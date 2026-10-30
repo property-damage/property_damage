@@ -1,6 +1,6 @@
 defmodule PropertyDamage.Docs do
   @moduledoc """
-  Reads the docs and the source path of a model, projection or command.
+  Reads the docs and the source path of a model, projection, command or adapter.
 
   `fetch/1` returns a map with the module's `moduledoc`, the `file` it was
   compiled from, and, per function, the `doc` and the `line` of its first
@@ -8,8 +8,8 @@ defmodule PropertyDamage.Docs do
   missing one. `fetch/1` tries three sources in order:
 
   1. the `__pd_docs__/0` function that `use PropertyDamage.Model`,
-     `use PropertyDamage.Model.Projection` and `use PropertyDamage.Command`
-     generate;
+     `use PropertyDamage.Model.Projection`, `use PropertyDamage.Command` and
+     `use PropertyDamage.Adapter` generate;
   2. the docs chunk of the module, read with `Code.fetch_docs/1`;
   3. nothing: it returns `:unavailable`.
 
@@ -37,7 +37,9 @@ defmodule PropertyDamage.Docs do
   earlier moduledoc. To capture it, set `@moduledoc` in the module body, or
   register that callback before `use`.
 
-  Events and adapters are not captured.
+  Events are not captured, and neither is an adapter that declares
+  `@behaviour PropertyDamage.Adapter` without `use`: both resolve through
+  the docs chunk of their beam.
   """
 
   @type docs :: %{

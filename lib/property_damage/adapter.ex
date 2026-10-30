@@ -362,6 +362,10 @@ defmodule PropertyDamage.Adapter do
   - `:default_timeout` - Default timeout for command execution (default: 30 seconds).
     Can be an integer (seconds) or a tuple like `{500, :milliseconds}`.
 
+  The macro also records the adapter's docs and the path of its source file
+  for the failure report (see `PropertyDamage.Docs`), so place it before every
+  `def` and `defp` of the module.
+
   ## Example
 
       defmodule MyHTTPAdapter do
@@ -383,6 +387,8 @@ defmodule PropertyDamage.Adapter do
 
     quote do
       @behaviour PropertyDamage.Adapter
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Adapter)
       import PropertyDamage.Adapter, only: [delegate_execution: 1]
 
       @impl true

@@ -688,3 +688,39 @@ The page SHALL be named after the model, the failing target, the failure kind an
 #### Scenario: The index lists the pages present
 - **WHEN** a directory holds two report pages and a file that is not a report page, and `HTML.write_index/1` runs on it
 - **THEN** `index.html` SHALL list the two pages in file name order and not the other file (DR-057)
+
+### Requirement: The HTML Page Carries a JSON Bundle (DR-058)
+
+Every page `PropertyDamage.FailureReport.HTML.render/1` returns SHALL carry exactly one script tag of type `application/json` with the id `pd-bundle`, on the line after the tag that holds the report text, and `HTML.write_index/1` SHALL write none (DR-058). The tag SHALL hold `Bundle.build(report, [])` encoded so that no text in it can close the tag. The viewer's script SHALL NOT read the tag. The bundle SHALL be deterministic: it SHALL hold no timestamp and no process id, and it SHALL list everything in a stable order.
+
+The bundle SHALL name the failure's fields, the context items, the steps and events of each target's listing, and the sections by id, and SHALL NOT copy the text the page prints for any of them. `ids` SHALL list every id the bundle declares once. An id SHALL be `failure:<label>`, `context:<label>`, `step:<target>:<label>`, `entry:<target>:<label>:<n>`, `section:<title>` or `source:<Module>.<function>/<arity>`, with the text as the page prints it; from its second occurrence in one section, a repeated label SHALL carry an ordinal suffix (`:2`). Entries SHALL count the events under a step after the log filter, and the lines under the adapter's `setup/1` and `teardown/1` notes and the events tied to no command SHALL be counted per target and filed under no step.
+
+The bundle SHALL hold, for the model, its projections, the commands and events of the listed steps and the adapter of each target, the moduledoc, the source file path, the full source text, how the docs were read (`captured`, `beam` or `unavailable`) and, per function, its doc and the lines it spans. A function SHALL start at its first clause and end the line before the next function definition of the module, or before the module's closing `end`. A source file that cannot be read SHALL give `{"missing": path}` as the source, null ranges, and an entry in `missing_sources`. The source of an adapter SHALL have each double-quoted string literal on a line that names a secret, password, token or key replaced by `"[REDACTED]"`, and the bundle SHALL count the replacements and state the rule; the source of any other module SHALL NOT be scanned.
+
+#### Scenario: One bundle per page
+- **WHEN** a report is rendered with `HTML.render/1` or written with `HTML.write/2`
+- **THEN** the page SHALL hold one `pd-bundle` tag whose content decodes to `Bundle.build(report, [])`, and the directory's `index.html` SHALL hold none (DR-058)
+
+#### Scenario: Source text cannot close the tag
+- **WHEN** an adapter's source holds the text `</script>`
+- **THEN** the page SHALL hold the same number of script tags as it does without it, and the decoded bundle SHALL hold the source as written (DR-058)
+
+#### Scenario: A repeated label is numbered
+- **WHEN** the Failure section prints two `Also differed` fields
+- **THEN** the ids SHALL be `failure:Also differed` and `failure:Also differed:2` (DR-058)
+
+#### Scenario: A log filter changes the entries
+- **WHEN** a `log:` filter hides the log lines of a step
+- **THEN** the step's entries SHALL still be its events, numbered from 1 in print order, and the lines the filter hides SHALL NOT count under `adapter_setup` (DR-058)
+
+#### Scenario: A function range starts at its first clause
+- **WHEN** a function has a `@doc` line, three clauses and a private function after them
+- **THEN** `from` SHALL be the line of its first clause and `to` the line before the private function, whether the docs were captured or read from the beam (DR-058)
+
+#### Scenario: A missing source file is named
+- **WHEN** the file of a module is deleted before the page is built
+- **THEN** the module's source SHALL be `{"missing": path}`, its functions SHALL keep their docs with null ranges, and `missing_sources` SHALL list the path once (DR-058)
+
+#### Scenario: A secret literal in an adapter is replaced
+- **WHEN** an adapter's source holds `@api_token "alice-token"`
+- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"`, the count SHALL be at least 1, and a model's source with the same line SHALL stay as written (DR-058)

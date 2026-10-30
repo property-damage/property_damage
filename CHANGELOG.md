@@ -584,6 +584,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warned about and ignored. Report files saved before the key load with `doc`
   as `nil`.
 
+- **A JSON bundle in every HTML failure page (DR-058).** Each page that
+  `PropertyDamage.FailureReport.HTML` writes now carries, in a second script
+  tag with the id `pd-bundle`, a machine-readable copy of the failure's
+  structure (fields, steps, events and sections), the docs and the source
+  file of the modules behind it, and an id for each thing a reader may cite.
+  `PropertyDamage.FailureReport.Bundle.build/2` returns the same map. The
+  index page carries no bundle, and the page's viewer does not read it.
+  Source text of an adapter has each double-quoted literal replaced by
+  `"[REDACTED]"` on a line that names a secret, password, token or key, and
+  the bundle counts the replacements; a source file that cannot be read is
+  named under `missing_sources`. `use PropertyDamage.Adapter` now captures the
+  adapter's docs like the other `use` macros, so a `def` or `defp` written
+  before it is a compile error: move the `use` above it.
+
 ### Changed
 
 - **Declare every model with `use PropertyDamage.Model` (DR-058).** Every
