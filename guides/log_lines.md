@@ -45,7 +45,9 @@ mix deps.get
 
 ### 2. Write the system, the adapter and the model
 
-Create `lib/my_app.ex` with this content:
+Create `lib/my_app.ex` with this content. The adapter in it calls
+`require PropertyDamage` before its first log call, because
+`PropertyDamage.log/2` is a macro: it records the file and line of the call.
 
 <!-- pd-example: lib/my_app.ex -->
 <!-- pd-doc-verify: runnable -->
@@ -198,9 +200,7 @@ defmodule MyApp.Model do
 end
 ```
 
-The adapter logs five lines per command, each under two tags. `require
-PropertyDamage` comes first, because `PropertyDamage.log/2` is a macro: it
-records the file and line of the call.
+The adapter logs five lines per command, each under two tags.
 
 ### 3. Run it
 

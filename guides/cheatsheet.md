@@ -44,10 +44,11 @@ defmodule MyApp.Commands.CreateOrder do
 end
 ```
 
-Rule: `use PropertyDamage.Model` (and `use PropertyDamage.Model.Projection`,
-`use PropertyDamage.Command`) comes before any definition in the module,
-including functions an earlier `use` injects, so `use GenServer` goes after it;
-otherwise the module does not compile.
+Rule: `use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection` and
+`use PropertyDamage.Command`.
 
 ## Model Template
 
