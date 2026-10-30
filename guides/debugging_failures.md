@@ -228,7 +228,11 @@ A page with an explanation opens on an Explanation tab, next to the Run tab. The
 
 Every claim lists the evidence it cites. Click a citation to switch to the Run view, where the page unfolds the cited step, event or section, scrolls to it and highlights it. A `source:` citation names lines of a module's source file: click it to unfold those lines under the citation, and click again to fold them. If the page cannot find a cited id, the citation shows as `(not in this page)` and does nothing when clicked.
 
-The explanation is only as private as the page. The bundle in the page holds the source of the model, the projections, the commands, the events and the adapters. In a file that holds an adapter, the bundle masks secret-shaped string literals: on a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. The page records the count and the rule. The rule reads one line at a time, so it does not mask other literals, such as an internal host name, a bare query string or text in a heredoc. Read the page before you share it.
+The explanation is only as private as the page. The bundle in the page holds the full source of the model, the projections, the commands, the events and the adapters.
+
+PropertyDamage masks secret-shaped literals in only some of that source. It scans each source file that holds an adapter (a sub-adapter too), and any model or command defined in the same file. On a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. A name counts when its last `_`-separated part is one of those words, so `api_key` and `admin_password` count and `keys` does not. When such a line ends in a comma or an opening bracket, the next line is masked too. The page records the count of masked literals and the rule.
+
+The rule reads one line at a time and has gaps. It does not scan a source file that holds no adapter. In the files it scans, it does not mask other literals, such as an internal host name, a bare query string like `"?token=abc"`, a heredoc, a sigil or a comment. It also masks harmless strings on a line that names a secret. Read the page before you share it.
 
 ## The Failure Report
 
