@@ -653,11 +653,15 @@ defmodule PropertyDamage.FailureReport.Bundle do
     end
   end
 
+  # The last line the module's definitions reach: a `do ... end` call ends on
+  # its `end` and a call in parentheses on its closing one. The parentheses
+  # around the whole body are not a definition, so their line is not counted.
   defp last_line(body) do
     {_ast, last} =
-      Macro.prewalk(body, 0, fn
+      Macro.prewalk(block(body), 0, fn
         {_form, meta, _args} = node, last when is_list(meta) ->
-          {node, max(last, meta[:line] || 0)}
+          {node,
+           Enum.max([last, meta[:line] || 0, meta[:end][:line] || 0, meta[:closing][:line] || 0])}
 
         node, last ->
           {node, last}
