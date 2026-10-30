@@ -26,6 +26,9 @@ def deps do
 end
 ```
 
+The command generators in this guide call `StreamData` functions directly, so
+your project lists `:stream_data` itself.
+
 ## Core Concepts
 
 PropertyDamage has five key components:
@@ -96,12 +99,6 @@ defmodule MyApp.Commands.CreateUser do
   end
 end
 ```
-
-`use PropertyDamage.Model` comes before any definition in the module: every
-`def` and `defp` comes after it. It also comes before any other `use` that
-defines functions, such as `use GenServer`; a module that breaks either rule
-does not compile. The same holds for `use PropertyDamage.Model.Projection` and
-`use PropertyDamage.Command`.
 
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
@@ -182,7 +179,11 @@ end
 
 ## Step 5: Define the Model
 
-The model ties everything together:
+The model ties everything together. Every module that calls
+`use PropertyDamage.Model`, `use PropertyDamage.Model.Projection` or
+`use PropertyDamage.Command` must put that line first, before any `def`, `defp`
+or other `use` that defines functions (such as `use GenServer`). Otherwise the
+module does not compile.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir

@@ -87,8 +87,8 @@ PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "propert
 `IO.inspect(report, pretty: true)` prints the report like this, wrapped in
 `#FailureReport<` and `>`, without color. A failure in a
 `property_damage` ExUnit test prints the same layout through
-`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Only that one prints
-color; the text is the same either way. Plain `inspect(report)`, without
+`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. The two layouts
+carry the same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
 `pretty: true`, prints a one-line summary.
 
 ### Banner and seed
@@ -114,10 +114,10 @@ filter adds a `Log filter` line (see the [log lines guide](log_lines.md#filterin
 This section says what was being checked, from the docs its author wrote. The
 items depend on the failure kind, and each prints under its label:
 
-- The first item names the kind and says what it means. Kinds that report a
-  problem with the test or the framework rather than the system open with
-  "Unable to test the system". Examples are `:adapter_error` (the adapter
-  raised or returned an error), `:setup_failed` (a target could not be
+- The first item names the kind and says what it means. A failure
+  kind that blames the test or the framework, not the system, opens with the
+  words "Unable to test the system". Three kinds do: `:adapter_error` (the
+  adapter raised or returned an error), `:setup_failed` (a target could not be
   prepared) and `:nemesis_error` (a fault injector failed).
   `PropertyDamage.Failure.Explain.meaning/1` returns the text for each kind.
 - `Model` prints the model's `@moduledoc`.
@@ -139,12 +139,13 @@ doc is missing and where to add it. In the excerpt, `Check` has one: add a
 `@doc` to `MyApp.Balances.never_negative/2`. For a module the fix is a
 `@moduledoc`, and for an expansion entry it is `doc: "..."` on the entry. The
 line prints every time a doc is missing, so adding the doc is the only way to
-remove it. If the docs cannot be read, the line tells you to declare the module
-with the matching `use PropertyDamage.*` line. That `use` captures the docs at
-compile time. Without it, PropertyDamage reads the module's docs chunk, and a
-module compiled from a script (an `.exs` file, such as a test file) has none.
-So the line appears, for example, for a model defined in a test file with a
-bare `@behaviour PropertyDamage.Model`.
+remove it. Sometimes PropertyDamage cannot read a module's docs. Then the line
+tells you to declare the module with the matching `use PropertyDamage.*` line,
+because that `use` captures the docs at compile time. Without it, PropertyDamage
+falls back to the docs the compiler stores in the compiled module's `.beam`
+file (its docs chunk). A module compiled from a script, such as a model in an
+`.exs` test file, has no such chunk. So the line appears, for example, for a
+model defined in a test file with a bare `@behaviour PropertyDamage.Model`.
 
 Decision record DR-058 (Failure Report Context and Explanations) holds the full
 rules.
@@ -194,7 +195,7 @@ passing `targets: targets`:
 
 1. Rerun from the seed: generates the failing run again, then fails and
    shrinks again.
-2. Regenerate the failing variant: `PropertyDamage.Expansion.for/5` returns the
+2. Regenerate the failing variant: `PropertyDamage.Expansion.for/4` returns the
    sequence one target ran before shrinking, without running anything. Its
    fifth argument, the options, has a default, which is why the report's call
    passes four.
@@ -239,16 +240,18 @@ The rule reads one line at a time and has gaps. It does not scan a source file t
 The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it.
 
 The steps below run on the bank of the [log lines guide](log_lines.md#2-write-the-system-the-adapter-and-the-model).
-Create its `lib/my_app.ex` first, in the project of that guide's step 1 or in
-any Mix project that depends on PropertyDamage.
+First create `lib/my_app.ex` in a Mix project that depends on PropertyDamage
+(the project of that guide's step 1 works). Copy the whole code block of that
+guide's step 2 into it.
 
 Put the first fence in a script file in the project root, such as `debug.exs`,
 and run it with `mix run debug.exs`, as step 3 of the log lines guide runs
 `bug.exs`. The later fences use `failure`, the report that first fence binds.
-Append each fence that uses `MyApp.Model`, `MyApp.Adapter` or `failure` to the
-end of the same script and run it again. A fence that names `MyModel`,
-`MyAdapter` or another `My` module is a placeholder: read it, or replace the
-name with your own module. It does not run against the bank.
+Each later fence that uses `MyApp.Model`, `MyApp.Adapter` or `failure` runs
+against the bank: append it to the end of the same script and run the script
+again. A fence that names `MyModel`, `MyAdapter` or another `My` module is a
+placeholder for your own code. Read it, or replace the name with your own
+module; it does not run against the bank.
 
 <!-- pd-doc-verify: include guides/log_lines.md lib/my_app.ex -->
 <!-- pd-doc-verify: runnable -->
