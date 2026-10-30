@@ -728,3 +728,89 @@ The bundle SHALL hold, for the model, its projections, the commands and events o
 #### Scenario: A module that shares a file with an adapter is redacted too
 - **WHEN** a model above an adapter in one file holds `password: "alice-pass"`
 - **THEN** the source of the model and the source of the adapter SHALL hold `"[REDACTED]"` and not the literal, each module's count SHALL be at least 1, and the bundle's count SHALL equal the sum of the module counts (DR-058)
+
+#### Scenario: The rule reads one line at a time
+- **WHEN** an adapter's source holds `@api_key "alice-key"`, a heredoc that holds a token, and `@base_url "http://internal.example"`
+- **THEN** the bundle's source SHALL hold `@api_key "[REDACTED]"` and SHALL hold the heredoc and the `@base_url` literal as written, and the bundle's `redactions` SHALL name the rule it applied (DR-058)
+
+### Requirement: Explaining a Failure Page (DR-058)
+
+`mix pd.explain PAGE` SHALL read one failure page, load no project code and call no model of its own (DR-058). It SHALL read the bundle from the page's one `pd-bundle` tag and SHALL exit with 1, with every error on standard error and standard output empty, when the page has no bundle, more than one, a bundle that is not a JSON object, or a bundle format the version does not read. The bundle hash SHALL be the lowercase hex SHA-256 of the bytes between the bundle tag and its closing `</script>`.
+
+Without an option, the task SHALL write `bundle.json` (the bundle bytes) and `instructions.md` into the directory `PAGE.explain`, create the directory when missing, remove nothing else in it, and print the absolute paths of the two files, the prompt version and the bundle hash, one per line. If the page already holds an explanation of this bundle for this prompt version, the task SHALL print one line saying so, write nothing and exit with 0. With `--prompt`, the task SHALL print the instructions, a newline, the bundle bytes and a newline to standard output, and nothing else, and SHALL write nothing.
+
+With `--apply FILE` (or `--apply -` for standard input), the task SHALL check the explanation and SHALL report every problem it finds, one line each on standard error, in this order: the schema lines, the hash line, the citation lines. A passing explanation SHALL have the keys `summary`, `hypotheses` and `talking_points` and no other key except `bundle_hash`. `summary` and `talking_points` SHALL be non-empty lists of objects with a non-empty `text` and a non-empty list `cites`. `hypotheses` SHALL be a non-empty list of objects with `rank`, `likelihood` (`likely`, `possible` or `unlikely`), `claim`, a non-empty list `evidence` and a non-empty list `next_steps` of non-empty strings; the ranks SHALL run 1 to n in order, and a hypothesis SHALL NOT be more likely than the one ranked above it. A `bundle_hash` the explanation names SHALL be the page's. Every id it cites SHALL be in the bundle's `ids`, or SHALL have the form `source:<Module>:<from>-<to>` where the bundle holds the source of `<Module>` with at least `<to>` lines. A hypothesis SHALL NOT cite the context item of a missing description as evidence. When any check fails, the page SHALL stay untouched and the task SHALL exit with 1.
+
+With `--with CMD`, the task SHALL run `CMD` with `sh -c`, send it the text `--prompt` prints on standard input, read the explanation from its standard output (the whole output as a JSON object, or the last fenced block whose info string is exactly `json`), and run the checks of `--apply`. An attempt SHALL fail when `CMD` exits with a status other than 0, runs past the timeout, prints no JSON, or prints an explanation that fails a check. After a failed attempt that is not the last, the task SHALL print `attempt N/M: ` and the reason to standard error and run `CMD` again with the prompt, the heading `## Your previous answer` with the previous output, and the heading `## Errors` with the error lines. The attempts SHALL number 3 by default and the timeout SHALL be `10m` by default. The page SHALL change only when an attempt passes. `--with` SHALL NOT be combined with `--prompt` or `--apply`, and `--attempts` and `--timeout` SHALL need `--with` or a non-empty string in `config :property_damage, explain_with`, which the task SHALL use as `--with` when no mode option is given.
+
+#### Scenario: The page already holds the explanation
+- **WHEN** `mix pd.explain PAGE` runs on a page whose `pd-explanation` tag names the page's bundle hash and the current prompt version
+- **THEN** the task SHALL print one line that says the page is already explained, SHALL write no file and SHALL exit with 0 (DR-058)
+
+#### Scenario: The files for an agent
+- **WHEN** `mix pd.explain PAGE` runs on a page with a bundle and no explanation
+- **THEN** `PAGE.explain/bundle.json` SHALL hold the bundle bytes, so `sha256sum` of it prints the hash the task printed (DR-058)
+
+#### Scenario: A citation the bundle lacks
+- **WHEN** `--apply` reads an explanation that cites `step:alice:[9]` and the bundle declares no such id
+- **THEN** the task SHALL print a line that names the id on standard error, SHALL exit with 1 and SHALL leave the page byte for byte as it was (DR-058)
+
+#### Scenario: A hypothesis ranked above a likelier one
+- **WHEN** the hypothesis ranked 2 is `likely` and the hypothesis ranked 1 is `possible`
+- **THEN** the explanation SHALL fail the checks (DR-058)
+
+#### Scenario: A source range inside the module
+- **WHEN** an explanation cites `source:MyApp.Balances:3-5` and the bundle holds the source of `MyApp.Balances` with 10 lines
+- **THEN** the citation SHALL resolve, and with `source:MyApp.Balances:3-50` it SHALL NOT (DR-058)
+
+#### Scenario: A retry carries the errors
+- **WHEN** the first answer of a `--with` command fails the checks and `--attempts` allows another
+- **THEN** the second run SHALL receive the prompt, `## Your previous answer` with the first output and `## Errors` with the error lines, and the task SHALL print `attempt 1/3: ` and the reason to standard error (DR-058)
+
+#### Scenario: No attempt passes
+- **WHEN** every attempt of `--with` fails
+- **THEN** the task SHALL print the error lines of the last attempt and say that the page is unchanged, SHALL exit with 1 and SHALL leave the page as it was (DR-058)
+
+### Requirement: An Explanation Is Embedded in the Page (DR-058)
+
+A passing explanation SHALL go into the page in a script tag of type `application/json` with the id `pd-explanation`, right after the closing `</script>` of the bundle tag, and no other byte of the page SHALL change (DR-058). The tag SHALL hold a JSON object with `format` 1, the `bundle_hash` of the page, the `prompt_version` and the `explanation` (its three parts, without a `bundle_hash`), encoded so that no text in it can close the tag. The task SHALL write the page in one step, so a failure part way leaves the old page. Every earlier `pd-explanation` tag SHALL be removed: a page holds at most one explanation. An explanation counts as of this bundle and prompt version only when its tag names both. When an earlier `pd-explanation` tag has no closing `</script>`, or another script opener comes before it, the task SHALL leave the page untouched, exit with 1 and name the tag.
+
+#### Scenario: An explanation replaces an earlier one
+- **WHEN** `--apply` succeeds on a page that already holds a `pd-explanation` tag
+- **THEN** the page SHALL hold one `pd-explanation` tag, holding the new explanation, right after the bundle tag (DR-058)
+
+#### Scenario: Explanation text cannot close the tag
+- **WHEN** a claim of the explanation holds `</script>`
+- **THEN** the page SHALL hold the same number of script tags as before and the decoded explanation SHALL hold the claim as written (DR-058)
+
+#### Scenario: A malformed earlier tag
+- **WHEN** the page holds a `pd-explanation` opener with no closing `</script>`
+- **THEN** `--apply` SHALL exit with 1, print a line that says an earlier explanation is malformed and leave the page untouched (DR-058)
+
+#### Scenario: An explanation of another prompt version
+- **WHEN** the page holds an explanation that names the page's bundle hash and an older prompt version
+- **THEN** `mix pd.explain PAGE` SHALL NOT report the page as explained and SHALL write the two files (DR-058)
+
+### Requirement: The Viewer Shows the Explanation (DR-058)
+
+A page without a `pd-explanation` tag SHALL run none of the explanation code and SHALL look as before (DR-058). A page with one SHALL open on an Explanation tab next to a Run tab, and the Run tab SHALL show the failure report as before. The Explanation tab SHALL list the summary, the hypotheses and the talking points. A hypothesis SHALL print its rank and likelihood in its heading, then its claim, its evidence and its next steps. Every cited id SHALL resolve through the ids and the modules of the bundle, never through the page's text. A citation that resolves to an element of the Run view SHALL be a button that switches to the Run tab, unfolds what hides the element, scrolls to it and highlights it, with at most one element highlighted at a time. A `source:` citation that resolves SHALL be a button that unfolds the cited lines, with their line numbers, under the citation and folds them on a second click. A citation that does not resolve SHALL show its id followed by `(not in this page)` and SHALL do nothing when clicked. On the Explanation tab the arrow keys SHALL scroll the page and SHALL NOT move the Run view's selection.
+
+#### Scenario: A page with an explanation opens on it
+- **WHEN** a page with a valid `pd-explanation` tag loads
+- **THEN** the Explanation tab SHALL be selected and show a heading `Hypothesis 1 (likely)` for a hypothesis of rank 1 and likelihood `likely` (DR-058)
+
+#### Scenario: A citation highlights its evidence
+- **WHEN** the reader clicks a citation of a step id the Run view shows
+- **THEN** the Run tab SHALL be selected, the step SHALL be open and carry the highlight (DR-058)
+
+#### Scenario: A source citation unfolds its lines
+- **WHEN** the reader clicks a resolved `source:` citation
+- **THEN** the cited lines SHALL show under it with their line numbers, and a second click SHALL fold them (DR-058)
+
+#### Scenario: An unresolvable citation
+- **WHEN** an explanation cites an id the bundle does not hold
+- **THEN** the citation SHALL show as `<id> (not in this page)` and SHALL NOT be a button (DR-058)
+
+#### Scenario: A page without an explanation
+- **WHEN** a page has no `pd-explanation` tag
+- **THEN** the page SHALL show no tab bar (DR-058)
