@@ -14,7 +14,8 @@ defmodule PropertyDamage.FailureReport.HTML do
 
   A second script tag, `pd-bundle`, holds a JSON copy of the failure's
   structure, docs and sources for other programs to read (see
-  `PropertyDamage.FailureReport.Bundle`). The viewer ignores it.
+  `PropertyDamage.FailureReport.Bundle`). The viewer reads it only to resolve
+  the citations of an explanation the page carries.
 
   Three ways to get a page:
 
