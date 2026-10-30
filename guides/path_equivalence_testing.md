@@ -254,6 +254,33 @@ Reference    "left"  0
 Variant      "right"  1
 Compared     using ==, still differing after 101 ms (bound 100 ms)
 
+## What this checks
+
+  Diverged      Two targets ran the same plan separately and disagreed. They may
+                have taken different but equivalent paths, and an observation
+                settled to different values in the reference target and in the
+                variant target. Either the system treats equivalent histories
+                differently, or the test's claim that the paths are equivalent
+                is wrong.
+
+  Model         Counter.Model
+                `Add n` may run as itself or as `Add 1` then `Add (n - 1)`.
+
+  Observation   Counter.Projection.total/2
+                (no description: add @doc to Counter.Projection.total/2)
+
+  Projection    Counter.Projection
+                Folds the reported total and compares it across targets.
+
+  Path          "left" ran Add as steps [0]
+                (no description: add doc: "..." to the first entry that Counter.Model.add_paths/2 returns for Add)
+
+  Path          "right" ran Add as steps [0.0],[0.1]
+                (no description: add doc: "..." to the second entry that Counter.Model.add_paths/2 returns for Add)
+
+  Command       Counter.Add
+                Add `amount` to the counter.
+
 ## Minimal Reproduction (1 root)
 
 Reference: target "left"

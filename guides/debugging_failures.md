@@ -28,6 +28,24 @@ Projection  MyApp.Balances
 At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
 Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
 
+## What this checks
+
+  Check failed  A property did not hold. After the marked step, a check judged
+                the projection state (built from the events observed so far) and
+                found that it violates the property.
+
+  Model         MyApp.Model
+                Deposits and withdrawals on two accounts.
+
+  Check         MyApp.Balances.never_negative/2
+                (no description: add @doc to MyApp.Balances.never_negative/2)
+
+  Projection    MyApp.Balances
+                Folds the balances the bank reported and checks that none is negative.
+
+  Command       MyApp.Withdraw
+                Withdraw `amount` from `account`.
+
 ## Minimal Reproduction (2 roots)
 
   [0] %MyApp.Deposit{account: "alice", amount: 5}

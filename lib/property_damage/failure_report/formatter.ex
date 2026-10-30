@@ -3,7 +3,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   alias PropertyDamage.{Failure, FailureReport, Sequence}
 
-  alias PropertyDamage.FailureReport.{Layout, Render}
+  alias PropertyDamage.FailureReport.{Context, Layout, Render}
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -39,6 +39,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
   "file", "line", "offset_ms", "attempt"}`, its message as plain text; a gap is
   `{"kind": "gap", "attempts", "lines"}`. A hidden line is in none of these.
   The JSON output is not the persistence format.
+
+  ## The JSON `what_this_checks` key
+
+  `what_this_checks` lists the items of the "What this checks" section in
+  print order, each `{"label", "name", "text", "missing"}`: the text as
+  printed without its indent, `name` null for the meaning of the kind, and
+  `missing` true when the text is the line that names the doc to add.
   """
   @spec format(FailureReport.t(), format(), keyword()) :: String.t()
   def format(report, format \\ :terminal, opts \\ [])
@@ -97,6 +104,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           },
           projection_entry(report)
         ),
+      "what_this_checks" => report |> Layout.context_items(opts) |> Context.data(),
       "error_origin" => %{
         "origin" => report.error_origin && to_string(report.error_origin),
         "reason" => get_in(report.error_origin_details, [:reason]),

@@ -540,7 +540,7 @@ defmodule PropertyDamage.Persistence do
 
       case payload[:kind] do
         :run_trace ->
-          trace = payload.trace |> backfill_expansion_docs() |> without_logs()
+          trace = payload.trace |> backfill_expansion_choices() |> without_logs()
           {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
 
         _ ->
@@ -607,8 +607,8 @@ defmodule PropertyDamage.Persistence do
     |> backfill_key(:other_failures, &backfill_others/1)
     |> backfill_key(:trace, &backfill_trace_outcome/1)
     |> backfill_key(:reference_trace, &backfill_trace_outcome/1)
-    |> backfill_key(:trace, &backfill_expansion_docs/1)
-    |> backfill_key(:reference_trace, &backfill_expansion_docs/1)
+    |> backfill_key(:trace, &backfill_expansion_choices/1)
+    |> backfill_key(:reference_trace, &backfill_expansion_choices/1)
   end
 
   defp backfill_added_fields(report), do: report
@@ -620,14 +620,18 @@ defmodule PropertyDamage.Persistence do
   defp backfill_trace_outcome(trace), do: trace
 
   # A choice an expansion made, saved before a choice carried the `doc:` of its
-  # entry, holds no `:doc` key. It is given nil, the doc of an entry without one.
-  defp backfill_expansion_docs(%RunTrace{expansion: expansion} = trace)
+  # entry or the `function` that returned the entries, holds no `:doc` or
+  # `:function` key. Each is given nil: no doc, and no function name.
+  defp backfill_expansion_choices(%RunTrace{expansion: expansion} = trace)
        when is_map(expansion) do
-    docs = fn choices -> Enum.map(choices, &Map.put_new(&1, :doc, nil)) end
-    %{trace | expansion: Map.new(expansion, fn {name, choices} -> {name, docs.(choices)} end)}
+    fill = fn choices ->
+      Enum.map(choices, &(&1 |> Map.put_new(:doc, nil) |> Map.put_new(:function, nil)))
+    end
+
+    %{trace | expansion: Map.new(expansion, fn {name, choices} -> {name, fill.(choices)} end)}
   end
 
-  defp backfill_expansion_docs(trace), do: trace
+  defp backfill_expansion_choices(trace), do: trace
 
   # A divergence, and the divergences listed beside it, saved before the wait
   # fields existed get each of them as nil. A failed check saved before it

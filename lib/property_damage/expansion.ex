@@ -83,6 +83,9 @@ defmodule PropertyDamage.Expansion do
     * `index` - the entry's index in the list the function returned, or nil
     * `doc` - the `doc:` of the entry the target ran, nil when the entry has
       none or when no listed entry ran
+    * `function` - the name of the function `expansions/0` pairs with the root
+      (the one that returned the entries), nil when no listed entry ran or in
+      a choice saved before the field existed
     * `commands` - the commands executed for the root, in order
     * `leaves?` - true when `commands` are leaves at leaf positions; false when
       the root ran as itself at its own position (the identity included)
@@ -104,6 +107,7 @@ defmodule PropertyDamage.Expansion do
           required(:entry) => String.t() | nil | :forced | :identity,
           required(:index) => non_neg_integer() | nil,
           required(:doc) => String.t() | nil,
+          required(:function) => atom() | nil,
           required(:commands) => [struct()],
           required(:leaves?) => boolean(),
           required(:seed_key) => term() | nil,
@@ -600,12 +604,21 @@ defmodule PropertyDamage.Expansion do
         {choice, state, minted, aliases, more} =
           choose(walk, name, mode, fun, base, carried)
 
+        choice = Map.put(choice, :function, function_name(fun, choice))
+
         registry = registry |> register(minted) |> alias_all(aliases)
         {choice, {state, registry, warnings ++ more}}
       end)
 
     {%{choices: choices, registry: registry}, warnings}
   end
+
+  # The name of the function that returned the entries a choice ran from: nil
+  # when the choice names no listed entry (its `index` is nil).
+  defp function_name(fun, %{index: index}) when is_function(fun) and is_integer(index),
+    do: Function.info(fun, :name) |> elem(1)
+
+  defp function_name(_fun, _choice), do: nil
 
   defp register(registry, placeholders),
     do: Enum.reduce(placeholders, registry, &PlaceholderRegistry.register(&2, &1))
@@ -1453,6 +1466,7 @@ defmodule PropertyDamage.Expansion do
           entry: nil,
           index: nil,
           doc: nil,
+          function: nil,
           commands: [root],
           leaves?: false,
           seed_key: nil,

@@ -35,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the JSON report's `failure` object carries it as `projection`.
   `Failure.check_failed/3` takes it as an optional third argument. Report
   files saved before the field existed load with `projection` as `nil`.
+- **"What this checks" in the failure report.** The printed report, the
+  markdown and the JSON report gain a second section, right after Failure,
+  that prints for the failure at hand the meaning of its kind and the docs of
+  the model, the check or observation, its projection, the expansion path a
+  target took and the command. It names what is missing with the line that
+  fixes it, such as `(no description: add @doc to MyApp.Balances.never_negative/2)`.
+  The HTML page shows the section open, right after the failure summary. The
+  JSON report carries the items under `what_this_checks`. Each choice that
+  `PropertyDamage.Expansion` records gains a `function` field, the name of the
+  function `expansions/0` pairs with the root; report files saved before the
+  field existed load with it as `nil`.
 - **`use PropertyDamage.Model`.** A model is now declared with
   `use PropertyDamage.Model`, which sets the `PropertyDamage.Model`
   behaviour. The macro takes no options and raises `ArgumentError` if given

@@ -341,8 +341,8 @@ defmodule PropertyDamage.Model do
 
   @typedoc """
   A sequence of command entries, written as `commands/0` entries are
-  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:` and
-  `weight:` are ignored.
+  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:`,
+  `weight:` and `doc:` are ignored.
   """
   @type sequence :: [command_spec()]
 

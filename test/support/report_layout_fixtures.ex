@@ -962,15 +962,15 @@ defmodule PropertyDamage.Test.ReportLayout do
   def assert_sections(text, facts) do
     headings = text |> headings() |> Enum.reject(&(&1 == "Setup"))
 
-    assert match?(["Failure", "Minimal Reproduction" <> _ | _], headings),
-           "Failure then Minimal Reproduction first, got #{inspect(headings)}"
+    assert match?(["Failure", "What this checks", "Minimal Reproduction" <> _ | _], headings),
+           "Failure, What this checks, then Minimal Reproduction first, got #{inspect(headings)}"
 
     assert List.last(headings) == "Reproduction", "Reproduction last, got #{inspect(headings)}"
 
     projections = Enum.filter(headings, &String.starts_with?(&1, "Projections at "))
-    expected = if facts.projections?, do: 4, else: 3
+    expected = if facts.projections?, do: 5, else: 4
 
-    assert length(headings) == expected and length(projections) == expected - 3,
+    assert length(headings) == expected and length(projections) == expected - 4,
            "headings #{inspect(headings)}, Projections expected: #{facts.projections?}"
 
     for removed <- @removed do
@@ -1242,7 +1242,13 @@ defmodule PropertyDamage.Test.ReportLayout do
   # The skeleton of DR-055's Example, as headings and label names.
   def example_skeleton do
     %{
-      headings: ["Failure", "Minimal Reproduction", "Projections at", "Reproduction"],
+      headings: [
+        "Failure",
+        "What this checks",
+        "Minimal Reproduction",
+        "Projections at",
+        "Reproduction"
+      ],
       failure_labels: ["Failure", "Observation", "At", "Reference", "Variant", "Compared"],
       listings: ["Reference: target", "Variant: target"],
       calls: ["PropertyDamage.run(", "PropertyDamage.Expansion.for(", "PropertyDamage.run("]
