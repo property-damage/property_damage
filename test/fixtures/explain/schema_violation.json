@@ -1,0 +1,72 @@
+{
+  "summary": [
+    {
+      "text": 5,
+      "cites": [
+        "failure:Message",
+        "entry:alice:[0]:1"
+      ],
+      "note": "n"
+    },
+    {
+      "text": "The ledger saw a payment of minus 1 after the first step and the check failed.",
+      "cites": [
+        "step:alice:[0]",
+        "source:PropertyDamage.Test.Bundle2009281_3459.Ledger:44-45"
+      ]
+    },
+    {
+      "text": "The model has no description, so its purpose is not written down.",
+      "cites": [
+        "context:Model"
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "rank": 1.0,
+      "likelihood": "certain",
+      "claim": "The test's adapter (its code that talks to the system) probably sends a negative amount, so the test is at fault.",
+      "evidence": "x",
+      "next_steps": []
+    },
+    {
+      "rank": 2,
+      "likelihood": "possible",
+      "claim": "",
+      "evidence": [
+        "source:PropertyDamage.Test.Bundle2009281_3459.Ledger.assert_not_negative/2"
+      ],
+      "next_steps": [
+        "Send a payment of minus 1 by hand and see whether the system refuses it."
+      ],
+      "mood": "m"
+    },
+    {
+      "rank": 3,
+      "likelihood": "unlikely",
+      "claim": "The test's payment generator probably makes amounts the model does not expect, so the test is at fault.",
+      "evidence": [
+        "source:PropertyDamage.Test.Bundle2009281_3459.Pay.generator/1"
+      ],
+      "next_steps": [
+        "Read the amounts the generator makes for the first three payments."
+      ]
+    }
+  ],
+  "talking_points": [
+    {
+      "text": "A payment check failed on the first step of the run.",
+      "cites": [
+        1
+      ]
+    },
+    {
+      "text": "The failing step paid a negative amount.",
+      "cites": [
+        "entry:alice:[0]:1"
+      ]
+    }
+  ],
+  "extra": "x"
+}

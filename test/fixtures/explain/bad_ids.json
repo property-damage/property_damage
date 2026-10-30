@@ -1,0 +1,75 @@
+{
+  "summary": [
+    {
+      "text": "The test paid bob from alice and expected every payment to stay at zero or above.",
+      "cites": [
+        "failure:Nope",
+        "entry:alice:[0]:1"
+      ]
+    },
+    {
+      "text": "The ledger saw a payment of minus 1 after the first step and the check failed.",
+      "cites": [
+        "step:alice:[0]",
+        "source:PropertyDamage.Test.Bundle2009281_3459.Ledger:44-45"
+      ]
+    },
+    {
+      "text": "The model has no description, so its purpose is not written down.",
+      "cites": [
+        "context:Model"
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "rank": 1,
+      "likelihood": "likely",
+      "claim": "The test's adapter (its code that talks to the system) probably sends a negative amount, so the test is at fault.",
+      "evidence": [
+        "failure:Nope",
+        "step:alice:[0] "
+      ],
+      "next_steps": [
+        "Rerun the test with the adapter's negative flag switched off.",
+        "Ask the test author why the adapter flips the sign."
+      ]
+    },
+    {
+      "rank": 2,
+      "likelihood": "possible",
+      "claim": "The system probably accepts a negative payment that it should refuse, so the system is at fault.",
+      "evidence": [
+        "source:PropertyDamage.Test.Bundle2009281_3459.Ledger.assert_not_negative/2"
+      ],
+      "next_steps": [
+        "Send a payment of minus 1 by hand and see whether the system refuses it."
+      ]
+    },
+    {
+      "rank": 3,
+      "likelihood": "unlikely",
+      "claim": "The test's payment generator probably makes amounts the model does not expect, so the test is at fault.",
+      "evidence": [
+        "source:PropertyDamage.Test.Bundle2009281_3459.Pay.generator/1"
+      ],
+      "next_steps": [
+        "Read the amounts the generator makes for the first three payments."
+      ]
+    }
+  ],
+  "talking_points": [
+    {
+      "text": "A payment check failed on the first step of the run.",
+      "cites": [
+        "failure:Check"
+      ]
+    },
+    {
+      "text": "The failing step paid a negative amount.",
+      "cites": [
+        "section:Nowhere"
+      ]
+    }
+  ]
+}
