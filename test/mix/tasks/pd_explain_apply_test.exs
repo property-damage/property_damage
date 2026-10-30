@@ -614,8 +614,7 @@ defmodule Mix.Tasks.Pd.ExplainApplyTest do
       assert E.tag_count(breakout.new, "pd-explanation") == 1
       assert E.close_count(breakout.new) == E.close_count(plain.new)
       assert [json] = E.explanation_tags(breakout.new)
-      refute String.contains?(json, "</script>")
-      assert String.contains?(json, "<\\/script>")
+      refute String.contains?(json, "</")
 
       sent =
         E.explanation_fixture("script_breakout.json")["hypotheses"] |> hd() |> Map.fetch!("claim")
