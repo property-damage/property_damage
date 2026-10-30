@@ -1106,13 +1106,13 @@ defmodule PropertyDamage.Variant do
   # `%Failure{}`s in check order.
   defp teardown_check_failures(exec) do
     case Executor.run_phase_checks(exec, :teardown) do
-      {:halt, name, reason, _counters} ->
-        [Failure.check_failed(name, reason)]
+      {:halt, name, projection, reason, _counters} ->
+        [Failure.check_failed(name, reason, projection)]
 
       {:ok, recorded, _counters} ->
         recorded
         |> Enum.reverse()
-        |> Enum.map(&Failure.check_failed(&1.check_name, &1.reason))
+        |> Enum.map(&Failure.check_failed(&1.check_name, &1.reason, &1.projection))
     end
   end
 

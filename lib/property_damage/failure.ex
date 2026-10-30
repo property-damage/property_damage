@@ -6,6 +6,10 @@ defmodule PropertyDamage.Failure.Check do
   `context` is `nil` except for an `@eventually` window that ended before its
   timeout (DR-052), where it holds `poll_count` and `elapsed_ms`, so the report
   can name the poll while `detail` keeps the exception itself.
+
+  `projection` is the projection module whose check failed, for `:check_failed`
+  and `:poll_timeout`. It is `nil` for every other kind and for a failure
+  rebuilt from a signature.
   """
 
   @type kind ::
@@ -20,10 +24,11 @@ defmodule PropertyDamage.Failure.Check do
           kind: kind(),
           name: atom() | {module(), atom()} | nil,
           detail: term(),
-          context: map() | nil
+          context: map() | nil,
+          projection: module() | nil
         }
 
-  defstruct kind: nil, name: nil, detail: nil, context: nil
+  defstruct kind: nil, name: nil, detail: nil, context: nil, projection: nil
 end
 
 defmodule PropertyDamage.Failure.Execution do
@@ -457,10 +462,16 @@ defmodule PropertyDamage.Failure do
   # Check constructors
   # ==========================================================================
 
-  @doc "A check or invariant failed (`name` identifies which)."
-  @spec check_failed(name(), term()) :: t()
-  def check_failed(name, detail) do
-    %__MODULE__{type: %Check{kind: :check_failed, name: name, detail: detail}}
+  @doc """
+  A check or invariant failed (`name` identifies which). `projection` is the
+  projection module that defines the check, or `nil` when no projection module
+  applies.
+  """
+  @spec check_failed(name(), term(), module() | nil) :: t()
+  def check_failed(name, detail, projection \\ nil) do
+    %__MODULE__{
+      type: %Check{kind: :check_failed, name: name, detail: detail, projection: projection}
+    }
   end
 
   @doc """
@@ -478,7 +489,8 @@ defmodule PropertyDamage.Failure do
         kind: :check_failed,
         name: info.triggered_by.check_name,
         detail: detail,
-        context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms}
+        context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms},
+        projection: info[:projection]
       }
     }
   end
@@ -495,11 +507,14 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Check{kind: :linearization, detail: message}}
   end
 
-  @doc "A `@eventually` check timed out; `info` carries the details."
+  @doc "A `@eventually` check timed out; `info` carries the details and the `:projection`."
   @spec poll_timeout(map()) :: t()
   def poll_timeout(info) do
     name = get_in(info, [:triggered_by, :check_name])
-    %__MODULE__{type: %Check{kind: :poll_timeout, name: name, detail: info}}
+
+    %__MODULE__{
+      type: %Check{kind: :poll_timeout, name: name, detail: info, projection: info[:projection]}
+    }
   end
 
   @doc "A probe/bridge command never settled; `detail` is the last error."

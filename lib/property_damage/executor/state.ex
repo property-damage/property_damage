@@ -51,7 +51,7 @@ defmodule PropertyDamage.Executor.State do
     * `:active_pollers` - running `@eventually` pollers
     * `:active_resource_pollers` - running resource pollers
     * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
-    * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
+    * `:async_halt` - `{name, projection, reason, command_index}` set when a DR-025 async
       `every:` check trips during a `@eventually` await drain (ghost field)
     * `:async_failed_index` - the command index a DR-025 async `every:` check
       failure is attributed to (the offending event's `command_index`, which may

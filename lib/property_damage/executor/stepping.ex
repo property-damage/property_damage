@@ -518,9 +518,9 @@ defmodule PropertyDamage.Executor.Stepping do
         drained = %{drained | check_counters: counters, check_failures: failures}
         {:ok, Executor.update_poller_state_getters(drained)}
 
-      {:halt, name, reason, command_index, counters} ->
+      {:halt, name, projection, reason, command_index, counters} ->
         failed = %{drained | check_counters: counters, async_failed_index: command_index}
-        {:error, Failure.check_failed(name, reason), failed}
+        {:error, Failure.check_failed(name, reason, projection), failed}
     end
   rescue
     # A mock's on_event/2 that raised fails the last step, whose events the

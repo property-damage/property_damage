@@ -384,8 +384,21 @@ defmodule PropertyDamage.FailureReport.Layout do
           invariant_field(to_string(name), check) ++ property_field(report.invariant_description)
       end
 
-    if check, do: invariant ++ [{"Check", [check]}], else: invariant
+    if check,
+      do: invariant ++ [{"Check", [check]}] ++ projection_field(report),
+      else: invariant
   end
+
+  # The projection whose check failed, for a failed check or a timed-out poll.
+  defp projection_field(%FailureReport{
+         failure_reason: %Failure{
+           type: %Failure.Check{kind: kind, projection: projection}
+         }
+       })
+       when kind in [:check_failed, :poll_timeout] and not is_nil(projection),
+       do: [{"Projection", [inspect(projection)]}]
+
+  defp projection_field(_report), do: []
 
   defp check_text(nil), do: nil
   defp check_text(name), do: FailureReport.format_name(name)

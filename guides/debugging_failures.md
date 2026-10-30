@@ -22,10 +22,11 @@ Seed: 20
 
 ## Failure
 
-Failure  check failed
-Check    never_negative
-At       [1] %MyApp.Withdraw{account: "alice", amount: 5}
-Message  check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
+Failure     check failed
+Check       never_negative
+Projection  MyApp.Balances
+At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
+Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
 
 ## Minimal Reproduction (2 roots)
 

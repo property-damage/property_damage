@@ -33,6 +33,37 @@ and `partial_events/1` accessors.
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
 - **THEN** `FailureReport.failure_type/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
 
+### Requirement: A Failed Check Records Its Projection
+
+A failure of kind `:check_failed` or `:poll_timeout` SHALL record the projection
+module that defines the failed check, in the `projection` field of its
+`Failure.Check`. Every other kind, and a failure rebuilt from a signature, SHALL
+leave `projection` as `nil`. The printed Failure section SHALL show a
+`Projection` field directly after the `Check` field when `projection` is set.
+The JSON report's `failure` object SHALL carry a `projection` key beside
+`check_name`: the module name when set, `null` for a check failure without one,
+and no key when the failure is not a check failure. A failure report file saved
+before the field existed SHALL load with `projection` as `nil`.
+
+#### Scenario: Two projections share a check name
+
+- **GIVEN** projections `Alpha` and `Beta` that both define a check named `:balance_is_sane`
+- **WHEN** the check of `Beta` fails
+- **THEN** the failure's `projection` SHALL be `Beta`
+- **AND** the Failure section SHALL show `Projection` with the value `Beta` after `Check`
+- **AND** the JSON report's `failure.projection` SHALL be `"Beta"`
+
+#### Scenario: A check failure without a projection
+
+- **WHEN** a report holds a check failure whose `projection` is `nil`
+- **THEN** the Failure section SHALL show no `Projection` field
+- **AND** the JSON report's `failure.projection` SHALL be `null`
+
+#### Scenario: A report file saved before the field existed
+
+- **WHEN** a failure report file holds a `Failure.Check` without a `projection` key
+- **THEN** loading it SHALL succeed and the loaded failure's `projection` SHALL be `nil`
+
 ### Requirement: Failure Fingerprinting
 
 The system SHALL extract comparable features from each failure report, producing a fingerprint that captures the failure type, check name, triggering command type, command shape, event types, sequence length, sequence shape, state keys, error category, and error pattern.

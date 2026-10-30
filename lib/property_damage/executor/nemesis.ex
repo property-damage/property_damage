@@ -170,7 +170,7 @@ defmodule PropertyDamage.Executor.Nemesis do
            check_failures,
            state.telemetry
          ) do
-      {:halt, async_name, async_reason, _idx, async_counters} ->
+      {:halt, async_name, async_projection, async_reason, _idx, async_counters} ->
         failed_state =
           Executor.put_state(state, %{
             event_log: event_log,
@@ -182,7 +182,7 @@ defmodule PropertyDamage.Executor.Nemesis do
             command_fold_ordinals: command_fold_ordinals
           })
 
-        {:error, Failure.check_failed(async_name, async_reason), failed_state}
+        {:error, Failure.check_failed(async_name, async_reason, async_projection), failed_state}
 
       {:ok, async_counters, async_failures} ->
         # Run checks
@@ -220,7 +220,7 @@ defmodule PropertyDamage.Executor.Nemesis do
 
             {:ok, new_state}
 
-          {:error, check_name, reason, check_counters} ->
+          {:error, check_name, projection, reason, check_counters} ->
             failed_state =
               Executor.put_state(state, %{
                 event_log: event_log,
@@ -232,7 +232,7 @@ defmodule PropertyDamage.Executor.Nemesis do
                 command_fold_ordinals: command_fold_ordinals
               })
 
-            {:error, Failure.check_failed(check_name, reason), failed_state}
+            {:error, Failure.check_failed(check_name, reason, projection), failed_state}
         end
     end
   rescue

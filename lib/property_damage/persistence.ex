@@ -603,23 +603,35 @@ defmodule PropertyDamage.Persistence do
   defp backfill_added_fields(report) when is_struct(report, FailureReport) do
     @added_fields
     |> Enum.reduce(report, &Map.put_new(&2, &1, nil))
-    |> backfill_key(:failure_reason, &backfill_divergence/1)
+    |> backfill_key(:failure_reason, &backfill_failure/1)
     |> backfill_key(:other_failures, &backfill_others/1)
+    |> backfill_key(:trace, &backfill_trace_outcome/1)
+    |> backfill_key(:reference_trace, &backfill_trace_outcome/1)
   end
 
   defp backfill_added_fields(report), do: report
 
+  # A trace's failed outcome holds the same `%Failure{}` the report does.
+  defp backfill_trace_outcome(%RunTrace{outcome: {:fail, failure}} = trace),
+    do: %{trace | outcome: {:fail, backfill_failure(failure)}}
+
+  defp backfill_trace_outcome(trace), do: trace
+
   # A divergence, and the divergences listed beside it, saved before the wait
-  # fields existed get each of them as nil.
-  defp backfill_divergence(%Failure{type: %Failure.Divergence{} = type} = failure) do
+  # fields existed get each of them as nil. A failed check saved before it
+  # recorded its projection gets that as nil.
+  defp backfill_failure(%Failure{type: %Failure.Divergence{} = type} = failure) do
     type = Enum.reduce(@added_divergence_fields, type, &Map.put_new(&2, &1, nil))
     %{failure | type: backfill_other_keys(type)}
   end
 
-  defp backfill_divergence(%Failure{type: %Failure.Convergence{} = type} = failure),
+  defp backfill_failure(%Failure{type: %Failure.Convergence{} = type} = failure),
     do: %{failure | type: backfill_other_keys(type)}
 
-  defp backfill_divergence(failure), do: failure
+  defp backfill_failure(%Failure{type: %Failure.Check{} = type} = failure),
+    do: %{failure | type: Map.put_new(type, :projection, nil)}
+
+  defp backfill_failure(failure), do: failure
 
   defp backfill_other_keys(%{other_keys: others} = type),
     do: %{type | other_keys: backfill_others(others)}
@@ -636,7 +648,7 @@ defmodule PropertyDamage.Persistence do
   defp backfill_others(others), do: others
 
   defp backfill_other(%{failure: failure} = other),
-    do: %{other | failure: backfill_divergence(failure)}
+    do: %{other | failure: backfill_failure(failure)}
 
   defp backfill_other(other), do: other
 

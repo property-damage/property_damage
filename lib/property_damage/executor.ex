@@ -572,8 +572,8 @@ defmodule PropertyDamage.Executor do
   @doc false
   def run_startup_checks(state) do
     case run_phase_checks(state, :startup) do
-      {:halt, name, reason, _counters} ->
-        {:failed, nil, Failure.check_failed(name, reason), state}
+      {:halt, name, projection, reason, _counters} ->
+        {:failed, nil, Failure.check_failed(name, reason, projection), state}
 
       {:ok, startup_recorded, startup_counters} ->
         {:ok,
@@ -1256,7 +1256,7 @@ defmodule PropertyDamage.Executor do
            check_failures,
            state.telemetry
          ) do
-      {:halt, async_name, async_reason, async_index, async_counters} ->
+      {:halt, async_name, async_projection, async_reason, async_index, async_counters} ->
         # DR-025: attribute the failure to the offending event's command_index
         # (`async_index`), which may be an earlier command than the one currently
         # executing (or nil for an ambient injector event) — never blindly to the
@@ -1264,7 +1264,7 @@ defmodule PropertyDamage.Executor do
         failed_state =
           pack.(%{check_counters: async_counters, async_failed_index: async_index})
 
-        {:error, Failure.check_failed(async_name, async_reason), failed_state}
+        {:error, Failure.check_failed(async_name, async_reason, async_projection), failed_state}
 
       {:ok, async_counters, async_failures} ->
         # 8. Run checks
@@ -1324,8 +1324,8 @@ defmodule PropertyDamage.Executor do
                   {:ok, new_state} ->
                     {:ok, update_poller_state_getters(new_state)}
 
-                  {:error, check_name, reason, failed_state} ->
-                    {:error, Failure.check_failed(check_name, reason), failed_state}
+                  {:error, check_name, projection, reason, failed_state} ->
+                    {:error, Failure.check_failed(check_name, reason, projection), failed_state}
                 end
 
               {:error, :idempotency_violation, violation} ->
@@ -1349,9 +1349,9 @@ defmodule PropertyDamage.Executor do
                 {:error, Failure.stutter_execution_failed(details), failed_state}
             end
 
-          {:error, check_name, reason, check_counters} ->
+          {:error, check_name, projection, reason, check_counters} ->
             failed_state = pack.(%{check_counters: check_counters})
-            {:error, Failure.check_failed(check_name, reason), failed_state}
+            {:error, Failure.check_failed(check_name, reason, projection), failed_state}
         end
     end
   end
@@ -1507,12 +1507,13 @@ defmodule PropertyDamage.Executor do
               # Handle based on check_mode
               case check_mode do
                 :halt ->
-                  {:halt, {:error, check_name, reason, new_counters}}
+                  {:halt, {:error, check_name, projection, reason, new_counters}}
 
                 :record ->
                   # Record failure and continue
                   failure = %{
                     check_name: check_name,
+                    projection: projection,
                     reason: reason,
                     command: Map.get(check_ctx, :command),
                     command_index: Map.get(check_ctx, :command_index),
@@ -1535,7 +1536,7 @@ defmodule PropertyDamage.Executor do
     # Normalize result format
     case result do
       {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, _, _, _} = error -> error
+      {:error, _, _, _, _} = error -> error
     end
   end
 
@@ -1624,7 +1625,7 @@ defmodule PropertyDamage.Executor do
   # firings are recorded, since these checks never pass through the
   # during-run counter path):
   #   {:ok, recorded_failures, counters}
-  #   {:halt, name, {exception, stacktrace}, counters}
+  #   {:halt, name, projection, {exception, stacktrace}, counters}
   # Shared with PropertyDamage.Executor.Finalization (:teardown checkpoint). DR-029.
   @doc false
   def run_phase_checks(state, phase) do
@@ -1652,8 +1653,11 @@ defmodule PropertyDamage.Executor do
                {recorded, acc_counters},
                Map.get(state, :telemetry)
              ) do
-          {:ok, new_recorded, new_counters} -> {:cont, {:ok, new_recorded, new_counters}}
-          {:halt, name, reason, halt_counters} -> {:halt, {:halt, name, reason, halt_counters}}
+          {:ok, new_recorded, new_counters} ->
+            {:cont, {:ok, new_recorded, new_counters}}
+
+          {:halt, name, halt_projection, reason, halt_counters} ->
+            {:halt, {:halt, name, halt_projection, reason, halt_counters}}
         end
       end)
     end
@@ -1687,11 +1691,12 @@ defmodule PropertyDamage.Executor do
         {:failed, e, stacktrace} ->
           case check_mode do
             :halt ->
-              {:halt, {:halt, check.name, {e, stacktrace}, fired}}
+              {:halt, {:halt, check.name, projection, {e, stacktrace}, fired}}
 
             :record ->
               failure = %{
                 check_name: check.name,
+                projection: projection,
                 reason: {e, stacktrace},
                 command: nil,
                 command_index: nil,
@@ -1884,7 +1889,7 @@ defmodule PropertyDamage.Executor do
   # Run `@check every:` checks on the events folded since `log_before`
   # (newest-first prepended to `event_log`), incrementally on each event's
   # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
-  # `{:halt, name, reason, command_index, counters}` where `command_index`
+  # `{:halt, name, projection, reason, command_index, counters}` where `command_index`
   # locates the offending event for the shrinker (nil for a pure injector event).
   # Shared with PropertyDamage.Executor.Finalization (settle/drain). DR-029.
   @doc false
@@ -1922,14 +1927,17 @@ defmodule PropertyDamage.Executor do
         projs = Events.update_projections(projs, entry.event)
 
         case check_async_event(model, projs, entry, c, mode, f, telemetry) do
-          {:ok, c, f} -> {:cont, {projs, c, f}}
-          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, Entry.attribution(entry), c}}
+          {:ok, c, f} ->
+            {:cont, {projs, c, f}}
+
+          {:halt, name, projection, reason, c} ->
+            {:halt, {:halt, name, projection, reason, Entry.attribution(entry), c}}
         end
       end)
 
     case folded do
       {_projs, c, f} -> {:ok, c, f}
-      {:halt, name, reason, idx, c} -> {:halt, name, reason, idx, c}
+      {:halt, name, projection, reason, idx, c} -> {:halt, name, projection, reason, idx, c}
     end
   end
 
@@ -1957,7 +1965,7 @@ defmodule PropertyDamage.Executor do
 
     case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, name, reason, counters} -> {:halt, name, reason, counters}
+      {:error, name, projection, reason, counters} -> {:halt, name, projection, reason, counters}
     end
   end
 
@@ -1997,7 +2005,7 @@ defmodule PropertyDamage.Executor do
   # triggers. The check function's return must be the 1-arity predicate the
   # poller calls; any other return is a check failure at this step, handled
   # under the run's `check_mode:` like a synchronous check that failed.
-  # Returns `{:ok, state}` or `{:error, check_name, reason, state}`.
+  # Returns `{:ok, state}` or `{:error, check_name, projection, reason, state}`.
   defp maybe_spawn_pollers(state, events, model, command, command_index) do
     check_mode = state.check_mode
 
@@ -2031,7 +2039,7 @@ defmodule PropertyDamage.Executor do
 
       case reject_non_predicates(state, others, command, command_index) do
         {:ok, state} -> {:ok, spawn_pollers(state, predicates, command_index)}
-        {:error, _name, _reason, _state} = error -> error
+        {:error, _name, _projection, _reason, _state} = error -> error
       end
     end
   end
@@ -2044,7 +2052,7 @@ defmodule PropertyDamage.Executor do
   defp reject_non_predicates(state, others, command, command_index) do
     require Logger
 
-    Enum.reduce_while(others, {:ok, state}, fn {_projection, check, event, returned},
+    Enum.reduce_while(others, {:ok, state}, fn {projection, check, event, returned},
                                                {:ok, state} ->
       reason =
         "@eventually #{check.name} must return a 1-arity predicate function " <>
@@ -2052,11 +2060,12 @@ defmodule PropertyDamage.Executor do
 
       case state.check_mode do
         :halt ->
-          {:halt, {:error, check.name, reason, state}}
+          {:halt, {:error, check.name, projection, reason, state}}
 
         :record ->
           failure = %{
             check_name: check.name,
+            projection: projection,
             reason: reason,
             command: command,
             command_index: command_index,

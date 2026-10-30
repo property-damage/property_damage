@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The projection of a failed check.** A `:check_failed` or `:poll_timeout`
+  failure records the projection module that defines the check, in the new
+  `projection` field of `PropertyDamage.Failure.Check`. The Failure section
+  of the printed report shows it as a `Projection` field after `Check`, and
+  the JSON report's `failure` object carries it as `projection`.
+  `Failure.check_failed/3` takes it as an optional third argument. Report
+  files saved before the field existed load with `projection` as `nil`.
 - **`use PropertyDamage.Model`.** A model is now declared with
   `use PropertyDamage.Model`, which sets the `PropertyDamage.Model`
   behaviour. The macro takes no options and raises `ArgumentError` if given
