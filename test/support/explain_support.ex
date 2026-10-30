@@ -78,8 +78,9 @@ defmodule PropertyDamage.Test.ExplainSupport do
   Runs `exec/1` of the task with `args` in this process.
 
   Returns `%{result: :ok | :error, stdout: binary, stderr: binary}`. Pass
-  `input:` to supply stdin. The caller must not run async: capturing stderr
-  replaces a process that every test shares.
+  `input:` to supply stdin as text, or `binary_input:` to supply stdin as raw
+  bytes that the task reads without any decoding. The caller must not run
+  async: capturing stderr replaces a process that every test shares.
   """
   def exec(args, opts \\ []) do
     mod = task()
@@ -87,12 +88,19 @@ defmodule PropertyDamage.Test.ExplainSupport do
     parent = self()
     ref = make_ref()
     input = Keyword.get(opts, :input)
+    binary_input = Keyword.get(opts, :binary_input)
 
     run = fn -> send(parent, {ref, :result, mod.exec(args)}) end
 
     stderr =
       capture_io(:stderr, fn ->
-        stdout = if input, do: capture_io(input, run), else: capture_io(run)
+        stdout =
+          cond do
+            binary_input -> capture_io(:stdio, [input: binary_input, encoding: :latin1], run)
+            input -> capture_io(input, run)
+            true -> capture_io(run)
+          end
+
         send(parent, {ref, :stdout, stdout})
       end)
 

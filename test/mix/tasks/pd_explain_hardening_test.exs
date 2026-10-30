@@ -120,7 +120,7 @@ defmodule Mix.Tasks.Pd.ExplainHardeningTest do
       assert out.result == :error
 
       assert E.lines(out.stderr) == [
-               "#{page}: bundle format \"9\\nfake\" is not supported; " <>
+               "#{page}: bundle format \"9\\nfake\" (a string) is not supported; " <>
                  "this version reads formats: 1"
              ]
     end

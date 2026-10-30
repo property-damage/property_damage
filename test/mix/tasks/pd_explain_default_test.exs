@@ -36,12 +36,12 @@ defmodule Mix.Tasks.Pd.ExplainDefaultTest do
 
     [
       {E.copy(dir, "page_no_bundle.html"),
-       "no bundle in this page (it was written by a version that did not embed one)"},
+       "no bundle in this page (it holds no pd-bundle script)"},
       {E.write(
          dir,
          "reordered.html",
          String.replace(html, open, ~s(<script id="pd-bundle" type="application/json">))
-       ), "no bundle in this page (it was written by a version that did not embed one)"},
+       ), "no bundle in this page (it holds no pd-bundle script)"},
       {E.write(dir, "two.html", E.with_text_before_body_end(html, open <> bytes <> "</script>")),
        "more than one bundle in this page"},
       {E.write(dir, "not_json.html", String.replace(html, bytes, ~s({"format":1,))),
