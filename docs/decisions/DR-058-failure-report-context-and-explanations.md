@@ -118,8 +118,11 @@ The items below ship with this record.
    - A `@moduledoc` set by a `@before_compile` registered after `use` is not
      captured. The workaround is to set `@moduledoc` in the module body, or to
      register that callback before `use`.
-   - Events and adapters are not captured. No source text is stored in the
-     compiled module.
+   - Events are not captured. Adapters are, through
+     `use PropertyDamage.Adapter`, because the page's bundle carries their
+     source (item 12); a bare `@behaviour PropertyDamage.Adapter` resolves
+     through the docs chunk. No source text is stored in the compiled
+     module.
 
    Why a capture: the docs chunk is missing for `.exs`-compiled modules, which
    would print a false gap for a model with good docs.
