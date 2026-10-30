@@ -333,13 +333,27 @@ See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Run Comparison](#
 
 Every HTML failure page carries a bundle: a machine-readable copy of the failure, with the docs and source of the modules behind it. The `pd-explain` skill gives the bundle to an agent. The agent writes an explanation of the failure, and the page then opens on an Explanation tab next to the Run view.
 
-To install the skill, link it into your project. The link keeps the skill in step with the PropertyDamage you installed. With a path dependency, run this from your project's `.claude/skills/` directory (the relative path runs from `.claude/skills/` to the PropertyDamage checkout, so adjust it to your layout):
+To install the skill, link it into your project. The link keeps the skill in step with the PropertyDamage you installed. Run the command from your project's `.claude/skills/` directory. The link target is a path relative to that directory, so count the levels up from `.claude/skills/` to the PropertyDamage checkout.
+
+With a path dependency, take a checkout that sits next to your project:
+
+```text
+dev/
+  my_app/                 your project
+    .claude/
+      skills/             run the command here
+  property_damage/        the checkout
+```
+
+From `dev/my_app/.claude/skills/`, `..` is `.claude`, `../..` is `my_app` and `../../..` is `dev`. Three levels up reach `dev`, where `property_damage` sits:
 
 ```bash
 ln -s ../../../property_damage/priv/claude/skills/pd-explain pd-explain
 ```
 
-With a Hex dependency, from the same directory:
+If the checkout lives elsewhere, keep `../../` (it reaches your project root) and replace what follows with the path from the project root to the checkout, then `/priv/claude/skills/pd-explain`. For a checkout two directories above the project, that is `../../../../property_damage/priv/claude/skills/pd-explain`.
+
+With a Hex dependency, the package sits in your project's `deps/` directory, so two levels up from `.claude/skills/` are enough:
 
 ```bash
 ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
@@ -347,8 +361,8 @@ ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
 
 The skill drives `mix pd.explain`, which reads one page and loads no project code:
 
-- `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation of this bundle.
-- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice.
+- `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation for the page's bundle at the current prompt version. An explanation made for an older prompt version does not count, so the task writes the files again.
+- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice. On a first run Mix prints its compile messages before the prompt, so run `mix compile` first, or set `MIX_QUIET=1`, when you pipe the output.
 - `mix pd.explain PAGE --apply FILE` (or `--apply -` for standard input) checks an explanation written as JSON and, if it passes, embeds it in the page. If it fails, it prints every problem and leaves the page untouched.
 
 To skip the agent, name a command with `--with`. The task sends it the prompt on standard input and reads the explanation from its output:
