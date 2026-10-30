@@ -303,15 +303,16 @@ PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "propert
 ```
 
 `IO.inspect/2` wraps the report in `#FailureReport<` and `>`. Read it from the
-top. The Failure section names the check and the step that
-broke it, `[1]`. Under each step of Minimal Reproduction, the step's log lines
-and events print in the order they happened. Each entry starts with its
-offset from the start of the target's run (`+0.00s`, since the bank answers
-at once), then `log` or `event`, then the line's tags in brackets and its
-message. The lines show what the adapter sent and what the bank answered: a
-withdrawal of 5 from a balance of 5 came back `200` with a balance of `-1`.
-The `authorization` header reads `[REDACTED]` because the adapter redacted it
-before the call.
+top. The Failure section names the check and the step that broke it, `[1]`. The
+"What this checks" section after it prints the docs of the model, check,
+projection and command, and a `(no description: ...)` line says where to add a
+missing doc. Under each step of Minimal Reproduction, the step's log lines and
+events print in the order they happened. Each entry starts with its offset from
+the start of the target's run (`+0.00s`, since the bank answers at once), then
+`log` or `event`, then the line's tags in brackets and its message. The lines
+show what the adapter sent and what the bank answered: a withdrawal of 5 from a
+balance of 5 came back `200` with a balance of `-1`. The `authorization` header
+reads `[REDACTED]` because the adapter redacted it before the call.
 
 ### 4. Read the report through a tag filter
 

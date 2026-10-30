@@ -132,6 +132,11 @@ defmodule AccountAdapter do
 end
 ```
 
+`use PropertyDamage.Model` (and `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command`) comes before any definition in the module,
+including functions an earlier `use` injects, so `use GenServer` goes after it;
+otherwise the module does not compile.
+
 Run it:
 
 <!-- pd-doc-verify: runnable -->

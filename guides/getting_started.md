@@ -97,6 +97,11 @@ defmodule MyApp.Commands.CreateUser do
 end
 ```
 
+`use PropertyDamage.Model` (and `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command`) comes before any definition in the module,
+including functions an earlier `use` injects, so `use GenServer` goes after it;
+otherwise the module does not compile.
+
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
 

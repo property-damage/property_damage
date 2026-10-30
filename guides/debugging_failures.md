@@ -109,11 +109,41 @@ statistic, bound and measured value. A run with other failures adds one
 `Shrink` line that warns the reproduction may not be minimal. A run with a log
 filter adds a `Log filter` line (see the [log lines guide](log_lines.md#filtering-by-tag)).
 
+### What this checks
+
+This section says what was being checked, from the docs its author wrote. The
+items depend on the failure kind, and each prints under its label:
+
+- The first item names the kind and says what it means. Kinds that point at
+  the test rather than the system open with "Unable to test the system".
+- `Model` prints the model's `@moduledoc`.
+- The subject comes next: here `Check`, for a comparison failure
+  `Observation`. It prints its whole doc. Supporting items follow, here
+  `Projection`, and each prints the first paragraph of its doc (up to the first
+  blank line).
+- `Path` appears when a target ran an expansion. See the
+  [path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
+- `Command` prints the `@moduledoc` of the command at the marked step.
+
+Docs print as written. PropertyDamage never parses, wraps or cuts them, so a
+heading inside a doc is only text.
+
+A line that starts with `(no description: ...)` is a gap line. It says which
+doc is missing and where to add it. In the excerpt, `Check` has one: add a
+`@doc` to `MyApp.Balances.never_negative/2`. For a module the fix is a
+`@moduledoc`, and for an expansion entry it is `doc: "..."` on the entry. The
+line prints every time a doc is missing, so adding the doc is the only way to
+remove it. If the docs cannot be read, the line tells you to declare the module
+with the matching `use PropertyDamage.*` line.
+
+Decision record DR-058 (Failure Report Context and Explanations) holds the full
+rules.
+
 ### Setup
 
-A Setup section appears between Failure and Minimal Reproduction when the run
-was given `setup_log:`. It holds the lines a test captured while it prepared
-the system, before the run started. See
+A Setup section appears between What this checks and Minimal Reproduction when
+the run was given `setup_log:`. It holds the lines a test captured while it
+prepared the system, before the run started. See
 [Work done before the run](log_lines.md#work-done-before-the-run).
 
 ### Minimal Reproduction

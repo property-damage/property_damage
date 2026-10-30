@@ -321,6 +321,12 @@ read 0 and the variant `"right"` read 1. `Compared` names the relation (`==`)
 and the wait: the comparison waited 101 ms against a bound of 100 ms before it
 called the difference real.
 
+The "What this checks" section prints the docs of the model, the observation,
+its projection and the command. Its `Path` items say how each target ran the
+root (here `"left"` as step `[0]`, `"right"` as steps `[0.0],[0.1]`) and print
+the `doc:` of the entry that target ran. The `(no description: ...)` lines
+here say to add that `doc:` to the entry.
+
 Minimal Reproduction lists both sides of the comparison, each under its own
 header, and marks the diverging root `►` in both. The reference ran the root
 itself (`as Add[0]`). The variant ran the second entry (`as Add[1]`), so its
@@ -393,8 +399,10 @@ def expansions, do: [{Add, &add_paths/2}]
 
 The function takes the root as generated and the target's simulated state at
 that root, and returns a list of **entries**. An entry is a sequence, or
-`{sequence, weight: n}` with a positive integer weight (default 1). Entries are
-named after their index in the returned list: `Add[0]`, `Add[1]`.
+`{sequence, weight: n, doc: "..."}`: `weight:` is a positive integer (default 1)
+and `doc:` is a string that describes the whole route. The failure report shows
+it in the Path item, and a `doc:` on a leaf is ignored with a warning. Entries
+are named after their index in the returned list: `Add[0]`, `Add[1]`.
 
 **The contract.** Every entry must mean the same as the root once the root is
 done, under every `@compare` observation of the model. The framework cannot
