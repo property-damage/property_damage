@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A bundle in every HTML failure page (DR-058).** Each page carries a
+  `pd-bundle` script tag, a JSON copy of the failure: its fields, the steps
+  and events of each target, the sections, and the docs and source of the
+  modules behind the failure, each with an id a reader can cite. The bundle
+  masks secret-shaped string literals in the source of a file that holds an
+  adapter, and records the count and the rule under `redactions`.
+- **`mix pd.explain` (DR-058).** The task reads one failure page and loads no
+  project code. `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and
+  `PAGE.explain/instructions.md`; `--prompt` prints the instructions and the
+  bundle; `--apply FILE` (or `-`) checks an explanation against the page and
+  embeds it in a `pd-explanation` script tag, or leaves the page untouched
+  and prints every problem. `--with CMD` runs a command of your choice with
+  the prompt on its standard input, checks its answer, and retries with the
+  errors up to `--attempts N` times (3 by default) within `--timeout T`
+  (`10m` by default). `config :property_damage, explain_with: CMD` sets a
+  default command. `--with` may cost money on every call.
+- **The `pd-explain` skill (DR-058).** `priv/claude/skills/pd-explain` ships
+  in the Hex package. It explains a failure page with `mix pd.explain`; link
+  it into your project's `.claude/skills/` so it always matches the installed
+  version. The README shows the link.
+- **The explanation view (DR-058).** A page with an explanation opens on an
+  Explanation tab next to the Run tab. It lists the summary, the hypotheses
+  with their rank and likelihood, and the talking points. A citation links to
+  the cited evidence in the Run view and highlights it, a `source:` citation
+  unfolds the cited lines, and a citation the page cannot resolve shows as
+  `(not in this page)`.
 - **Docs and source path of a declared module (DR-058).** A model, projection or
   command declared with `use` keeps its own docs and the path of its source
   file, and `PropertyDamage.Docs.fetch/1` returns them. This also works for a
@@ -583,6 +609,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is an `ArgumentError` that names `weight:` and `doc:`; `doc:` on a leaf is
   warned about and ignored. Report files saved before the key load with `doc`
   as `nil`.
+
+- **A JSON bundle in every HTML failure page (DR-058).** Each page that
+  `PropertyDamage.FailureReport.HTML` writes now carries, in a second script
+  tag with the id `pd-bundle`, a machine-readable copy of the failure's
+  structure (fields, steps, events and sections), the docs and the source
+  file of the modules behind it, and an id for each thing a reader may cite.
+  The modules include the sub-adapters an adapter names in
+  `delegate_execution/1` (`to:`), after the adapter that delegates to them.
+  `PropertyDamage.FailureReport.Bundle.build/2` returns the same map. The
+  index page carries no bundle, and the page's viewer does not read it.
+  Source text of every module in a file that holds an adapter has each
+  double-quoted literal replaced by `"[REDACTED]"` on a line that names a
+  secret, password, token or key (a quoted map key counts as a name and stays
+  as written), and on the next line when it ends in a comma or an opening
+  bracket, and the bundle counts the replacements; a source file that cannot be read is
+  named under `missing_sources`. `use PropertyDamage.Adapter` now captures the
+  adapter's docs like the other `use` macros, so a `def` or `defp` written
+  before it is a compile error: move the `use` above it.
 
 ### Changed
 

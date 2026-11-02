@@ -574,7 +574,7 @@ The report ends with three calls you can paste:
 1. **The reproduction command**, `PropertyDamage.run(..., seed: s, max_runs: 1)`:
    generates the failing run again from its seed with the same targets and
    options, then fails and shrinks again.
-2. **Regenerate the failing variant**, `PropertyDamage.Expansion.for/5`: returns
+2. **Regenerate the failing variant**, `PropertyDamage.Expansion.for/4`: returns
    the concrete sequence one target ran before shrinking, without running
    anything:
 

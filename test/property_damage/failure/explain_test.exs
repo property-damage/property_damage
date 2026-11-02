@@ -8,6 +8,8 @@ defmodule PropertyDamage.Failure.ExplainTest do
   alias PropertyDamage.Failure
   alias PropertyDamage.Failure.Explain
 
+  defp explain, do: Module.concat([Explain])
+
   # The atoms of the `kind` type of `PropertyDamage.Failure`. A member that is
   # not an atom raises, so a change of the type's shape cannot shrink the list.
   defp kinds do
@@ -29,7 +31,7 @@ defmodule PropertyDamage.Failure.ExplainTest do
     assert length(Enum.uniq(kinds)) == 19
 
     for kind <- kinds do
-      meaning = Explain.meaning(kind)
+      meaning = explain().meaning(kind)
 
       assert is_binary(meaning) and meaning != "",
              "no meaning for #{inspect(kind)}: #{inspect(meaning)}"
@@ -37,7 +39,9 @@ defmodule PropertyDamage.Failure.ExplainTest do
   end
 
   test "a kind outside the kind type has no meaning" do
-    assert_raise FunctionClauseError, fn -> Explain.meaning(:bogus_kind) end
+    # The module is bound at runtime, so the compiler cannot check the argument
+    # or the result against the spec.
+    assert_raise FunctionClauseError, fn -> explain().meaning(:bogus_kind) end
   end
 
   test "the meaning of check_failed is the agreed text" do

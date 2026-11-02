@@ -87,8 +87,8 @@ PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "propert
 `IO.inspect(report, pretty: true)` prints the report like this, wrapped in
 `#FailureReport<` and `>`, without color. A failure in a
 `property_damage` ExUnit test prints the same layout through
-`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Only that one prints
-color; the text is the same either way. Plain `inspect(report)`, without
+`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Both print the
+same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
 `pretty: true`, prints a one-line summary.
 
 ### Banner and seed
@@ -114,10 +114,10 @@ filter adds a `Log filter` line (see the [log lines guide](log_lines.md#filterin
 This section says what was being checked, from the docs its author wrote. The
 items depend on the failure kind, and each prints under its label:
 
-- The first item names the kind and says what it means. Kinds that report a
-  problem with the test or the framework rather than the system open with
-  "Unable to test the system". Examples are `:adapter_error` (the adapter
-  raised or returned an error), `:setup_failed` (a target could not be
+- The first item names the kind and says what it means. A failure
+  kind that blames the test or the framework, not the system, opens with the
+  words "Unable to test the system". Examples are `:adapter_error` (the
+  adapter raised or returned an error), `:setup_failed` (a target could not be
   prepared) and `:nemesis_error` (a fault injector failed).
   `PropertyDamage.Failure.Explain.meaning/1` returns the text for each kind.
 - `Model` prints the model's `@moduledoc`.
@@ -139,12 +139,13 @@ doc is missing and where to add it. In the excerpt, `Check` has one: add a
 `@doc` to `MyApp.Balances.never_negative/2`. For a module the fix is a
 `@moduledoc`, and for an expansion entry it is `doc: "..."` on the entry. The
 line prints every time a doc is missing, so adding the doc is the only way to
-remove it. If the docs cannot be read, the line tells you to declare the module
-with the matching `use PropertyDamage.*` line. That `use` captures the docs at
-compile time. Without it, PropertyDamage reads the module's docs chunk, and a
-module compiled from a script (an `.exs` file, such as a test file) has none.
-So the line appears, for example, for a model defined in a test file with a
-bare `@behaviour PropertyDamage.Model`.
+remove it. Sometimes PropertyDamage cannot read a module's docs. Then the line
+tells you to declare the module with the matching `use PropertyDamage.*` line,
+because that `use` captures the docs at compile time. Without it, PropertyDamage
+falls back to the docs the compiler stores in the compiled module's `.beam`
+file (its docs chunk). A module compiled from a script, such as a model in an
+`.exs` test file, has no such chunk. So the line appears, for example, for a
+model defined in a test file with a bare `@behaviour PropertyDamage.Model`.
 
 Decision record DR-058 (Failure Report Context and Explanations) holds the full
 rules.
@@ -194,7 +195,7 @@ passing `targets: targets`:
 
 1. Rerun from the seed: generates the failing run again, then fails and
    shrinks again.
-2. Regenerate the failing variant: `PropertyDamage.Expansion.for/5` returns the
+2. Regenerate the failing variant: `PropertyDamage.Expansion.for/4` returns the
    sequence one target ran before shrinking, without running anything. Its
    fifth argument, the options, has a default, which is why the report's call
    passes four.
@@ -215,21 +216,42 @@ failing root in both. Projections compares the reference's state with the
 variant's at the failing boundary. For a real report, see the excerpt in the
 [path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
 
+## Explaining the report
+
+A failure page can carry an explanation of its failure: a summary, ranked hypotheses and talking points, each claim citing the page. Reading one takes four steps:
+
+1. Write the page. Set `report_html:` or `PD_REPORT_HTML` as the [README](../README.md#explaining-a-failure-page) shows, and let a run fail.
+2. Get an explanation written. Either ask an agent that has the `pd-explain` skill to explain the page, or run `mix pd.explain PAGE --with "my-agent --print"`, where the command reads the prompt on standard input and prints the explanation as JSON.
+3. Apply it. The skill runs `mix pd.explain PAGE --apply explanation.json`, and `--with` applies its own answer. The task checks the explanation against the page and refuses one that cites an id the page does not hold. A refused explanation leaves the page as it was.
+4. Reopen the page in a browser.
+
+A page with an explanation opens on an Explanation tab, next to the Run tab. The tab lists the summary, the hypotheses and the talking points. Each hypothesis prints with its rank and its likelihood, as `Hypothesis 1 (likely)`, then its claim, its evidence and its next steps.
+
+Every claim lists the evidence it cites. Click a citation to switch to the Run view, where the page unfolds the cited step, event or section, scrolls to it and highlights it. A `source:` citation names lines of a module's source file: click it to unfold those lines under the citation, and click again to fold them. If the page cannot find a cited id, the citation shows as `(not in this page)` and does nothing when clicked.
+
+The explanation is only as private as the page. The bundle in the page holds the full source of the model, the projections, the commands, the events and the adapters.
+
+PropertyDamage masks secret-shaped literals in only some of that source. It scans each source file that holds an adapter (a sub-adapter too), and any model or command defined in the same file. On a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. A name counts when its last `_`-separated part is one of those words, so `api_key` and `admin_password` count and `keys` does not. When such a line ends in a comma or an opening bracket, the next line is masked too. The page records the count of masked literals and the rule.
+
+The rule reads one line at a time and has gaps. It does not scan a source file that holds no adapter. In the files it scans, it does not mask other literals, such as an internal host name, a bare query string like `"?token=abc"`, a heredoc, a sigil or a comment. It also masks harmless strings on a line that names a secret. Read the page before you share it.
+
 ## The Failure Report
 
 The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it.
 
 The steps below run on the bank of the [log lines guide](log_lines.md#2-write-the-system-the-adapter-and-the-model).
-Create its `lib/my_app.ex` first, in the project of that guide's step 1 or in
-any Mix project that depends on PropertyDamage.
+First create `lib/my_app.ex` in a Mix project that depends on PropertyDamage
+(the project of that guide's step 1 works). Copy the whole code block of that
+guide's step 2 into it.
 
 Put the first fence in a script file in the project root, such as `debug.exs`,
 and run it with `mix run debug.exs`, as step 3 of the log lines guide runs
 `bug.exs`. The later fences use `failure`, the report that first fence binds.
-Append each fence that uses `MyApp.Model`, `MyApp.Adapter` or `failure` to the
-end of the same script and run it again. A fence that names `MyModel`,
-`MyAdapter` or another `My` module is a placeholder: read it, or replace the
-name with your own module. It does not run against the bank.
+Each later fence that uses `MyApp.Model`, `MyApp.Adapter` or `failure` runs
+against the bank: append it to the end of the same script and run the script
+again. A fence that names `MyModel`, `MyAdapter` or another `My` module is a
+placeholder for your own code. Read it, or replace the name with your own
+module; it does not run against the bank.
 
 <!-- pd-doc-verify: include guides/log_lines.md lib/my_app.ex -->
 <!-- pd-doc-verify: runnable -->

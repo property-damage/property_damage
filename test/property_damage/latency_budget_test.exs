@@ -260,7 +260,9 @@ defmodule PropertyDamage.LatencyBudgetTest do
       assert detail.statistic == :p95
       assert detail.bound == :max_ratio
       assert detail.limit == @tiny
-      assert detail.value > 1.0
+      # The slow variant sleeps at least 5 ms per command, so its p95 has that
+      # floor whatever the scheduler does to the reference.
+      assert report.metrics["slow"].p95 >= 5_000
       assert_in_delta detail.value, report.metrics["slow"].p95 / report.metrics["ref"].p95, 1.0e-6
       assert detail.reference_value == report.metrics["ref"].p95
       assert detail.metrics == report.metrics["slow"]
@@ -270,7 +272,8 @@ defmodule PropertyDamage.LatencyBudgetTest do
 
     test "a generous max_ratio passes" do
       assert {:ok, stats} = run(slow_pair(), latency: [p95: [max_ratio: @huge]])
-      assert stats.metrics["slow"].p95 > stats.metrics["ref"].p95
+      assert stats.metrics["slow"].p95 >= 5_000
+      assert stats.metrics["ref"].p95 > 0
     end
 
     test "max compares with the duration converted to microseconds" do

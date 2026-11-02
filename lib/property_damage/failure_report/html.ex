@@ -12,6 +12,11 @@ defmodule PropertyDamage.FailureReport.HTML do
   (the report's `log:` option, or `PD_LOG`). The page loads nothing from the
   network and opens from disk.
 
+  A second script tag, `pd-bundle`, holds a JSON copy of the failure's
+  structure, docs and sources for other programs to read (see
+  `PropertyDamage.FailureReport.Bundle`). The viewer reads it only to resolve
+  the citations of an explanation the page carries.
+
   Three ways to get a page:
 
     * `render/1` returns it as a string.
@@ -35,7 +40,7 @@ defmodule PropertyDamage.FailureReport.HTML do
   """
 
   alias PropertyDamage.FailureReport
-  alias PropertyDamage.FailureReport.Formatter
+  alias PropertyDamage.FailureReport.{Bundle, Formatter}
 
   @viewer_path Path.expand("../../../priv/failure_report/viewer.html", __DIR__)
   @index_path Path.expand("../../../priv/failure_report/index.html", __DIR__)
@@ -51,9 +56,17 @@ defmodule PropertyDamage.FailureReport.HTML do
   def render(%FailureReport{} = report) do
     text = Formatter.format(report, :terminal, color: false)
 
-    @viewer
-    |> String.replace("__PD_TITLE__", escape(title(report)))
-    |> String.replace("__PD_REPORT_JSON__", Jason.encode!(text, escape: :html_safe))
+    # One pass over the template, so text in a replacement that looks like a
+    # placeholder is never replaced itself.
+    String.replace(
+      @viewer,
+      ["__PD_TITLE__", "__PD_REPORT_JSON__", "__PD_BUNDLE_JSON__"],
+      fn
+        "__PD_TITLE__" -> escape(title(report))
+        "__PD_REPORT_JSON__" -> Jason.encode!(text, escape: :html_safe)
+        "__PD_BUNDLE_JSON__" -> Jason.encode!(Bundle.build(report, []), escape: :html_safe)
+      end
+    )
   end
 
   @doc """

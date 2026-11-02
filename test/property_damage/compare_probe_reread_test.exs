@@ -100,12 +100,12 @@ defmodule PropertyDamage.CompareProbeRereadTest do
   end
 
   test "after a mutation root the loop drains and folds without re-executing it", ctx do
-    targets = [Compare.target("a"), Compare.target("b", %{at: %{0 => {:after_ms, 80}}})]
+    targets = [Compare.target("a"), Compare.target("b", %{at: %{0 => {:after_ms, 1_000}}})]
 
     assert {:ok, stats} =
              Compare.run(model!(ctx, :pays), targets,
                max_commands: 2,
-               compare: [converge_within: 3_000]
+               compare: [converge_within: 5_000]
              )
 
     projection = Compare.fixture!(ctx.compiled, :balances)

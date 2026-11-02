@@ -95,7 +95,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       TODO: Add description of what system this connects to.
       \"\"\"
 
-      @behaviour PropertyDamage.Adapter
+      use PropertyDamage.Adapter
 
       # TODO: Add command aliases
       # alias MyApp.Commands.{CreateEntity, UpdateEntity, DeleteEntity}
@@ -176,7 +176,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       TODO: Add description of what system this connects to.
       \"\"\"
 
-      @behaviour PropertyDamage.Adapter
+      use PropertyDamage.Adapter
 
       # TODO: Add command aliases
       # alias MyApp.Commands.{CreateEntity, UpdateEntity}
@@ -241,7 +241,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       TODO: Add description of what system this connects to.
       \"\"\"
 
-      @behaviour PropertyDamage.Adapter
+      use PropertyDamage.Adapter
 
       # TODO: Add command aliases
       # alias MyApp.Commands.{CreateEntity, UpdateEntity}

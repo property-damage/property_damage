@@ -15,9 +15,11 @@ defmodule PropertyDamage.FailureReport.Layout do
   #     the renderer lines up the values of one section in one column
   #   * `{:header, text}` - the header of a listing (`Reference: target "a"`)
   #   * `{:step, step}` - a command of a listing, `%{depth:, label:, root:,
-  #     command:, note:, outcome:}`; `outcome` is nil, or the word printed after
-  #     `◄──` on the failing step, which also carries `►`; `root` is the index
-  #     of the root it belongs to, nil for a setup or teardown command
+  #     command:, note:, ran_as:, outcome:}`; `outcome` is nil, or the word
+  #     printed after the arrow on the failing step, which also carries the
+  #     marker; `root` is the index of the root it belongs to, nil for a setup
+  #     or teardown command; `ran_as` is the part of `note` that names the expansion entry
+  #     a root ran as, nil for any other step
   #   * `{:event, %{offset_ms:, source:, event:}}` - an event under its step
   #   * `{:log, %{offset_ms:, tags:, message:, file:, line:, attempt:}}` - a log
   #     line (DR-054) under its step or under an adapter note; `message` is
@@ -77,6 +79,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # The notes that head the adapter's setup/1 and teardown/1 lines.
   @adapter_setup_note "adapter setup/1"
   @adapter_teardown_note "adapter teardown/1"
+  @untied_note "Not tied to a command"
 
   # `opts` holds the `log:` filter a caller gives for this one formatting
   # (`PropertyDamage.Log.Filter.resolve/2` decides what applies). A filter
@@ -85,13 +88,21 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec build(FailureReport.t(), keyword()) :: t()
   def build(%FailureReport{} = report, opts \\ []) do
+    {layout, _listing, _context} = assemble(report, opts)
+    layout
+  end
+
+  # One reading of the report: the layout, the data of its listing, and the
+  # items of the "What this checks" section.
+  defp assemble(report, opts) do
     listing = listing_data(report, opts)
     %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
+    context = Context.items(report, focus, context_targets(report))
 
     sections =
       [
         failure_section(report, focus, filter, unknown),
-        context_section(report, focus),
+        context_section(context),
         setup && setup.section,
         listing.section,
         projections_section(report, variant, focus),
@@ -99,11 +110,39 @@ defmodule PropertyDamage.FailureReport.Layout do
       ]
       |> Enum.reject(&is_nil/1)
 
-    %__MODULE__{
+    layout = %__MODULE__{
       banner: banner(report),
       seed: report.seed,
       sections: sections,
       logs: logs_of(listing)
+    }
+
+    {layout, listing, context}
+  end
+
+  # What the JSON bundle of an HTML page is built from, read once so that a
+  # log message that is a function runs once:
+  #
+  #   * `layout` - `build/2`'s result, for the headings and the Failure fields
+  #   * `context` - the items of the "What this checks" section
+  #   * `targets` - one map per listed target, the reference first, with the
+  #     steps the listing prints, the events under each, and the number of
+  #     lines printed under the adapter's `setup/1` and `teardown/1` notes and
+  #     of the events tied to no command
+  #   * `setup_commands`, `projections`, `reproduction` - the data of the
+  #     Setup, Projections and Reproduction sections
+  @doc false
+  @spec bundle_data(FailureReport.t(), keyword()) :: map()
+  def bundle_data(%FailureReport{} = report, opts \\ []) do
+    {layout, listing, context} = assemble(report, opts)
+
+    %{
+      layout: layout,
+      context: context,
+      targets: Enum.map(listing.listed, &target_data/1),
+      setup_commands: setup_command_data(report),
+      projections: projection_data(report),
+      reproduction: reproduction_data(report)
     }
   end
 
@@ -134,7 +173,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       side(report, report.trace, variant_name(report), FailureReport.steps(report), filter)
 
     focus = focus(report, variant.items)
-    {section, targets} = reproduction_listing(report, variant, focus)
+    {section, targets, listed} = reproduction_listing(report, variant, focus)
 
     %{
       filter: filter,
@@ -143,6 +182,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       focus: focus,
       section: section,
       targets: targets,
+      listed: listed,
       setup: setup_section(report, filter)
     }
   end
@@ -216,7 +256,8 @@ defmodule PropertyDamage.FailureReport.Layout do
         logs: Map.get(logs, position, []),
         root: nil,
         failed?: false,
-        note: nil
+        note: nil,
+        ran_as: nil
       }
     end
   end
@@ -235,8 +276,9 @@ defmodule PropertyDamage.FailureReport.Layout do
     case steps do
       [%Step{position: ^position} = step | more] ->
         item = step_item(:root, step, index)
-        note = join_notes(entry_note(choices, index), item.note)
-        [%{item | note: note} | walk_roots(rest, more, choices)]
+        ran_as = entry_note(choices, index)
+        item = %{item | note: join_notes(ran_as, item.note), ran_as: ran_as}
+        [item | walk_roots(rest, more, choices)]
 
       [%Step{position: %Position{section: {:leaf, id}}} | _] ->
         {leaves, more} = Enum.split_while(steps, &leaf_of?(&1, id))
@@ -261,7 +303,8 @@ defmodule PropertyDamage.FailureReport.Layout do
       logs: step.logs,
       root: root,
       failed?: step.failed?,
-      note: comment(step.label)
+      note: comment(step.label),
+      ran_as: nil
     }
   end
 
@@ -275,7 +318,8 @@ defmodule PropertyDamage.FailureReport.Layout do
       logs: [],
       root: index,
       failed?: false,
-      note: note
+      note: note,
+      ran_as: note
     }
   end
 
@@ -375,8 +419,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   # What this checks
   # ==========================================================================
 
-  defp context_section(report, focus) do
-    lines = report |> then(&Context.items(&1, focus, context_targets(&1))) |> Context.lines()
+  defp context_section(items) do
+    lines = Context.lines(items)
     %Section{heading: "What this checks", lines: Enum.map(lines, &{:text, &1})}
   end
 
@@ -768,11 +812,12 @@ defmodule PropertyDamage.FailureReport.Layout do
   # Minimal Reproduction
   # ==========================================================================
 
-  # The section, and the log lines each target's listing shows, which the
-  # `:json` format carries: `%{target:, reference:}`, the reference nil for a
-  # report that lists one target.
+  # The section, the log lines each target's listing shows, which the `:json`
+  # format carries (`%{target:, reference:}`, the reference nil for a report
+  # that lists one target), and the listings themselves as `{role, name,
+  # lines}`, the reference first.
   defp reproduction_listing(report, variant, focus) do
-    {lines, targets} =
+    {lines, targets, listed} =
       if report.kind in [:diverged, :did_not_converge] do
         reference = reference_side(report, variant.filter)
         reference_lines = listing(reference, focus, report.kind)
@@ -788,14 +833,82 @@ defmodule PropertyDamage.FailureReport.Layout do
          %{
            target: target_logs(variant_name(report), variant_lines),
            reference: target_logs(reference_name(report), reference_lines)
-         }}
+         },
+         [
+           {:reference, reference_name(report), reference_lines},
+           {:variant, variant_name(report), variant_lines}
+         ]}
       else
         lines = listing(variant, focus, report.kind)
-        {lines, %{target: target_logs(variant_name(report), lines), reference: nil}}
+
+        {lines, %{target: target_logs(variant_name(report), lines), reference: nil},
+         [{:variant, variant_name(report), lines}]}
       end
 
-    {%Section{heading: "Minimal Reproduction (#{roots_text(report)})", lines: lines}, targets}
+    section = %Section{heading: "Minimal Reproduction (#{roots_text(report)})", lines: lines}
+    {section, targets, listed}
   end
+
+  # One listed target, read from the lines its listing printed: its steps
+  # with the events under each, and a count for what the listing prints
+  # under no step. The reduction follows the lines' own notes, as
+  # `target_logs/2` does, and never the rendered text.
+  defp target_data({role, name, lines}) do
+    {acc, _where} =
+      Enum.reduce(
+        lines,
+        {%{steps: [], adapter_setup: 0, adapter_teardown: 0, untied: 0}, :none},
+        &collect_target/2
+      )
+
+    %{
+      role: role,
+      name: name,
+      steps: acc.steps |> Enum.map(&%{&1 | events: Enum.reverse(&1.events)}) |> Enum.reverse(),
+      adapter_setup: acc.adapter_setup,
+      adapter_teardown: acc.adapter_teardown,
+      untied: acc.untied
+    }
+  end
+
+  defp collect_target({:step, step}, {acc, _where}) do
+    entry = %{
+      label: step.label,
+      command: step.command,
+      ran_as: step.ran_as,
+      failed?: not is_nil(step.outcome),
+      events: []
+    }
+
+    {%{acc | steps: [entry | acc.steps]}, :step}
+  end
+
+  defp collect_target({:note, @adapter_setup_note}, {acc, _where}), do: {acc, :setup}
+  defp collect_target({:note, @adapter_teardown_note}, {acc, _where}), do: {acc, :teardown}
+  defp collect_target({:note, @untied_note}, {acc, _where}), do: {acc, :untied}
+
+  defp collect_target({:event, %{event: event}}, {acc, where}) do
+    case {where, acc.steps} do
+      {:step, [step | steps]} ->
+        {%{acc | steps: [%{step | events: [event | step.events]} | steps]}, where}
+
+      {:untied, _steps} ->
+        {%{acc | untied: acc.untied + 1}, where}
+
+      _other ->
+        {acc, where}
+    end
+  end
+
+  defp collect_target({kind, _line}, {acc, where}) when kind in [:log, :gap] do
+    case where do
+      :setup -> {%{acc | adapter_setup: acc.adapter_setup + 1}, where}
+      :teardown -> {%{acc | adapter_teardown: acc.adapter_teardown + 1}, where}
+      _other -> {acc, where}
+    end
+  end
+
+  defp collect_target(_other, {acc, _where}), do: {acc, :none}
 
   # The log lines of one target's listing, read from the lines the listing
   # printed: the adapter's setup/1 and teardown/1 lines, and each step's lines
@@ -892,6 +1005,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       root: item.root,
       command: item.command,
       note: item.note,
+      ran_as: item.ran_as,
       outcome: if(focus && focus.match.(item), do: outcome(kind))
     }
   end
@@ -960,7 +1074,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp untied_lines(%{untied: []}), do: []
 
   defp untied_lines(side),
-    do: [:blank, {:note, "Not tied to a command"} | event_lines(side.untied, side.start)]
+    do: [:blank, {:note, @untied_note} | event_lines(side.untied, side.start)]
 
   defp roots_text(report) do
     case FailureReport.shrunk_sequence(report) do
@@ -1257,6 +1371,61 @@ defmodule PropertyDamage.FailureReport.Layout do
     do: {:text, "(no artifact: this failure is replayed from its seed only)"}
 
   defp replay_call(_report), do: {:text, "(no artifact recorded for this report)"}
+
+  # ==========================================================================
+  # Section data for the JSON bundle
+  # ==========================================================================
+
+  # The setup commands of the run, as the listing labels them.
+  defp setup_command_data(report) do
+    for {command, offset} <- Enum.with_index(report.setup_commands) do
+      %{label: Position.label(Position.setup(offset)), command: command}
+    end
+  end
+
+  # The projections the Projections section prints, with the state each side
+  # of its diff holds: `before` and `at_failure` for a failure of one run,
+  # `at_failure` (the variant) and `reference` for a comparison. A side that
+  # holds no state for the projection is nil.
+  defp projection_data(report) do
+    {minus, plus, _legend} = compared_states(report)
+
+    if state?(minus) or state?(plus) do
+      comparison? = report.kind in [:diverged, :did_not_converge]
+
+      for module <- modules(minus, plus) do
+        left = Map.get(minus || %{}, module)
+        right = Map.get(plus || %{}, module)
+
+        if comparison?,
+          do: %{name: inspect(module), before: nil, at_failure: right, reference: left},
+          else: %{name: inspect(module), before: left, at_failure: right, reference: nil}
+      end
+    else
+      []
+    end
+  end
+
+  # The roots of the shrunk sequence, the seed, and the call that reruns it,
+  # with the targets bound to a name as the Reproduction section prints it, so
+  # no target config value is copied.
+  defp reproduction_data(report) do
+    roots =
+      case FailureReport.shrunk_sequence(report) do
+        %Sequence{} = sequence ->
+          for {position, index, command} <- Sequence.indexed(sequence),
+              do: %{label: Position.label(position, index), command: command}
+
+        nil ->
+          []
+      end
+
+    %{
+      roots: roots,
+      seed: report.seed,
+      command: bind(FailureReport.reproduction_command(report), report)
+    }
+  end
 
   # ==========================================================================
   # Names
