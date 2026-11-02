@@ -17,8 +17,6 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     TimedStepAdapter
   }
 
-  alias PropertyDamage.Test.LazyInjector
-
   alias PropertyDamage.Test.Lockstep.{
     Create,
     Noted,
@@ -53,6 +51,47 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
       {:ok, [%Stepped{value: value}]}
     end
+  end
+
+  # Compiles an injector that delivers one Noted event at setup, writes its
+  # beam into `dir`, puts `dir` on the code path and unloads the module.
+  defp lazy_injector_on_disk!(dir) do
+    module = Module.concat([__MODULE__, "LazyInjector#{System.unique_integer([:positive])}"])
+
+    [{^module, beam}] =
+      Code.compile_string("""
+      defmodule #{inspect(module)} do
+        use PropertyDamage.Adapter.Injector
+
+        @emits [PropertyDamage.Test.Lockstep.Noted]
+
+        @impl true
+        def setup(%{event_queue: queue} = config) do
+          PropertyDamage.EventQueue.push(queue, __MODULE__, %PropertyDamage.Test.Lockstep.Noted{value: :lazy})
+          {:ok, config}
+        end
+
+        @impl true
+        def teardown(_context), do: :ok
+
+        @impl true
+        def to_event(payload), do: {:ok, payload}
+      end
+      """)
+
+    File.write!(Path.join(dir, "#{module}.beam"), beam)
+    :code.add_patha(String.to_charlist(dir))
+    :code.purge(module)
+    :code.delete(module)
+    :code.purge(module)
+
+    on_exit(fn ->
+      :code.del_path(String.to_charlist(dir))
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    module
   end
 
   defp run_opts(model, targets, commands, extra \\ []) do
@@ -148,15 +187,15 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     Variant.stop(pid)
   end
 
-  test "an injector whose module was not loaded yet is still set up" do
-    # Unload the module so the run is the first to touch it.
-    :code.purge(LazyInjector)
-    :code.delete(LazyInjector)
-    :code.purge(LazyInjector)
-    refute :code.is_loaded(LazyInjector)
+  @tag :tmp_dir
+  test "an injector whose module was not loaded yet is still set up", %{tmp_dir: dir} do
+    # The injector gets a fresh name and lives only as a file on the code
+    # path, so no other test can load it before the run touches it.
+    injector = lazy_injector_on_disk!(dir)
+    refute :code.is_loaded(injector)
 
     targets =
-      targets!([{StepAdapter, name: "solo", config: %{name: "solo"}, injectors: [LazyInjector]}])
+      targets!([{StepAdapter, name: "solo", config: %{name: "solo"}, injectors: [injector]}])
 
     assert {:ok, run} = Scheduler.run(run_opts(StepModel, targets, [%Step{value: 1}]))
     assert [result] = run.results
