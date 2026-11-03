@@ -43,7 +43,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   ## Events
 
-  Emits `%NetworkLatencyInjected{}` on inject and `%NetworkLatencyRestored{}` on restore.
+  Emits `%PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected{}` on inject and
+  `%PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyRestored{}` on restore.
   """
 
   @behaviour PropertyDamage.Nemesis
@@ -76,7 +77,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkLatencyInjected,
+          __struct__: __MODULE__.NetworkLatencyInjected,
           latency_ms: command.latency_ms,
           jitter_ms: command.jitter_ms,
           target: command.target,
@@ -100,7 +101,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkLatencyRestored,
+          __struct__: __MODULE__.NetworkLatencyRestored,
           latency_ms: command.latency_ms,
           target: command.target,
           restored_at: now,
@@ -165,15 +166,14 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   end
 
   defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
-end
 
-# Event structs
-defmodule NetworkLatencyInjected do
-  @moduledoc false
-  defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
-end
+  defmodule NetworkLatencyInjected do
+    @moduledoc false
+    defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
+  end
 
-defmodule NetworkLatencyRestored do
-  @moduledoc false
-  defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
+  defmodule NetworkLatencyRestored do
+    @moduledoc false
+    defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
+  end
 end

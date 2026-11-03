@@ -24,7 +24,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       assert length(events) == 1
       [event] = events
-      assert event.__struct__ == NetworkLatencyInjected
+      assert event.__struct__ == PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected
       assert event.latency_ms == 100
       assert event.jitter_ms == 10
     end
@@ -35,7 +35,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       assert length(events) == 1
       [event] = events
-      assert event.__struct__ == NetworkLatencyRestored
+      assert event.__struct__ == PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyRestored
     end
 
     test "auto_restore? returns true" do
@@ -75,7 +75,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       assert length(events) == 1
       [event] = events
-      assert event.__struct__ == NetworkPartitioned
+      assert event.__struct__ == PropertyDamage.Nemesis.NetworkPartition.NetworkPartitioned
       assert event.partition_type == :full
     end
 
@@ -89,7 +89,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       assert length(events) == 1
       [event] = events
-      assert event.__struct__ == NetworkPartitionHealed
+      assert event.__struct__ == PropertyDamage.Nemesis.NetworkPartition.NetworkPartitionHealed
     end
 
     test "new! generates valid commands with different partition types" do
@@ -117,7 +117,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       assert length(events) == 1
       [event] = events
-      assert event.__struct__ == PacketLossInjected
+      assert event.__struct__ == PropertyDamage.Nemesis.PacketLoss.PacketLossInjected
       assert event.loss_percent == 20
     end
 

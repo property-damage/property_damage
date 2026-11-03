@@ -83,7 +83,7 @@ defmodule RedisBench.NemesisAuditTest do
       {:ok, [injected]} =
         NetworkLatency.inject(%NetworkLatency{latency_ms: @injected_latency_ms}, %{})
 
-      assert injected.__struct__ == NetworkLatencyInjected
+      assert injected.__struct__ == NetworkLatency.NetworkLatencyInjected
       assert injected.latency_ms == @injected_latency_ms
 
       # ...yet the SUT is completely unaffected: the round-trip is unchanged, so
@@ -148,7 +148,7 @@ defmodule RedisBench.NemesisAuditTest do
     test "NetworkPartition without Toxiproxy: a no-op that masquerades as a real fault" do
       # Reports success with a real-looking partition event...
       {:ok, [injected]} = NetworkPartition.inject(%NetworkPartition{partition_type: :full}, %{})
-      assert injected.__struct__ == NetworkPartitioned
+      assert injected.__struct__ == NetworkPartition.NetworkPartitioned
       assert injected.partition_type == :full
 
       # ...but the proxy is still fully reachable: nothing was cut. (The real
@@ -182,7 +182,7 @@ defmodule RedisBench.NemesisAuditTest do
     test "PacketLoss without Toxiproxy: a no-op that masquerades as a real fault" do
       # Reports success with a real-looking packet-loss event...
       {:ok, [injected]} = PacketLoss.inject(%PacketLoss{loss_percent: 100}, %{})
-      assert injected.__struct__ == PacketLossInjected
+      assert injected.__struct__ == PacketLoss.PacketLossInjected
       assert injected.loss_percent == 100
 
       # ...but the connection works fine: nothing was disrupted. (The real

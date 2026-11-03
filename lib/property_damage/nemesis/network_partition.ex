@@ -78,7 +78,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkPartitioned,
+          __struct__: __MODULE__.NetworkPartitioned,
           partition_type: command.partition_type,
           target: command.target,
           injected_at: now,
@@ -101,7 +101,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkPartitionHealed,
+          __struct__: __MODULE__.NetworkPartitionHealed,
           partition_type: command.partition_type,
           target: command.target,
           restored_at: now,
@@ -175,15 +175,14 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   end
 
   defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
-end
 
-# Event structs
-defmodule NetworkPartitioned do
-  @moduledoc false
-  defstruct [:partition_type, :target, :injected_at, simulated: false]
-end
+  defmodule NetworkPartitioned do
+    @moduledoc false
+    defstruct [:partition_type, :target, :injected_at, simulated: false]
+  end
 
-defmodule NetworkPartitionHealed do
-  @moduledoc false
-  defstruct [:partition_type, :target, :restored_at, :duration_ms, simulated: false]
+  defmodule NetworkPartitionHealed do
+    @moduledoc false
+    defstruct [:partition_type, :target, :restored_at, :duration_ms, simulated: false]
+  end
 end

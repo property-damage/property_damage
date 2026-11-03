@@ -68,7 +68,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     case result do
       :ok ->
         event = %{
-          __struct__: PacketLossInjected,
+          __struct__: __MODULE__.PacketLossInjected,
           loss_percent: command.loss_percent,
           target: command.target,
           injected_at: now,
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     case result do
       :ok ->
         event = %{
-          __struct__: PacketLossRestored,
+          __struct__: __MODULE__.PacketLossRestored,
           loss_percent: command.loss_percent,
           target: command.target,
           restored_at: now,
@@ -153,15 +153,14 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   end
 
   defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
-end
 
-# Event structs
-defmodule PacketLossInjected do
-  @moduledoc false
-  defstruct [:loss_percent, :target, :injected_at, simulated: false]
-end
+  defmodule PacketLossInjected do
+    @moduledoc false
+    defstruct [:loss_percent, :target, :injected_at, simulated: false]
+  end
 
-defmodule PacketLossRestored do
-  @moduledoc false
-  defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
+  defmodule PacketLossRestored do
+    @moduledoc false
+    defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
+  end
 end

@@ -287,12 +287,14 @@ defmodule PropertyDamage.Nemesis.ToxiproxyTest do
       injected =
         Enum.find_value(result.event_log, fn entry ->
           case entry.event do
-            %NetworkLatencyInjected{} = ev -> ev
+            %PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected{} = ev -> ev
             _ -> nil
           end
         end)
 
-      assert injected, "no NetworkLatencyInjected event in the run"
+      assert injected,
+             "no PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected event in the run"
+
       assert injected.simulated == false
 
       # A real POST reached the proxy through the engine.

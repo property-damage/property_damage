@@ -138,6 +138,7 @@ defmodule Cache.State do
   use PropertyDamage.Model.Projection
 
   alias Cache.Events.{KeySet, KeyRead}
+  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
 
   @impl true
   def init do
@@ -365,6 +366,8 @@ Create a projection that tracks active faults:
 defmodule MyApp.Projections.NemesisInvariants do
   use PropertyDamage.Model.Projection
 
+  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
+
   @impl true
   def init do
     %{
@@ -374,8 +377,9 @@ defmodule MyApp.Projections.NemesisInvariants do
   end
 
   # Track fault injection. There is no generic fault event: each nemesis emits
-  # its own injected/restored structs (NetworkLatencyInjected,
-  # NetworkLatencyRestored, PacketLossInjected, ...). Match the ones your model
+  # its own injected/restored structs (NetworkLatency.NetworkLatencyInjected,
+  # NetworkLatency.NetworkLatencyRestored, PacketLoss.PacketLossInjected, ...),
+  # each nested under its nemesis module. Match the ones your model
   # uses; the injected struct carries a `simulated: true | false` flag.
   @impl true
   def apply(state, %NetworkLatencyInjected{} = event) do
