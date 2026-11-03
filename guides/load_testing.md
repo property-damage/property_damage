@@ -352,9 +352,11 @@ Faster commands mean workers become available sooner:
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 ~1 command. Check your model's `terminate_early?/3` implementation:
 
-`terminate_early?/3` receives the state after a command, the command that just
-ran, and the events that command produced. It does not receive a step count, so
-decide from the state:
+`terminate_early?/3` receives the state after a command, the command that was
+just added, and the events the simulator predicts for it. The generator calls
+it while it builds the sequence, before anything runs, so the events are a
+prediction and never a real answer from the SUT. It does not receive a step
+count, so decide from the state:
 
 ```elixir
 # This terminates immediately: only 1 command per sequence
