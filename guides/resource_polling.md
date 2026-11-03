@@ -30,7 +30,7 @@ defmodule MyAdapter do
   use PropertyDamage.Adapter
 
   @impl true
-  def execute(%CreateAuthorization{user_id: user_id, amount: amount} = cmd, ctx, runtime) do
+  def execute(%CreateAuthorization{user_id: user_id, amount: amount}, ctx, runtime) do
     # Step 1: Create the authorization (returns immediately)
     {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
       Req.post(ctx.client, url: "/authorizations", json: %{
@@ -45,20 +45,23 @@ defmodule MyAdapter do
       end,
       interval_ms: 500,
       timeout_ms: 30_000,
-      handler: fn response ->
-        case response.body["status"] do
-          "processing" ->
-            :continue
+      # poll_fn returns Req's result, so the handler matches {:ok, response}
+      # or {:error, exception}.
+      handler: fn
+        {:ok, %{body: %{"status" => "processing"}}} ->
+          :continue
 
-          "pending_review" ->
-            {:inject, %AuthorizationPendingReview{id: id}}
+        {:ok, %{body: %{"status" => "pending_review"}}} ->
+          {:inject, %AuthorizationPendingReview{id: id}}
 
-          "approved" ->
-            {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
+        {:ok, %{body: %{"status" => "approved"}}} ->
+          {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
 
-          "declined" ->
-            {:done, %AuthorizationDeclined{id: id, reason: response.body["decline_reason"]}}
-        end
+        {:ok, %{body: %{"status" => "declined", "decline_reason" => reason}}} ->
+          {:done, %AuthorizationDeclined{id: id, reason: reason}}
+
+        {:error, reason} ->
+          {:error, {:http_error, reason}}
       end
     )
 
@@ -68,9 +71,26 @@ defmodule MyAdapter do
 end
 ```
 
+## Logging From a Poller
+
+`poll_fn` and `handler` run in a `GenServer` that `start_poller` starts, not in
+the process of the command. `PropertyDamage.log/2` finds its log scope only in
+the calling process and its `$callers` chain, and a `GenServer` carries no
+`$callers`. A `PropertyDamage.log/2` call inside `poll_fn` or `handler` therefore
+raises `PropertyDamage.Log.NoScopeError`, and the poller reports that raise as
+`{:poll_fn_error, ...}` or `{:handler_error, ...}`.
+
+`PropertyDamage.Runtime.log/3` does not raise there, but it drops a line written
+after the command ended, and a poller usually runs past that point. To record
+progress from a poller, inject an event from `handler` (`{:inject, event}`), which shows up in the
+report beside the events of the command, or put the reason in the
+`{:error, reason}` that [`on_timeout`](#timeout-handling) returns. To log from
+the command itself, see [Log Lines in the Failure Report](log_lines.md).
+
 ## Handler Return Values
 
-The handler function receives the response from `poll_fn` and must return one of:
+The handler function receives the value `poll_fn` returned (in the examples below,
+the `{:ok, response} | {:error, exception}` result of `Req.get/2`) and must return one of:
 
 | Return | Behavior |
 |--------|----------|
@@ -96,41 +116,40 @@ cleaner log output in `:log` check mode.
 
 **Track intermediate states:**
 ```elixir
-handler: fn response ->
-  case response.body["status"] do
-    "queued" -> :continue
-    "processing" -> {:inject, %ProcessingStarted{id: id}}
-    "completed" -> {:done, %ProcessingCompleted{id: id}}
-  end
+handler: fn
+  {:ok, %{body: %{"status" => "queued"}}} -> :continue
+  {:ok, %{body: %{"status" => "processing"}}} -> {:inject, %ProcessingStarted{id: id}}
+  {:ok, %{body: %{"status" => "completed"}}} -> {:done, %ProcessingCompleted{id: id}}
+  {:error, reason} -> {:error, {:http_error, reason}}
 end
 ```
 
 **Emit batch of final events:**
 ```elixir
-handler: fn response ->
-  case response.body["status"] do
-    "pending" -> :continue
-    "completed" ->
-      items = response.body["items"]
-      events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
-      {:done, events ++ [%BatchCompleted{count: length(items)}]}
-  end
+handler: fn
+  {:ok, %{body: %{"status" => "pending"}}} ->
+    :continue
+
+  {:ok, %{body: %{"status" => "completed", "items" => items}}} ->
+    events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
+    {:done, events ++ [%BatchCompleted{count: length(items)}]}
+
+  {:error, reason} ->
+    {:error, {:http_error, reason}}
 end
 ```
 
 **Handle errors gracefully:**
 ```elixir
-handler: fn response ->
-  case response do
-    {:ok, %{status: 200, body: body}} ->
-      if body["completed"], do: {:done, %Completed{}}, else: :continue
+handler: fn
+  {:ok, %{status: 200, body: body}} ->
+    if body["completed"], do: {:done, %Completed{}}, else: :continue
 
-    {:ok, %{status: 404}} ->
-      {:error, :resource_not_found}
+  {:ok, %{status: 404}} ->
+    {:error, :resource_not_found}
 
-    {:error, reason} ->
-      {:error, {:http_error, reason}}
-  end
+  {:error, reason} ->
+    {:error, {:http_error, reason}}
 end
 ```
 
@@ -189,10 +208,10 @@ Example:
 %{
   elapsed_ms: 30050,           # Just over 30 seconds
   poll_count: 60,              # Polled 60 times at 500ms intervals
-  last_poll_result: %{         # Last response from poll_fn
+  last_poll_result: {:ok, %{   # Last value poll_fn returned (here a Req result)
     status: 200,
     body: %{"status" => "processing"}
-  }
+  }}
 }
 ```
 
@@ -216,7 +235,11 @@ on_timeout: fn info ->
     resource: "authorization",
     elapsed_ms: info.elapsed_ms,
     poll_count: info.poll_count,
-    last_status: info.last_poll_result[:status]
+    last_status:
+      case info.last_poll_result do
+        {:ok, %{status: status}} -> status
+        _ -> nil
+      end
   }}
 end
 ```
@@ -334,5 +357,5 @@ end
 
 - `PropertyDamage.ResourcePoller` - Module documentation
 - `PropertyDamage.Adapter` - Adapter behaviour and runtime handle
-- `PropertyDamage.Runtime` - Runtime handle providing `inject`, `start_poller`, and `stutter`
+- `PropertyDamage.Runtime` - Runtime handle whose fields are `inject`, `start_poller`, `stutter`, `mock_registry`, and `log`
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) - Related guide

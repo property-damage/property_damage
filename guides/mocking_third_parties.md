@@ -68,10 +68,6 @@ end
 defmodule PaymentDeclined do
   defstruct [:order_id, :reason]
 end
-
-defmodule PaymentTimedOut do
-  defstruct [:order_id]
-end
 ```
 
 ### Mock Module
@@ -80,7 +76,7 @@ end
 defmodule MyTest.PaymentGatewayMock do
   use PropertyDamage.MockServiceAdapter
 
-  @emits [PaymentAuthorized, PaymentDeclined, PaymentTimedOut]
+  @emits [PaymentAuthorized, PaymentDeclined]
 
   @impl true
   def setup(config) do
@@ -99,7 +95,7 @@ defmodule MyTest.PaymentGatewayMock do
     %{
       behavior: :success,
       decline_reason: nil,
-      request_log: []
+      authorized_count: 0
     }
   end
 
@@ -110,13 +106,11 @@ defmodule MyTest.PaymentGatewayMock do
   def on_command(_cmd, state), do: state
 
   @impl true
+  def on_event(%PaymentAuthorized{}, state), do: update_in(state.authorized_count, &(&1 + 1))
   def on_event(_event, state), do: state
 
   @impl true
   def handle_request(%{path: "/authorize", body: body}, state) do
-    # Record the request
-    state = update_in(state.request_log, &[body | &1])
-
     case state.behavior do
       :success ->
         resp = %{status: 200, body: %{transaction_id: "txn_#{System.unique_integer([:positive])}"}}
@@ -129,7 +123,7 @@ defmodule MyTest.PaymentGatewayMock do
         {:ok, resp, events}
 
       :timeout ->
-        events = [%PaymentTimedOut{order_id: body["order_id"]}]
+        # {:error, term} simulates a connection failure and carries no events.
         {:error, :timeout}
 
       :partial_failure ->
@@ -292,21 +286,35 @@ them. `runtime.mock_registry` is `nil` when the run's target declared no `mocks:
 ### State-Based Responses
 
 The mock tracks previous calls and varies behavior accordingly. Useful for
-simulating rate limits, quotas, or stateful APIs:
+simulating rate limits, quotas, or stateful APIs.
+
+`handle_request/2` returns a response, never a new state, so a change it makes to
+`state` is lost. Mock state changes in `on_command/2` and `on_event/2`, which
+see every command and every event the mock pushed. Count calls in `on_event/2`,
+keyed to an event that `handle_request/2` returns:
 
 ```elixir
 @impl true
-def handle_request(%{path: "/authorize", body: body}, state) do
-  call_count = length(state.request_log)
+def init_state, do: %{behavior: :success, authorized_count: 0}
 
-  if call_count > 10 do
-    # Rate limit after 10 calls
+@impl true
+def on_event(%PaymentAuthorized{}, state), do: update_in(state.authorized_count, &(&1 + 1))
+def on_event(_event, state), do: state
+
+@impl true
+def handle_request(%{path: "/authorize", body: body}, state) do
+  if state.authorized_count >= 10 do
+    # Rate limit after 10 authorizations
     {:ok, %{status: 429, body: %{error: "rate_limited", retry_after: 60}}}
   else
-    {:ok, %{status: 200, body: %{transaction_id: "txn_#{call_count}"}}}
+    event = %PaymentAuthorized{order_id: body["order_id"], amount: body["amount"]}
+    {:ok, %{status: 200, body: %{transaction_id: "txn_#{state.authorized_count}"}}, [event]}
   end
 end
 ```
+
+A transport that drives the mock itself can also write the new state back with
+`MockServiceRegistry.update_state(registry, MyTest.PaymentGatewayMock, new_state)`.
 
 ### Event Injection
 
@@ -331,26 +339,58 @@ end
 
 ### Request Recording
 
-Record all requests the SUT makes to the mock for later verification.
-Use `on_command/2` to clear the log between test phases if needed:
+A `@check` runs against projection state, not mock state, so it cannot read the
+mock's own fields. To check what the SUT sent to the mock, have `handle_request/2`
+return an event for each request, and fold that event into a projection:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule ChargeRequested do
+  defstruct [:order_id]
+end
+
+defmodule ChargeLedger do
+  use PropertyDamage.Model.Projection
+
+  def init, do: %{charge_orders: []}
+
+  def apply(state, %ChargeRequested{order_id: id}),
+    do: update_in(state.charge_orders, &[id | &1])
+
+  def apply(state, _event), do: state
+
+  @check every: ChargeRequested
+  def assert_no_duplicate_charges(state, _event) do
+    length(state.charge_orders) == length(Enum.uniq(state.charge_orders)) or
+      PropertyDamage.fail!("duplicate charge attempts", order_ids: state.charge_orders)
+  end
+end
+```
+
+The mock returns the event with the response:
 
 ```elixir
 @impl true
-def init_state, do: %{behavior: :success, request_log: []}
-
-@impl true
-def handle_request(%{path: path, body: body} = req, state) do
-  state = update_in(state.request_log, &[%{path: path, body: body, at: System.monotonic_time()} | &1])
-  # ... handle normally
+def handle_request(%{path: "/charge", body: body}, _state) do
+  {:ok, %{status: 200, body: %{id: "ch_123"}}, [%ChargeRequested{order_id: body["order_id"]}]}
 end
+```
 
-# Check projection can check recorded requests
-@check every: 10
-def assert_no_duplicate_charges(state, _) do
-  charges = Enum.filter(state.mock_requests, &(&1.path == "/charge"))
-  order_ids = Enum.map(charges, & &1.body["order_id"])
-  length(order_ids) == length(Enum.uniq(order_ids)) or
-    PropertyDamage.fail!("duplicate charge attempts", order_ids: order_ids)
+The check passes while each order is charged once and fails on the second charge
+for the same order:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+once = ChargeLedger.apply(ChargeLedger.init(), %ChargeRequested{order_id: "alice-1"})
+true = ChargeLedger.assert_no_duplicate_charges(once, %ChargeRequested{order_id: "alice-1"})
+
+twice = ChargeLedger.apply(once, %ChargeRequested{order_id: "alice-1"})
+
+try do
+  ChargeLedger.assert_no_duplicate_charges(twice, %ChargeRequested{order_id: "alice-1"})
+  raise "the duplicate charge was not caught"
+rescue
+  e in PropertyDamage.CheckFailed -> e
 end
 ```
 
