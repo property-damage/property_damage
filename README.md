@@ -510,7 +510,7 @@ IO.puts(Coverage.format(tracker, :matrix))
 # Full - includes everything
 IO.puts(Coverage.format(tracker, :full))
 
-# State classes (when classifier is set)
+# State classes (needs a tracker built with Coverage.new/2 and state_classifier:, see below)
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
 
@@ -534,44 +534,50 @@ top = Coverage.top_transitions(tracker, 5)
 
 ### State Class Coverage
 
-For more meaningful coverage, define a state classifier to group concrete states into abstract classes:
+A state classifier groups concrete states into abstract classes. `Coverage.record/2` classifies one state per recorded failing run: the merged projection state at the failure. Counts accumulate across all recorded runs. A transition pairs the class of the previous recorded run with the class of the current one, so it spans runs, not steps inside a run. Nothing is classified while a run executes.
+
+The classifier is an option of `Coverage.new/2` only (not of `run/1`), and `record/2` takes a failing run's `{:error, report}`. A passing `run/1` result has no failure state to classify, and `coverage: true` / `stats.coverage` records no state classes.
 
 ```elixir
 # Define a classifier function
 classifier = fn state ->
   cond do
     state.accounts == %{} -> :no_accounts
-    Enum.all?(state.accounts, fn {_, a} -> a.balance == 0 end) -> :all_zero_balance
-    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :has_negative
-    true -> :has_positive
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < -50 end) -> :deeply_overdrawn
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :slightly_overdrawn
+    true -> :in_credit
   end
 end
 
-# Create tracker with classifier and record failing runs' reports
+# Record the failing runs of several seeds
 tracker = Coverage.new(MyModel, state_classifier: classifier)
-{:error, report1} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: 1)
-{:error, report2} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: 2)
-tracker = Coverage.record(tracker, {:error, report1})
-tracker = Coverage.record(tracker, {:error, report2})
 
-# View state class distribution
-counts = Coverage.state_class_counts(tracker)
-# => %{no_accounts: 5, all_zero_balance: 12, has_positive: 83}
+tracker =
+  Enum.reduce(1..6, tracker, fn seed, tracker ->
+    {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: seed)
+    Coverage.record(tracker, {:error, report})
+  end)
 
-# View state class transitions (what state classes lead to what)
-transitions = Coverage.state_class_transitions(tracker)
-# => %{{:no_accounts, :all_zero_balance} => 5, {:all_zero_balance, :has_positive} => 10, ...}
+# Failing-state classes seen, and how often
+Coverage.state_class_counts(tracker)
+# => %{deeply_overdrawn: 1, slightly_overdrawn: 5}
 
-# Get state class matrix for visualization
-state_matrix = Coverage.state_class_matrix(tracker)
+# Class of one recorded failure followed by the class of the next
+Coverage.state_class_transitions(tracker)
+# => %{
+#      {:deeply_overdrawn, :slightly_overdrawn} => 1,
+#      {:slightly_overdrawn, :deeply_overdrawn} => 1,
+#      {:slightly_overdrawn, :slightly_overdrawn} => 3
+#    }
 
-# Format with state class matrix
+# The same transitions as a nested map, for visualization
+Coverage.state_class_matrix(tracker)
+
+# Format with the state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
 
-`Coverage.record/2` takes a failing run's `{:error, report}`. It does not accept a passing `run/1` result; for a passing run, use `coverage: true` and `stats.coverage`, as shown above.
-
-State class coverage helps answer: "Have we tested all interesting state configurations?"
+The transitions pair consecutive recorded results, so six recorded failures give five transitions. The section answers two questions: which classes of final failing state were seen, and how often one followed another across the recorded failures.
 
 ## OpenAPI Scaffolding
 
@@ -1367,6 +1373,8 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 ```
 
 ### Options
+
+These are the options of the `regression:` option of `PropertyDamage.run/1`. `Regression.process_batch/2` takes its own list, which also includes `:description` and `:dedup_source`.
 
 | Option | Description |
 |--------|-------------|
