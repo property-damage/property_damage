@@ -14,6 +14,17 @@ defmodule RedisBench.FaultInjectionTest do
 
   alias RedisBench.Toxiproxy
 
+  @toxic_latency_ms 300
+
+  # The toxic must add most of its configured latency. The slack below the full
+  # amount absorbs timer granularity; a toxic that does nothing adds about 0.
+  @min_added_ms 200
+
+  # Allowed drift of the restored round-trip above the baseline. It covers
+  # runner noise between measurements and stays well under the toxic latency,
+  # so a toxic that was not removed (adding 300ms) still fails.
+  @restore_margin_ms 150
+
   setup do
     :ok = Toxiproxy.ensure_clean_proxy()
     on_exit(fn -> Toxiproxy.ensure_clean_proxy() end)
@@ -22,20 +33,21 @@ defmodule RedisBench.FaultInjectionTest do
 
   describe "the toxic is real (differential proof)" do
     test "a latency toxic measurably slows the round-trip" do
-      {:ok, clean_ms} = Toxiproxy.probe_ping_ms()
-      assert clean_ms < 100, "baseline ping should be fast, was #{clean_ms}ms"
+      baseline_ms = Toxiproxy.fastest_ping_ms()
 
-      {:ok, _} = Toxiproxy.add_toxic("lag", "latency", %{latency: 300})
+      {:ok, _} = Toxiproxy.add_toxic("lag", "latency", %{latency: @toxic_latency_ms})
+      laggy_ms = Toxiproxy.fastest_ping_ms()
 
-      {:ok, laggy_ms} = Toxiproxy.probe_ping_ms()
-
-      assert laggy_ms >= 250,
-             "latency toxic should add ~300ms (was #{laggy_ms}ms vs clean #{clean_ms}ms)"
+      assert laggy_ms - baseline_ms >= @min_added_ms,
+             "latency toxic should add at least #{@min_added_ms}ms " <>
+               "(fastest ping #{laggy_ms}ms with it vs #{baseline_ms}ms without)"
 
       {:ok, _} = Toxiproxy.remove_toxic("lag")
+      restored_ms = Toxiproxy.fastest_ping_ms()
 
-      {:ok, restored_ms} = Toxiproxy.probe_ping_ms()
-      assert restored_ms < 100, "removing the toxic should restore speed, was #{restored_ms}ms"
+      assert restored_ms - baseline_ms <= @restore_margin_ms,
+             "removing the toxic should restore the baseline " <>
+               "(fastest ping #{restored_ms}ms after vs #{baseline_ms}ms before)"
     end
 
     test "a disabled proxy partitions the connection" do

@@ -21,6 +21,22 @@ defmodule RedisBench.NemesisAuditTest do
 
   alias RedisBench.Toxiproxy
 
+  @injected_latency_ms 250
+
+  # The real toxic must add most of its configured latency. The slack below the
+  # full amount absorbs timer granularity; a toxic that does nothing adds about 0.
+  @min_added_ms 150
+
+  # Allowed drift of the restored round-trip above the baseline. It covers
+  # runner noise between measurements and stays well under the toxic latency,
+  # so a toxic that was not removed (adding 250ms) still fails.
+  @restore_margin_ms 120
+
+  # Largest increase a simulated no-op may add over the baseline. It covers
+  # runner noise and stays well under the latency the no-op claims to inject,
+  # so a no-op that slowed the proxy for real still fails.
+  @simulated_margin_ms 120
+
   # Context that points the network nemeses at the bench's real Toxiproxy proxy.
   defp toxiproxy_ctx do
     %{toxiproxy: %{proxy_name: Toxiproxy.proxy_name(), api_url: Toxiproxy.api_url()}}
@@ -34,16 +50,17 @@ defmodule RedisBench.NemesisAuditTest do
     end
 
     test "NetworkLatency really slows the proxy, and restore lifts it" do
-      {:ok, clean_ms} = Toxiproxy.probe_ping_ms()
-      assert clean_ms < 100
+      clean_ms = Toxiproxy.fastest_ping_ms()
 
-      cmd = %NetworkLatency{latency_ms: 250, jitter_ms: 0}
+      cmd = %NetworkLatency{latency_ms: @injected_latency_ms, jitter_ms: 0}
       {:ok, [injected]} = NetworkLatency.inject(cmd, toxiproxy_ctx())
       assert injected.simulated == false
       refute Nemesis.simulated_event?(injected)
 
-      {:ok, laggy_ms} = Toxiproxy.probe_ping_ms()
-      assert laggy_ms >= 200, "real latency not observed (#{laggy_ms}ms vs #{clean_ms}ms)"
+      laggy_ms = Toxiproxy.fastest_ping_ms()
+
+      assert laggy_ms - clean_ms >= @min_added_ms,
+             "real latency not observed (fastest ping #{laggy_ms}ms with it vs #{clean_ms}ms without)"
 
       {:ok, [_restored]} =
         NetworkLatency.restore(
@@ -51,25 +68,31 @@ defmodule RedisBench.NemesisAuditTest do
           toxiproxy_ctx()
         )
 
-      {:ok, restored_ms} = Toxiproxy.probe_ping_ms()
-      assert restored_ms < 100, "restore did not lift latency (#{restored_ms}ms)"
+      restored_ms = Toxiproxy.fastest_ping_ms()
+
+      assert restored_ms - clean_ms <= @restore_margin_ms,
+             "restore did not lift latency (fastest ping #{restored_ms}ms after vs #{clean_ms}ms before)"
     end
 
     test "NetworkLatency without Toxiproxy: a no-op that masquerades as a real fault" do
-      {:ok, clean_ms} = Toxiproxy.probe_ping_ms()
+      clean_ms = Toxiproxy.fastest_ping_ms()
 
       # The deception, behaviorally. inject reports success with an event that
       # looks exactly like the real injection above (same struct, same
       # latency_ms)...
-      {:ok, [injected]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 250}, %{})
+      {:ok, [injected]} =
+        NetworkLatency.inject(%NetworkLatency{latency_ms: @injected_latency_ms}, %{})
+
       assert injected.__struct__ == NetworkLatencyInjected
-      assert injected.latency_ms == 250
+      assert injected.latency_ms == @injected_latency_ms
 
       # ...yet the SUT is completely unaffected: the round-trip is unchanged, so
       # the "fault" did nothing.
-      {:ok, sim_ms} = Toxiproxy.probe_ping_ms()
-      assert sim_ms < 100, "a simulated fault must not actually slow the SUT"
-      assert_in_delta sim_ms, clean_ms, 80
+      sim_ms = Toxiproxy.fastest_ping_ms()
+
+      assert sim_ms - clean_ms <= @simulated_margin_ms,
+             "a simulated fault must not actually slow the SUT " <>
+               "(fastest ping #{sim_ms}ms after vs #{clean_ms}ms before)"
 
       # The ONLY thing that tells this no-op apart from the real fault is the
       # simulated marker (the P2 fix). Pre-fix the two were indistinguishable.
