@@ -288,6 +288,22 @@ defmodule PropertyDamage.IntegrationTest do
       assert content =~ ~s(<testsuite name="PropertyDamage Integration")
       assert content =~ ~s(tests="#{@pass_runs}")
     end
+
+    test "junit format lists no passing testcase for a report with no passing run" do
+      {:error, failed} = Integration.run(failing_opts(max_runs: 2, stop_on_failure: true))
+      assert failed.passed == 0
+
+      path = report_path("junit_failed") <> ".xml"
+      on_exit(fn -> File.rm(path) end)
+
+      capture_io(fn ->
+        Integration.generate_report(failed, %{format: :junit, path: path})
+      end)
+
+      content = File.read!(path)
+      assert content =~ ~s(tests="#{failed.total_runs}")
+      refute content =~ ~s(name="run_)
+    end
   end
 
   # Derives a temp-file base path from a static prefix and the OS pid (no

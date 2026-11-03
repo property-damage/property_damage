@@ -722,7 +722,7 @@ defmodule PropertyDamage.Integration do
       end)
 
     passed_xml =
-      1..result.passed
+      1..result.passed//1
       |> Enum.map_join("", fn n ->
         """
             <testcase name="run_#{n}" classname="#{inspect(result.model)}" time="0"/>
