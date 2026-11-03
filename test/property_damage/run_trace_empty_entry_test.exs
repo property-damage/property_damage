@@ -66,7 +66,8 @@ defmodule PropertyDamage.RunTraceEmptyEntryTest do
          Formatter.format(report, :markdown, []), HTML.render(report)}
       end)
 
-    assert stderr == ""
+    # Other async tests may print to stderr at the same time; only the range warning matters here.
+    refute stderr =~ "default to a step of -1"
     refute Enum.any?(steps, &match?(%{position: %{offset: -1}}, &1))
     assert terminal =~ "Seed"
     assert markdown != "" and html != ""
