@@ -273,6 +273,16 @@ defmodule CompanyDomain.Events.OrderCreated do
     created_at: :__external__
   ]
 end
+
+# lib/company_domain/commands/ship_order.ex
+defmodule CompanyDomain.Commands.ShipOrder do
+  defstruct [:order_id]
+end
+
+# lib/company_domain/events/order_shipped.ex
+defmodule CompanyDomain.Events.OrderShipped do
+  defstruct [:order_id]
+end
 ```
 
 ### Model Library (order_model)
@@ -281,6 +291,13 @@ The command and projection modules live in `order_model` and implement the
 PropertyDamage behaviours. The **shared contract surface is the event struct**
 (`CompanyDomain.Events.OrderCreated`): it flows through the projection and the
 adapter without either side depending on PropertyDamage.
+
+The example has two commands so that it shows a server-generated id chaining:
+the server mints the order `id` when it handles `CreateOrder`, and `ShipOrder`
+must carry that same id. The model offers `ShipOrder` only after an order
+exists, takes its `order_id` from the projection state, and implements
+`PropertyDamage.Model.Simulator` so the run can predict each command's events
+before the server answers.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -297,6 +314,21 @@ defmodule OrderModel.Commands.CreateOrder do
       amount: StreamData.positive_integer(),
       currency: StreamData.member_of(["USD", "EUR", "GBP"])
     }
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+# lib/order_model/commands/ship_order.ex
+defmodule OrderModel.Commands.ShipOrder do
+  use PropertyDamage.Command
+
+  defstruct [:order_id]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    # The model overrides order_id with an id from the projection state.
+    %{order_id: StreamData.constant(nil)}
     |> PropertyDamage.Generator.merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
@@ -350,18 +382,39 @@ end
 # lib/order_model.ex
 defmodule OrderModel do
   use PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
-  alias OrderModel.Commands.CreateOrder
+  alias CompanyDomain.Events.{OrderCreated, OrderShipped}
+  alias OrderModel.Commands.{CreateOrder, ShipOrder}
   alias OrderModel.Projections.{OrderState, OrderInvariants}
 
   @impl true
-  def commands, do: [{CreateOrder, weight: 1}]
+  def commands do
+    [
+      {CreateOrder, weight: 1},
+      {ShipOrder,
+       weight: 2,
+       when: fn state -> map_size(state.orders) > 0 end,
+       overrides: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
+    ]
+  end
 
   @impl true
   def command_sequence_projection, do: OrderState
 
   @impl true
   def check_projections, do: [OrderInvariants]
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  # The id and created_at keep their :__external__ default: the server mints them.
+  @impl true
+  def simulate(%CreateOrder{} = cmd, _state) do
+    [%OrderCreated{customer_id: cmd.customer_id, amount: cmd.amount, currency: cmd.currency}]
+  end
+
+  def simulate(%ShipOrder{order_id: id}, _state), do: [%OrderShipped{order_id: id}]
 end
 ```
 
@@ -394,8 +447,8 @@ end
 defmodule OrderHttpAdapter do
   use PropertyDamage.Adapter
 
-  alias OrderModel.Commands.CreateOrder
-  alias CompanyDomain.Events.OrderCreated
+  alias OrderModel.Commands.{CreateOrder, ShipOrder}
+  alias CompanyDomain.Events.{OrderCreated, OrderShipped}
 
   def setup(_config) do
     {:ok, %{base_url: "http://localhost:4000"}}
@@ -425,6 +478,15 @@ defmodule OrderHttpAdapter do
 
       status ->
         {:error, {:http_error, status}}
+    end
+  end
+
+  def execute(%ShipOrder{order_id: id}, ctx, _runtime) do
+    response = HTTPoison.post!("#{ctx.base_url}/orders/#{id}/ship", "")
+
+    case response.status_code do
+      200 -> {:ok, [%OrderShipped{order_id: id}]}
+      status -> {:error, {:http_error, status}}
     end
   end
 
