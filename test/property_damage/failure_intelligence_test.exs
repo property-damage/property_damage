@@ -943,6 +943,28 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert result.confidence == 1.0
     end
 
+    test "a one-variation budget and a zero range run no variation" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_variations: 1,
+          variation_range: 0
+        )
+
+      assert result.variations_run == 0
+    end
+
+    test "a negative variation range runs only the random variations" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_variations: 5,
+          variation_range: -4
+        )
+
+      assert result.variations_run == 2
+    end
+
     test ":still_failing when the original seed still reproduces" do
       result =
         Verification.verify_fix(fi_report(100_000), FI.Model,
