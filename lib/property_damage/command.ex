@@ -420,6 +420,10 @@ defmodule PropertyDamage.Command do
   2. Module defaults (from `use PropertyDamage.Command` opts)
   3. Framework defaults
 
+  Every key replaces the lower layer's value, except `:settle`. A `:settle` map
+  merges per key over the layer below, so `settle: %{timeout_ms: 1_000}` keeps
+  the default `interval_ms` and `backoff`.
+
   ## Parameters
 
   - `module` - The command module
@@ -435,7 +439,15 @@ defmodule PropertyDamage.Command do
   def build_spec(module, module_defaults, overrides) do
     framework_defaults()
     |> Map.merge(%{command: module})
-    |> Map.merge(Map.new(module_defaults))
-    |> Map.merge(Map.new(overrides))
+    |> merge_layer(Map.new(module_defaults))
+    |> merge_layer(Map.new(overrides))
+  end
+
+  # A settle map merges per key; every other key replaces the lower layer's value.
+  defp merge_layer(spec, layer) do
+    Map.merge(spec, layer, fn
+      :settle, base, over when is_map(base) and is_map(over) -> Map.merge(base, over)
+      _key, _base, over -> over
+    end)
   end
 end
