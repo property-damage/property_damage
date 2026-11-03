@@ -181,7 +181,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   defp resolve_value_for_bash(value), do: to_string(value)
 
   # Render the spec's query params as a `?k=v&...` suffix. Sorted for stable
-  # output; values resolve like path params (`$var` for produced refs).
+  # output; values resolve like path params (`$var` for produced values).
   defp resolve_query(params) when map_size(params) == 0, do: ""
 
   defp resolve_query(params) do

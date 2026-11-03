@@ -213,7 +213,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
   # Append the spec's query params as a `?k=v&...` fragment onto the path
   # string. Sorted for stable output; values interpolate like path params
-  # (a produced ref renders as `state.refs["name"]`).
+  # (a produced value renders as `state.refs["name"]`).
   defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
 
   defp append_query_code(path_code, params) do

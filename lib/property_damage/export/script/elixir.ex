@@ -186,7 +186,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
 
   # Append the spec's query params as a `?k=v&...` fragment onto the path
   # string. Sorted for stable output; values interpolate like path params
-  # (a produced ref renders as `refs["name"]`).
+  # (a produced value renders as `refs["name"]`).
   defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
 
   defp append_query_code(path_code, params) do

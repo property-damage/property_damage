@@ -174,7 +174,7 @@ Run with: python #{Common.generate_filename(report, :python)}
 
   # Append the spec's query params as an f-string `?k=v&...` fragment onto the
   # path expression. Sorted for stable output; values interpolate like path
-  # params (a produced ref renders as `refs['name']`).
+  # params (a produced value renders as `refs['name']`).
   defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
 
   defp append_query_code(path_code, params) do

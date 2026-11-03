@@ -1314,7 +1314,7 @@ defmodule PropertyDamage.Shrinker do
       state
     else
       # Drop this level's nodes, then pull back any ancestors that surviving
-      # nodes still depend on so refs stay resolvable. Everything here is in
+      # nodes still depend on so placeholders stay resolvable. Everything here is in
       # the original index space, which `graph` agrees with.
       candidate_keep = MapSet.difference(kept, MapSet.new(level))
 
@@ -1778,11 +1778,11 @@ defmodule PropertyDamage.Shrinker do
   defp check_failure_equivalence(failure_reason, variant_index, nil) do
     # No original signature: we can't prove equivalence, so for backwards
     # compatibility we accept any failure EXCEPT ones that are unmistakably
-    # shrink artifacts. A dangling-ref / ref-resolution error only appears
+    # shrink artifacts. A placeholder-resolution error only appears
     # because a producing command was removed; accepting it would pass off a
     # different bug as the "minimal repro". (When a signature IS present, the
     # comparison below already rejects these unless the original was itself a
-    # ref-resolution error.)
+    # placeholder-resolution error.)
     elem(failure_signature(failure_reason, variant_index), 0) != :placeholder_resolution
   end
 

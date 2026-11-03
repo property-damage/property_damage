@@ -27,7 +27,7 @@ defmodule PropertyDamage.Validation do
   - `model` - Model module
   - `adapter` - Adapter module
   - `opts` - Options:
-    - `:injectors` - List of InjectorAdapter modules
+    - `:injectors` - List of `PropertyDamage.Adapter.Injector` modules
 
   ## Returns
 
@@ -524,7 +524,7 @@ defmodule PropertyDamage.Validation do
       for event <- injectable, event not in emitted, reduce: [] do
         acc ->
           [
-            "Injectable event #{inspect(event)} not covered by any InjectorAdapter @emits"
+            "Injectable event #{inspect(event)} not covered by any injector adapter @emits"
             | acc
           ]
       end

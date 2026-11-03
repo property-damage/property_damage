@@ -104,7 +104,7 @@ defmodule PropertyDamage.EventQueue do
 
   ## Example
 
-      EventQueue.push(queue, MyInjectorAdapter, %PaymentConfirmed{order_id: "123"})
+      EventQueue.push(queue, MyApp.PaymentInjector, %PaymentConfirmed{order_id: "123"})
   """
   @spec push(pid(), module(), struct()) :: :ok
   def push(queue, adapter_module, event) do
