@@ -549,26 +549,28 @@ classifier = fn state ->
   end
 end
 
-# Record the failing runs of several seeds
+# Record the failing runs of several seeds (shrink: false keeps the state of the
+# first failure, so the failing states differ from seed to seed)
 tracker = Coverage.new(MyModel, state_classifier: classifier)
 
 tracker =
   Enum.reduce(1..6, tracker, fn seed, tracker ->
-    {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: seed)
+    opts = [model: MyModel, targets: [MyAdapter], seed: seed, shrink: false]
+    {:error, report} = PropertyDamage.run(opts)
     Coverage.record(tracker, {:error, report})
   end)
 
 # Failing-state classes seen, and how often (one possible outcome; the
 # classes and counts depend on the model and the seeds)
 Coverage.state_class_counts(tracker)
-# => %{deeply_overdrawn: 1, slightly_overdrawn: 5}
+# => %{deeply_overdrawn: 4, slightly_overdrawn: 2}
 
 # Class of one recorded failure followed by the class of the next
 Coverage.state_class_transitions(tracker)
 # => %{
-#      {:deeply_overdrawn, :slightly_overdrawn} => 1,
+#      {:deeply_overdrawn, :deeply_overdrawn} => 3,
 #      {:slightly_overdrawn, :deeply_overdrawn} => 1,
-#      {:slightly_overdrawn, :slightly_overdrawn} => 3
+#      {:slightly_overdrawn, :slightly_overdrawn} => 1
 #    }
 
 # The same transitions as a nested map, for visualization
@@ -576,7 +578,18 @@ Coverage.state_class_matrix(tracker)
 
 # Format with the state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
+# State Class Transition Matrix
+# ────────────────────────────────────────────────────────────
+#                     → deeply_overdrawn    slightly_overdrawn
+# deeply_overdrawn    3
+# slightly_overdrawn  ░░░░                1
+#
+# State class counts:
+#   deeply_overdrawn: 4x
+#   slightly_overdrawn: 2x
 ```
+
+A cell off the diagonal shows a bar (`░░░░` for 1 to 4 transitions, `▓▓▓▓` for 5 to 9, `████` for 10 or more). A diagonal cell, a transition from a class to itself, shows its count, or `·` when there is none.
 
 The transitions pair consecutive recorded results, so six recorded failures give five transitions. The section answers two questions: which classes of final failing state were seen, and how often one followed another across the recorded failures.
 
