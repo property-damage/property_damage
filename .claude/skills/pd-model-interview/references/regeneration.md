@@ -14,7 +14,12 @@ and show your work.
    any regeneration.
 4. OpenAPI-composed spec → hash the referenced document. Mismatch: diff the
    operations against the spec's commands and delta-interview the difference.
-   File missing: ask whether it moved; update the path if so.
+   File missing: ask whether it moved; update the path if so. Never rerun
+   `mix pd.scaffold` whole over a hand-owned adapter: it overwrites `adapter.ex`
+   and `model.ex` unconditionally. Use `MIX_ENV=test mix pd.scaffold --from
+   <openapi path> --output <dir> --namespace <Namespace> --dry-run` to see what
+   changed, or `--commands-only --operations <ids>` to write only new
+   commands, then add the class header lines to the new files.
 
 ## The delta interview
 
@@ -26,7 +31,7 @@ change, not the world:
 - "What changed in the system since this spec was written? What broke in
   production?" (New failure modes are invariant candidates.)
 - New commands/events/invariants go through the same phase questions as the
-  full interview (fields, semantics, preconditions, classification), then
+  full interview (fields, execution, preconditions, classification), then
   into the spec.
 - Removals: mark the spec item removed, but never delete files - report the
   affected file list for the user to delete.
@@ -37,12 +42,14 @@ Every answer updates the spec **before** any code is touched.
 
 | Files | Class | Regeneration may |
 |---|---|---|
-| `model.ex`, `commands/`, `events/`, `projections/` | regenerable | rewrite, via confirmed diff |
-| `adapter.ex` | hand-owned | propose additions only |
+| `model.ex`, `simulator.ex`, `smoke.exs`, `commands/`, `events/`, `projections/` | regenerable | rewrite, via confirmed diff |
+| `adapter.ex`, injector stubs | hand-owned | propose additions only |
 | `model_spec.md` | source | edit as the interview dictates |
 
 Generated files carry a header comment naming their class; keep it intact
-when rewriting.
+when rewriting. They also carry the `@moduledoc` and `@doc` text written from
+the spec's prose; regenerate that text from the spec too, because the failure
+report prints it.
 
 **Regenerable files**: compute what the spec change implies, show a per-file
 diff, apply on confirmation. Batch related confirmations sensibly; do not ask
@@ -57,7 +64,7 @@ they look wrong - report drift instead.
 
 Before regenerating, diff each regenerable file against what the current spec
 implies. Divergence that regeneration would destroy - a tuned generator, an
-added guard, a tightened assertion - is a fork in the source of truth.
+added guard, a tightened check - is a fork in the source of truth.
 Resolve it explicitly with the user, per divergence:
 
 - **Adopt**: fold the edit's intent into the spec (usually a generator note,
@@ -78,8 +85,14 @@ naggingly - and proceed either way.
 
 ## Exit ladder
 
-Same as first scaffold: `mix format` on touched generated files → `mix
-compile` → `mix pd.validate` → bounded smoke run only if adapter wiring is
-user-confirmed. Compile or validate failures on regenerated code are your
-bugs. Close by summarizing: spec changes, files rewritten, adapter proposals
+Same as first scaffold, every rung under `MIX_ENV=test` (the scaffold lives
+in `test/support/`): `mix format` on touched generated files →
+`MIX_ENV=test mix compile` → `MIX_ENV=test mix pd.validate <Namespace>.Model
+<Namespace>.Adapter --strict` → bounded smoke run (`MIX_ENV=test mix run
+<dir>/smoke.exs`, which checks that every command executed at least once),
+only if adapter wiring is user-confirmed. A bare `mix pd.validate` prints
+usage and exits 0, so always name the model and adapter. Compile or validate
+failures on regenerated code are your bugs. A changed simulator, a new
+command or a new guard can leave a command that never executes, so a green
+smoke run without that check proves nothing. Close by summarizing: spec changes, files rewritten, adapter proposals
 made, removals awaiting user deletion, deferred backlog.

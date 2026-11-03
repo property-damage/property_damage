@@ -22,7 +22,7 @@ namespace: MyApp.PD.OrderBook         # module prefix for generated code
 dir: test/support/pd/order_book/      # this directory
 pd_version: "0.2.0"                   # PD version scaffolded against
 transport: in_process                 # in_process | http | other (prose below)
-reset: ecto_sandbox                   # how a run gets a clean SUT
+reset: ecto_sandbox                   # adapter-only side effects that give a run a clean SUT
 openapi:                              # only when composed with an OpenAPI spec
   path: priv/openapi.json
   sha256: "ab12..."                   # content hash at scaffold time
@@ -40,9 +40,11 @@ moved* - never conclude the composition is gone.
 
 ### 1. System overview
 
-Prose only. What the SUT is, the entities in scope and their lifecycles, and
+Prose. What the SUT is, the entities in scope and their lifecycles, and
 where this model's boundary sits (what neighboring subsystems it deliberately
-excludes). Interview context, not scaffold input.
+excludes). The scaffold copies it into the model's `@moduledoc`, and the
+failure report prints that text as the model's description, so write it for a
+reader who has never seen the system.
 
 ### 2. Commands
 
@@ -50,7 +52,8 @@ One `###`-heading per command:
 
 ```yaml
 name: PlaceOrder
-semantics: sync            # sync | probe | async
+execution: sync            # sync | probe | async
+role: root                 # root (default) | setup | teardown (see section 3)
 fields:
   amount: "positive cents, typically < 10^6; hostile edge: exactly 0"
   currency: "ISO 4217 code from the supported set"
@@ -63,50 +66,125 @@ Field values are **generator notes** in plain language, not StreamData code -
 the scaffolder translates. `when:` is prose describing the precondition; the
 scaffolder turns it into a guard over projection state. `events:` is the
 simulate contract: everything this command can observably produce, including
-deliberate rejections. Prose after the block: edge cases, failure behavior,
-anything the user said that a maintainer would need.
+deliberate rejections. The scaffolder generates the model's simulator from
+it, one clause per command. Prose after the block: edge cases, failure
+behavior, anything the user said that a maintainer would need; the scaffold
+copies it into the command module's `@moduledoc`, which the failure report
+prints.
 
-### 3. Events
+For an `async` command, add `completion:` with how the user learns the work
+finished: `poll` (a probe command reads the result; name it) or `injected`
+(the system pushes a webhook or callback; the event it carries is marked
+`source: injected` in the Events section).
+
+### 3. Setup and teardown
+
+Fixtures: what must exist before anything can happen (an admin user, an open
+session), and what must be cleaned up after. Each one is a command, written
+up in section 2 with `role: setup` or `role: teardown`, and listed here in
+the order it runs:
+
+```yaml
+setup:
+  - command: CreateUser
+    overrides: "role is admin"   # plain-language note; becomes overrides:
+teardown:
+  - command: DeleteTestUsers
+```
+
+The scaffold turns the lists into the model's `setup_each/0` and
+`teardown_each/0`. Every entry runs, in order, in every run and every target.
+Omit the section when there are no fixtures. Do not put fixtures in the
+adapter: its `setup/1` only does what the adapter can do alone (start or
+reset the system) and must be idempotent, because it runs once per run in
+every target. That is what the header's `reset:` records.
+
+### 4. Events
 
 One `###`-heading per event:
 
 ```yaml
 name: OrderPlaced
+source: command          # command (default) | injected
 fields:
   order_id: external       # server-generated -> external() in the struct
   amount: from_command
   placed_at: external
 ```
 
-Every event here must be produced by at least one command's `events:` list.
+Every event with `source: command` must be produced by at least one command's
+`events:` list. An event with `source: injected` reaches the test through an
+injector (a webhook, a callback), not from a command, so the closure rule
+exempts it. The scaffold lists it in the model's `injectable_events/0` and
+stubs the injector. Prose after the block becomes the event module's
+`@moduledoc`.
 
-### 4. Projections
+### 5. Projections
 
 The command-sequence projection (what state it tracks and which commands'
 guards or generators need it), then check projections. State exists only
-because something gates on it or an invariant inspects it.
+because something gates on it or an invariant inspects it. The prose becomes
+each projection module's `@moduledoc`.
 
-### 5. Invariants
+### 6. Invariants
 
 One `###`-heading per invariant:
 
 ```yaml
 name: no_negative_balance
-kind: trigger              # trigger (immediate) | eventually (eventual)
+kind: check                # check (now) | eventually (within a window)
 projection: BalanceInvariants
-after: every_step          # or an event name; eventually: settling time too
+every: [WalletOpened, Deposited]   # check: event or command names (or a step count),
+                           # or `at: teardown` instead (once, on the settled final state)
 ```
 
-Prose: the check in domain language, and the severity of a violation.
-Suggested-but-unadopted invariants do not go here - they go in section 7 as
-deferred.
+An `eventually` invariant takes `after:` (the event that starts the window),
+`timeout:` and `interval:` instead of `every:`:
 
-### 6. Known failure modes
+```yaml
+name: payment_confirmed
+kind: eventually
+projection: PaymentInvariants
+after: PaymentInitiated
+timeout: 5s
+interval: 100ms
+```
+
+A safety invariant ("this never happens too much") is `kind: check` with
+`at: teardown`. Its projection must accumulate evidence (a count, a maximum,
+a sticky flag), because the check reads only the final state.
+
+Prose: the check in domain language, and the severity of a violation. The
+scaffold copies it into the `@doc` of the check function, and the failure
+report prints it under "What this checks". Suggested-but-unadopted invariants
+do not go here - they go in section 9 as deferred.
+
+### 7. Targets and expansions (optional)
+
+Two optional features. Record them when the user says yes, and leave the section
+out otherwise (a `deferred` or `declined` entry in section 9 records the
+no):
+
+```yaml
+targets: [reference, candidate]    # compare the same commands on several targets
+compare:
+  - name: balance
+    every: end                     # the value to compare, and when
+expansions:
+  - root: Pay
+    as: "authorize, then capture"  # a root that may run as an equivalent sequence
+```
+
+The scaffold turns `compare:` into `@compare` functions in a check
+projection, and `expansions:` into the model's `expansions/0`. A model with
+`expansions:` must also compare at the end of the run.
+
+### 8. Known failure modes
 
 Prose. Where the user suspects or fears bugs. Steers weights and generator
 hostility toward where blood is expected.
 
-### 7. Explicitly not modeled
+### 9. Explicitly not modeled
 
 The anti-scope, and the delta interview's memory. Flat list, each entry
 marked:
