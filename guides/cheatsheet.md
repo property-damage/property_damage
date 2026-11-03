@@ -458,7 +458,7 @@ PropertyDamage.run(
 )
 ```
 
-`only:` goes in a call of its own. It runs one run of a campaign, or replays an artifact, and it is an error beside `max_runs:` other than 1 and beside `branching:`. With `replay:`, `seed:` is an error too, because the artifact records the seed.
+`only:` goes in a call of its own. It runs one of the runs a seed generates, or replays an artifact, and it is an error beside `max_runs:` other than 1 and beside `branching:`. With `replay:`, `seed:` is an error too, because the artifact records the seed.
 
 ```elixir
 # Run 3 of the seed alone
