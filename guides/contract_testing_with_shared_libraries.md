@@ -222,11 +222,24 @@ When upgrading dependencies that change struct definitions, regenerate ExUnit
 tests from the saved failures with the current struct versions:
 
 ```elixir
+File.mkdir_p!("test/regressions")
+
 for path <- Path.wildcard("failures/*.pd") do
   {:ok, report} = PropertyDamage.load_failure(path)
-  PropertyDamage.generate_test(report, format: :exunit)
+  name = Path.basename(path, ".pd")
+
+  source =
+    PropertyDamage.generate_test(report,
+      format: :exunit,
+      module_name: "Regression#{Macro.camelize(name)}Test"
+    )
+
+  File.write!(Path.join("test/regressions", "#{name}_test.exs"), source)
 end
 ```
+
+`generate_test/2` returns the test source as a string and writes nothing, so the
+loop writes each string to a file itself.
 
 ### Strategy 4: Shared Seed Library
 

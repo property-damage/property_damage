@@ -272,7 +272,7 @@ decorating attribute, and each answers a different question.
 |------|----------|----------|----------|------------|
 | `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, :event}`, `{N, Module}`, `{N, [Modules]}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
-| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
+| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`, `[Modules, :end]`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
 When to pick which:
 
@@ -410,7 +410,8 @@ end
 ```
 
 `every:` takes the same schedule vocabulary as `@check` (`1`, `N`,
-`{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
+`{N, Module}`, `Module`, `[Modules]`) plus `:end` or `[Modules, :end]` for the
+final boundary.
 Values agree under `==` unless `using:` names another relation: `:fun` (a
 function of the projection, public or private), `{Mod, :fun}` or
 `{Mod, :fun, args}`, each called with the reference's value and the variant's

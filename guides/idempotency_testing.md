@@ -329,7 +329,7 @@ To debug violations:
 To read the violation as a page in a browser, pass
 `report_html: "_build/pd_reports"` to `PropertyDamage.run/1` or set
 `PD_REPORT_HTML=_build/pd_reports`. See
-[Debugging Failures](debugging_failures.md#sharing-a-failure-page).
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
 
 ## Full Example
 

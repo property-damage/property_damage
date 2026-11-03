@@ -565,7 +565,8 @@ Replay the sequence step by step to observe state changes:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 # replay/2 returns {:ok, [step]}; each step is
-# %{index, command, command_name, events, projections, projections_before, result}
+# %{command, index, events, result, command_name, projections,
+#   projections_before, leaf_index}
 {:ok, steps} = PropertyDamage.replay(failure)
 
 Enum.each(steps, fn step ->
@@ -579,6 +580,8 @@ end)
 
 `step.projections` is the projection state after the command; `projections_before`
 is the state just before it, so you can diff the two around the failing step.
+`leaf_index` is `nil` for a root that ran as itself. For a root that ran as
+leaves, it is the leaf's position within that root's expansion.
 
 #### Step results
 
@@ -621,7 +624,8 @@ It prints each step and exits non-zero while the bug still reproduces (zero once
 it is fixed), so the same command doubles as a regression check. Concretely it
 exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
 replay could not run at all (the project does not compile, the file fails to
-load, it records no model/adapter, or the sequence is branching). That third
+load, it records no model/adapter, the sequence is branching, or the target's setup or
+a setup command fails). That third
 case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
 needs to treat as "skip".
 
@@ -659,7 +663,11 @@ Find the specific field/value that causes the failure:
 {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
 
 IO.puts("Trigger: #{inspect(trigger)}")
-# => %{trigger_index: 0, trigger_command: %Withdraw{...}, likely_cause: "...", changes: [%{field: ..., original: ..., fixed: ...}]}
+# => %{trigger_index: 1,
+#      trigger_command: %MyApp.Withdraw{account: "alice", amount: 5},
+#      likely_cause: "Amount-related issue: original amount 5 causes failure",
+#      changes: [%{description: "Changing amount from 5 to 0 eliminates failure",
+#                  field: :amount, original: 5, fixed: 0}, ...]}
 ```
 
 ## Step 6: Visual Debugging
@@ -1144,8 +1152,14 @@ failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 
 summary = PropertyDamage.RunComparison.outcome_summary(comparison)
 
-if summary.passing > 0 and summary.failing > 0 do
-  IO.puts("Flaky: #{summary.passing} passed / #{summary.failing} failed")
+# A seed is flaky when runs disagree on pass or fail, or when the failing
+# runs disagree on why they failed.
+if (summary.passing > 0 and summary.failing > 0) or length(summary.failure_signatures) > 1 do
+  IO.puts(
+    "Flaky: #{summary.passing} passed / #{summary.failing} failed, " <>
+      "#{length(summary.failure_signatures)} failure signature(s)"
+  )
+
   IO.inspect(comparison.ranking, label: "most discriminating fields")
 else
   IO.puts("Reproduces consistently (#{summary.failing}/#{comparison.traces |> length} failed)")
@@ -1165,7 +1179,8 @@ verdicts, bounded memory).
 
 ### 2. Shrunk Sequence Too Long
 
-- Add more command preconditions
+- Add `when:` options to the model's command specs, so the model stops
+  generating commands in states where they make no sense
 - Use `shrink_further/2` with `:exhaustive` strategy
 - Check for hidden dependencies between commands
 
