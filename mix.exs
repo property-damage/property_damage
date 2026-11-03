@@ -87,7 +87,6 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Command,
           PropertyDamage.Model,
           PropertyDamage.Model.Projection,
-          PropertyDamage.Model.Projection.Liveness,
           PropertyDamage.Model.Projection.Statistics,
           PropertyDamage.Model.Simulator,
           PropertyDamage.Adapter,

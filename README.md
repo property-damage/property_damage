@@ -899,44 +899,6 @@ def assert_latency_sla(state, _cmd_or_event) do
 end
 ```
 
-## Liveness Checking
-
-Detect deadlocks, livelocks, and starvation with the Liveness projection.
-
-### Configuration
-
-```elixir
-defmodule MyModel do
-  def check_projections do
-    [
-      {PropertyDamage.Model.Projection.Liveness, [
-        max_pending_duration_ms: 10_000,
-        check_interval: 10,
-        required_completions: %{
-          CreateTransfer => [TransferCompleted, TransferFailed],
-          CreateOrder => [OrderConfirmed, OrderRejected]
-        }
-      ]}
-    ]
-  end
-end
-```
-
-### How It Works
-
-1. **Track starts**: When `CreateTransfer` executes, mark operation as pending
-2. **Track completions**: When `TransferCompleted` or `TransferFailed` arrives, mark complete
-3. **Check timeouts**: Periodically check for operations pending too long
-4. **Report stuck**: If any operation exceeds `max_pending_duration_ms`, fail
-
-### What It Detects
-
-| Issue | Symptom |
-|-------|---------|
-| Deadlock | Operations never complete |
-| Livelock | System busy but no progress |
-| Starvation | Some operations always timeout |
-
 ## Visual Sequence Diagrams
 
 Generate sequence diagrams from failure reports to visualize command flows and pinpoint failures.

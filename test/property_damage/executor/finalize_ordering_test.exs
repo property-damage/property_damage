@@ -66,7 +66,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     def apply(%{count: c, max: m} = s, %Bumped{}), do: %{s | count: c + 1, max: max(m, c + 1)}
     def apply(s, _), do: s
 
-    # Liveness that never resolves: a poll-timeout candidate.
+    # liveness check that never resolves: a poll-timeout candidate.
     @eventually after: Started, timeout: {1000, :milliseconds}, interval: {10, :milliseconds}
     def confirm_eventually(_state, %Started{}), do: fn s -> s.confirmed end
 

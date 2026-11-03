@@ -99,7 +99,7 @@ defmodule PropertyDamage.AwaitsTest do
 
     def apply(state, _), do: state
 
-    # Liveness: the closing webhook for the issue eventually correlates.
+    # liveness: the closing webhook for the issue eventually correlates.
     @eventually after: IssueCloseRequested,
                 timeout: {200, :milliseconds},
                 interval: {10, :milliseconds}
