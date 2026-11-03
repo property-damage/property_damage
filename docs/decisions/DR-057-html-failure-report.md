@@ -59,7 +59,9 @@ cannot be written? How are several pages browsed?
 
 4. **One page per failing run, named after what failed.** The file name joins
    the model, the failing target, the failure kind and the seed
-   (`seed<N>`) with `-`, and replaces every character outside letters,
+   (`seed<N>`) with `-`. The kind is the one the report and page state,
+   such as `adapter_error` or `check_failed`, not the broader report kind
+   `execution_failed`. The name replaces every character outside letters,
    digits, `.`, `_` and `-` with `_`. The target is the adapter-qualified name
    of decision 2. A report with none of these facts is named
    `failure_report.html`. A later failure with the same model, target, kind and

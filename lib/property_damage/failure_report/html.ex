@@ -73,7 +73,8 @@ defmodule PropertyDamage.FailureReport.HTML do
   Writes the report's page into `dir`, created when missing, and rebuilds
   `dir/index.html`. The file is named after the model, the failing target,
   the failure kind and the seed, so a later failure of the same run replaces
-  it.
+  it. The kind is the one the report states (`FailureReport.failure_type/1`),
+  such as `adapter_error`, not the broader `report.kind`.
   """
   @spec write(FailureReport.t(), Path.t()) :: {:ok, Path.t()} | {:error, File.posix()}
   def write(%FailureReport{} = report, dir) do
@@ -133,12 +134,16 @@ defmodule PropertyDamage.FailureReport.HTML do
     [
       report.model && inspect(report.model),
       target(report),
-      report.kind && to_string(report.kind),
+      kind_label(report),
       report.seed && "seed #{report.seed}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
   end
+
+  # The failure kind the report states, in the title and the file name.
+  defp kind_label(%FailureReport{kind: nil}), do: nil
+  defp kind_label(%FailureReport{} = report), do: to_string(FailureReport.failure_type(report))
 
   # The failing target's name, after its adapter when the name does not say
   # it: two suites can run one model under one target name against different
@@ -161,7 +166,7 @@ defmodule PropertyDamage.FailureReport.HTML do
       [
         report.model && inspect(report.model),
         target(report),
-        report.kind && to_string(report.kind),
+        kind_label(report),
         report.seed && "seed#{report.seed}"
       ]
       |> Enum.reject(&is_nil/1)
