@@ -58,6 +58,13 @@ defmodule PropertyDamage.SetupFaultReportTest do
     def __checks__, do: [%{name: :old_shape, trigger: :always}]
   end
 
+  defmodule RecordingAdapter do
+    use PropertyDamage.Adapter
+    def setup(config), do: {:ok, config}
+    def teardown(%{test_pid: pid}), do: send(pid, :adapter_torn_down)
+    def execute(%Bump{}, _, _), do: {:ok, [%Bumped{}]}
+  end
+
   defmodule ExitModel do
     use PropertyDamage.Model
     def commands, do: [Bump]
@@ -140,5 +147,19 @@ defmodule PropertyDamage.SetupFaultReportTest do
     assert report.kind == :setup_failed
     assert %Failure{type: %Failure.Setup{cause: :adapter_setup}} = report.failure_reason
     assert FailureReport.failure_message(report) =~ "Adapter setup failed"
+  end
+
+  test "the adapter's teardown/1 runs after model code faults while the variant comes up" do
+    assert {:error, %FailureReport{} = report} =
+             PropertyDamage.run(
+               model: OldShapeModel,
+               targets: [{RecordingAdapter, config: %{test_pid: self()}}],
+               max_runs: 1,
+               max_commands: 2,
+               shrink: false
+             )
+
+    assert %Failure{type: %Failure.Setup{cause: :model}} = report.failure_reason
+    assert_received :adapter_torn_down
   end
 end
