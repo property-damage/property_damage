@@ -30,7 +30,7 @@ defmodule PropertyDamage.Test.ExplainSupport do
   def usage_line,
     do:
       "usage: mix pd.explain PAGE " <>
-        "[--prompt | --apply FILE|- | --with CMD [--attempts N] [--timeout T]]"
+        "[--files | --prompt | --apply FILE|- | --with CMD [--attempts N] [--timeout T]]"
 
   @doc "The module name of `name` in the system the fixture page describes."
   def mod(name), do: @prefix <> "." <> name

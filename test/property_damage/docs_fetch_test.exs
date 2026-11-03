@@ -37,7 +37,7 @@ defmodule PropertyDamage.DocsFetchTest do
 
   describe "a module with a docs chunk and no macro" do
     test "fetch translates Code.fetch_docs for a module of the library" do
-      module = PropertyDamage.Model.Projection.Liveness
+      module = PropertyDamage.Settle
       assert Code.ensure_loaded?(module)
       refute function_exported?(module, :__pd_docs__, 0)
 
@@ -45,21 +45,22 @@ defmodule PropertyDamage.DocsFetchTest do
       assert docs == expected_from_chunk(module)
 
       # Hand-checked entries.
-      assert String.starts_with?(docs.moduledoc, "Projection that tracks pending operations")
-      assert Path.basename(docs.file) == "liveness.ex"
+      assert String.starts_with?(
+               docs.moduledoc,
+               "Settle logic for eventually consistent systems."
+             )
+
+      assert Path.basename(docs.file) == "settle.ex"
 
       assert String.starts_with?(
-               docs.functions[{:check_liveness, 2}].doc,
-               "Check for stuck operations."
+               docs.functions[{:get_execution, 1}].doc,
+               "Get the execution mode from a command spec map."
              )
 
       assert String.starts_with?(
-               docs.functions[{:pending_count, 1}].doc,
-               "Get count of currently pending operations."
+               docs.functions[{:get_settle_config, 1}].doc,
+               "Get the settle configuration from a command spec map."
              )
-
-      assert docs.functions[{:__checks__, 0}].doc == false
-      assert docs.functions[{:check, 3}].doc == false
     end
 
     test "fetch reads a hidden moduledoc as false and a missing one as nil" do

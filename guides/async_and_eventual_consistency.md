@@ -973,12 +973,12 @@ instead of waiting out the `timeout:` to report that it never became
 became true, and nothing else: with a total predicate, nothing else can have
 happened.
 
-## Safety vs Liveness: `@check at: :teardown`
+## Safety vs liveness: `@check at: :teardown`
 
 Verifying an eventually-consistent effect has two halves, and they need
 different tools:
 
-- **Liveness** ("the effect *eventually* happens") is what `@eventually`
+- **liveness** ("the effect *eventually* happens") is what `@eventually`
   expresses: its poller resolves the instant its predicate is first true, then
   stops. This is a reachability check.
 - **Safety** ("the effect *never* happens too much": at most once, never
@@ -1009,7 +1009,7 @@ defmodule JobProjection do
   end
   def apply(s, _), do: s
 
-  # Liveness: the effect eventually reaches the expected count.
+  # liveness: the effect eventually reaches the expected count.
   @eventually after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
   def eventually_applied(_s, %Enqueue{}), do: fn s -> s.applied >= s.expected end
 

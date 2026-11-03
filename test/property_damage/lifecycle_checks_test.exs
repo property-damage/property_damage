@@ -208,9 +208,9 @@ defmodule PropertyDamage.LifecycleChecksTest do
     def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
-  # Liveness (@eventually) that never resolves, plus a teardown safety check
+  # An @eventually check that never resolves, plus a teardown safety check
   # that would always fail. A genuine liveness timeout preempts the checkpoint.
-  defmodule LivenessAndSafetyProjection do
+  defmodule EventuallyAndSafetyProjection do
     use PropertyDamage.Model.Projection
     @impl true
     def init, do: %{confirmed: false}
@@ -229,12 +229,12 @@ defmodule PropertyDamage.LifecycleChecksTest do
     end
   end
 
-  defmodule LivenessSafetyModel do
+  defmodule EventuallySafetyModel do
     use PropertyDamage.Model
     @impl true
     def commands, do: [Initiate]
     @impl true
-    def command_sequence_projection, do: LivenessAndSafetyProjection
+    def command_sequence_projection, do: EventuallyAndSafetyProjection
     @impl true
     def check_projections, do: []
   end
@@ -250,7 +250,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   test "a genuine @eventually liveness timeout preempts the teardown checkpoint" do
-    {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), LivenessSafetyModel, SilentAdapter)
+    {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), EventuallySafetyModel, SilentAdapter)
 
     refute result.success
 
@@ -267,7 +267,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
   defmodule Confirmed, do: defstruct([])
 
-  # Liveness that DOES resolve (the poller confirms), so the run reaches the
+  # Eventual check that DOES resolve (the poller confirms), so the run reaches the
   # settled checkpoint and the teardown safety check fires.
   defmodule ConfirmingAdapter do
     use PropertyDamage.Adapter

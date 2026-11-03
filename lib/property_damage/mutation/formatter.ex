@@ -39,6 +39,7 @@ defmodule PropertyDamage.Mutation.Formatter do
     %{
       mutation_score: report.mutation_score,
       killed: report.killed,
+      killed_by_error: report.killed_by_error,
       survived: report.survived,
       timeout: report.timeout,
       total: report.total,
@@ -81,7 +82,8 @@ defmodule PropertyDamage.Mutation.Formatter do
     status = if Report.passes?(report), do: "✓ PASS", else: "✗ FAIL"
 
     """
-    Mutation Score: #{score_pct}% (#{report.killed}/#{report.total} killed)  #{status} (target: #{target_pct}%)
+    Mutation Score: #{score_pct}% (#{report.killed}/#{scored(report)} killed)  #{status} (target: #{target_pct}%)
+    #{error_kill_note(report)}
     """
   end
 
@@ -100,7 +102,7 @@ defmodule PropertyDamage.Mutation.Formatter do
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
-          "│ #{String.pad_trailing(cmd_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}) │"
+          "│ #{String.pad_trailing(cmd_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats_scored(stats)}) │"
         end)
 
       "\n#{header}\n#{rows}\n#{footer}"
@@ -122,7 +124,7 @@ defmodule PropertyDamage.Mutation.Formatter do
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
-          "│ #{String.pad_trailing(op_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}) │"
+          "│ #{String.pad_trailing(op_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats_scored(stats)}) │"
         end)
 
       "\n#{header}\n#{rows}\n#{footer}"
@@ -157,6 +159,33 @@ defmodule PropertyDamage.Mutation.Formatter do
     end
   end
 
+  # Mutations killed by an adapter error leave the score's denominator.
+  defp error_kills(report), do: report.killed_by_error || 0
+
+  defp scored(report), do: report.total - error_kills(report)
+
+  defp stats_scored(stats), do: stats.total - Map.get(stats, :killed_by_error, 0)
+
+  defp error_kill_note(report) do
+    case error_kills(report) do
+      0 ->
+        ""
+
+      count ->
+        "#{count} killed by adapter error, excluded from the score (no check caught them)\n"
+    end
+  end
+
+  defp markdown_error_kill_note(report) do
+    case error_kills(report) do
+      0 ->
+        ""
+
+      count ->
+        "\n#{count} mutations were killed by an adapter error and are excluded from the score, because no check caught them.\n"
+    end
+  end
+
   defp format_footer_terminal(report) do
     duration_sec = Float.round(report.duration_ms / 1000, 1)
     "\nDuration: #{duration_sec}s"
@@ -182,9 +211,11 @@ defmodule PropertyDamage.Mutation.Formatter do
     |--------|-------|
     | Mutation Score | #{score_pct}% |
     | Killed | #{report.killed} |
+    | Killed by adapter error | #{error_kills(report)} |
     | Survived | #{report.survived} |
     | Total | #{report.total} |
     | Status | **#{status}** (target: #{target_pct}%) |
+    #{markdown_error_kill_note(report)}
     """
   end
 
@@ -195,8 +226,8 @@ defmodule PropertyDamage.Mutation.Formatter do
       header = """
       ## By Command
 
-      | Command | Score | Killed | Survived | Total |
-      |---------|-------|--------|----------|-------|
+      | Command | Score | Killed | Killed by error | Survived | Total |
+      |---------|-------|--------|-----------------|----------|-------|
       """
 
       rows =
@@ -205,7 +236,8 @@ defmodule PropertyDamage.Mutation.Formatter do
         |> Enum.map_join("\n", fn {cmd, stats} ->
           cmd_name = format_command_name(cmd)
           pct = Float.round(stats.score * 100, 1)
-          "| #{cmd_name} | #{pct}% | #{stats.killed} | #{stats.survived} | #{stats.total} |"
+
+          "| #{cmd_name} | #{pct}% | #{stats.killed} | #{Map.get(stats, :killed_by_error, 0)} | #{stats.survived} | #{stats.total} |"
         end)
 
       header <> rows <> "\n"
@@ -219,8 +251,8 @@ defmodule PropertyDamage.Mutation.Formatter do
       header = """
       ## By Operator
 
-      | Operator | Score | Killed | Survived | Total |
-      |----------|-------|--------|----------|-------|
+      | Operator | Score | Killed | Killed by error | Survived | Total |
+      |----------|-------|--------|-----------------|----------|-------|
       """
 
       rows =
@@ -228,7 +260,8 @@ defmodule PropertyDamage.Mutation.Formatter do
         |> Enum.sort_by(fn {_op, stats} -> -stats.score end)
         |> Enum.map_join("\n", fn {op, stats} ->
           pct = Float.round(stats.score * 100, 1)
-          "| `:#{op}` | #{pct}% | #{stats.killed} | #{stats.survived} | #{stats.total} |"
+
+          "| `:#{op}` | #{pct}% | #{stats.killed} | #{Map.get(stats, :killed_by_error, 0)} | #{stats.survived} | #{stats.total} |"
         end)
 
       header <> rows <> "\n"

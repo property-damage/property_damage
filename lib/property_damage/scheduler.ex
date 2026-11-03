@@ -368,13 +368,13 @@ defmodule PropertyDamage.Scheduler do
           {:cont, {:ok, %{run | active: run.active ++ [variant]}}}
 
         {:error, reason, logs} when target.index == 0 ->
-          failure = failure(config, target, nil, Failure.setup_failed(reason))
+          failure = failure(config, target, nil, setup_failure(reason))
           {:halt, {:error, Map.put(failure, :logs, logs)}}
 
         {:error, reason, logs} ->
           failure =
             config
-            |> failure(target, nil, Failure.setup_failed(reason))
+            |> failure(target, nil, setup_failure(reason))
             |> Map.put(:logs, logs)
 
           gone = %{pid: nil, target: target, retired: {nil, []}}
@@ -428,6 +428,11 @@ defmodule PropertyDamage.Scheduler do
         {:error, reason, %{}}
     end
   end
+
+  # A model fault arrives as the `%Failure{}` the variant built; anything
+  # else is what the adapter's `setup/1` answered.
+  defp setup_failure(%Failure{} = failure), do: failure
+  defp setup_failure(reason), do: Failure.setup_failed(reason)
 
   # A setup that raised is reported by the exception itself.
   defp setup_reason({:raised, exception}), do: exception

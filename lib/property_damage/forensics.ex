@@ -358,6 +358,8 @@ defmodule PropertyDamage.Forensics do
         |> PropertyDamage.Verdict.check(check.name)
       rescue
         e -> {:fail, e}
+      catch
+        kind, reason -> {:fail, PropertyDamage.Verdict.caught(kind, reason)}
       end
       |> case do
         :pass -> run_projection_checks(projection, projection_state, rest, ctx)

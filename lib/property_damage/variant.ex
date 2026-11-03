@@ -145,7 +145,8 @@ defmodule PropertyDamage.Variant do
     ResourcePoller,
     StatePoller,
     Target,
-    Telemetry
+    Telemetry,
+    Verdict
   }
 
   alias PropertyDamage.Executor.{Phases, Stepping}
@@ -225,7 +226,11 @@ defmodule PropertyDamage.Variant do
 
   Returns `:ok`, or `{:error, reason}` when `setup/1` returned `{:error, reason}`
   (any other non-`{:ok, _}` return is the reason itself), or
-  `{:error, {:raised, exception}}` when setup raised. After an error the
+  `{:error, {:raised, exception}}` when setup raised. Model code that faults
+  after the adapter's `setup/1` returned `{:ok, _}` (a malformed
+  `__checks__/0` entry, say) returns `{:error, failure}` with a
+  `%PropertyDamage.Failure{}` of cause `:model`; the adapter's `teardown/1`
+  runs for it. After an error the
   queue, injectors and mocks are released, once (a later `release/1` or
   `stop/1` releases nothing again), the adapter's `teardown/1` is not called,
   and the variant only accepts `release/1` and `stop/1`.
@@ -585,7 +590,7 @@ defmodule PropertyDamage.Variant do
     case started do
       {:ok, state, adapter_context} ->
         state = keep_lines(state, :adapter_setup, lines)
-        {:ok, build_ready_state(state, adapter_context)}
+        ready_or_model_fault(state, adapter_context)
 
       # The services are released here, once: `release/1` and `stop/1`
       # release nothing again.
@@ -594,6 +599,25 @@ defmodule PropertyDamage.Variant do
         {:ok, released} = PropertyDamage.Log.inline(fn -> release_services(state) end)
         {:error, reason, %{keep_lines(state, :adapter_teardown, released) | released: true}}
     end
+  end
+
+  # The adapter's `setup/1` returned `{:ok, _}`, so a raise, exit or throw
+  # from here on is model code's, and the report says so. The adapter's
+  # `teardown/1` runs, as it does for any variant that came up.
+  defp ready_or_model_fault(state, adapter_context) do
+    {:ok, build_ready_state(state, adapter_context)}
+  rescue
+    exception -> model_fault(state, adapter_context, exception)
+  catch
+    kind, reason -> model_fault(state, adapter_context, Verdict.caught(kind, reason))
+  end
+
+  defp model_fault(state, adapter_context, exception) do
+    state = %{state | ctx: setup_context(state, adapter_context)}
+    released = release_all(state)
+
+    {:error, Failure.setup_failed(:model, detail: exception),
+     %{keep_lines(state, :adapter_teardown, released) | released: true}}
   end
 
   defp keep_lines(state, key, lines),
@@ -653,6 +677,16 @@ defmodule PropertyDamage.Variant do
     kind, reason -> {:error, {kind, reason}}
   end
 
+  defp setup_context(state, adapter_context) do
+    %Stepping.Context{
+      model: state.model,
+      adapter: state.target.adapter,
+      adapter_context: adapter_context,
+      event_queue: state.event_queue,
+      target_name: state.target.name
+    }
+  end
+
   defp build_ready_state(state, adapter_context) do
     exec =
       Stepping.init_state(state.model,
@@ -675,15 +709,7 @@ defmodule PropertyDamage.Variant do
 
     exec = %{exec | logs: state.logs}
 
-    ctx = %Stepping.Context{
-      model: state.model,
-      adapter: state.target.adapter,
-      adapter_context: adapter_context,
-      event_queue: state.event_queue,
-      target_name: state.target.name
-    }
-
-    state = %{state | ctx: ctx}
+    state = %{state | ctx: setup_context(state, adapter_context)}
 
     case Executor.run_startup_checks(exec) do
       {:ok, exec} ->

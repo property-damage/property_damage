@@ -284,8 +284,9 @@ defmodule PropertyDamage.Telemetry do
   # Evaluates one check for the engine inside a check start/stop pair when
   # `context` is set. `fun` returns the check's verdict as read by
   # `PropertyDamage.Verdict.check/2`, or raises. A pass returns `:ok`; a
-  # returned failure returns `{:failed, exception, []}` and a raise
-  # `{:failed, exception, stacktrace}`.
+  # returned failure returns `{:failed, exception, []}`; a raise, exit or
+  # throw returns `{:failed, exception, stacktrace}`, with an exit or throw
+  # turned into an exception by `PropertyDamage.Verdict.caught/2`.
   @spec check_span(map() | nil, module(), atom(), (-> :pass | {:fail, Exception.t()})) ::
           :ok | {:failed, Exception.t(), list()}
   def check_span(context, projection, check_name, fun) do
@@ -309,6 +310,9 @@ defmodule PropertyDamage.Telemetry do
         end
       rescue
         exception -> {:failed, exception, __STACKTRACE__}
+      catch
+        # An exit or throw bypasses `rescue`; it fails the check like a raise.
+        kind, reason -> {:failed, PropertyDamage.Verdict.caught(kind, reason), __STACKTRACE__}
       end
 
     if metadata do

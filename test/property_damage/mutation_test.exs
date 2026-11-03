@@ -551,6 +551,50 @@ defmodule PropertyDamage.MutationTest do
       assert length(report.survived_mutations) == 1
     end
 
+    test "record_result counts error kills apart and leaves them out of the score" do
+      error_kill = %{
+        command: TestEvent,
+        operator: :status,
+        result: :killed_by_error,
+        mutation: %{},
+        failure_message: "boom",
+        duration_ms: 1
+      }
+
+      kill = %{error_kill | result: :killed}
+      survivor = %{error_kill | result: :survived}
+
+      report =
+        Enum.reduce(
+          [error_kill, error_kill, kill, survivor],
+          Report.new(),
+          &Report.record_result(&2, &1)
+        )
+
+      assert report.killed_by_error == 2
+      assert report.total == 4
+      assert report.mutation_score == 0.5
+      assert report.by_command[TestEvent].killed_by_error == 2
+      assert report.by_command[TestEvent].score == 0.5
+      assert report.by_operator[:status].score == 0.5
+    end
+
+    test "score is 0.0 when every mutation was an error kill" do
+      result = %{
+        command: TestEvent,
+        operator: :status,
+        result: :killed_by_error,
+        mutation: %{},
+        failure_message: "boom",
+        duration_ms: 1
+      }
+
+      report = Report.record_result(Report.new(), result)
+
+      assert report.mutation_score == 0.0
+      assert report.by_command[TestEvent].score == 0.0
+    end
+
     test "passes? returns true when score meets target" do
       report = %Report{mutation_score: 0.85, target_score: 0.80}
       assert Report.passes?(report)
@@ -627,6 +671,20 @@ defmodule PropertyDamage.MutationTest do
       assert output =~ "| Metric | Value |"
       assert output =~ "85"
       assert output =~ "PASS"
+    end
+
+    test "names the error kills and says the score excludes them", %{report: report} do
+      report = %{report | killed_by_error: 4, total: 24}
+
+      terminal = Formatter.format(report, :terminal)
+      markdown = Formatter.format(report, :markdown)
+      json = Jason.decode!(Formatter.format(report, :json))
+
+      assert terminal =~ "4 killed by adapter error"
+      assert terminal =~ "excluded from the score"
+      assert markdown =~ "| Killed by adapter error | 4 |"
+      assert markdown =~ "excluded from the score"
+      assert json["killed_by_error"] == 4
     end
 
     test "formats json output", %{report: report} do
@@ -808,6 +866,48 @@ defmodule PropertyDamage.MutationTest do
 
       # Report shape stays internally consistent.
       assert report.total == report.killed + report.survived + report.timeout
+    end
+  end
+
+  describe "run/1 killed mutation message" do
+    test "a killed mutation carries the failure message of the report" do
+      {:ok, report} =
+        Mutation.run(
+          model: FixtureModel,
+          targets: [PropertyDamage.Test.TestAdapter],
+          operators: [:value],
+          mutations_per_command: 1,
+          max_runs: 1
+        )
+
+      assert report.killed > 0
+
+      for %{failure_message: message} <- report.killed_mutations do
+        assert message =~ "mutation progress fixture: always fails"
+      end
+    end
+  end
+
+  describe "run/1 adapter-error kills" do
+    test "error kills are counted apart and excluded from the score" do
+      {:ok, report} =
+        Mutation.run(
+          model: PassingModel,
+          targets: [PropertyDamage.Test.TestAdapter],
+          operators: [:status],
+          mutations_per_command: 4,
+          max_runs: 1
+        )
+
+      assert report.mutation_score == 0.0
+      assert report.killed == 0
+      assert report.killed_by_error > 0
+
+      assert report.total ==
+               report.killed + report.killed_by_error + report.survived + report.timeout
+
+      for {_command, stats} <- report.by_command, do: assert(stats.score == 0.0)
+      for {_operator, stats} <- report.by_operator, do: assert(stats.score == 0.0)
     end
   end
 

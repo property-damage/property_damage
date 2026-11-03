@@ -308,6 +308,28 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
+  defp format_failure(
+         :setup_failed,
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :model}} = failure,
+         context
+       ) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    Model code (a projection, a check or a hand-written `__checks__/0`) raised,
+    exited or threw while the target came up. The adapter's setup/1 had succeeded.
+
+    Suggestions:
+      - Read the reason: it names the projection or the entry that failed
+      - Fix the model code; the adapter needs no change
+    """
+    |> String.trim()
+  end
+
   defp format_failure(:setup_failed, failure, context) do
     cmd_info = format_command_info(context)
 

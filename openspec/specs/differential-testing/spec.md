@@ -670,7 +670,7 @@ The mutation testing subsystem SHALL inject faults into adapter responses by wra
 - **WHEN** `PropertyDamage.Mutation.run/1` is called with a model, a `targets:` list of exactly one entry (DR-043) and configuration
 - **THEN** the framework SHALL generate mutations using the configured operators
 - **AND** SHALL execute full command sequences against each mutated adapter
-- **AND** SHALL classify each mutation as killed (detected) or survived (undetected)
+- **AND** SHALL classify each mutation as killed (a check detected it), killed by error (the run failed with an `:execution_failed` report, for example because the mutation made the adapter return an error; DR-059), survived (undetected) or timed out
 
 #### Scenario: Mutating a model with expansions (DR-049)
 
@@ -682,7 +682,9 @@ The mutation testing subsystem SHALL inject faults into adapter responses by wra
 #### Scenario: Mutation score calculation
 
 - **WHEN** mutation testing completes
-- **THEN** the framework SHALL calculate the mutation score as `killed_mutations / total_mutations`
+- **THEN** the framework SHALL calculate the mutation score as `killed / (total - killed_by_error)`, or 0.0 when that denominator is 0, with timeouts left in the denominator (DR-059)
+- **AND** SHALL apply the same rule to the score of each `by_command` and `by_operator` row
+- **AND** SHALL report the `killed_by_error` count next to `killed` and `survived` and state that the score excludes it
 - **AND** SHALL compare against the configured `target_score` (default 0.80)
 
 ### Requirement: Mutation Operators
