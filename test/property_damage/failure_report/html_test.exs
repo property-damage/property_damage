@@ -105,6 +105,9 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       assert PropertyDamage.FailureReport.failure_type(report) == :adapter_error
       assert {:ok, path} = HTML.write(report, dir)
       assert Path.basename(path) =~ ~r/-adapter_error-seed\d+\.html$/
+      assert [%{"title" => title}] = index_entries(dir)
+      assert title =~ "adapter_error"
+      refute title =~ "execution_failed"
     end
 
     test "a check failure keeps its kind in the page name", %{dir: dir} do
