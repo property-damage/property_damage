@@ -397,48 +397,51 @@ list produces every event. List it in `injectable_events/0` and give it an
 injector. The injector stays hand-owned like the adapter, so scaffold a stub
 and let the user fill in the transport:
 
-    # test/support/pd/wallets/payment_webhook.ex
-    # Scaffolded by pd-model-interview (class: hand-owned). Yours after the first edit.
-    defmodule MyStore.PD.Wallets.PaymentWebhook do
-      @moduledoc """
-      Delivers the payment provider's confirmation webhook as a PaymentConfirmed event.
-      """
+<!-- pd-doc-verify: runnable -->
+```elixir
+# test/support/pd/wallets/payment_webhook.ex
+# Scaffolded by pd-model-interview (class: hand-owned). Yours after the first edit.
+defmodule MyStore.PD.Wallets.PaymentWebhook do
+  @moduledoc """
+  Delivers the payment provider's confirmation webhook as a PaymentConfirmed event.
+  """
 
-      use PropertyDamage.Adapter.Injector
+  use PropertyDamage.Adapter.Injector
 
-      @emits [MyStore.PD.Wallets.Events.PaymentConfirmed]
+  @emits [MyStore.PD.Wallets.Events.PaymentConfirmed]
 
-      @impl true
-      def setup(config) do
-        # TODO(pd-model-interview): start listening for the webhook, and call
-        # deliver(payload, queue) for each payload it receives.
-        {:ok, %{queue: config.event_queue}}
-      end
+  @impl true
+  def setup(config) do
+    # TODO(pd-model-interview): start listening for the webhook, and call
+    # deliver(payload, queue) for each payload it receives.
+    {:ok, %{queue: config.event_queue}}
+  end
 
-      @impl true
-      def teardown(_context), do: :ok
+  @impl true
+  def teardown(_context), do: :ok
 
-      @impl true
-      def to_event(_payload) do
-        # TODO(pd-model-interview): turn the payload into a PaymentConfirmed event.
-        :skip
-      end
+  @impl true
+  def to_event(_payload) do
+    # TODO(pd-model-interview): turn the payload into a PaymentConfirmed event.
+    :skip
+  end
 
-      # The queue stores whatever it receives as the event and the framework
-      # never calls to_event/1 for an injector, so convert before pushing.
-      def deliver(payload, queue), do: push_result(to_event(payload), queue)
+  # The queue stores whatever it receives as the event and the framework
+  # never calls to_event/1 for an injector, so convert before pushing.
+  def deliver(payload, queue), do: push_result(to_event(payload), queue)
 
-      # Public on purpose. While to_event/1 returns only :skip, the compiler
-      # warns that two clauses of a private function never match.
-      def push_result({:ok, event}, queue),
-        do: PropertyDamage.EventQueue.push(queue, __MODULE__, event)
+  # Public on purpose. While to_event/1 returns only :skip, the compiler
+  # warns that two clauses of a private function never match.
+  def push_result({:ok, event}, queue),
+    do: PropertyDamage.EventQueue.push(queue, __MODULE__, event)
 
-      def push_result(:skip, _queue), do: :ok
+  def push_result(:skip, _queue), do: :ok
 
-      def push_result({:error, reason}, _queue) do
-        raise "#{inspect(__MODULE__)}: to_event/1 returned an error: #{inspect(reason)}"
-      end
-    end
+  def push_result({:error, reason}, _queue) do
+    raise "#{inspect(__MODULE__)}: to_event/1 returned an error: #{inspect(reason)}"
+  end
+end
+```
 
 The `raise` runs in the process that calls `deliver/2`, which is the user's
 listener, not the run. If the listener lets it end that process (a webhook

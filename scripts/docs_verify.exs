@@ -8,7 +8,9 @@
 # Corpus: README.md, guides/*.md, benches/*/README.md, shipped agent skills
 # (.claude/skills/pd-*/**/*.md, SKILL.md plus references), and the Livebook notebook
 # notebooks/property_damage_demo.livemd. A fence is executable only when the line
-# immediately above it is exactly `<!-- pd-doc-verify: runnable -->`.
+# immediately above it is `<!-- pd-doc-verify: runnable -->`. Leading whitespace on
+# that line and on the fence is ignored, so a fence inside a list item runs too.
+# Indented code blocks without backtick fences (four-space style) never run.
 #
 # Usage (from the repo root):
 #     elixir scripts/docs_verify.exs                 # full corpus + notebook
