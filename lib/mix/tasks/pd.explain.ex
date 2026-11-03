@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Pd.Explain do
   ## Usage
 
       mix pd.explain PAGE
+      mix pd.explain PAGE --files
       mix pd.explain PAGE --prompt
       mix pd.explain PAGE --apply FILE
       mix pd.explain PAGE --apply -
@@ -31,6 +32,12 @@ defmodule Mix.Tasks.Pd.Explain do
   prints the bundle hash. If the page already holds an explanation of this
   bundle for this prompt version, the task prints one line saying so and writes
   nothing.
+
+  With `--files`, the task does exactly what it does without an option and never
+  runs a command, whatever `explain_with` says in the config below. Use it when
+  the caller writes the explanation itself, as an agent skill does, and must get
+  the files even in a project that sets a command. It prints no config notice.
+  `--files` cannot be combined with `--prompt`, `--apply` or `--with`.
 
   With `--prompt`, the task prints the instructions, a newline, the bundle and a
   newline to standard output, and nothing else. It writes nothing. Pipe it to
@@ -83,10 +90,12 @@ defmodule Mix.Tasks.Pd.Explain do
 
       config :property_damage, explain_with: "my-llm-cli --json"
 
-  When that value is a non-empty string and you give neither `--prompt` nor
-  `--apply` nor `--with`, the task prints
+  When that value is a non-empty string and you give none of `--files`,
+  `--prompt`, `--apply` and `--with`, the task prints
   `using the command from config :property_damage, :explain_with` to standard
   error and behaves as if you had passed `--with` with that command.
+
+  `--files` ignores this config.
 
   `--with` runs `CMD` on every call, and the command may cost money each time.
   Put `--with` in a CI job only if you accept that the job runs the command, and
@@ -120,7 +129,7 @@ defmodule Mix.Tasks.Pd.Explain do
   @default_timeout_seconds 600
 
   @usage "usage: mix pd.explain PAGE " <>
-           "[--prompt | --apply FILE|- | --with CMD [--attempts N] [--timeout T]]"
+           "[--files | --prompt | --apply FILE|- | --with CMD [--attempts N] [--timeout T]]"
 
   @config_notice "using the command from config :property_damage, :explain_with"
 
@@ -137,6 +146,7 @@ defmodule Mix.Tasks.Pd.Explain do
     {opts, argv, invalid} =
       OptionParser.parse(args,
         strict: [
+          files: :boolean,
           prompt: :boolean,
           apply: :string,
           with: :string,
@@ -174,6 +184,9 @@ defmodule Mix.Tasks.Pd.Explain do
   defp check_options([{"--prompt", value} | _]),
     do: {:usage, "mix pd.explain: --prompt takes no value, got #{value}"}
 
+  defp check_options([{"--files", value} | _]),
+    do: {:usage, "mix pd.explain: --files takes no value, got #{value}"}
+
   defp check_options([{switch, _value} | _]),
     do: {:usage, "mix pd.explain: unknown option #{switch}"}
 
@@ -183,6 +196,15 @@ defmodule Mix.Tasks.Pd.Explain do
 
   defp check_modes(opts) do
     cond do
+      opts[:files] && opts[:prompt] ->
+        {:usage, "mix pd.explain: --files and --prompt cannot be used together"}
+
+      opts[:files] && Keyword.has_key?(opts, :apply) ->
+        {:usage, "mix pd.explain: --files and --apply cannot be used together"}
+
+      opts[:files] && Keyword.has_key?(opts, :with) ->
+        {:usage, "mix pd.explain: --files and --with cannot be used together"}
+
       opts[:prompt] && Keyword.has_key?(opts, :apply) ->
         {:usage, "mix pd.explain: --prompt and --apply cannot be used together"}
 
@@ -204,9 +226,11 @@ defmodule Mix.Tasks.Pd.Explain do
   end
 
   # Settles what the task does. A `--with` command wins over the config; the
-  # other mode flags win over both.
+  # other mode flags win over both, and `--files` skips the config so that a
+  # caller can always get the files.
   defp resolve_mode(opts) do
     cond do
+      opts[:files] -> no_run_options(:default, opts)
       Keyword.has_key?(opts, :with) -> with_mode(opts[:with], false, opts)
       opts[:prompt] -> no_run_options(:prompt, opts)
       Keyword.has_key?(opts, :apply) -> no_run_options({:apply, opts[:apply]}, opts)

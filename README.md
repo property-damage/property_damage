@@ -377,6 +377,7 @@ ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
 The skill drives `mix pd.explain`, which reads one page and loads no project code:
 
 - `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation for the page's bundle at the current prompt version. An explanation made for an older prompt version does not count, so the task writes the files again.
+- `mix pd.explain PAGE --files` does the same as the first bullet and never runs a command. A project may set `config :property_damage, explain_with: CMD` so that `mix pd.explain PAGE` runs `CMD`; `--files` ignores that config, so a caller that writes the explanation itself still gets the files.
 - `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice. On a first run Mix prints its compile messages before the prompt, so run `mix compile` first, or set `MIX_QUIET=1`, when you pipe the output.
 - `mix pd.explain PAGE --apply FILE` (or `--apply -` for standard input) checks an explanation written as JSON and, if it passes, embeds it in the page. If it fails, it prints every problem and leaves the page untouched.
 
