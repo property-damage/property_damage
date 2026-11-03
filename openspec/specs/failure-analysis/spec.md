@@ -375,7 +375,7 @@ Each item SHALL print its label at column 2 and its name (a module, `Module.func
 
 - **GIVEN** a comparison failure in which each target ran a root as a listed expansion entry
 - **WHEN** the report is printed
-- **THEN** a `Path` item for each target, the reference first, SHALL be named `"<target>" ran <Root> as steps [i.j],[i.k]` and SHALL print the entry's `doc:`, or when the entry has none, the line that names the entry's number, the model function that returned it and the root
+- **THEN** a `Path` item for each target, the reference first, SHALL be named `"<target>" split <Root> (step i) into <A> (step i.0) and <B> (step i.1)` when the target ran the root as leaves (one leaf: `into <A> (step i.0)`; three or more: `<A> (step i.0), <B> (step i.1) and <C> (step i.2)`) or `"<target>" ran <Root> (step i) as itself, as its listed entry` when the entry is the root alone, using the step labels of the Run view, and SHALL print the entry's `doc:`, or when the entry has none, the line that names the entry's number, the model function that returned it and the root
 - **AND** a root that a target ran as itself in place of an entry SHALL have no `Path` item
 
 #### Scenario: A kind without a subject prints the meaning and the model
