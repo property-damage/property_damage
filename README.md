@@ -37,7 +37,7 @@ Add `property_damage` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:property_damage, "~> 0.2"},
+    {:property_damage, "~> 0.3"},
     {:stream_data, "~> 1.0"}
   ]
 end
@@ -1538,7 +1538,7 @@ the git tag matching your installed version. Skills track the API of their relea
 tag may reference APIs your version does not have:
 
 ```bash
-git clone --depth 1 --branch v0.2.0 https://github.com/property-damage/property_damage /tmp/pd
+git clone --depth 1 --branch v0.3.0 https://github.com/property-damage/property_damage /tmp/pd
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 

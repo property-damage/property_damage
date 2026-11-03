@@ -20,7 +20,7 @@ Opens the file as a fenced `yaml` block:
 model: OrderBook                      # model module basename
 namespace: MyApp.PD.OrderBook         # module prefix for generated code
 dir: test/support/pd/order_book/      # this directory
-pd_version: "0.2.0"                   # PD version scaffolded against
+pd_version: "0.3.0"                   # PD version scaffolded against
 transport: in_process                 # in_process | http | other (prose below)
 reset: ecto_sandbox                   # how a run gets a clean SUT
 openapi:                              # only when composed with an OpenAPI spec
