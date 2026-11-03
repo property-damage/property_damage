@@ -536,7 +536,8 @@ defmodule PropertyDamage do
       compare: opts[:compare],
       measure_latency: opts[:latency] != false,
       latency: latency_given,
-      latency_budget: opts[:latency]
+      latency_budget: opts[:latency],
+      external_markers: opts[:external_markers] || []
     }
 
     # Validate configuration against every target's adapter and injectors
@@ -626,7 +627,7 @@ defmodule PropertyDamage do
     end)
 
     # Generate sequences and run
-    generator_opts = [max_commands: ctx.max_commands]
+    generator_opts = [max_commands: ctx.max_commands, external_markers: ctx.external_markers]
 
     generator_opts =
       if ctx.branching,
@@ -1050,6 +1051,7 @@ defmodule PropertyDamage do
         measure_latency: ctx.measure_latency,
         stutter_config: ctx.stutter_config,
         keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         check_mode: ctx.check_mode
       )
 
@@ -1102,6 +1104,7 @@ defmodule PropertyDamage do
         mock_registry: mock_registry,
         stutter_config: ctx.stutter_config,
         keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         # Explicit stutter RNG base (DR-029): per-run seed so stutter
         # decisions are decoupled from run count and seed-library replay
         # drift, yet reproduce on the same campaign seed.
@@ -1665,6 +1668,7 @@ defmodule PropertyDamage do
             # the offending command rather than being skipped.
             stutter_config: ctx.stutter_config,
             keep_attempts: ctx.keep_attempts,
+            external_markers: ctx.external_markers,
             # The run's effective seed: every attempt runs as run 0 of it, so
             # the per-target RNG and the stutter base track the original run.
             rng_seed: found.run_seed,
@@ -1785,6 +1789,7 @@ defmodule PropertyDamage do
           mock_registry: mock_registry,
           stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
           keep_attempts: ctx.keep_attempts,
+          external_markers: ctx.external_markers,
           rng_seed: found.run_seed,
           run_nonce: ctx.run_nonce,
           mint_epoch: epoch,
