@@ -9,6 +9,7 @@
   --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1f23; --muted: #5d636e; --line: #dfe1e5;
   --accent: #2f5bd3; --bad: #c62f2f; --bad-bg: #fdecec; --ok: #1f7a4a; --ok-bg: #e7f5ee;
   --warn: #8a5a00; --ref: #2f5bd3; --var: #8d3fc7; --code-bg: #f0f1f3;
+  --cite: #a1007d;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -17,12 +18,14 @@
     --bg: #15171b; --panel: #1d2026; --ink: #e6e8ec; --muted: #9aa1ad; --line: #30343c;
     --accent: #7ea2ff; --bad: #ff7b7b; --bad-bg: #3a1f22; --ok: #6fd3a0; --ok-bg: #18322a;
     --warn: #e0b45c; --ref: #7ea2ff; --var: #c79bff; --code-bg: #262a31;
+    --cite: #d10fc8;
   }
 }
 :root[data-theme="dark"] {
   --bg: #15171b; --panel: #1d2026; --ink: #e6e8ec; --muted: #9aa1ad; --line: #30343c;
   --accent: #7ea2ff; --bad: #ff7b7b; --bad-bg: #3a1f22; --ok: #6fd3a0; --ok-bg: #18322a;
   --warn: #e0b45c; --ref: #7ea2ff; --var: #c79bff; --code-bg: #262a31;
+  --cite: #d10fc8;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
@@ -231,7 +234,8 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
 .xcode .xl { display: flex; white-space: pre; }
 .xcode .xn { flex: none; width: 4.5em; padding-right: 10px; text-align: right; color: var(--muted); user-select: none; }
 .xcode .xt { padding-right: 10px; }
-.xhl { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* The mark on the element a citation points at has a color of its own, so it never reads as part of the report. */
+.xhl { outline: 3px solid var(--cite); outline-offset: 2px; }
 </style>
 </head>
 <body>
