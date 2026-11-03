@@ -223,8 +223,10 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
 .xhyp ul { margin: 2px 0 4px; padding-left: 20px; }
 .xlbl { font-size: 13px; font-weight: 600; margin-top: 8px; }
 .xcites { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; margin-top: 4px; min-width: 0; }
-.xcite { font: 11.5px var(--mono); color: var(--accent); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
-.xcite.xnone { color: var(--muted); border-style: dashed; }
+.xcite { font: 11px/1 var(--mono); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 9px; min-width: 18px; padding: 3px 5px; text-align: center; cursor: pointer; }
+.xcite:hover, .xcite:focus-visible, .xcite[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+.xcite:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.xcite.xnone { border-style: dashed; cursor: help; opacity: .75; }
 .xcode { flex-basis: 100%; min-width: 0; max-width: 100%; overflow-x: auto; font: 12px/1.45 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 6px 0; }
 .xcode .xl { display: flex; white-space: pre; }
 .xcode .xn { flex: none; width: 4.5em; padding-right: 10px; text-align: right; color: var(--muted); user-select: none; }
@@ -498,7 +500,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
 
   // ---------- model ----------
   var R = null, NODES = {}, TAGS = [], TAGCOUNT = {}, CMDPREFIX = "", EVPREFIX = "", SRC = "";
-  var S = { tags: {}, open: {}, linked: false, sel: null, rawOpen: {}, pay: {}, cmpOpen: {}, cmpFocus: null };
+  var S = { tags: {}, open: {}, linked: true, sel: null, rawOpen: {}, pay: {}, cmpOpen: {}, cmpFocus: null };
 
   function commonPrefix(mods) {
     mods = mods.filter(Boolean);
@@ -897,7 +899,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
   }
   function setHash() {
     var ids = Object.keys(S.open);
-    history.replaceState(null, "", ids.length ? "#/run?open=" + ids.map(encodeURIComponent).join(",") : location.pathname + location.search);
+    history.replaceState(history.state, "", ids.length ? "#/run?open=" + ids.map(encodeURIComponent).join(",") : location.pathname + location.search);
   }
   function render() {
     var y = window.scrollY, N = R.targets.length;
@@ -1151,13 +1153,13 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       "<h2>Talking points</h2>" + list(X.talking_points).map(claim).join("");
     view.parentNode.insertBefore(bar, view);
     view.parentNode.insertBefore(pane, view);
-    bar.addEventListener("click", function (e) { var b = e.target.closest("[data-view]"); if (b) show(b.getAttribute("data-view")); });
+    bar.addEventListener("click", function (e) { var b = e.target.closest("[data-view]"); if (b) go(b.getAttribute("data-view")); });
     pane.addEventListener("click", function (e) {
       var b = e.target.closest("[data-ref]");
       if (!b) return;
       var id = b.getAttribute("data-ref");
       if (b.classList.contains("xsrc")) toggleSource(b, id);
-      else cite(id);
+      else go("run", id);
     });
     // The Run view's arrow keys walk its lines; on the Explanation tab they scroll the page.
     window.addEventListener("keydown", function (e) { if (cur === "explanation" && /^Arrow/.test(e.key)) e.stopPropagation(); }, true);
@@ -1166,11 +1168,15 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
     function list(x) { return Array.isArray(x) ? x : []; }
     function claim(c) { c = c || {}; return '<div class="xitem"><p>' + esc(c.text) + "</p>" + cites(c.cites) + "</div>"; }
     function cites(ids) {
-      return '<div class="xcites">' + list(ids).map(function (id) {
+      return '<div class="xcites">' + list(ids).map(function (id, i) {
         id = String(id);
-        if (/^source:/.test(id) ? sourceOf(id) : IDS[id] && locate(id))
-          return '<button type="button" class="xcite' + (/^source:/.test(id) ? ' xsrc" aria-expanded="false" title="show the cited lines"' : '" title="show in the run"') + ' data-ref="' + esc(id) + '">' + esc(id) + "</button>";
-        return '<span class="xcite xnone" data-ref-none="' + esc(id) + '">' + esc(id) + " (not in this page)</span>";
+        var n = i + 1, src = /^source:/.test(id);
+        if (src ? sourceOf(id) : IDS[id] && locate(id)) {
+          var tip = esc(id) + (src ? " (show the cited lines)" : " (show in the run)");
+          return '<button type="button" class="xcite' + (src ? ' xsrc" aria-expanded="false"' : '"') + ' title="' + tip + '" aria-label="' + tip + '" data-ref="' + esc(id) + '">' + n + "</button>";
+        }
+        var none = esc(id) + " (not in this page)";
+        return '<span class="xcite xnone" title="' + none + '" aria-label="' + none + '" data-ref-none="' + esc(id) + '">' + n + "</span>";
       }).join("") + "</div>";
     }
     function show(v) {
@@ -1283,6 +1289,28 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
     }
     // Shows the cited element in the Run view: unfolds it, scrolls to it and marks it. One
     // element carries data-cite at a time.
+    // Every change of the visible tab adds one history entry: a tab click and a citation jump
+    // alike. An entry's state names its tab and, for a jump, the cited id; its scroll position
+    // is kept here, noted when the page leaves the entry. Back and Forward restore both.
+    var here = { n: 0, tab: cur }, ys = {}, lastN = 0;
+    try { history.replaceState(here, ""); } catch (err) { /* a page without history support still navigates */ }
+    function go(v, id) {
+      if (v === cur && !id) return;
+      ys[here.n] = window.scrollY;
+      here = { n: ++lastN, tab: v, cite: id || null };
+      try { history.pushState(here, ""); } catch (err) { /* see above */ }
+      if (id) cite(id); else show(v);
+    }
+    window.addEventListener("popstate", function (e) {
+      var st = e.state;
+      if (!st || typeof st.n !== "number") return;
+      ys[here.n] = window.scrollY;
+      here = st;
+      show(st.tab);
+      if (st.cite) cite(st.cite);
+      else window.scrollTo(0, ys[st.n] || 0);
+    });
+    try { history.scrollRestoration = "manual"; } catch (err) { /* default restoration */ }
     function cite(id) {
       var loc = locate(id);
       if (!loc) return;

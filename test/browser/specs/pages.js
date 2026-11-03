@@ -16,7 +16,10 @@ const files = fs
 // The generator explains the check failure only; the other page has no
 // explanation, whatever its kind is named.
 const explained = files.find((f) => f.includes("check_failed"));
-const plain = files.find((f) => f !== explained);
+const plain = files.find((f) => f.includes("bob"));
+
+// The page of a run with two targets, which has the Run view's linking checkbox.
+const paired = files.find((f) => f.includes("diverged"));
 
 const url = (file) => pathToFileURL(path.join(dir, file)).href;
 
@@ -30,4 +33,4 @@ function watchErrors(page) {
   return errors;
 }
 
-module.exports = { dir, files, explained, plain, url, watchErrors };
+module.exports = { dir, files, explained, plain, paired, url, watchErrors };

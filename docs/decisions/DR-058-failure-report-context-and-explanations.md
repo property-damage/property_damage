@@ -249,8 +249,9 @@ build changes any of them.
     `mix pd.explain` modes are the interface the skill uses.
 
 16. **A page with an explanation opens on two tabs.** The tabs are Explanation
-    and Run, with Explanation first. Every citation links to its evidence and
-    highlights it, and a `source:` citation unfolds the cited lines. The tab
+    and Run, with Explanation first. Every citation is a small numbered marker (its id is in its tooltip) that links to its evidence and
+    highlights it, and a `source:` citation unfolds the cited lines. Each change of tab, by a tab click
+    or a citation, adds one browser history entry that Back and Forward restore with its scroll position. The tab
     opens with the fixed line "Hypotheses ranked by a language model from this
     run; each claim links to its evidence." Hypotheses print as "Hypothesis 1
     (likely)", never as "Cause", and the tab has no footer. A page without an

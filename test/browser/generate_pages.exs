@@ -113,7 +113,11 @@ defmodule BrowserPages.Adapter do
   @impl true
   def teardown(_ctx), do: :ok
 
+  # The tenant "dave" books every deposit one too high, so it differs from its reference.
   @impl true
+  def execute(%BrowserPages.Deposit{amount: amount}, %{tenant: "dave"}, _runtime),
+    do: {:ok, [%BrowserPages.Deposited{amount: amount + 1}]}
+
   def execute(%BrowserPages.Deposit{amount: amount}, _ctx, _runtime),
     do: {:ok, [%BrowserPages.Deposited{amount: amount}]}
 
@@ -121,6 +125,37 @@ defmodule BrowserPages.Adapter do
     do: {:ok, [%BrowserPages.Pinged{n: 0}]}
 
   def execute(%BrowserPages.Ping{}, _ctx, _runtime), do: {:error, :service_down}
+end
+
+defmodule BrowserPages.Total do
+  @moduledoc "Sums the deposits of a sequence and offers the sum for comparison."
+  use PropertyDamage.Model.Projection
+
+  @impl true
+  def init, do: %{total: 0}
+
+  @impl true
+  def apply(state, %BrowserPages.Deposited{amount: amount}),
+    do: %{state | total: state.total + amount}
+
+  def apply(state, _other), do: state
+
+  @compare every: :end
+  def total(state, _root), do: state.total
+end
+
+defmodule BrowserPages.PairModel do
+  @moduledoc "Deposits on two targets that book the same amount differently."
+  use PropertyDamage.Model
+
+  @impl true
+  def commands, do: [BrowserPages.Deposit]
+
+  @impl true
+  def command_sequence_projection, do: BrowserPages.Steps
+
+  @impl true
+  def check_projections, do: [BrowserPages.Total]
 end
 
 defmodule BrowserPages.Generate do
@@ -135,6 +170,7 @@ defmodule BrowserPages.Generate do
 
     check_page = run!(BrowserPages.AccountModel, "alice", 11, dir)
     run!(BrowserPages.ServiceModel, "bob", 12, dir)
+    run!(BrowserPages.PairModel, ["carol", "dave"], 13, dir)
 
     explain!(check_page, dir)
 
@@ -145,13 +181,17 @@ defmodule BrowserPages.Generate do
   def main(_args), do: Mix.raise("usage: mix run test/browser/generate_pages.exs DIR")
 
   # Runs the model until it fails and returns the page the run wrote.
-  defp run!(model, name, seed, dir) do
+  defp run!(model, names, seed, dir) do
     before = File.ls!(dir)
+
+    targets =
+      for name <- List.wrap(names),
+          do: {BrowserPages.Adapter, name: name, config: %{tenant: name}}
 
     result =
       PropertyDamage.run(
         model: model,
-        targets: [{BrowserPages.Adapter, name: name, config: %{}}],
+        targets: targets,
         max_runs: 20,
         max_commands: 6,
         seed: seed,
