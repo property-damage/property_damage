@@ -39,7 +39,7 @@ defmodule MyApp.RegressionTest do
       # Setup adapter directly
       {:ok, adapter_ctx} = TestAdapter.setup(%{base_url: "http://localhost:4000"})
 
-      # A no-op runtime handle for the now-required 3rd argument of execute/3.
+      # The third argument of execute/3 is the runtime handle.
       # When calling the adapter directly there is no framework to inject events
       # or start pollers, so both fields are no-ops.
       runtime = %PropertyDamage.Runtime{inject: fn _ -> :ok end, start_poller: fn _ -> nil end}

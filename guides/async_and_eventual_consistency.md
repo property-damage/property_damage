@@ -254,9 +254,16 @@ Commands declare their behavior via the `:execution` key of `command_spec/1`:
 ### The `settle:` map
 
 The per-command `settle:` map tunes the settle loop of a `:probe` or `:async`
-command. Every key is optional and a missing key takes its default:
+command. A `settle:` map you declare replaces the framework default as a whole,
+so it must carry all three keys. A map with a key missing (for example
+`%{timeout_ms: 1_000}`) fails the run with an `:adapter_error` holding a
+`KeyError` for the first missing key the loop reads, `:interval_ms`.
 
-| Key | Default | Meaning |
+```elixir
+settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
+```
+
+| Key | Value the framework applies when you declare no `settle:` map | Meaning |
 |-----|---------|---------|
 | `timeout_ms` | `2_000` | Longest the loop waits for the adapter call to stop answering `{:retry, reason}` |
 | `interval_ms` | `300` | Pause between attempts |
@@ -434,6 +441,15 @@ defmodule MyTest.Events.AuthorizationCreated do
   # authorization_id is server-generated
   defstruct [:account_id, :amount, :currency, :status, authorization_id: external()]
 end
+
+# The settled outcomes the adapters below return once the authorization resolves
+defmodule MyTest.Events.AuthorizationApproved do
+  defstruct [:authorization_id, :amount]
+end
+
+defmodule MyTest.Events.AuthorizationDeclined do
+  defstruct [:authorization_id, :reason]
+end
 ```
 
 The Model wires this command with account selection:
@@ -452,8 +468,17 @@ end
 defmodule MyTest.HTTPAdapter do
   use PropertyDamage.Adapter
 
+  alias MyTest.Commands.CreateAuthorization
+  alias MyTest.Events.{AuthorizationCreated, AuthorizationApproved, AuthorizationDeclined}
+
   @poll_timeout_ms 10_000
   @poll_interval_ms 200
+
+  @impl true
+  def setup(config), do: {:ok, %{client: Req.new(base_url: config[:base_url])}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
 
   @impl true
   def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
@@ -815,6 +840,9 @@ blocking a single command), you can create a polling Adapter.Injector:
 defmodule MyTest.AuthorizationPollerAdapter do
   use PropertyDamage.Adapter.Injector
 
+  alias MyTest.AuthorizationPoller
+  alias MyTest.Events.{AuthorizationApproved, AuthorizationDeclined}
+
   @emits [AuthorizationApproved, AuthorizationDeclined]
 
   @impl true
@@ -848,6 +876,8 @@ end
 
 defmodule MyTest.AuthorizationPoller do
   use GenServer
+
+  alias MyTest.Events.{AuthorizationApproved, AuthorizationDeclined}
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 

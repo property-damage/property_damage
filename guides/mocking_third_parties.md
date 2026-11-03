@@ -68,10 +68,6 @@ end
 defmodule PaymentDeclined do
   defstruct [:order_id, :reason]
 end
-
-defmodule PaymentTimedOut do
-  defstruct [:order_id]
-end
 ```
 
 ### Mock Module
@@ -80,7 +76,7 @@ end
 defmodule MyTest.PaymentGatewayMock do
   use PropertyDamage.MockServiceAdapter
 
-  @emits [PaymentAuthorized, PaymentDeclined, PaymentTimedOut]
+  @emits [PaymentAuthorized, PaymentDeclined]
 
   @impl true
   def setup(config) do
@@ -127,7 +123,7 @@ defmodule MyTest.PaymentGatewayMock do
         {:ok, resp, events}
 
       :timeout ->
-        events = [%PaymentTimedOut{order_id: body["order_id"]}]
+        # {:error, term} simulates a connection failure and carries no events.
         {:error, :timeout}
 
       :partial_failure ->
