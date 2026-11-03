@@ -1046,8 +1046,17 @@ rejected. This ensures the minimal sequence demonstrates the original bug, not a
 different one. For a divergence between targets (or a failure to converge), the name is the
 `@compare` key `{Projection, function}`: a candidate that diverges on another
 observation, or in another target, is a different failure and is rejected too.
-When a run has several failures (for example, when a target other than the reference, the first one, leaves the run after its adapter fails and the others go on; a failure in the reference ends the run), only the primary one (the first by root, then by
-target order) is shrunk, and `report.other_failures` lists the rest.
+A run can hold several failures. Only the primary one is shrunk: the first by
+root, then by target order. Here "reference" means the first target in
+`targets:`. A failure in the reference ends the run. A target other than the
+reference leaves the run after its adapter fails, and the others go on. That
+retirement case needs three or more targets: with two, a failure in the second
+target ends the run, because no target other than the reference is left.
+
+By default, `report.other_failures` holds the other failures of the shrunk
+reproduction, which can differ from the original run's. A failure past the
+last root of the shrunk sequence drops out. With `shrink: false`, it keeps the
+other failures of the original run.
 
 ### Shrinking and References
 

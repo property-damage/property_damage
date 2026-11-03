@@ -16,7 +16,7 @@ injecting bugs and seeing whether your tests catch them.
 property against the mutated responses:
 
 1. For each command, it runs the property once as a baseline (one whole run
-   of up to 10 commands, with its own random seed) and keeps the events of
+   of up to 10 commands, with a fresh seed for each baseline run) and keeps the events of
    that run, from all commands, as samples.
 2. It generates that command's mutations (via the configured operators) from
    its own samples, so two commands do not share one sample set.

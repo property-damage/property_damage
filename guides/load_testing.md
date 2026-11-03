@@ -355,15 +355,20 @@ If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 `terminate_early?/3` receives the state after a command, the command that was
 just added, and the events the simulator predicts for it. The generator calls
 it while it builds the sequence, before anything runs, so the events are a
-prediction and never a real answer from the SUT. A model without a
-`simulator/0` always passes `[]` as the events. It does not receive a step
-count, so decide from the state:
+prediction and never a real answer from the SUT. For a model without a
+`simulator/0`, the generator always passes `[]` as the events, and the state
+changes only through what the projection derives from the command itself.
+The callback does not receive a step count, so decide from the state. The
+second clause below counts accounts that a simulator predicts as
+`AccountCreated` events. Without a simulator the count stays at 0 and the
+clause never fires (see the
+[simulate callback](writing_commands.md#simulate-callback)).
 
 ```elixir
 # This terminates immediately: only 1 command per sequence
 def terminate_early?(_state, _command, _events), do: true
 
-# This ends each sequence once it holds three accounts
+# With a simulator, this ends each sequence once it holds three accounts
 def terminate_early?(state, _command, _events), do: map_size(state.accounts) >= 3
 ```
 
