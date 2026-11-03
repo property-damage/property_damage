@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mix pd.explain PAGE --files` (DR-060).** The flag writes
+  `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md` as the task
+  does without an option, and never runs a command, even when
+  `config :property_damage, explain_with:` is set. It cannot be combined with
+  `--prompt`, `--apply` or `--with`.
+
 - **A bundle in every HTML failure page (DR-058).** Each page carries a
   `pd-bundle` script tag, a JSON copy of the failure: its fields, the steps
   and events of each target, the sections, and the docs and source of the
@@ -630,6 +636,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A mutation killed by an adapter error no longer counts toward the
+  mutation score (DR-059).** A mutation whose run fails with an
+  `:execution_failed` report, for example a status mutation that makes the
+  adapter return an error, gets the outcome `:killed_by_error`. No check
+  caught it, so `mutation_score` is `killed / (total - killed_by_error)`, and
+  each `by_command` and `by_operator` row is scored the same way. The report
+  gains `killed_by_error` and `killed_by_error_mutations`, and the output
+  shows the count. Scores drop for models whose kills came from adapter
+  errors.
+
 - **Declare every model with `use PropertyDamage.Model` (DR-058).** Every
   model in this repo is now declared with it. A model that declares
   `@behaviour PropertyDamage.Model` directly still compiles and runs, and its
@@ -1196,6 +1212,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING: `PropertyDamage.Model.Projection.Liveness` is removed.** It
+  could not run: listed bare in `check_projections/0` it crashed the engine,
+  and listed with options it raised `FunctionClauseError`. To check that an
+  effect happens, declare `@eventually` per operation. To check that nothing
+  is left pending at the end of a run, add a `@check at: :teardown` to your
+  own projection.
+
 - **`observations` in the result of `PropertyDamage.Scheduler.run/1`.** Nothing
   read it; boundary observations reach a run through `@compare` alone.
 - **BREAKING (DR-042)**: Removed Differential baseline comparison: the `baseline:`
@@ -1266,6 +1289,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fault state (the original "per-instance handle" plan is superseded by removal).
 
 ### Fixed
+
+- **A check that exits or throws, or a projection with a malformed
+  `__checks__/0` entry, is no longer reported as an adapter setup failure.** A
+  check body that exits or throws now fails that check, as a raise does. Other
+  model code that faults while a target comes up is a setup failure with the
+  new cause `:model`, and its message names the faulty code. The cause
+  `:adapter_setup` now means only that the adapter's `setup/1` failed.
+- **A killed mutation reports why it was killed.** Every killed mutation said
+  "Unknown failure". Its `failure_message` is now the message of the failure
+  report the run returned.
+- **`PropertyDamage.Model.Projection.Statistics` works when listed in
+  `check_projections/0`.** It crashed the run, because its check entry
+  predated the current projection shape. The module now uses
+  `PropertyDamage.Model.Projection`, has `init/0` and declares no check;
+  `new/1` takes the `window_size` option. The `checks:` option and
+  `evaluate_checks/1` are gone: write a threshold as a `@check` in your own
+  projection that calls `compute_metrics/1`. The moduledoc shows the recipe.
 
 - **The `PropertyDamage.Replay` docs list the options the schema accepts.**
   They listed `:stutter_config` and `:external_markers`, which `run/2` and
