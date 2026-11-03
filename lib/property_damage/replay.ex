@@ -7,7 +7,7 @@ defmodule PropertyDamage.Replay do
   exactly how the system reached the failure state.
 
   Replay is a thin **stepping shell over the Executor**: every command runs
-  through the exact same engine path as a real run (ref/placeholder resolution,
+  through the exact same engine path as a real run (placeholder resolution,
   settle for probe/async commands, nemesis injection, injector and mock events,
   projection updates, `@check` checks, and stutter). This is what makes a
   recorded failure replay to the identical step sequence and state.
@@ -65,7 +65,6 @@ defmodule PropertyDamage.Replay do
   - `events` - Events produced by this command (in chronological order)
   - `projections` - Projection states after this command
   - `projections_before` - Projection states before this command
-  - `refs` - Ref resolution map
   - `result` - `:ok`, `{:check_failed, name, exception}`, or `{:error, reason}`
 
   ## Limitations

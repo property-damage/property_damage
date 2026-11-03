@@ -81,7 +81,7 @@ defmodule PropertyDamage.Command do
   takes an overrides map and returns a StreamData generator of maps. The framework
   wraps the result in the command struct automatically.
 
-  State-dependent concerns (preconditions, ref selection, expected events) are defined
+  State-dependent concerns (preconditions, selection of placeholder values, expected events) are defined
   in the **Model**, not the Command. This separation enables command reuse across
   different Models with different state shapes.
 
@@ -116,6 +116,16 @@ defmodule PropertyDamage.Command do
           ]
         end
 
+        def simulator, do: MyTest.OrderSimulator
+      end
+
+  The model names a simulator module in `simulator/0`. The engine calls
+  `simulate/2` on that module (see `PropertyDamage.Model.Simulator`):
+
+      defmodule MyTest.OrderSimulator do
+        @behaviour PropertyDamage.Model.Simulator
+
+        @impl true
         def simulate(%CreateOrder{amount: amount}, _state) do
           [%OrderCreated{amount: amount, order_ref: nil}]
         end

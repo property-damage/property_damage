@@ -5,9 +5,15 @@ defmodule PropertyDamage.Expansion do
   A model that defines `expansions/0` lets each target run a root either as
   itself or as the leaves of one of the entries the root's function returns.
   `for/5` answers "what did target `name` run in run `run` of a campaign
-  seeded with `seed`?" without running any target: it generates the run's
-  sequence exactly as `PropertyDamage.run/1` does and realizes the named
+  seeded with `seed`?" without running any target: it regenerates the run's
+  sequence the way `PropertyDamage.run/1` does and realizes the named
   target's entries the way the run realized them.
+
+  `for/5` accepts only `:targets` and `:max_commands`, and it has no option for
+  the atom markers a run named through `external_markers:`. The failure report
+  does not record them either. For a model with expansions that relied on such
+  markers, a command that consumes a marked value gets a placeholder no
+  registry knows, so the result can differ from what the run executed.
 
       {:ok, result} = PropertyDamage.Expansion.for(MyModel, 42, 1, "second", targets: targets)
       result.sequence

@@ -61,7 +61,10 @@ defmodule PropertyDamage.FailureReport do
     or linearization violation.
   - `:diverged` - a target's boundary observation (a `@compare` function)
     still differed from the reference's when the convergence bound expired.
-  - `:setup_failed` - a target's adapter `setup/1` returned an error or raised.
+  - `:setup_failed` - a target could not be brought up: its adapter `setup/1`
+    returned an error or raised, model code or the variant failed while it came
+    up, a setup command failed, a check failed on a setup command's event, or
+    a setup command left an `external()` value unresolved.
   - `:execution_failed` - a command could not be executed: an adapter raise,
     a command the framework could not run, and, in a one-target run, an
     adapter `{:error, _}` answer.

@@ -19,7 +19,7 @@ defmodule PropertyDamage do
   - **Model**: Defines what commands are available and how state is tracked
   - **Projections**: Pure state reducers that process commands and events to maintain state
   - **Adapters**: Bridge between the test framework and the actual SUT
-  - **Refs**: Symbolic placeholders for entity IDs, resolved during execution
+  - **Placeholders**: Symbolic stand-ins for values the system under test mints (see `PropertyDamage.External`), resolved during execution
 
   ## Two-Phase Execution
 
@@ -123,8 +123,8 @@ defmodule PropertyDamage do
 
   The framework consists of several layers:
 
-  - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
-  - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
+  - **Tier 0 (Core Types)**: Command, Projection, Model behaviours, Placeholder
+  - **Tier 1 (Execution)**: Adapter, EventQueue, Adapter.Injector, Executor
   - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
   - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, RunComparison
   - **Utilities**: Persistence, SeedLibrary, mix tasks
@@ -395,7 +395,7 @@ defmodule PropertyDamage do
 
   - `:name` - Label used in reports (default: last segment of the module name)
   - `:config` - Map passed to `adapter.setup/1` (default: `%{}`)
-  - `:injectors` - List of InjectorAdapter modules for event injection
+  - `:injectors` - List of `PropertyDamage.Adapter.Injector` modules for event injection
     (default: `[]`)
   - `:mocks` - Mock third-party services the SUT calls (default: `[]`).
     A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`

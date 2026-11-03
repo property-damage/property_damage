@@ -60,7 +60,7 @@ defmodule PropertyDamage.Linearization do
   ## Verification strength
 
   The check is exactly as strong as the model's simulator: predicted event
-  fields that are `nil`, unresolved refs, or external markers are treated as
+  fields that are `nil`, unresolved placeholders, or external markers are treated as
   wildcards, and commands the simulator does not predict (returns `[]`) are
   unconstrained. A model without a `simulator/0` cannot be verified at all;
   `check/5` then returns `{:indeterminate, 0}` rather than fabricating a
@@ -100,7 +100,7 @@ defmodule PropertyDamage.Linearization do
   ## Parameters
 
   - `branch_commands` - List of command lists, one per branch (commands should
-    have refs resolved so simulator predictions see concrete values)
+    have placeholders resolved so simulator predictions see concrete values)
   - `branch_events` - Map of branch_id to CHRONOLOGICAL event log entries
   - `projections` - Initial projection states (from prefix execution),
     as a `%{projection_module => state}` map
@@ -476,7 +476,7 @@ defmodule PropertyDamage.Linearization do
 
   # Expected events are compatible with observed events when every expected
   # event has a matching observed event (order-preserving, leftover observed
-  # events allowed). Predicted fields that are nil, refs, unresolved, or
+  # events allowed). Predicted fields that are nil, unresolved placeholders, or
   # external markers act as wildcards.
   defp events_compatible?(expected, observed) do
     Enum.reduce_while(expected, observed, fn exp, remaining ->
