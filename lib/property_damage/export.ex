@@ -184,7 +184,12 @@ defmodule PropertyDamage.Export do
   @doc """
   Saves an export to a file.
 
-  The filename is automatically generated based on the seed and format.
+  The file name is `reproduce_<seed>_<signature>` plus a suffix per format.
+  The signature is eight hex digits derived from the failure, so two different
+  failures that share a seed get different names. The ExUnit test ends in
+  `_test.exs`, so `mix test` runs it when you save it under `test/`. The
+  Elixir script ends in plain `.exs`, the curl script in `.sh`, the Python
+  script in `.py`, and the notebook in `.livemd`.
 
   ## Parameters
 
@@ -196,12 +201,12 @@ defmodule PropertyDamage.Export do
   ## Example
 
       {:ok, path} = PropertyDamage.Export.save(failure, "exports/", :exunit)
-      # => {:ok, "exports/reproduce_512902757.exs"}
+      # => {:ok, "exports/reproduce_512902757_02e399f6_test.exs"}
 
       {:ok, path} = PropertyDamage.Export.save(failure, "scripts/", {:script, :curl},
         base_url: "http://localhost:4000"
       )
-      # => {:ok, "scripts/reproduce_512902757.sh"}
+      # => {:ok, "scripts/reproduce_512902757_02e399f6.sh"}
   """
   @spec save(FailureReport.t(), Path.t(), format(), keyword()) ::
           {:ok, Path.t()} | {:error, term()}
@@ -241,11 +246,11 @@ defmodule PropertyDamage.Export do
       )
 
       # => {:ok, %{
-      #   exunit: "exports/reproduce_512902757.exs",
-      #   livebook: "exports/reproduce_512902757.livemd",
-      #   script_elixir: "exports/reproduce_512902757.exs",
-      #   script_curl: "exports/reproduce_512902757.sh",
-      #   script_python: "exports/reproduce_512902757.py"
+      #   exunit: "exports/reproduce_512902757_02e399f6_test.exs",
+      #   livebook: "exports/reproduce_512902757_02e399f6.livemd",
+      #   script_elixir: "exports/reproduce_512902757_02e399f6.exs",
+      #   script_curl: "exports/reproduce_512902757_02e399f6.sh",
+      #   script_python: "exports/reproduce_512902757_02e399f6.py"
       # }}
   """
   @spec save_all(FailureReport.t(), Path.t(), keyword()) ::

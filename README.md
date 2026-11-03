@@ -1192,13 +1192,13 @@ notebook = PropertyDamage.Export.to_livebook(failure,
 ```elixir
 # Save single format
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", :exunit)
-# => {:ok, "exports/reproduce_512902757.exs"}
+# => {:ok, "exports/reproduce_512902757_02e399f6_test.exs"}
 
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", {:script, :curl},
   base_url: "http://localhost:4000",
   adapter: MyHTTPAdapter
 )
-# => {:ok, "exports/reproduce_512902757.sh"}
+# => {:ok, "exports/reproduce_512902757_02e399f6.sh"}
 
 # Save all formats at once
 {:ok, paths} = PropertyDamage.Export.save_all(failure, "exports/",
@@ -1207,11 +1207,11 @@ notebook = PropertyDamage.Export.to_livebook(failure,
   script_languages: [:elixir, :curl, :python]
 )
 # => {:ok, %{
-#   exunit: "exports/reproduce_512902757.exs",
-#   livebook: "exports/reproduce_512902757.livemd",
-#   script_elixir: "exports/reproduce_512902757.exs",
-#   script_curl: "exports/reproduce_512902757.sh",
-#   script_python: "exports/reproduce_512902757.py"
+#   exunit: "exports/reproduce_512902757_02e399f6_test.exs",
+#   livebook: "exports/reproduce_512902757_02e399f6.livemd",
+#   script_elixir: "exports/reproduce_512902757_02e399f6.exs",
+#   script_curl: "exports/reproduce_512902757_02e399f6.sh",
+#   script_python: "exports/reproduce_512902757_02e399f6.py"
 # }}
 ```
 
