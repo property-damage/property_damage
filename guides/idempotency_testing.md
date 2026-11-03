@@ -246,7 +246,8 @@ defmodule MyAdapter do
 
   def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
     # The same header goes out on the first execution and on every retry.
-    headers = [{"Idempotency-Key", cmd.idempotency_key}]
+    # Calling the callback keeps this key equal to the one stutter retries reuse.
+    headers = [{"Idempotency-Key", CreateOrder.idempotency_key(cmd)}]
     result = HttpClient.post("/orders", %{amount: cmd.amount}, headers: headers)
     {:ok, [result.event]}
   end

@@ -390,7 +390,9 @@ Tests](static_regression_tests.md)), then replay it:
 ```bash
 # Re-run the failing sequence against the SUT and print a verdict. Exit codes:
 # 0 = fixed, 1 = the bug still reproduces, 125 = the replay could not run (the
-# file fails to load or the target's setup fails), 2 = usage error.
+# project does not compile, the file fails to load or records no model or
+# target, the sequence is branching, or the target's setup fails), 2 = usage
+# error.
 mix pd.replay bugs/read_consistent-seed352687743.pd
 
 # Show per-step events and projection state
