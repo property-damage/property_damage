@@ -30,7 +30,7 @@ Prefix (sequential setup):
   CreateAccount{name: "a"} -> CreateAccount{name: "b"}
     (produce account_a, account_b as server-generated ids)
 
-Branches (parallel execution):
+Branches (run one after another):
   Branch 1: Deposit{acc: account_a, amount: 100} -> Withdraw{acc: account_a, amount: 30}
   Branch 2: Deposit{acc: account_b, amount: 200} -> Transfer{from: account_a, to: account_b, amount: 50}
 
@@ -113,11 +113,19 @@ ordering of these parallel commands that produces the observed results?"
 
 The algorithm:
 
-1. Generate all valid interleavings of the branch commands (preserving
-   within-branch order).
-2. For each interleaving, simulate execution through the model's projections.
-3. Compare the simulated final state with the actual observed state.
-4. If any interleaving matches, the execution is linearizable.
+1. Generate valid interleavings of the branch commands (preserving
+   within-branch order), up to a candidate limit.
+2. For each interleaving, walk the commands in order. The model's simulator
+   predicts the events each command should produce, given the model state at
+   that position. The checker compares the prediction with the events the
+   system actually produced for that command.
+3. Advance the model state with the observed events and run the model's
+   `@check`s at that position.
+4. If some interleaving matches at every position and passes every check, the
+   execution is linearizable.
+
+Nothing compares a final state. A model without a `simulator/0` is never
+verified: the checker returns `{:indeterminate, 0}` and the run passes.
 
 ```elixir
 case PropertyDamage.Linearization.check(branches, branch_events, projections, model) do
@@ -181,7 +189,8 @@ model:
   is accepted: a read that returned `nil` after a physically earlier write is
   taken as "read first". The linear engine, with checks on, reports it.
 - **No `@eventually` poller for a branch command.** Checks are off inside the
-  branches; the synchronous checks run after the branch set.
+  branches. The linearization checker runs the synchronous checks at each
+  position of a candidate ordering, and the suffix runs with checks on.
 - **A converted replay cannot re-execute branch placeholders.** A replay
   artifact of a failure found on this path and converted to linear cannot
   re-execute placeholders minted in a branch (DR-050).
@@ -189,11 +198,14 @@ model:
   order.** The generator builds every branch from the same state; the executor
   and the shrinker judge the branches one after another, so a generated run
   can fail its own checks in the second branch.
+- **No expansions.** `branching:` is refused for a model that defines
+  `expansions/0` (DR-049): a branching sequence runs on one target without
+  expansions.
 - **`latency:` and a `check_mode:` other than the default are option errors**
   beside `branching:`: the path records no latency samples and halts at the
   first failing check.
 
-## Example: Concurrent Account Operations
+## Example: Account Operations Under Branching
 
 > This example highlights only the branching wiring. The `CreateAccount` /
 > `Deposit` / `Withdraw` / `Transfer` commands, their events, and
@@ -294,8 +306,8 @@ do with parallel branches.
 
 ## Combining with Stutter Testing
 
-Parallel and stutter testing compose. Enable both to test concurrent
-idempotency:
+Branching and stutter testing compose. Enable both to test retried
+commands inside branches that are judged under reordering:
 
 ```elixir
 PropertyDamage.run(
@@ -306,5 +318,7 @@ PropertyDamage.run(
 )
 ```
 
-This tests both linearizability of concurrent operations and idempotency of
-retried commands within each branch.
+The branches still run one after another, so this does not test concurrent
+idempotency. It checks that the observed events match the simulator under some
+ordering of the branch commands, and that retried commands within each branch
+are idempotent.
