@@ -21,7 +21,7 @@ model: OrderBook                      # model module basename
 namespace: MyApp.PD.OrderBook         # module prefix for generated code
 dir: test/support/pd/order_book/      # this directory
 pd_version: "0.2.0"                   # PD version scaffolded against (see below)
-pd_source: hex                        # hex | locked git ref | checkout commit (see below)
+pd_source: hex                        # hex | <commit> | <commit>+dirty | sha256:<hash> (see below)
 transport: in_process                 # in_process | http | other (prose below)
 reset: ecto_sandbox                   # adapter-only side effects that give a run a clean SUT
 openapi:                              # only when composed with an OpenAPI spec
@@ -37,8 +37,13 @@ hosts the model, with commands that do not compile the project (a generated
 file that no longer compiles must not hide the answer):
 
 ```
+MIX_ENV=test mix deps.compile
 MIX_ENV=test mix deps
 ```
+
+`deps.compile` compiles the dependencies, not the project, and does nothing
+when they are already built. Run it first: a dependency that was fetched but
+not built prints no version.
 
 Find the `property_damage` entry. Its first line holds the installed version
 and the kind of dependency:
@@ -46,20 +51,27 @@ and the kind of dependency:
 - Hex release: `* property_damage 0.2.0 (Hex package) (mix)`. Set
   `pd_version` to the version and `pd_source` to `hex`.
 - Git dependency: `* property_damage 0.2.0 (<url> - <ref>) (mix)`, then
-  `locked at 704af9a (branch: main)`. Set `pd_source` to the locked commit
+  `locked at 704af9a (branch: main)`. Set `pd_source` to that commit
   (`704af9a`). `mix.lock` holds the full commit.
-- Path dependency: `* property_damage 0.2.0 (<path>) (mix)`. Set `pd_source`
-  to the output of `git -C <path> rev-parse HEAD`, or to `path` when the
-  checkout is not a git repository.
+- Path dependency: `* property_damage 0.2.0 (<path>) (mix)`. If `<path>` is a
+  git checkout, set `pd_source` to the output of `git -C <path> rev-parse
+  HEAD`, and add `+dirty` (`<commit>+dirty`) when `git -C <path> status
+  --porcelain` prints anything: uncommitted changes are invisible to the
+  commit. If `<path>` is not a git repository, set `pd_source` to
+  `sha256:` and the hash from `sha256sum <path>/CHANGELOG.md`. This sees
+  edits to the changelog only, so it is the best signal available, not a
+  guarantee.
 
-If the entry says `the dependency build is outdated`, run
-`MIX_ENV=test mix deps.compile` first (it compiles the dependencies, not the
-project) and read `mix deps` again.
+If the entry has no version and says `could not find an app file` or `the
+dependency build is outdated`, the dependency is not built yet or is stale:
+run `MIX_ENV=test mix deps.compile` and read `mix deps` again.
 
 A git or path dependency keeps its version while the library changes, so
-`pd_source` is the signal that the library moved. Regeneration compares both
-keys with the installed values and writes both back after a successful
-regeneration (see `regeneration.md`).
+`pd_source` is the signal that the library moved. Compare commits by their
+first seven characters. A value that ends in `+dirty`, in the spec or in the
+installed one, always counts as different, because the working tree may have
+changed since. Regeneration compares both keys with the installed values and
+writes both back after a successful regeneration (see `regeneration.md`).
 
 `interview: checkpoint` + `missing:` is the resume mechanism: a later session
 (possibly a different agent) must be able to continue from the spec alone.

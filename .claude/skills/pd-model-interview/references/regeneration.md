@@ -13,19 +13,23 @@ and show your work.
 3. `interview: checkpoint` → resume the interview at the recorded gap before
    any regeneration.
 4. Compare the spec's `pd_version` and `pd_source` with the installed ones.
-   Read the installed values with `MIX_ENV=test mix deps`, as described under
-   the header in [spec_format.md](spec_format.md): the command works for a
-   Hex, git or path dependency and does not compile the project, so it still
-   answers when generated files no longer compile. (Do not use `mix run`: it
+   Read the installed values with `MIX_ENV=test mix deps.compile` and then
+   `MIX_ENV=test mix deps`, and compute `pd_source` as described under the
+   header in [spec_format.md](spec_format.md): the commands work for a
+   Hex, git or path dependency and do not compile the project, so they still
+   answer when generated files no longer compile. (Do not use `mix run`: it
    compiles the project first and fails before it prints.)
    - Both equal: no library change to check.
    - `pd_version` differs: read the library's `CHANGELOG.md` (in
      `deps/property_damage/`, or in the checkout for a path dependency) for
      the entries between the two versions.
-   - Dependency is a git or path one, and `pd_source` differs or the spec
-     has none: the version may be unchanged while breaking changes sit under
-     `[Unreleased]`. Read the `[Unreleased]` section in full, together with
-     any entries between the two versions.
+   - Dependency is a git or path one, and `pd_source` differs, either value
+     ends in `+dirty`, or the spec has none: the version may be unchanged
+     while breaking changes sit under `[Unreleased]`. Read the `[Unreleased]`
+     section in full, together with any entries between the two versions.
+     (A `sha256:` value is the hash of the checkout's `CHANGELOG.md`: a
+     difference means the changelog changed, but a library change without a
+     changelog edit goes unseen.)
 
    Look in those entries for breaking changes that affect generated files, and
    raise any you find with the user before regenerating. After a successful
@@ -44,11 +48,15 @@ and show your work.
    (`update`, `delete`, `get` and `list` give `Updated`, `Deleted`,
    `Retrieved` and `Listed`), `findUser` and `searchUser` both give
    `events/user_completed.ex`, and any other operationId gives
-   `<operation_id>_completed.ex`. Run the `--dry-run` first, turn each
-   command and event module it lists into its file path, and leave out every
-   operation whose command file or event file already exists, including an
-   event file that another operation shares. Then add the class header lines
-   to the new files.
+   `<operation_id>_completed.ex`. Run the `--dry-run` first and turn each
+   command and event module it lists into its file path. The dry run lists an
+   event module for every operation, but the run writes an event file only
+   for an operation whose success response has a schema. Leave out an
+   operation if its command file already exists, or if its success response
+   has a schema and its event file already exists (an event file that
+   another operation shares counts). Ignore the event module of an operation
+   without a schema: the run neither writes that file nor touches a file of
+   that name. Then add the class header lines to the new files.
 
 ## The delta interview
 

@@ -71,11 +71,14 @@ give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
 (`createUser` gives `UserCreated`, file `events/user_created.ex`); `find` and
 `search` also strip the prefix but give `<Resource>Completed`, so `findUser`
 and `searchUser` share `UserCompleted`; any other operationId gives
-`<OperationId>Completed`. An operation whose success response has no schema
-writes no event file. Run `--dry-run` first, turn each command and event
-module it lists into its file path, and leave out every operation whose
-command file or event file already exists, including an event file that
-another operation shares.
+`<OperationId>Completed`. Run `--dry-run` first and turn each command and
+event module it lists into its file path. The dry run lists an event module
+for every operation, but the run writes an event file only for an operation
+whose success response has a schema. Leave out an operation if its command
+file already exists, or if its success response has a schema and its event
+file already exists (an event file that another operation shares counts).
+Ignore the event module of an operation without a schema: the run neither
+writes that file nor touches a file of that name.
 What it writes differs from the layout above: it writes `commands/`,
 `events/` (named as above), `adapter.ex` and `model.ex`, but no
 `projections/` and no `simulator.ex`; its `model.ex` raises in

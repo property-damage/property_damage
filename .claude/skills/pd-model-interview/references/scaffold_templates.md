@@ -430,12 +430,16 @@ and let the user fill in the transport:
         case to_event(payload) do
           {:ok, event} -> PropertyDamage.EventQueue.push(queue, __MODULE__, event)
           :skip -> :ok
-
-          {:error, reason} ->
-            raise "#{inspect(__MODULE__)}: to_event/1 returned an error: #{inspect(reason)}"
+          {:error, reason} -> raise "to_event/1 returned an error: #{inspect(reason)}"
         end
       end
     end
+
+The `raise` runs in the process that calls `deliver/2`, which is the user's
+listener, not the run. If the listener lets it end that process (a webhook
+server's request process, for one), the run never sees the error: it sees only
+a missing event. Have the listener report the failure back to the adapter,
+which raises it in the run, so the run fails with the message.
 
 and attach the injector to the target with `injectors:`, in the first-run
 command (`targets: [{MyStore.PD.Wallets.Adapter, injectors:

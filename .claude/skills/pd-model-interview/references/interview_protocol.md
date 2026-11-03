@@ -20,9 +20,8 @@ which app owns which behavior; scoping (Phase 2) will need it.
 Also check that `elixirc_paths(:test)` in `mix.exs` includes `"test/support"`
 (see [SKILL.md](../SKILL.md)); the scaffold lives there.
 Read the installed PropertyDamage version and source for the spec header
-(`pd_version`, `pd_source`) with `MIX_ENV=test mix deps`, as described under
-the header in [spec_format.md](spec_format.md); do not copy the example's
-values.
+(`pd_version`, `pd_source`) with the commands described under the header in
+[spec_format.md](spec_format.md); do not copy the example's values.
 
 ## Phase 1 - Overview (shallow, minutes)
 
