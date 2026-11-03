@@ -363,14 +363,15 @@ defmodule MyApp.Nemesis.PartitionNetwork do
 
   @impl true
   def inject(%__MODULE__{partition_type: type}, ctx) do
-    :ok = Toxiproxy.partition(ctx.proxy, type)
-    {:ok, [%NetworkPartitioned{type: type}]}
+    # ctx.adapter_context is what the adapter's setup/1 returned
+    :ok = Toxiproxy.partition(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionStarted{type: type}]}
   end
 
   @impl true
   def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.proxy, type)
-    {:ok, [%NetworkRestored{type: type}]}
+    Toxiproxy.restore(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionEnded{type: type}]}
   end
 
   @impl true
@@ -435,8 +436,7 @@ PropertyDamage.run(
 
   check_mode: :halt,         # :halt (default) | :record | :log | :disabled (see Check Modes)
 
-  # Part of a campaign, and the artifacts a failing run writes
-  only: [run: 3],            # run 3 of the seed alone; or [replay: "property_damage_replays/MyModel_seed42.replay.exs"]
+  # The artifacts a failing run writes (for `only:`, see below this call)
   replay_dir: "property_damage_replays", # default; where a failure writes its replay artifact; false writes none
   report_html: "reports/",   # default: false; a directory for the HTML failure page (env: PD_REPORT_HTML)
 
@@ -455,6 +455,20 @@ PropertyDamage.run(
     tags: [:auto_detected],
     dedup: false
   ]
+)
+```
+
+`only:` goes in a call of its own. It runs one run of a campaign, or replays an artifact, and it is an error beside `max_runs:` other than 1 and beside `branching:`. With `replay:`, `seed:` is an error too, because the artifact records the seed.
+
+```elixir
+# Run 3 of the seed alone
+PropertyDamage.run(model: MyModel, targets: [MyApp.Adapter], seed: 12345, only: [run: 3])
+
+# Run an artifact again, with no seed:
+PropertyDamage.run(
+  model: MyModel,
+  targets: [MyApp.Adapter],
+  only: [replay: "property_damage_replays/MyModel_seed42.replay.exs"]
 )
 ```
 
