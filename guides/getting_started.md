@@ -385,11 +385,13 @@ nothing. `stats.runs` is the number of runs and `stats.seed` the seed they
 started from. Add `verbose: true` to print a summary and one progress line per
 run.
 
-When tests fail, `PropertyDamage.run/1` returns `{:error, report}` and prints
-nothing itself. The report holds the shrunk failure, its events, the state it
-left and the calls that reproduce it. To read it, call `IO.inspect(report, pretty: true)`. ExUnit
-does the same when an `assert {:ok, _stats} = ...` fails. [Reading the report](debugging_failures.md#reading-the-report)
-walks through a real one. To put your own lines in it, such as the requests an
+When tests fail, `PropertyDamage.run/1` returns `{:error, report}` and does not
+print the report. The report holds the shrunk failure, its events, the state it
+left and the calls that reproduce it. To read it in full, call
+`IO.inspect(report, pretty: true)`. A failed `assert {:ok, _stats} = ...` in
+ExUnit shows only a compact summary of the report.
+[Reading the report](debugging_failures.md#reading-the-report) walks through a
+real one. To put your own lines in it, such as the requests an
 adapter sends, call `PropertyDamage.log/2`; see the
 [log lines guide](log_lines.md).
 
