@@ -659,7 +659,7 @@ A failing run SHALL write its failure report as one HTML page into a directory w
 
 `PropertyDamage.FailureReport.HTML.render/1` SHALL return one page that holds the terminal report text without color, as built by `Formatter.format/3` for `:terminal`, and the viewer that reads it. The text SHALL follow the layout of the printed report and apply the same log tag filter (DR-054, DR-057), so the page body SHALL carry nothing the terminal text does not carry. The page SHALL load nothing from the network (DR-057).
 
-The page SHALL be named after the model, the failing target, the failure kind and the seed, so a later failure with the same four replaces it, and SHALL be written by a rename of a temporary file in the same directory (DR-057). `HTML.write/2` SHALL rebuild `index.html` in the directory after each page, and `HTML.write_index/1` SHALL rebuild it from the report pages present, in file name order, leaving out any page whose title cannot be read (DR-057).
+The page SHALL be named after the model, the failing target, the failure kind the report states (for example `adapter_error`) and the seed, so a later failure with the same four replaces it, and SHALL be written by a rename of a temporary file in the same directory (DR-057). `HTML.write/2` SHALL rebuild `index.html` in the directory after each page, and `HTML.write_index/1` SHALL rebuild it from the report pages present, in file name order, leaving out any page whose title cannot be read (DR-057).
 
 #### Scenario: PD_REPORT_HTML replaces report_html:
 - **WHEN** the run gives `report_html: "dir_a"`, `PD_REPORT_HTML="dir_b"` is set and the run fails
