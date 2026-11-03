@@ -15,14 +15,28 @@ injecting bugs and seeing whether your tests catch them.
 `MutatingAdapter` that perturbs the events the SUT returns, then runs your
 property against the mutated responses:
 
-1. It collects sample events for each command from a baseline run.
-2. For each command it generates mutations (via the configured operators).
+1. For each command, it runs the property once as a baseline (one whole run
+   of up to 10 commands, with a fresh seed for each baseline run) and keeps the events of
+   that run, from all commands, as samples.
+2. It generates that command's mutations (via the configured operators) from
+   its own samples, so two commands do not share one sample set.
 3. It runs your property against each mutated adapter.
-4. A mutation is **killed** if your tests now fail (good: the bug was caught) and
-   **survived** if they still pass (bad: the bug slipped through).
+4. A mutation is **killed** if a check now fails (good: the bug was caught) and
+   **survived** if your tests still pass (bad: the bug slipped through).
 
-The **mutation score** is the fraction of mutations killed. A low score means
-your invariants or checks are not pinning down behaviour tightly enough.
+A third outcome, **killed by error**, covers a mutation whose run fails because
+a command could not be executed: the adapter returned an error, so the run
+stops with an `:execution_failed` report before any check can judge the
+state. The `:status` operator causes this when it turns a success into an
+`{:error, _}`. Any model fails that way, however weak its checks are, so the
+report counts these mutations apart (`killed_by_error`) and leaves them out of
+the score.
+
+The **mutation score** is `killed / (total - killed_by_error)`: the fraction of
+the measurable mutations that a check killed. Timeouts stay in the
+denominator. The score is 0.0 when every mutation was killed by an error. A
+low score means your invariants or checks are not pinning down behavior
+tightly enough.
 
 ## Quick start
 
@@ -47,11 +61,14 @@ end
 |----------|-----------------|
 | `:value` | Numeric and string values (zero, negate, off-by-one, empty string) |
 | `:omission` | Removes fields from events, or whole events |
-| `:status` | Flips success/error outcomes |
+| `:status` | Turns a success into an error (`{:error, _}`) or into an empty event list |
 | `:event` | Modifies event contents and structure |
 | `:boundary` | Pushes values to edges (`0`, `-1`, max, `nil`) |
 
-By default all operators run. Narrow the set with `operators:`:
+By default all operators run. Narrow the set with `operators:`. Most `:status`
+mutations make the adapter return an error, so they end as killed by error and
+do not score; leave `:status` out of `operators:` if you only want mutations a
+check can catch:
 
 ```elixir
 PropertyDamage.Mutation.run(
@@ -65,10 +82,19 @@ PropertyDamage.Mutation.run(
 
 The `%PropertyDamage.Mutation.Report{}` returned by `run/1` carries:
 
-- `:mutation_score` - fraction of mutations killed (0.0–1.0)
-- `:killed` / `:survived` / `:timeout` / `:total` - mutation counts
-- `:by_command` / `:by_operator` - per-command and per-operator stats
+- `:mutation_score` - `killed / (total - killed_by_error)` (0.0–1.0)
+- `:killed` / `:killed_by_error` / `:survived` / `:timeout` / `:total` -
+  mutation counts
+- `:by_command` / `:by_operator` - per-command and per-operator stats; each
+  row has its own `killed_by_error` count and a score computed the same way
 - `:survived_mutations` - the mutations your tests missed (the actionable list)
+- `:killed_mutations` / `:killed_by_error_mutations` - the details of each
+  kind of kill; a kill's `failure_message` is the message of the failure
+  report the run returned
+
+To read `:status` results, look at `by_operator`: its `:status` row shows how
+many of those mutations were killed by error and how many a check killed or
+missed.
 
 ```elixir
 # Which commands have the weakest tests?
@@ -87,6 +113,26 @@ IO.puts(PropertyDamage.Mutation.Analysis.format(analysis))
 IO.puts(PropertyDamage.Mutation.format(report, :markdown))
 ```
 
+When any mutation was killed by error, the terminal and Markdown outputs name
+the count and say the score excludes it. The JSON output carries
+`killed_by_error` as a number only (in the report, in each `by_command` and
+`by_operator` entry) and does not say that the score excludes it. The terminal
+output shows a line such as:
+
+```text
+Mutation Score: 14.3% (3/21 killed)  ✗ FAIL (target: 80.0%)
+3 killed by adapter error, excluded from the score (no check caught them)
+```
+
+The Markdown output adds a "Killed by adapter error" row to its summary and a
+"Killed by error" column to its per-command and per-operator tables:
+
+```text
+| Operator | Score | Killed | Killed by error | Survived | Total |
+|----------|-------|--------|-----------------|----------|-------|
+| `:status` | 0.0% | 0 | 3 | 1 | 4 |
+```
+
 ## Improving a low score
 
 A survived mutation is a concrete lead: the SUT returned something subtly wrong
@@ -99,7 +145,7 @@ mutation testing to validate the invariants you write.
 A mutation run can take a while (it runs your whole property once per mutation),
 so pass an `on_progress` function to watch it. It receives a
 `%PropertyDamage.Progress{}` projection (DR-022): a `MutationUpdate` per mutation
-as it is killed, survived, or timed out, then a terminal `MutationResult`
+as it is killed, killed by error, survived, or timed out, then a terminal `MutationResult`
 carrying a copy of the final report. The same stream drives `verbose: true` and
 the `[:property_damage, :mutation, :progress | :result]` telemetry events.
 
@@ -130,7 +176,7 @@ The authoritative report is still the `{:ok, report}` return value;
 | `:model` | required | Model module implementing `PropertyDamage.Model` |
 | `:targets` | required | List with one target: `[Adapter]` or `[{Adapter, config: %{...}}]` |
 | `:operators` | all | Mutation operators to use |
-| `:mutations_per_command` | 5 | Max mutations generated per command type |
+| `:mutations_per_command` | 5 | Max mutations each operator generates per command type (so a command gets up to this number times the number of operators) |
 | `:max_runs` | 10 | Property test runs per mutation |
 | `:target_score` | 0.80 | Score `passes?/1` checks against |
 | `:timeout_ms` | 30000 | Timeout per mutation test |

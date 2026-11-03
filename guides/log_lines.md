@@ -482,7 +482,8 @@ one before it runs your code at an execution point, which is any of these:
 - each setup and teardown command, each root and each leaf, and each attempt
   of a settle or stutter retry;
 - a nemesis's `inject/2` and `restore/2`;
-- a mock's setup and its `on_command/2` and `on_event/2` handlers.
+- an injector's setup and teardown;
+- a mock's setup, its `on_command/2` and `on_event/2` handlers, and its teardown.
 
 `PropertyDamage.log/2` looks for a scope in the calling process first, then in
 each process of the caller's `$callers` list. A `Task` started from
@@ -613,7 +614,7 @@ mix run setup.exs
 
 `capture/1` runs the function, and returns its result and the lines it
 logged. The report prints those lines once, in a Setup section after
-Failure, labeled as shared by every run:
+What this checks, labeled as shared by every run:
 
 <!-- pd-report-excerpt: mix run setup.exs; seed 20 -->
 ```text
