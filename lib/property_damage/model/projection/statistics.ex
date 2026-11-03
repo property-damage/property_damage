@@ -20,20 +20,42 @@ defmodule PropertyDamage.Model.Projection.Statistics do
 
   ## Usage
 
-      defmodule MyModel do
-        def check_projections do
-          [
-            {PropertyDamage.Model.Projection.Statistics, [
-              window_size: 100,
-              checks: [
-                {:p99_latency_ms, :less_than, 500},
-                {:error_rate, :less_than, 0.05},
-                {:success_rate, :greater_than, 0.95}
-              ]
-            ]}
-          ]
+  List the module bare in `check_projections/0`. It tracks the metrics below
+  from the events of a run and ships no check of its own.
+
+      def check_projections do
+        [PropertyDamage.Model.Projection.Statistics]
+      end
+
+  A threshold is a check, and a check belongs to a projection of your own.
+  Write one that hands `init/0` and `apply/2` to this module and declares a
+  `@check` over `compute_metrics/1`:
+
+      defmodule MyApp.LatencyBudget do
+        use PropertyDamage.Model.Projection
+
+        alias PropertyDamage.Model.Projection.Statistics
+
+        def init, do: Statistics.init()
+
+        def apply(state, item), do: Statistics.apply(state, item)
+
+        @check every: 10
+        def p99_under_budget(state, _cmd_or_event) do
+          p99 = Statistics.compute_metrics(state).p99_latency_ms
+
+          p99 < 500 or
+            PropertyDamage.fail!("p99 latency over budget", p99_latency_ms: p99, budget_ms: 500)
         end
       end
+
+  List `MyApp.LatencyBudget` in `check_projections/0` in place of this module.
+  The same pattern covers `error_rate`, `success_rate` and the other metrics.
+
+  The state keeps the last 100 latency samples. For another window, build the
+  state with `new/1` in your own `init/0`:
+
+      def init, do: Statistics.new(window_size: 20)
 
   ## Tracked Metrics
 
@@ -60,14 +82,13 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   - Thresholds are environment-dependent (CI vs production hardware)
   """
 
-  @behaviour PropertyDamage.Model.Projection
+  use PropertyDamage.Model.Projection
 
   defstruct [
     :latency_samples,
     :success_count,
     :error_count,
     :window_size,
-    :checks,
     :current_step
   ]
 
@@ -76,7 +97,6 @@ defmodule PropertyDamage.Model.Projection.Statistics do
           success_count: non_neg_integer(),
           error_count: non_neg_integer(),
           window_size: pos_integer(),
-          checks: [check_spec()],
           current_step: non_neg_integer()
         }
 
@@ -90,28 +110,28 @@ defmodule PropertyDamage.Model.Projection.Statistics do
           | :error_rate
           | :total_count
 
-  @type comparator :: :less_than | :greater_than | :equal_to
-
-  @type check_spec :: {metric(), comparator(), number()}
-
   @default_window_size 100
 
-  @impl PropertyDamage.Model.Projection
-  @spec init(keyword()) :: t()
-  def init(opts \\ []) do
-    if Keyword.has_key?(opts, :assertions) do
-      raise ArgumentError, "`assertions:` was renamed `checks:`"
-    end
+  @doc """
+  Build an empty state.
 
+  The `:window_size` option caps how many latency samples the state keeps
+  (default 100). Older samples drop out first.
+  """
+  @spec new(keyword()) :: t()
+  def new(opts \\ []) do
     %__MODULE__{
       latency_samples: :queue.new(),
       success_count: 0,
       error_count: 0,
       window_size: Keyword.get(opts, :window_size, @default_window_size),
-      checks: Keyword.get(opts, :checks, []),
       current_step: 0
     }
   end
+
+  @impl PropertyDamage.Model.Projection
+  @spec init() :: t()
+  def init, do: new()
 
   @impl PropertyDamage.Model.Projection
   def apply(state, item) do
@@ -234,70 +254,6 @@ defmodule PropertyDamage.Model.Projection.Statistics do
     n = length(sorted_samples)
     k = max(0, Float.ceil(n * p / 100) - 1) |> trunc()
     Enum.at(sorted_samples, k, 0)
-  end
-
-  @doc """
-  Check all configured checks against current metrics.
-  """
-  @spec evaluate_checks(t()) :: :ok | {:error, String.t()}
-  def evaluate_checks(state) do
-    metrics = compute_metrics(state)
-
-    failed_checks =
-      state.checks
-      |> Enum.filter(fn {metric, comparator, threshold} ->
-        value = Map.get(metrics, metric, 0)
-        not apply_comparator(value, comparator, threshold)
-      end)
-
-    if Enum.empty?(failed_checks) do
-      :ok
-    else
-      {:error, format_failures(failed_checks, metrics)}
-    end
-  end
-
-  defp apply_comparator(value, :less_than, threshold), do: value < threshold
-  defp apply_comparator(value, :greater_than, threshold), do: value > threshold
-  defp apply_comparator(value, :equal_to, threshold), do: value == threshold
-
-  defp format_failures(failures, metrics) do
-    details =
-      failures
-      |> Enum.map_join("; ", fn {metric, comparator, threshold} ->
-        value = Map.get(metrics, metric, 0)
-        "#{metric} = #{Float.round(value * 1.0, 4)} (expected #{comparator} #{threshold})"
-      end)
-
-    "Statistical check failures: #{details}"
-  end
-
-  # ============================================================================
-  # Check Registration (for use as check projection)
-  # ============================================================================
-
-  @doc false
-  def __checks__ do
-    [
-      %{
-        name: :statistical_checks,
-        trigger: :always,
-        sample: 10
-      }
-    ]
-  end
-
-  @doc false
-  @spec check(:statistical_checks, t(), map()) :: :ok | {:error, String.t()}
-  def check(:statistical_checks, state, _ctx) do
-    # Only check if we have enough samples
-    metrics = compute_metrics(state)
-
-    if metrics.sample_count >= 10 or metrics.total_count >= 10 do
-      evaluate_checks(state)
-    else
-      :ok
-    end
   end
 
   # ============================================================================
