@@ -154,8 +154,8 @@ The items below ship with this record.
    and <B> (step i.1)`, then the doc. The step numbers are the labels the Run
    view prints, and each leaf has its own name. It names no entry key and no
    ordinal. A target prints a Path item for a root it ran as a listed entry,
-   including the listed identity (`"<target>" ran <Root> (step i) as itself, as
-   its listed entry`). A
+   including the listed identity (`"<target>" kept <Root> (step i) as one step`)
+   and an entry with no commands (`"<target>" dropped <Root> (step i)`). A
    target that ran the root as itself without a listed entry (`expansion:
    :identity`, a root absent from the list, or an identity that shrinking
    substituted) prints none.

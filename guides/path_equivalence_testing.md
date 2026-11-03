@@ -272,7 +272,7 @@ Compared     using ==, still differing after 101 ms (bound 100 ms)
   Projection    Counter.Projection
                 Folds the reported total and compares it across targets.
 
-  Path          "left" ran Add (step 0) as itself, as its listed entry
+  Path          "left" kept Add (step 0) as one step
                 (no description: add doc: "..." to the first entry that Counter.Model.add_paths/2 returns for Add)
 
   Path          "right" split Add (step 0) into Add (step 0.0) and Add (step 0.1)
