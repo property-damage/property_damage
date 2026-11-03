@@ -80,6 +80,7 @@ Commands represent operations. Each command implements the
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
+  @moduledoc "Create a user with a random name and email."
   use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -120,6 +121,7 @@ Projections are state reducers. They process events and maintain state:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.ModelState do
+  @moduledoc "Tracks the users the system has created, updated and deleted."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.{UserCreated, UserUpdated, UserDeleted}
@@ -152,6 +154,7 @@ projections using `@check` and `assert_*` functions:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.UserInvariants do
+  @moduledoc "Checks that every user the system creates has a unique email."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.UserCreated
@@ -168,6 +171,7 @@ defmodule MyApp.Projections.UserInvariants do
 
   # Checks use @check to specify when to run
   # and assert_* naming convention
+  @doc "No two users share an email address."
   @check every: 1
   def assert_emails_unique(_state, _cmd_or_event) do
     # In a real system, duplicate emails would be caught at creation time.
@@ -176,6 +180,9 @@ defmodule MyApp.Projections.UserInvariants do
   end
 end
 ```
+
+The failure report shows a check by its function name without the `assert_`
+prefix, so a failing `assert_emails_unique` appears as `emails_unique`.
 
 ## Step 5: Define the Model
 
@@ -188,6 +195,7 @@ module does not compile.
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
+  @moduledoc "A user registry: users are created, and every email stays unique."
   use PropertyDamage.Model
 
   alias MyApp.Commands.CreateUser
@@ -212,6 +220,14 @@ defmodule MyApp.TestModel do
   def injectable_events, do: []
 end
 ```
+
+The `@moduledoc` and `@doc` lines in Steps 2 to 5 are not decoration. When a run
+fails, the report's "What this checks" section prints the model's `@moduledoc`,
+the check function's `@doc` and the `@moduledoc` of the check's projection and of
+the failing command. A module without one prints a "no description" line
+instead, so a first failure page stays empty of context. See
+[What this checks](debugging_failures.md#what-this-checks) for what each
+item reads.
 
 The model above implements four callbacks, but only two are **required**:
 `commands/0` and `command_sequence_projection/0`. Every other `PropertyDamage.Model`
@@ -326,9 +342,9 @@ PropertyDamage.run(
 )
 ```
 
-A passing run returns `{:ok, stats}` and prints nothing. [Reading the
-report](debugging_failures.md#reading-the-report) shows what a failing run
-prints.
+A passing run returns `{:ok, stats}` and prints nothing. A failing run returns
+`{:error, report}`; [Reading the report](debugging_failures.md#reading-the-report)
+shows what the report holds.
 
 ### In ExUnit
 
@@ -369,10 +385,13 @@ nothing. `stats.runs` is the number of runs and `stats.seed` the seed they
 started from. Add `verbose: true` to print a summary and one progress line per
 run.
 
-When tests fail, `PropertyDamage.run/1` returns `{:error, report}`, and the
-report prints the shrunk failure, its events, the state it left and the calls
-that reproduce it. [Reading the report](debugging_failures.md#reading-the-report)
-walks through a real one. To put your own lines in it, such as the requests an
+When tests fail, `PropertyDamage.run/1` returns `{:error, report}` and does not
+print the report. The report holds the shrunk failure, its events, the state it
+left and the calls that reproduce it. To read it in full, call
+`IO.inspect(report, pretty: true)`. A failed `assert {:ok, _stats} = ...` in
+ExUnit shows only a compact summary of the report.
+[Reading the report](debugging_failures.md#reading-the-report) walks through a
+real one. To put your own lines in it, such as the requests an
 adapter sends, call `PropertyDamage.log/2`; see the
 [log lines guide](log_lines.md).
 

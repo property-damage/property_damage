@@ -73,6 +73,7 @@ overrides) lives in the Model, not here:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
+  @moduledoc "Create a user with a random name and email."
   use PropertyDamage.Command
 
   defstruct [:name, :email]
@@ -101,6 +102,7 @@ are invariants, checked at the configured points:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.Users do
+  @moduledoc "Tracks the users the system has created."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.UserCreated
@@ -118,6 +120,7 @@ defmodule MyApp.Projections.Users do
   # Checked after every command. Assert a property your SUT must never violate.
   # (Don't assert uniqueness of a client-supplied field like emails -- the
   # generator can legitimately repeat them; assert on what the SUT guarantees.)
+  @doc "Every user has a non-empty email."
   @check every: 1
   def assert_emails_present(state, _cmd_or_event) do
     Enum.all?(state.users, fn {_id, u} -> u.email not in [nil, ""] end) or
@@ -160,6 +163,7 @@ selection weights, `when:` preconditions, and `overrides:` generator overrides:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
+  @moduledoc "A user registry: users are created and each keeps an email."
   use PropertyDamage.Model
 
   @impl true
@@ -183,6 +187,11 @@ defmodule MyApp.TestModel do
   def simulator, do: MyApp.Simulator
 end
 ```
+
+The `@moduledoc` and `@doc` lines above feed the failure page's "What this
+checks" section, which prints them when a run fails; without them the page
+shows "no description" lines. See
+[What this checks](guides/debugging_failures.md#what-this-checks).
 
 ### 6. Define an Adapter
 
