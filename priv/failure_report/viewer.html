@@ -341,9 +341,10 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       if (sm && bi <= 6) {
         var rest = sm[4], mk = /\s+◄── (.+?)\s*$/.exec(rest);
         if (mk) rest = rest.slice(0, mk.index);
-        var as = /\s+(kept as one step|dropped: no step ran in its place)\s*$/.exec(rest);
-        if (!as) as = /\s+(split into steps? \S+(?:, \S+)*(?: and \S+)?)\s*$/.exec(rest);
-        if (as) rest = rest.slice(0, as.index);
+        // The note may be followed by the step's "# label" comment, which stays with the command.
+        var as = /\s+(kept as one step|dropped: no step ran in its place)(\s+#.*)?\s*$/.exec(rest);
+        if (!as) as = /\s+(split into steps? \S+(?:, \S+)*(?: and \S+)?)(\s+#.*)?\s*$/.exec(rest);
+        if (as) rest = rest.slice(0, as.index) + (as[2] || "");
         var s = { label: sm[3], depth: bi <= 2 ? 0 : 1, cmd: rest.trim(), marker: mk ? mk[1] : null, note: as ? as[1] : null, entries: [], children: [], arrow: !!sm[1] };
         if (s.depth === 0 || !root) { ensureT().steps.push(s); root = s; } else root.children.push(s);
         step = s; entry = null;
