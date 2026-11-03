@@ -9,6 +9,11 @@ defmodule PropertyDamage.Mutation do
 
   A **killed** mutant means your tests detected the simulated bug (good).
   A **survived** mutant means your tests missed the bug (bad - weak tests).
+  A mutant **killed by error** made the run fail with an `:execution_failed`
+  report, for example a status mutation that made the adapter return an error.
+  No check caught it, so the mutation score leaves these out:
+  `killed / (total - killed_by_error)`. The report shows the count next to
+  killed and survived (see DR-059).
 
   ## Usage
 
@@ -78,6 +83,7 @@ defmodule PropertyDamage.Mutation do
 
       report.mutation_score  # => 0.85
       report.killed          # => 17
+      report.killed_by_error # => 2
       report.survived        # => 3
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}

@@ -7,15 +7,23 @@ defmodule PropertyDamage.Mutation.Report do
 
   ## Fields
 
-  - `mutation_score` - Ratio of killed to total mutations (0.0 to 1.0)
-  - `killed` - Number of mutations that were caught by tests
+  - `mutation_score` - `killed / (total - killed_by_error)` (0.0 to 1.0); 0.0
+    when every mutation was killed by an adapter error. Timeouts stay in the
+    denominator.
+  - `killed` - Number of mutations that were caught by a check
+  - `killed_by_error` - Number of mutations whose run failed with an
+    `:execution_failed` report, for example a status mutation that made the
+    adapter return an error. No check caught these, so the score leaves them
+    out (see DR-059)
   - `survived` - Number of mutations that tests failed to catch
   - `timeout` - Number of mutations that timed out
   - `total` - Total number of mutations tested
   - `by_command` - Breakdown by command type
   - `by_operator` - Breakdown by mutation operator
   - `survived_mutations` - Details of mutations that survived
-  - `killed_mutations` - Details of mutations that were killed
+  - `killed_mutations` - Details of mutations that were killed by a check
+  - `killed_by_error_mutations` - Details of mutations that were killed by an
+    adapter error
   - `duration_ms` - Total time taken
   - `started_at` - When testing started
   - `completed_at` - When testing completed
@@ -24,6 +32,7 @@ defmodule PropertyDamage.Mutation.Report do
   defstruct [
     :mutation_score,
     :killed,
+    :killed_by_error,
     :survived,
     :timeout,
     :total,
@@ -31,6 +40,7 @@ defmodule PropertyDamage.Mutation.Report do
     :by_operator,
     :survived_mutations,
     :killed_mutations,
+    :killed_by_error_mutations,
     :duration_ms,
     :started_at,
     :completed_at,
@@ -43,13 +53,14 @@ defmodule PropertyDamage.Mutation.Report do
           mutation: map(),
           command: module(),
           operator: atom(),
-          result: :killed | :survived | :timeout,
+          result: :killed | :killed_by_error | :survived | :timeout,
           failure_message: String.t() | nil,
           duration_ms: non_neg_integer()
         }
 
   @type command_stats :: %{
           killed: non_neg_integer(),
+          killed_by_error: non_neg_integer(),
           survived: non_neg_integer(),
           timeout: non_neg_integer(),
           total: non_neg_integer(),
@@ -59,6 +70,7 @@ defmodule PropertyDamage.Mutation.Report do
   @type t :: %__MODULE__{
           mutation_score: float(),
           killed: non_neg_integer(),
+          killed_by_error: non_neg_integer(),
           survived: non_neg_integer(),
           timeout: non_neg_integer(),
           total: non_neg_integer(),
@@ -66,6 +78,7 @@ defmodule PropertyDamage.Mutation.Report do
           by_operator: %{atom() => command_stats()},
           survived_mutations: [mutation_result()],
           killed_mutations: [mutation_result()],
+          killed_by_error_mutations: [mutation_result()],
           duration_ms: non_neg_integer(),
           started_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
@@ -82,6 +95,7 @@ defmodule PropertyDamage.Mutation.Report do
     %__MODULE__{
       mutation_score: 0.0,
       killed: 0,
+      killed_by_error: 0,
       survived: 0,
       timeout: 0,
       total: 0,
@@ -89,6 +103,7 @@ defmodule PropertyDamage.Mutation.Report do
       by_operator: %{},
       survived_mutations: [],
       killed_mutations: [],
+      killed_by_error_mutations: [],
       duration_ms: 0,
       started_at: nil,
       completed_at: nil,
@@ -159,6 +174,7 @@ defmodule PropertyDamage.Mutation.Report do
 
     case outcome do
       :killed -> %{report | killed: report.killed + 1}
+      :killed_by_error -> %{report | killed_by_error: report.killed_by_error + 1}
       :survived -> %{report | survived: report.survived + 1}
       :timeout -> %{report | timeout: report.timeout + 1}
     end
@@ -180,6 +196,10 @@ defmodule PropertyDamage.Mutation.Report do
     %{report | killed_mutations: [result | report.killed_mutations]}
   end
 
+  defp record_mutation_detail(report, result, :killed_by_error) do
+    %{report | killed_by_error_mutations: [result | report.killed_by_error_mutations]}
+  end
+
   defp record_mutation_detail(report, result, :survived) do
     %{report | survived_mutations: [result | report.survived_mutations]}
   end
@@ -190,18 +210,11 @@ defmodule PropertyDamage.Mutation.Report do
   end
 
   defp recalculate_score(report) do
-    score =
-      if report.total > 0 do
-        report.killed / report.total
-      else
-        0.0
-      end
-
-    %{report | mutation_score: score}
+    %{report | mutation_score: score(report.killed, report.total - report.killed_by_error)}
   end
 
   defp empty_stats do
-    %{killed: 0, survived: 0, timeout: 0, total: 0, score: 0.0}
+    %{killed: 0, killed_by_error: 0, survived: 0, timeout: 0, total: 0, score: 0.0}
   end
 
   defp increment_stats(stats, outcome) do
@@ -210,11 +223,16 @@ defmodule PropertyDamage.Mutation.Report do
     stats =
       case outcome do
         :killed -> %{stats | killed: stats.killed + 1}
+        :killed_by_error -> %{stats | killed_by_error: stats.killed_by_error + 1}
         :survived -> %{stats | survived: stats.survived + 1}
         :timeout -> %{stats | timeout: stats.timeout + 1}
       end
 
-    score = if stats.total > 0, do: stats.killed / stats.total, else: 0.0
-    %{stats | score: score}
+    %{stats | score: score(stats.killed, stats.total - stats.killed_by_error)}
   end
+
+  # Mutations killed by an adapter error say nothing about the checks, so the
+  # caller has already taken them out of `scored`.
+  defp score(killed, scored) when scored > 0, do: killed / scored
+  defp score(_killed, _scored), do: 0.0
 end

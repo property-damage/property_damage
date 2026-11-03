@@ -4,7 +4,9 @@ defmodule PropertyDamage.Progress.MutationResult do
   final mutation report.
 
   A copy for consumers; the `Mutation.run/1` return value (`{:ok, report}`)
-  remains the source of truth.
+  remains the source of truth. The report counts mutations killed by an
+  adapter error apart from mutations killed by a check; see
+  `PropertyDamage.Mutation.Report`.
   """
 
   @type t :: %__MODULE__{report: term()}

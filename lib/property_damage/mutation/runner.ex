@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Mutation.Runner do
   @moduledoc false
 
-  alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
   alias PropertyDamage.{FailureReport, Options, Telemetry}
+  alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate, Reporter}
 
@@ -216,12 +216,14 @@ defmodule PropertyDamage.Mutation.Runner do
         }
 
       {:error, failure} ->
-        # Test failed = mutation killed (good)
+        # Test failed. A check caught the mutation (killed), or the run broke
+        # because the mutated adapter errored (killed by error), which says
+        # nothing about the checks.
         %{
           mutation: mutation,
           command: command,
           operator: operator.name(),
-          result: :killed,
+          result: kill_outcome(failure),
           failure_message: failure_message(failure),
           duration_ms: duration_ms
         }
@@ -254,6 +256,9 @@ defmodule PropertyDamage.Mutation.Runner do
     end
   end
 
+  defp kill_outcome(%FailureReport{kind: :execution_failed}), do: :killed_by_error
+  defp kill_outcome(_failure), do: :killed
+
   # A failed run returns a failure report; its message names the failing check.
   # Anything else gets a readable rendering so the update is never blank.
   defp failure_message(%FailureReport{} = report) do
@@ -285,6 +290,7 @@ defmodule PropertyDamage.Mutation.Runner do
         status =
           case update.result do
             :killed -> "✓ KILLED"
+            :killed_by_error -> "✓ KILLED BY ERROR"
             :survived -> "✗ SURVIVED"
             :timeout -> "⏱ TIMEOUT"
           end
