@@ -82,13 +82,9 @@ end
 
 ### In the Test Project
 
-Configure PropertyDamage to recognize your sentinel:
+Pass the sentinel to each run with the `external_markers:` option. The option is the only way to name atom markers; there is no application config for it.
 
 ```elixir
-# In config/test.exs (applies to all tests)
-config :property_damage, external_markers: [:__external__]
-
-# Or per-test (overrides + combines with config)
 PropertyDamage.run(
   model: OrderModel,
   targets: [OrderAdapter],
@@ -128,21 +124,13 @@ end
 
 ## Configuration Options
 
-### App Config (Global)
-
-```elixir
-# config/test.exs
-config :property_damage,
-  external_markers: [:__external__, :server_generated]
-```
-
-### Runtime Options (Per-Test)
+### Runtime Options (Per-Run)
 
 ```elixir
 PropertyDamage.run(
   model: MyModel,
   targets: [MyAdapter],
-  external_markers: [:__external__]  # Combined with app config
+  external_markers: [:__external__, :server_generated]
 )
 ```
 
@@ -152,7 +140,6 @@ External marker recognition follows this priority:
 1. `%PropertyDamage.External{}` struct (always recognized)
 2. Protocol implementations
 3. Explicit `:external_markers` option
-4. App config `:external_markers`
 
 ## Saved Test Case Compatibility
 
@@ -177,15 +164,15 @@ The saved file includes:
 ```elixir
 case PropertyDamage.Persistence.load("failures/bug-123.pd") do
   {:ok, report} ->
-    # Versions match, safe to replay (the adapter is taken from the report;
-    # pass targets: [{Adapter, config: map}] if you need to override its setup config)
+    # Versions match, safe to replay (the targets are taken from the report;
+    # pass targets: [{Adapter, config: map}] if you need to override a setup config)
     PropertyDamage.Replay.run(report)
 
   {:ok, report, warnings} ->
     # Version mismatch detected
     IO.warn("Version warnings: #{inspect(warnings)}")
     # Warnings might include:
-    # {:property_damage_version_mismatch, "1.0.0", "1.1.0"}
+    # {:property_damage_version_mismatch, "0.2.0", "0.2.1"}
     # {:dependency_version_mismatch, :company_domain, "2.1.0", "2.2.0"}
     # {:dependency_missing, :old_domain, "1.0.0"}
 
@@ -214,7 +201,7 @@ Lock dependency versions in your CI environment:
 defp deps do
   [
     {:company_domain, "~> 2.1.0"},  # Pin to specific version
-    {:property_damage, "~> 1.0"}
+    {:property_damage, "~> 0.2"}
   ]
 end
 ```
@@ -381,9 +368,6 @@ end
 ### Test Project
 
 ```elixir
-# config/test.exs
-config :property_damage, external_markers: [:__external__]
-
 # test/order_test.exs
 defmodule OrderTest do
   use ExUnit.Case
@@ -392,6 +376,7 @@ defmodule OrderTest do
     result = PropertyDamage.run(
       model: OrderModel,
       targets: [OrderHttpAdapter],
+      external_markers: [:__external__],
       max_runs: 100,
       max_commands: 20,
       regression: [
@@ -408,6 +393,9 @@ end
 # Uses HTTPoison as the HTTP client; add {:httpoison, "~> 2.0"} to your deps.
 defmodule OrderHttpAdapter do
   use PropertyDamage.Adapter
+
+  alias OrderModel.Commands.CreateOrder
+  alias CompanyDomain.Events.OrderCreated
 
   def setup(_config) do
     {:ok, %{base_url: "http://localhost:4000"}}

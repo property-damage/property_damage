@@ -82,7 +82,7 @@ Because a run option is runtime data, a 2-arity function
 `fn original_events, retry_events -> ... end` is accepted too, but a named
 relation is a function you can unit-test and a run prints it as written. The
 relation's return is a verdict (DR-052): a truthy value when the retry agrees,
-and `false`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
+and `false`, `nil`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
 
 ### Default: `==`
 
@@ -235,7 +235,9 @@ test whether the current execution is a retry.
 
 ```elixir
 defmodule MyAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
+
+  def setup(_config), do: {:ok, %{}}
 
   def execute(
         %CreateOrder{} = cmd,
@@ -254,6 +256,8 @@ defmodule MyAdapter do
     result = HttpClient.post("/orders", %{amount: cmd.amount})
     {:ok, [result.event]}
   end
+
+  def teardown(_ctx), do: :ok
 end
 ```
 
@@ -326,6 +330,11 @@ To debug violations:
 3. Use `seed:` to reproduce the exact sequence deterministically.
 4. If the violation is expected (e.g., a legitimately non-idempotent command),
    set `idempotent: false` in that command's `command_spec/1`.
+
+To read the violation as a page in a browser, pass
+`report_html: "_build/pd_reports"` to `PropertyDamage.run/1` or set
+`PD_REPORT_HTML=_build/pd_reports`. See
+[Debugging Failures](debugging_failures.md#sharing-a-failure-page).
 
 ## Full Example
 
