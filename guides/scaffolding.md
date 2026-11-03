@@ -122,6 +122,9 @@ Adapter:
 
 Model:
   - WidgetTest.Model
+
+Projection:
+  - WidgetTest.Projections.State
 ```
 
 Drop `--dry-run` to write the files:
@@ -146,13 +149,16 @@ Generating adapter...
 Generating model...
   lib/widget_test/model.ex
 
+Generating projection...
+  lib/widget_test/projections/state.ex
+
 ✓ Generated 2 commands in lib/widget_test
 
 Next steps:
   1. Review and customize generators in command generator/1 callbacks
   2. Define events/3 (command, status, response) to map responses to events
   3. Add when:/overrides: options in Model's commands() for preconditions
-  4. Implement simulate/2 in Model for expected events
+  4. Add a simulator module with simulate/2 and name it in the Model's simulator/0
   5. Configure authentication in adapter
 ```
 
@@ -170,6 +176,7 @@ That is your first visible result: a complete test scaffold on disk, already
 | `--commands-only` | Emit only command modules, no adapter/model. |
 | `--base-url` | Override the spec's `servers` URL. |
 | `--dry-run` | Print the plan without writing files. |
+| `--force` | Overwrite files that already exist. Without it, the task refuses and names them. |
 
 ## 3. Tour the generated code
 
@@ -283,8 +290,8 @@ target `config:` keys (`bearer_token:`, `api_key:`, `basic_auth:`).
 ### Model — command weights, projection slots
 
 The model lists the commands with inferred weights (reads > creates > updates >
-deletes) and leaves you two `TODO`s: the state projection and any check
-projections.
+deletes) and names a starter state projection, `Projections.State`, that
+ignores every event. A `TODO` marks where to add check projections.
 
 ```elixir
 def commands do
@@ -295,9 +302,7 @@ def commands do
 end
 
 @impl true
-def command_sequence_projection do
-  raise "command_sequence_projection/0 not implemented - add your state projection module"
-end
+def command_sequence_projection, do: Projections.State
 ```
 
 ## 4. Fill in what the spec cannot know
@@ -305,9 +310,7 @@ end
 The scaffold gets you a faithful *client*; you still supply the *meaning*. The
 task's printed "Next steps" footer (shown in step 2; the task prints it and
 writes it to no file) lists five items. The steps below cover the same work in
-a different order and add the projection and the optional expansions. Where the
-footer says "Implement simulate/2 in Model", read step 4: the model names a
-simulator module with `simulator/0`, and that module defines `simulate/2`.
+a different order and add the projection and the optional expansions.
 
 1. **Map responses to events** — implement each command's `events/3`. Keying on
    status is the norm:
@@ -326,8 +329,9 @@ simulator module with `simulator/0`, and that module defines `simulate/2`.
    `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
    Catalogs*.
 
-3. **Wire the projection into the model** — replace the `raise` in
-   `command_sequence_projection/0`, and list check projections.
+3. **Wire the projection into the model** — fill in the generated
+   `Projections.State` (or point `command_sequence_projection/0` at your own
+   module), and list check projections.
 
 4. **Add a simulator**: a module with `simulate/2`, named by the model's
    `simulator/0`. You need it if you want state-dependent command
@@ -412,7 +416,7 @@ honest proof that the generated code drives the API for real.
 
 ## Regenerating
 
-Re-running `mix pd.scaffold` overwrites the generated files. Keep your fill-ins
+Re-running `mix pd.scaffold` refuses to touch existing files unless you pass `--force`, which overwrites the generated files. Keep your fill-ins
 (events/3, projections, model wiring) in separate modules or under version
 control so a regeneration only touches the generated base. `openapi_bench`
 follows this convention: the generated client is regenerated verbatim, while the
