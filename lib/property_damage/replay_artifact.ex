@@ -847,13 +847,19 @@ defmodule PropertyDamage.ReplayArtifact do
   # generation simulated them at (a root at the position of its root id), so
   # every placeholder the recorded commands hold resolves; then the teardown
   # commands generated from the seed against the state the roots leave.
-  @spec sequence(t()) :: Sequence.t()
-  def sequence(term) do
+  #
+  # The term does not record the run's `external_markers:`. Options:
+  # `:external_markers`, the atom markers the re-execution passes, read where
+  # the commands are simulated again (see `PropertyDamage.External`).
+  @spec sequence(t(), keyword()) :: Sequence.t()
+  def sequence(term, opts \\ []) do
     roots = Enum.map(term.roots, & &1.command)
-    registry = registry(term.model, term.prefix, term.roots)
+    registry = registry(term.model, term.prefix, term.roots, opts)
     sequence = %{Sequence.linear(roots) | setup: term.prefix, registry: registry}
-    Generator.teardown_commands(term.model, sequence, term.seed)
+    Generator.teardown_commands(term.model, sequence, term.seed, markers(opts))
   end
+
+  defp markers(opts), do: [external_markers: Keyword.get(opts, :external_markers, [])]
 
   @doc false
   # The placeholder ids that `commands` hold and that the registry an
@@ -862,10 +868,10 @@ defmodule PropertyDamage.ReplayArtifact do
   # leaf mints is left out: a re-execution simulates the leaves again where
   # they ran, so it mints that id again. A shrink candidate with an id here
   # would fail on replay where it failed in the shrink, so the shrinker never
-  # runs it.
-  @spec unregistered(module(), [struct()], [map()], [struct()]) :: [term()]
-  def unregistered(model, prefix, roots, commands) do
-    registry = registry(model, prefix, roots)
+  # runs it. Options: `:external_markers`, as for `sequence/2`.
+  @spec unregistered(module(), [struct()], [map()], [struct()], keyword()) :: [term()]
+  def unregistered(model, prefix, roots, commands, opts \\ []) do
+    registry = registry(model, prefix, roots, opts)
 
     commands
     |> PlaceholderRegistry.collect_placeholder_ids()
@@ -879,7 +885,7 @@ defmodule PropertyDamage.ReplayArtifact do
   # and the roots simulated again from the projection's initial state, each
   # root at the position of its root id, then moved to the roots' positions
   # in the recorded order.
-  defp registry(model, prefix, roots) do
+  defp registry(model, prefix, roots, opts) do
     projection = model.command_sequence_projection()
 
     steps =
@@ -892,7 +898,7 @@ defmodule PropertyDamage.ReplayArtifact do
       Enum.reduce(steps, {PlaceholderRegistry.new(), projection.init()}, fn {command, position},
                                                                             {registry, state} ->
         {_command, _events, state, minted} =
-          Generator.simulate_step(model, command, position, state)
+          Generator.simulate_step(model, command, position, state, markers(opts))
 
         {Enum.reduce(minted, registry, &PlaceholderRegistry.register(&2, &1)), state}
       end)
@@ -908,13 +914,14 @@ defmodule PropertyDamage.ReplayArtifact do
   @doc false
   # Every recorded target's concrete sequence for `sequence(term)`, from the
   # commands it ran, with no draw: `PropertyDamage.Expansion.t()`, restricted
-  # to `names` (default: every recorded target).
-  @spec expansion(t(), Sequence.t(), [String.t()] | nil) :: Expansion.t()
-  def expansion(term, %Sequence{} = sequence, names \\ nil) do
+  # to `names` (default: every recorded target). Options: `:external_markers`,
+  # as for `sequence/2`.
+  @spec expansion(t(), Sequence.t(), [String.t()] | nil, keyword()) :: Expansion.t()
+  def expansion(term, %Sequence{} = sequence, names \\ nil, opts \\ []) do
     recorded = if names, do: Map.take(term.choices, names), else: term.choices
 
     if Expansion.defines?(term.model) do
-      Expansion.recorded(term.model, sequence, term.seed, recorded, owners(term))
+      Expansion.recorded(term.model, sequence, term.seed, recorded, owners(term), markers(opts))
     else
       Expansion.identity(
         sequence,
@@ -946,16 +953,16 @@ defmodule PropertyDamage.ReplayArtifact do
   # for a value no file can hold, say) falls back to the choices its trace
   # records. Raises `ArgumentError` naming `path` when the report records
   # neither a `replay` term nor `expansions`, or does not record what one of
-  # `names` ran.
-  @spec reexecution(FailureReport.t(), [String.t()], String.t()) ::
+  # `names` ran. Options: `:external_markers`, as for `sequence/2`.
+  @spec reexecution(FailureReport.t(), [String.t()], String.t(), keyword()) ::
           {Sequence.t(), %{String.t() => map()} | nil}
-  def reexecution(%FailureReport{model: model} = report, names, path) do
+  def reexecution(%FailureReport{model: model} = report, names, path, opts \\ []) do
     cond do
       not Expansion.defines?(model) ->
         {FailureReport.shrunk_sequence(report), nil}
 
       is_map(report.replay) ->
-        from_term(report.replay, names, path)
+        from_term(report.replay, names, path, opts)
 
       is_nil(report.replay) and is_nil(report.expansions) ->
         raise ArgumentError,
@@ -966,15 +973,15 @@ defmodule PropertyDamage.ReplayArtifact do
                 "seed again to get a report that records them"
 
       true ->
-        from_trace(report, names, path)
+        from_trace(report, names, path, opts)
     end
   end
 
-  defp from_term(term, names, path) do
+  defp from_term(term, names, path, opts) do
     case names -- Map.keys(term.choices) do
       [] ->
-        sequence = sequence(term)
-        {sequence, expansion(term, sequence, names).variants}
+        sequence = sequence(term, opts)
+        {sequence, expansion(term, sequence, names, opts).variants}
 
       missing ->
         raise ArgumentError,
@@ -985,13 +992,13 @@ defmodule PropertyDamage.ReplayArtifact do
     end
   end
 
-  defp from_trace(report, names, path) do
+  defp from_trace(report, names, path, opts) do
     traced = Expansion.traced!(report.model, report.trace && report.trace.expansion, names, path)
     sequence = FailureReport.shrunk_sequence(report)
 
     {sequence,
      Map.new(names, fn name ->
-       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name))}
+       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name), markers(opts))}
      end)}
   end
 

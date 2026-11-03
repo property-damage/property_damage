@@ -893,12 +893,20 @@ defmodule PropertyDamage.Generator do
   @doc false
   # Simulates a root at `position` from `state` and folds it. The placeholders
   # its events carry are the ones `registry` links to that position, so a walk
-  # over a shrink candidate folds the ids generation minted.
-  @spec simulate_root(module(), struct(), Position.t(), map(), PlaceholderRegistry.t() | nil) ::
-          map()
-  def simulate_root(model, command, position, state, registry) do
+  # over a shrink candidate folds the ids generation minted. Options:
+  # `:external_markers`, as for `generate_sequence/2`.
+  @spec simulate_root(
+          module(),
+          struct(),
+          Position.t(),
+          map(),
+          PlaceholderRegistry.t() | nil,
+          keyword()
+        ) :: map()
+  def simulate_root(model, command, position, state, registry, opts \\ []) do
+    markers = Keyword.get(opts, :external_markers, [])
     projection = model.command_sequence_projection()
-    simulate_linked(model, projection, command, position, state, registry, [])
+    simulate_linked(model, projection, command, position, state, registry, markers)
   end
 
   defp simulate_linked(model, projection, command, position, state, registry, markers) do

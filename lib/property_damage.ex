@@ -680,7 +680,10 @@ defmodule PropertyDamage do
 
         case Keyword.fetch(only, :replay) do
           {:ok, path} ->
-            replay = load_replay!(path, opts[:model], opts[:targets])
+            replay =
+              load_replay!(path, opts[:model], opts[:targets],
+                external_markers: opts[:external_markers] || []
+              )
 
             {opts
              |> Keyword.put(:seed, replay.term.seed)
@@ -693,7 +696,9 @@ defmodule PropertyDamage do
     end
   end
 
-  defp load_replay!(path, model, targets) do
+  # The artifact does not record the run's `external_markers:`: the replay
+  # reads its commands with the markers this run passes.
+  defp load_replay!(path, model, targets, markers) do
     # The loader builds structs of loaded modules only and never loads one, so
     # the modules `model:` names are loaded first: the model and the commands
     # it lists. A leaf module no other command names must be loaded by the
@@ -755,14 +760,14 @@ defmodule PropertyDamage do
         %{Enum.find(targets, &(&1.name == name)) | index: index, expansion: mode}
       end)
 
-    sequence = ReplayArtifact.sequence(term)
+    sequence = ReplayArtifact.sequence(term, markers)
 
     %{
       term: term,
       path: path,
       targets: replayed,
       sequence: sequence,
-      expansion: ReplayArtifact.expansion(term, sequence)
+      expansion: ReplayArtifact.expansion(term, sequence, nil, markers)
     }
   end
 
@@ -1229,8 +1234,11 @@ defmodule PropertyDamage do
   # its teardown commands generated against the state the roots leave.
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
-    Generator.teardown_commands(ctx.model, sequence, run_seed)
+    Generator.teardown_commands(ctx.model, sequence, run_seed, markers(ctx))
   end
+
+  # The `:external_markers` option of the generator and expansion calls.
+  defp markers(ctx), do: [external_markers: ctx.external_markers]
 
   # Every target's concrete sequence for a generated linear sequence: the roots
   # with each target's expansions realized, before any target is set up. A
@@ -1240,7 +1248,7 @@ defmodule PropertyDamage do
   defp expand(ctx, sequence, run_seed) do
     if Expansion.defines?(ctx.model) do
       ctx.model
-      |> Expansion.expand(sequence, ctx.all_targets, run_seed)
+      |> Expansion.expand(sequence, ctx.all_targets, run_seed, markers(ctx))
       |> running(ctx)
     else
       Expansion.identity(sequence, ctx.targets)
@@ -2163,6 +2171,11 @@ defmodule PropertyDamage do
     step's last settle or stutter attempts keep their log lines in the new
     report (default 3). The report does not record the run's value, so a run
     given another value passes it here again.
+  - `:external_markers` - The atom markers of the run, as on
+    `PropertyDamage.run/1` (default `[]`). The report does not record them, so
+    a run that named atom markers passes them here again: the re-shrink
+    simulates the report's commands again, and only a marker named here turns
+    an event field into a placeholder that later commands resolve.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2214,7 +2227,8 @@ defmodule PropertyDamage do
           ReplayArtifact.reexecution(
             report,
             Enum.map(targets, & &1.name),
-            "PropertyDamage.shrink_further/2"
+            "PropertyDamage.shrink_further/2",
+            external_markers: Keyword.get(opts, :external_markers, [])
           )
 
         if names_failing_target?(targets, report.variant),
@@ -2246,6 +2260,7 @@ defmodule PropertyDamage do
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
       keep_attempts: Options.keep_attempts!(opts),
+      external_markers: Keyword.get(opts, :external_markers, []),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }
@@ -2283,6 +2298,7 @@ defmodule PropertyDamage do
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
         keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(

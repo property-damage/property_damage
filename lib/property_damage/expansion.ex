@@ -287,10 +287,13 @@ defmodule PropertyDamage.Expansion do
   #                              function lists one, else as `:identity`
   #                :follow       run what the first target runs at that root
   #                              in this walk: its entry and its commands
+  #   :external_markers  the run's atom markers (see `PropertyDamage.External`):
+  #              an event field holding one becomes a placeholder when a root
+  #              or a leaf is simulated, as in generation
   @spec expand(module(), Sequence.t(), [PropertyDamage.Target.t()], integer(), keyword()) :: t()
   def expand(model, %Sequence{} = sequence, targets, run_seed, opts \\ []) do
     carry = Keyword.get(opts, :carry)
-    walk = walk_state(model, sequence, Keyword.get(opts, :root_ids), run_seed)
+    walk = walk_state(model, sequence, Keyword.get(opts, :root_ids), run_seed, opts)
 
     {variants, warnings} =
       Enum.reduce(targets, {%{}, []}, fn target, {variants, warnings} ->
@@ -472,14 +475,20 @@ defmodule PropertyDamage.Expansion do
   # at their leaf positions, which mints their placeholders and links the
   # root's placeholders to them. `owners` maps each name to the name its
   # seed keys carry (the reference's name for a target that copied it), so a
-  # later shrink realizes the same entries again.
-  @spec recorded(module(), Sequence.t(), integer(), %{String.t() => [map()]}, %{
-          String.t() => String.t()
-        }) :: t()
-  def recorded(model, %Sequence{} = sequence, run_seed, recorded, owners) do
+  # later shrink realizes the same entries again. Options: `:external_markers`,
+  # as for `expand/5`.
+  @spec recorded(
+          module(),
+          Sequence.t(),
+          integer(),
+          %{String.t() => [map()]},
+          %{String.t() => String.t()},
+          keyword()
+        ) :: t()
+  def recorded(model, %Sequence{} = sequence, run_seed, recorded, owners, opts \\ []) do
     variants =
       Map.new(recorded, fn {name, choices} ->
-        walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), run_seed)
+        walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), run_seed, opts)
         carry = Map.new(choices, &{&1.root_id, {:recorded, &1}})
         {variant, _warnings} = walk(walk, Map.get(owners, name, name), :random, carry)
         {name, variant}
@@ -493,14 +502,15 @@ defmodule PropertyDamage.Expansion do
   # choices it made there (`choices`, one per root in order, as a report's
   # trace keeps them): its choices and the registry its commands resolve
   # against. The roots keep the root ids of `choices`. A model without
-  # `expansions/0` runs the roots of `sequence`.
-  @spec carried(module(), Sequence.t(), [choice()]) :: %{
+  # `expansions/0` runs the roots of `sequence`. Options: `:external_markers`,
+  # as for `expand/5`.
+  @spec carried(module(), Sequence.t(), [choice()], keyword()) :: %{
           choices: [choice()],
           registry: PlaceholderRegistry.t()
         }
-  def carried(model, %Sequence{} = sequence, choices) do
+  def carried(model, %Sequence{} = sequence, choices, opts \\ []) do
     if defines?(model) do
-      walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), nil)
+      walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), nil, opts)
       {variant, _warnings} = walk(walk, nil, :random, Map.new(choices, &{&1.root_id, &1}))
       variant
     else
@@ -565,24 +575,26 @@ defmodule PropertyDamage.Expansion do
 
   def root_ids(_traced), do: nil
 
-  defp walk_state(model, sequence, root_ids, run_seed) do
+  defp walk_state(model, sequence, root_ids, run_seed, opts) do
     roots = Sequence.to_list(sequence)
     indices = Enum.to_list(0..(length(roots) - 1)//1)
+    markers = [external_markers: Keyword.get(opts, :external_markers, [])]
 
     %{
       model: model,
       functions: functions(model) || %{},
       preconditions: preconditions(model),
       registry: sequence.registry || PlaceholderRegistry.new(),
-      start: start_state(model, sequence),
+      markers: markers,
+      start: start_state(model, sequence, markers),
       roots: Enum.zip([roots, root_ids || indices, indices]),
       run_seed: run_seed
     }
   end
 
   # A model without expansions has nothing to fold: every walk runs the roots.
-  defp start_state(model, sequence) do
-    if defines?(model), do: Generator.setup_state(model, sequence), else: nil
+  defp start_state(model, sequence, markers) do
+    if defines?(model), do: Generator.setup_state(model, sequence, markers), else: nil
   end
 
   # Per command module, the `when:` specs of its commands/0 entries.
@@ -739,7 +751,8 @@ defmodule PropertyDamage.Expansion do
         base.root_command,
         Position.prefix(base.root),
         base.state,
-        walk.registry
+        walk.registry,
+        walk.markers
       )
 
     choice = %{
@@ -841,7 +854,7 @@ defmodule PropertyDamage.Expansion do
         position = Position.leaf(base.root_id, leaf)
 
         {command, events, state, new_minted} =
-          Generator.simulate_step(walk.model, command, position, state)
+          Generator.simulate_step(walk.model, command, position, state, walk.markers)
 
         {:cont, {done ++ [%{command: command, events: events}], state, minted ++ new_minted}}
       end
@@ -1120,7 +1133,7 @@ defmodule PropertyDamage.Expansion do
       position = Position.leaf(base.root_id, leaf)
 
       {command, events, state, minted} =
-        Generator.simulate_step(walk.model, command, position, state)
+        Generator.simulate_step(walk.model, command, position, state, walk.markers)
 
       {command, events, state, minted, warnings, own}
     else
