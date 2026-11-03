@@ -1524,6 +1524,11 @@ defmodule PropertyDamage.FailureReport do
   defp message_for(%Failure{type: %Failure.Setup{cause: :model, detail: detail}}),
     do: "Model code failed while the variant came up (cause: model): " <> extract_message(detail)
 
+  defp message_for(%Failure{type: %Failure.Setup{cause: :variant, detail: detail}}),
+    do:
+      "The variant process exited while the target came up (cause: variant): " <>
+        extract_message(detail)
+
   defp message_for(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
     "Setup failed (cause: unresolved_placeholder) at setup command #{setup.setup_index} " <>
       "(#{command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>

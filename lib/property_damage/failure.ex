@@ -166,6 +166,10 @@ defmodule PropertyDamage.Failure.Setup do
       after the adapter's `setup/1` returned `{:ok, _}` (for example a
       `__checks__/0` entry without `:type`); `detail` is the exception, with
       an exit or throw as an `ErlangError`
+    * `:variant` - the variant process exited while it came up, in a way no
+      `setup/1` or model code could rescue (an untrappable kill, or the crash
+      of a process linked to it); `detail` is the exit reason, as
+      `{:exit, reason}` or the exception that ended the process
     * `:command` - a setup command's adapter answer was `{:error, term}` or a
       raise, or the command could not be executed; `detail` is the term, the
       exception, or the `%PropertyDamage.Failure{}` the engine reported
@@ -180,7 +184,7 @@ defmodule PropertyDamage.Failure.Setup do
   its offset among the setup commands.
   """
 
-  @type cause :: :adapter_setup | :model | :command | :check | :unresolved_placeholder
+  @type cause :: :adapter_setup | :model | :variant | :command | :check | :unresolved_placeholder
 
   @type t :: %__MODULE__{
           cause: cause(),
@@ -625,15 +629,15 @@ defmodule PropertyDamage.Failure do
   end
 
   @doc """
-  A setup command failed in a target, or model code faulted while the target
-  came up. `cause` is `:model`, `:command`, `:check` or
-  `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
+  A setup command failed in a target, model code faulted while the target came
+  up, or the variant process died while it came up. `cause` is `:model`,
+  `:variant`, `:command`, `:check` or `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
   `:detail` and, for an unresolved placeholder, `:field` (see
   `PropertyDamage.Failure.Setup`).
   """
   @spec setup_failed(Setup.cause(), keyword()) :: t()
   def setup_failed(cause, fields)
-      when cause in [:model, :command, :check, :unresolved_placeholder] do
+      when cause in [:model, :variant, :command, :check, :unresolved_placeholder] do
     %__MODULE__{type: struct!(Setup, Keyword.put(fields, :cause, cause))}
   end
 

@@ -65,6 +65,20 @@ defmodule PropertyDamage.SetupFaultReportTest do
     def execute(%Bump{}, _, _), do: {:ok, [%Bumped{}]}
   end
 
+  defmodule KillProj do
+    use PropertyDamage.Model.Projection
+    def init, do: %{}
+    def apply(state, _), do: state
+    @check at: :startup
+    def startup_probe(_state, _phase), do: Process.exit(self(), :kill)
+  end
+
+  defmodule KillModel do
+    use PropertyDamage.Model
+    def commands, do: [Bump]
+    def command_sequence_projection, do: KillProj
+  end
+
   defmodule ExitModel do
     use PropertyDamage.Model
     def commands, do: [Bump]
@@ -161,5 +175,15 @@ defmodule PropertyDamage.SetupFaultReportTest do
 
     assert %Failure{type: %Failure.Setup{cause: :model}} = report.failure_reason
     assert_received :adapter_torn_down
+  end
+
+  test "a variant process that dies while it comes up is reported as a variant crash" do
+    report = run(KillModel)
+
+    assert report.kind == :setup_failed
+    assert %Failure{type: %Failure.Setup{cause: :variant}} = report.failure_reason
+    message = FailureReport.failure_message(report)
+    assert message =~ "variant"
+    refute message =~ "Adapter setup failed"
   end
 end

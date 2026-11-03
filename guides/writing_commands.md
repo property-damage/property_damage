@@ -591,11 +591,13 @@ always drew.
 ### When Setup Fails
 
 A setup failure has kind `:setup_failed`, and the report's `failed_at_index` is
-`nil`. It has four causes:
+`nil`. It has six causes:
 
 | Cause | What happened |
 |-------|---------------|
 | `:adapter_setup` | `Adapter.setup/1` returned `{:error, _}` or raised |
+| `:model` | model code (a projection or a check) raised, exited or threw while the target came up, after `setup/1` succeeded |
+| `:variant` | the variant process exited while the target came up, in a way nothing could rescue (an untrappable kill, or a linked process crashing) |
 | `:command` | a setup command answered `{:error, _}` or raised |
 | `:check` | a `@check` or `@eventually` check failed on a setup command's event |
 | `:unresolved_placeholder` | an `external()` a setup command produced was still unresolved after the last setup command |
