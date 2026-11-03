@@ -322,25 +322,25 @@ branch (if any) on the envelope:
 
 There are seven **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 
-- `:check` — a property or invariant did not hold (`:check_failed`,
+- `:check`: a property or invariant did not hold (`:check_failed`,
   `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
   `:projection_violation`). This is the class you usually want: it means the SUT
   misbehaved.
-- `:execution` — the machinery around the SUT failed to run a command
+- `:execution`: the machinery around the SUT failed to run a command
   (an adapter raise or `{:error, _}` answer is `:adapter_error` in every run,
   never compared as an observation; `:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
   `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`,
   `:malformed_adapter_return`). Often a test-harness or
   infrastructure problem rather than a SUT bug.
-- `:framework` — PropertyDamage itself could not proceed
+- `:framework`: PropertyDamage itself could not proceed
   (`:placeholder_resolution`, `:unknown`).
-- `:divergence` — in a comparison run, a variant's boundary observation differed
+- `:divergence`: in a comparison run, a variant's boundary observation differed
   from the reference's (kind `:diverged`).
-- `:convergence` — in a comparison run, a variant's boundary observation was
+- `:convergence`: in a comparison run, a variant's boundary observation was
   still pending when the convergence bound expired (kind `:did_not_converge`).
-- `:setup` — a target could not be brought up, so no root ran in it (kind
+- `:setup`: a target could not be brought up, so no root ran in it (kind
   `:setup_failed`).
-- `:latency` — a variant's latency statistic exceeded its `latency:` bound over
+- `:latency`: a variant's latency statistic exceeded its `latency:` bound over
   the whole campaign (kind `:latency_exceeded`).
 
 The last four classes each carry one kind, so the class and the kind identify
@@ -585,7 +585,7 @@ is the state just before it, so you can diff the two around the failing step.
 a replay-local outcome vocabulary (distinct from the run-level `failure_reason`)
 with three shapes:
 
-- `:ok` — the command executed and every check that ran passed.
+- `:ok`: the command executed and every check that ran passed.
 - `{:check_failed, name, exception}` — a check failed. `name` is the check
   name (an atom, e.g. `:balance_non_negative`) and `exception` is the exception
   struct the check raised. Only `:check_failed` failures take this shape.
