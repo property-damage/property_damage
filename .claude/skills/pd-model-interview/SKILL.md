@@ -16,17 +16,26 @@ One model per bounded subsystem, one directory per model:
 test/support/pd/<model_slug>/
   model_spec.md     # source of truth (human + agent edited)
   model.ex          # generated
+  simulator.ex      # generated (from each command's events: list)
   commands/         # generated
   events/           # generated
   projections/      # generated
+  smoke.exs         # generated (the bounded smoke run)
   adapter.ex        # hand-owned after first scaffold
+  <injector>.ex     # hand-owned stub, only when the spec has injected events
 ```
 
 ## Entry states
 
 Run recon BEFORE asking anything: read `mix.exs`, glob `**/model_spec.md`,
 look for existing PD model code and OpenAPI specs. Never ask what the code
-already answers. Then branch:
+already answers. Check that `elixirc_paths(:test)` in `mix.exs` includes
+`"test/support"`: Mix compiles only `lib` by default, and the scaffold lives
+under `test/support/`. If it does not, propose the change (a clause
+`defp elixirc_paths(:test), do: ["lib", "test/support"]` beside
+`defp elixirc_paths(_), do: ["lib"]`, and `elixirc_paths:
+elixirc_paths(Mix.env())` in `project/0`) and apply it only after the user
+confirms. Then branch:
 
 1. **No spec anywhere** → full interview
    ([interview_protocol.md](references/interview_protocol.md)).
@@ -44,7 +53,40 @@ If an OpenAPI spec is present and the SUT is that API: `mix pd.scaffold`
 supplies the mechanical layer (operations, fields, adapter surface) and the
 interview narrows to what OpenAPI cannot express - invariants, preconditions,
 state, weights, expected events. Record the OpenAPI path and content hash in
-the spec header.
+the spec header. The command is:
+
+```
+MIX_ENV=test mix pd.scaffold --from <openapi path> --output test/support/pd/<slug>/ --namespace <Namespace> --dry-run
+```
+
+Run it with `--dry-run` first, show the user the list, then run it again
+without `--dry-run`. Run it once, before the adapter becomes hand-owned: it
+overwrites `adapter.ex` and `model.ex` unconditionally. When the OpenAPI
+document drifts later, never rerun it whole; use `--dry-run` to see the
+difference. To add operations, `--commands-only --operations <ids>` writes
+each named operation's command (`commands/create_user.ex`) and its event file,
+and overwrites any file of the same name without asking. The event name comes
+from the operationId: `create`, `update`, `delete`, `get` and `list` prefixes
+give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
+(`createUser` gives `UserCreated`, file `events/user_created.ex`); `find` and
+`search` also strip the prefix but give `<Resource>Completed`, so `findUser`
+and `searchUser` share `UserCompleted`; any other operationId gives
+`<OperationId>Completed`. Run `--dry-run` first and turn each command and
+event module it lists into its file path. The dry run lists an event module
+for every operation, but the run writes an event file only for an operation
+whose success response has a schema. Leave out an operation if its command
+file already exists, or if its success response has a schema and its event
+file already exists (an event file that another operation shares counts).
+Ignore the event module of an operation without a schema: the run neither
+writes that file nor touches a file of that name.
+What it writes differs from the layout above: it writes `commands/`,
+`events/` (named as above), `adapter.ex` and `model.ex`, but no
+`projections/` and no `simulator.ex`; its `model.ex` raises in
+`command_sequence_projection/0` until a projection exists, and its files carry
+no class header. Add the class header lines from
+[scaffold_templates.md](references/scaffold_templates.md) to each file
+afterwards, then write the projection, simulator and `@moduledoc` text from
+the spec as for any model.
 
 ## Workflow spine
 
@@ -61,12 +103,22 @@ the spec header.
    templates in
    [scaffold_templates.md](references/scaffold_templates.md); do not drive
    `mix pd.gen.*` (their flag surface cannot carry the spec).
-5. **Verify**, in order, stopping at the first rung that cannot proceed:
-   `mix format` on generated files → `mix compile` → `mix pd.validate` →
-   (only if adapter wiring was user-confirmed) a bounded smoke run.
+5. **Verify**, in order, stopping at the first rung that cannot proceed.
+   Run every rung under `MIX_ENV=test`, because the scaffold lives in
+   `test/support/`:
+   1. `mix format` on the generated files;
+   2. `MIX_ENV=test mix compile`;
+   3. `MIX_ENV=test mix pd.validate <Namespace>.Model <Namespace>.Adapter --strict`
+      (a bare `mix pd.validate` prints usage and exits 0, so it proves
+      nothing);
+   4. only if adapter wiring was user-confirmed, the bounded smoke run
+      (`MIX_ENV=test mix run <dir>/smoke.exs`), which also checks that every
+      command executed at least once.
+
    Compile or validate failures are your bugs; fix them before handover.
 6. **Hand over**: what was scaffolded, adapter TODOs, the exact command for
-   the first real run, and anything deferred.
+   the first real run (with `report_html:` set, so a failure leaves an HTML
+   page to read), the smoke check result, and anything deferred.
 
 ## Hard rules
 
@@ -78,7 +130,8 @@ the spec header.
   TODO-stub what the user does not confirm.
 - Invariants are elicited always, blocked never: if the user defers them,
   scaffold anyway, explain what the implicit checks still catch (crashes,
-  error tuples, linearization) and what they are blind to (domain wrongness),
+  error tuples, and, with the `branching:` option and a simulator,
+  linearization) and what they are blind to (domain wrongness),
   and write concrete context-specific invariant suggestions to the spec as
   deferred.
 - Never delete files on regeneration; report removals for the user to delete.
