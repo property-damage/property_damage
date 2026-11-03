@@ -29,6 +29,9 @@ end
 The command generators in this guide call `StreamData` functions directly, so
 your project lists `:stream_data` itself.
 
+Each module in the steps below goes in its own file under `lib/my_app/` (for
+example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run.
+
 ## Core Concepts
 
 PropertyDamage has five key components:
@@ -184,11 +187,27 @@ end
 The failure report shows a check by its function name without the `assert_`
 prefix, so a failing `assert_emails_unique` appears as `emails_unique`.
 
+Optional: to see a failure, replace the body of `assert_emails_unique` with a
+check that fails on purpose, then run as in Step 7 with
+`report_html: "_build/pd_reports"` and open the page it writes (see
+[Understanding Results](#understanding-results)). Restore the `:ok` body
+afterward.
+
+```elixir
+def assert_emails_unique(state, _cmd_or_event) do
+  if MapSet.size(state.emails) >= 1 do
+    {:fail, "broken on purpose: a user exists"}
+  else
+    :ok
+  end
+end
+```
+
 ## Step 5: Define the Model
 
 The model ties everything together. Every module that calls
-`use PropertyDamage.Model`, `use PropertyDamage.Model.Projection` or
-`use PropertyDamage.Command` must put that line first, before any `def`, `defp`
+`use PropertyDamage.Model`, `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` or `use PropertyDamage.Adapter` must put that line first, before any `def`, `defp`
 or other `use` that defines functions (such as `use GenServer`). Otherwise the
 module does not compile.
 
@@ -237,14 +256,20 @@ model is just those two. The optional ones:
 - `check_projections/0` — invariant projections to run; defaults to `[]`.
 - `injectable_events/0` — events that arrive from outside command execution
   (webhooks, callbacks) rather than from commands; defaults to `[]`.
-- `simulator/0` — a separate simulator module for sequence generation (defaults
-  to the model itself).
+- `simulator/0`: the simulator module for sequence generation. It has no
+  default: without `simulator/0` the generator predicts no events, so projection
+  state stays at `init/0` while the sequence is generated and any `when:` guard
+  that reads state never opens. A model whose commands need no such guard can
+  leave it out.
 - `setup_each/0`, `teardown_each/0` — setup commands and teardown commands: a
   fixture such as "a user is logged in" is a command that runs before the first
   root of every run (or after the last), and each target's adapter decides how
   to do it. Both default to `[]`. See
   [Writing Commands](writing_commands.md#setup-and-teardown-commands).
 - `terminate_early?/3` — a predicate to stop generating a sequence early.
+- `expansions/0`: command sequences a root command may run as, per target, when
+  they mean the same as the root. A model without it has none. See
+  [Writing Commands](writing_commands.md#expansions-one-root-several-commands).
 
 This example spells out `check_projections/0` and `injectable_events/0`
 (even though `injectable_events` returns `[]`) to show their shape; you can drop
@@ -332,6 +357,9 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 
 ### Basic Run
 
+Put the call in a script such as `run.exs` and start it with `mix run run.exs`,
+or paste it into `iex -S mix`.
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
@@ -348,20 +376,25 @@ shows what the report holds.
 
 ### In ExUnit
 
+`use PropertyDamage.ExUnit` gives you `property_damage/2`, which takes the same
+options as `PropertyDamage.run/1`. When the run fails, the test's failure message
+is the full failure report:
+
 ```elixir
 defmodule MyApp.PropertyTest do
   use ExUnit.Case
+  use PropertyDamage.ExUnit
 
-  test "system maintains invariants" do
-    assert {:ok, _stats} =
-             PropertyDamage.run(
-               model: MyApp.TestModel,
-               targets: [MyApp.TestAdapter],
-               max_runs: 100
-             )
-  end
+  property_damage "system maintains invariants",
+    model: MyApp.TestModel,
+    targets: [MyApp.TestAdapter],
+    max_runs: 100
 end
 ```
+
+A plain `test` that asserts on `PropertyDamage.run/1` also works, but a failed
+`assert {:ok, _stats} = PropertyDamage.run(...)` shows only a compact summary of
+the report. Use it when the test needs the result for more than pass or fail.
 
 ### Verbose Mode
 
@@ -388,10 +421,19 @@ run.
 When tests fail, `PropertyDamage.run/1` returns `{:error, report}` and does not
 print the report. The report holds the shrunk failure, its events, the state it
 left and the calls that reproduce it. To read it in full, call
-`IO.inspect(report, pretty: true)`. A failed `assert {:ok, _stats} = ...` in
-ExUnit shows only a compact summary of the report.
+`IO.inspect(report, pretty: true)`. A `property_damage/2` test prints the full
+report when it fails, but a failed `assert {:ok, _stats} = ...` in ExUnit shows
+only a compact summary of it.
+
+To read the failure as an HTML page, pass `report_html: "_build/pd_reports"` to
+the run, or set the environment variable `PD_REPORT_HTML` to a directory (the
+variable wins when both are set). Each failing run then writes a page there, and
+the directory's `index.html` browses them all; see
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
 [Reading the report](debugging_failures.md#reading-the-report) walks through a
-real one. To put your own lines in it, such as the requests an
+real one. Shrinking can simplify a command's values to ones your generator
+would never draw, such as an empty string for a name that needs five
+characters; the shrunk failure still fails the same way. To put your own lines in it, such as the requests an
 adapter sends, call `PropertyDamage.log/2`; see the
 [log lines guide](log_lines.md).
 

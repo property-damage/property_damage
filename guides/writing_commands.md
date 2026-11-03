@@ -24,7 +24,7 @@ Commands define:
 Commands do NOT define:
 - When the command is valid (preconditions) - defined in Model via `when:`
 - How to parameterize based on state - defined in Model via `overrides:`
-- Expected events from execution - defined in Model via `simulate/2`
+- Expected events from execution - defined by the simulator module (the one `simulator/0` names in the Model) via `simulate/2`
 
 ### Basic Command Example
 
@@ -73,12 +73,12 @@ end
 `use PropertyDamage.Model` comes before any definition in the module: every
 `def` and `defp` comes after it. It also comes before any other `use` that
 defines functions, such as `use GenServer`; a module that breaks either rule
-does not compile. The same holds for `use PropertyDamage.Model.Projection` and
-`use PropertyDamage.Command`.
+does not compile. The same holds for `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
 
 ### State-Dependent Command Example
 
-For commands that need state-dependent values (like selecting from existing refs):
+For commands that need state-dependent values (like selecting from the ids of existing orders):
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -94,7 +94,7 @@ defmodule MyTest.Commands.ViewOrder do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # Default to nil - Model provides actual refs via overrides:
+    # Default to nil - Model provides actual order ids via overrides:
     %{order_ref: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -104,14 +104,32 @@ end
 
 The Model wires this command with state:
 
+The model needs a projection to hold the orders it has seen. `apply/2` stores
+each simulated `OrderCreated` under its (placeholder) id:
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
+defmodule MyTest.OrderProjection do
+  use PropertyDamage.Model.Projection
+
+  alias MyTest.Events.OrderCreated
+
+  @impl true
+  def init, do: %{orders: %{}}
+
+  @impl true
+  def apply(state, %OrderCreated{order_id: id, amount: amount}),
+    do: %{state | orders: Map.put(state.orders, id, %{amount: amount, status: :active})}
+
+  def apply(state, _event), do: state
+end
+
 defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model.Simulator
   use PropertyDamage.Model
 
   alias MyTest.Commands.{CreateOrder, ViewOrder}
-  alias MyTest.Events.{OrderViewed, OrderNotFound}
+  alias MyTest.Events.{OrderCreated, OrderViewed, OrderNotFound}
 
   def commands do
     [
@@ -127,7 +145,11 @@ defmodule MyTest.OrderModel do
   # Return self as the simulator module
   def simulator, do: __MODULE__
 
-  # simulate/2 defines expected events (Simulator behaviour)
+  # simulate/2 defines expected events (Simulator behaviour). CreateOrder
+  # predicts an OrderCreated, which opens the `when:` guard of ViewOrder.
+  def simulate(%CreateOrder{amount: amount, currency: currency}, _state),
+    do: [%OrderCreated{amount: amount, currency: currency}]
+
   def simulate(%ViewOrder{order_ref: ref}, state) do
     if Map.has_key?(state.orders, ref) do
       [%OrderViewed{order_ref: ref}]
@@ -136,6 +158,43 @@ defmodule MyTest.OrderModel do
     end
   end
 end
+```
+
+A small adapter answers each command with its events, so the model can run:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule MyTest.OrderAdapter do
+  use PropertyDamage.Adapter
+
+  alias MyTest.Commands.{CreateOrder, ViewOrder}
+  alias MyTest.Events.{OrderCreated, OrderViewed}
+
+  @impl true
+  def setup(_config) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    {:ok, %{counter: counter}}
+  end
+
+  @impl true
+  def teardown(%{counter: counter}) do
+    Agent.stop(counter)
+    :ok
+  end
+
+  @impl true
+  def execute(%CreateOrder{amount: amount, currency: currency}, %{counter: counter}, _runtime) do
+    n = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+    {:ok, [%OrderCreated{amount: amount, currency: currency, order_id: "ord_#{n}"}]}
+  end
+
+  def execute(%ViewOrder{order_ref: ref}, _ctx, _runtime), do: {:ok, [%OrderViewed{order_ref: ref}]}
+end
+
+{:ok, stats} =
+  PropertyDamage.run(model: MyTest.OrderModel, targets: [MyTest.OrderAdapter], max_runs: 5, seed: 1)
+
+true = stats.runs == 5
 ```
 
 ## Server-Generated Values
@@ -219,7 +278,11 @@ end
 |--------|------|-------------|
 | `weight:` | `pos_integer()` | Relative selection frequency (default: 1) |
 | `when:` | `(state -> boolean)` | Precondition function |
-| `overrides:` | `(state -> map)` | Override function for generation |
+| `overrides:` | `map \| (state -> map)` | Fixed values or a function of the state, merged into generation |
+
+Inside an expansion sequence, `overrides:` can also be a function of two arguments
+(the state and the events of the earlier commands in the sequence). See
+[Expansions](#expansions-one-root-several-commands).
 
 ### Simulate Callback
 
@@ -238,17 +301,26 @@ defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model.Simulator
   use PropertyDamage.Model
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder}
+  alias MyTest.Events.{OrderCancelled, OrderCreated, OrderNotFound}
+
+  @impl true
   def commands, do: [CreateOrder, CancelOrder]
+
+  @impl true
   def command_sequence_projection, do: MyTest.OrderProjection
+
+  @impl true
   def check_projections, do: []
 
   # Return self as the simulator module
+  @impl true
   def simulator, do: __MODULE__
 
   # Simulator behaviour callback
   @impl PropertyDamage.Model.Simulator
-  def simulate(%CreateOrder{amount: amount}, _state) do
-    [%OrderCreated{amount: amount, order_ref: nil}]
+  def simulate(%CreateOrder{amount: amount, currency: currency}, _state) do
+    [%OrderCreated{amount: amount, currency: currency}]
   end
 
   def simulate(%CancelOrder{order_ref: ref}, state) do
@@ -895,6 +967,7 @@ defmodule MyTest.OrderModel do
   use PropertyDamage.Model
 
   alias MyTest.CommandWiring
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
   alias MyTest.Simulation
 
   def commands do
@@ -932,7 +1005,7 @@ defmodule MyTest.CommandWiring do
       when: fn s -> Enum.any?(s.orders, fn {_, o} -> o.status == :active end) end,
       overrides: fn s ->
         active = Enum.filter(s.orders, fn {_, o} -> o.status == :active end)
-        %{order_ref: StreamData.member_of(Keyword.keys(active))}
+        %{order_ref: StreamData.member_of(Enum.map(active, fn {id, _} -> id end))}
       end
     ]
   end
@@ -941,9 +1014,12 @@ end
 defmodule MyTest.Simulation do
   @behaviour PropertyDamage.Model.Simulator
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
+  alias MyTest.Events.{OrderCancelled, OrderCreated, OrderViewed}
+
   @impl true
-  def simulate(%CreateOrder{amount: amount}, _state) do
-    [%OrderCreated{amount: amount, order_ref: nil}]
+  def simulate(%CreateOrder{amount: amount, currency: currency}, _state) do
+    [%OrderCreated{amount: amount, currency: currency}]
   end
 
   def simulate(%ViewOrder{order_ref: ref}, _state) do
@@ -997,6 +1073,8 @@ end
 
 # Model A uses standard state shape
 defmodule ModelA do
+  use PropertyDamage.Model
+
   import SharedWiring.Orders
 
   def commands do
@@ -1006,10 +1084,14 @@ defmodule ModelA do
       {CancelOrder, cancel_order_wiring()}
     ]
   end
+
+  def command_sequence_projection, do: MyTest.OrderProjection
 end
 
 # Model B uses different state key
 defmodule ModelB do
+  use PropertyDamage.Model
+
   import SharedWiring.Orders
 
   def commands do
@@ -1019,6 +1101,8 @@ defmodule ModelB do
       {CancelOrder, cancel_order_wiring(:pending_orders, :state)}
     ]
   end
+
+  def command_sequence_projection, do: MyTest.PendingOrderProjection
 end
 ```
 
@@ -1048,6 +1132,10 @@ defmodule ViewOrder do
   # ...
 end
 ```
+
+The `@moduledoc` also serves the reader of a failure. The failure report's
+"What this checks" section prints the failing command's `@moduledoc`, or
+`(no description: add @moduledoc to ViewOrder)` when the command has none.
 
 ## Static Metadata (`command_spec/1`)
 
@@ -1131,7 +1219,7 @@ internal polling, optionally injecting intermediate events via `runtime.inject`.
     use PropertyDamage.Command, execution: :async
 
 Use for operations that return "processing" status and require polling for completion.
-Async commands whose refs are used by downstream commands are protected during shrinking.
+The shrinker does not try to remove an async command whose `external()` value a later command still uses: the consumer would lose its input, and the candidate would not reproduce the failure.
 
 ### Settle Configuration
 
