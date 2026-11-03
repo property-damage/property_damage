@@ -242,10 +242,6 @@ The quick start already used `PropertyDamage.Integration.run/1`. Its full option
 set:
 
 ```elixir
-# The report option writes one file but does not create its directory
-# (`mix pd.integration` does), so create it first.
-File.mkdir_p!("reports")
-
 run_result =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
@@ -258,7 +254,7 @@ run_result =
       timeout_ms: 30_000,
       retries: 30
     },
-    # Optional: write a report file.
+    # Optional: write a report file (its directory is created if missing).
     report: %{format: :markdown, path: "reports/integration.md"},
     # Optional: save each failing sequence as JSON here (created if missing).
     save_failures: "bugs/"
