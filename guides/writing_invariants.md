@@ -80,6 +80,43 @@ defp balance_ok!({id, account}),
   do: account.balance >= 0 or PropertyDamage.fail!("overdrawn", id: id)
 ```
 
+### Describing a Check
+
+When a check fails, the failure report explains what the check was for. Its
+"What this checks" section prints the `@doc` of the failing check (or of the
+`@eventually` or `@compare` observation), next to the docs of the model, the
+projection and the command. A check without a `@doc` prints a line that names
+the fix instead: `(no description: add @doc to Mod.fun/2)`. Write the `@doc`
+for the person who reads the failure, in a sentence or two that states the
+property. Put it above the `@check` attribute:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule MyApp.Projections.Balance do
+  use PropertyDamage.Model.Projection
+
+  defmodule Deposited do
+    defstruct [:amount]
+  end
+
+  @impl true
+  def init, do: %{balance: 0}
+
+  @impl true
+  def apply(state, %Deposited{amount: amount}), do: %{state | balance: state.balance + amount}
+  def apply(state, _event), do: state
+
+  @doc """
+  An account balance never goes below zero.
+  """
+  @check every: 1
+  def balance_non_negative(state, _cmd_or_event), do: state.balance >= 0
+end
+```
+
+The terminal report, the Markdown and JSON formats, and the HTML page
+(`report_html:` or `PD_REPORT_HTML`) all carry the section.
+
 ## What Makes a Good Invariant?
 
 Good invariants are:
@@ -263,10 +300,10 @@ way. In all three a truthy return is good, a raise is a failure, and
 
 The sections below teach `@check` first, then `@eventually`, then `@compare`.
 
-## Check Triggers
+## Check Schedules
 
-Control when checks are run using the `@check` attribute. The trigger
-takes an `every:` key:
+Control when a check runs with the schedule on its `@check` attribute. The
+`every:` key sets it:
 
 ```elixir
 # Check after every step (every: 1)
@@ -376,7 +413,7 @@ Values agree under `==` unless `using:` names another relation: `:fun` (a
 function of the projection, public or private), `{Mod, :fun}` or
 `{Mod, :fun, args}`, each called with the reference's value and the variant's
 value first (DR-051). The relation's return is a verdict: truthy when the
-values agree, `false` or `{:fail, reason}` when they do not. Normalize in the
+values agree, `false`, `nil` or `{:fail, reason}` when they do not. Normalize in the
 observation body and keep `using:` for relations that are not equalities,
 such as a tolerance:
 

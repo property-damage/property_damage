@@ -15,6 +15,9 @@ free of side effects and ambient reads:
 
 - command generators (`generator/1`),
 - `when:` and `overrides:` predicates in the model's command list,
+- the command specs that `setup_each/0` and `teardown_each/0` return, with their
+  `overrides:` functions,
+- the expansion functions that `expansions/0` names,
 - the `command_sequence_projection`, and
 - the `simulator`.
 
@@ -63,6 +66,20 @@ CI gates on it. The programmatic form is `PropertyDamage.audit/2`.
 The audit is generation-only: no adapter, no SUT, no execution. It never
 resolves `mint_per_run` markers or `external()` placeholders (those are
 deterministic symbolic structs and part of the plan).
+
+It covers the sequence that `PropertyDamage.Generator.generate_sequence/2`
+draws: the roots, the setup commands drawn before them, and the `when:` and
+`overrides:` functions, the simulator and the sequence projection that drawing
+calls. It does not cover two things, so review them by hand:
+
+- **Teardown commands.** The run seed draws them in a separate step after the
+  roots (`PropertyDamage.Generator.teardown_commands/4`), and the audit never
+  makes that call.
+- **Expansion functions.** `expansions/0` functions run when a target picks a
+  rewrite of a root, which the audit does not do.
+
+Keep both free of clocks, randomness and other ambient reads, as the contract
+above requires.
 
 ### Projection purity, too
 
@@ -114,8 +131,9 @@ def generator(_overrides) do
   end)
 end
 
-# The adapter performs the ONE wall-clock read, at execution time:
-def execute(%IssueToken{exp: {:relative_seconds, off}}, ctx) do
+# The adapter (a module with `use PropertyDamage.Adapter`) performs the ONE
+wall-clock read, in its `execute/3` callback at execution time:
+def execute(%IssueToken{exp: {:relative_seconds, off}}, _ctx, _runtime) do
   exp = DateTime.add(DateTime.utc_now(), off, :second)
   # ... send `exp` to the SUT ...
 end

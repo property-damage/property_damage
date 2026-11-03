@@ -73,12 +73,12 @@ end
 `use PropertyDamage.Model` comes before any definition in the module: every
 `def` and `defp` comes after it. It also comes before any other `use` that
 defines functions, such as `use GenServer`; a module that breaks either rule
-does not compile. The same holds for `use PropertyDamage.Model.Projection` and
-`use PropertyDamage.Command`.
+does not compile. The same holds for `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
 
 ### State-Dependent Command Example
 
-For commands that need state-dependent values (like selecting from existing refs):
+For commands that need state-dependent values (like selecting from the ids of existing orders):
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -94,7 +94,7 @@ defmodule MyTest.Commands.ViewOrder do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # Default to nil - Model provides actual refs via overrides:
+    # Default to nil - Model provides actual order ids via overrides:
     %{order_ref: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -997,6 +997,8 @@ end
 
 # Model A uses standard state shape
 defmodule ModelA do
+  use PropertyDamage.Model
+
   import SharedWiring.Orders
 
   def commands do
@@ -1010,6 +1012,8 @@ end
 
 # Model B uses different state key
 defmodule ModelB do
+  use PropertyDamage.Model
+
   import SharedWiring.Orders
 
   def commands do
@@ -1048,6 +1052,10 @@ defmodule ViewOrder do
   # ...
 end
 ```
+
+The `@moduledoc` also serves the reader of a failure. The failure report's
+"What this checks" section prints the failing command's `@moduledoc`, or
+`(no description: add @moduledoc to ViewOrder)` when the command has none.
 
 ## Static Metadata (`command_spec/1`)
 
@@ -1131,7 +1139,7 @@ internal polling, optionally injecting intermediate events via `runtime.inject`.
     use PropertyDamage.Command, execution: :async
 
 Use for operations that return "processing" status and require polling for completion.
-Async commands whose refs are used by downstream commands are protected during shrinking.
+The shrinker does not try to remove an async command whose `external()` value a later command still uses: the consumer would lose its input, and the candidate would not reproduce the failure.
 
 ### Settle Configuration
 
