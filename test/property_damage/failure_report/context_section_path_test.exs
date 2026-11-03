@@ -30,7 +30,7 @@ defmodule PropertyDamage.FailureReport.ContextSectionPathTest do
     |> Enum.find(&String.starts_with?(&1, target <> ~s(")))
     |> String.split("\n")
     |> Enum.flat_map(fn line ->
-      case Regex.run(~r/^[\x{25BA}\s]*\[(\d+)\] .* as Refund\[\d+\]/u, line) do
+      case Regex.run(~r/^[\x{25BA}\s]*\[(\d+)\] .* (?:split into|kept as one|dropped)/u, line) do
         [_, root] -> [String.to_integer(root)]
         nil -> []
       end
