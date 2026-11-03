@@ -1721,12 +1721,22 @@ defmodule PropertyDamage.Executor do
   defp phase_checks(projection, phase) do
     if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
       Enum.filter(projection.__checks__(), fn check ->
-        check.type == :synchronous and
+        check_type!(projection, check) == :synchronous and
           match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
       end)
     else
       []
     end
+  end
+
+  # A hand-written `__checks__/0` entry without `:type` is a model fault, so
+  # it raises with the projection and the entry instead of skipping the entry.
+  defp check_type!(_projection, %{type: type}), do: type
+
+  defp check_type!(projection, entry) do
+    raise ArgumentError,
+          "#{inspect(projection)}.__checks__/0 returned an entry without a :type key " <>
+            "(expected :synchronous or :eventually): #{inspect(entry)}"
   end
 
   defp projection_modules(model), do: PropertyDamage.Model.projection_modules(model)

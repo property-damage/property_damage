@@ -365,6 +365,12 @@ defmodule PropertyDamage.Linearization do
           e ->
             reason = Failure.check_failed(check.name, {e, __STACKTRACE__}, projection)
             {:halt, {:refuted, check.name, reason}}
+        catch
+          # An exit or throw fails the check like a raise.
+          kind, thrown ->
+            exception = PropertyDamage.Verdict.caught(kind, thrown)
+            reason = Failure.check_failed(check.name, {exception, __STACKTRACE__}, projection)
+            {:halt, {:refuted, check.name, reason}}
         end
       else
         {:cont, :ok}

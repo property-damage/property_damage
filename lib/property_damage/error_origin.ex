@@ -258,6 +258,21 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
+  defp classify_kind(
+         :setup_failed,
+         %Failure{type: %Failure.Setup{cause: :model}} = failure,
+         _stacktrace
+       ) do
+    %{
+      origin: :test_code_error,
+      details: %{
+        reason: "Model code failed while the variant came up",
+        evidence: %{reason: inspect(Failure.detail(failure))},
+        confidence: :high
+      }
+    }
+  end
+
   defp classify_kind(:setup_failed, failure, _stacktrace) do
     %{
       origin: :unknown,

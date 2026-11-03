@@ -162,6 +162,10 @@ defmodule PropertyDamage.Failure.Setup do
 
     * `:adapter_setup` - the adapter's `setup/1` returned `{:error, term}` or
       raised; `detail` is the term or the exception
+    * `:model` - model code raised, exited or threw while the variant came up,
+      after the adapter's `setup/1` returned `{:ok, _}` (for example a
+      `__checks__/0` entry without `:type`); `detail` is the exception, with
+      an exit or throw as an `ErlangError`
     * `:command` - a setup command's adapter answer was `{:error, term}` or a
       raise, or the command could not be executed; `detail` is the term, the
       exception, or the `%PropertyDamage.Failure{}` the engine reported
@@ -176,7 +180,7 @@ defmodule PropertyDamage.Failure.Setup do
   its offset among the setup commands.
   """
 
-  @type cause :: :adapter_setup | :command | :check | :unresolved_placeholder
+  @type cause :: :adapter_setup | :model | :command | :check | :unresolved_placeholder
 
   @type t :: %__MODULE__{
           cause: cause(),
@@ -307,7 +311,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1` or of a setup command, the failed check, or the unresolved placeholder |
+  | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1`, of model code that faulted during setup or of a setup command, the failed check, or the unresolved placeholder |
 
   ### `Failure.Latency` - a latency statistic exceeded its budget
 
@@ -621,13 +625,15 @@ defmodule PropertyDamage.Failure do
   end
 
   @doc """
-  A setup command failed in a target. `cause` is `:command`, `:check` or
+  A setup command failed in a target, or model code faulted while the target
+  came up. `cause` is `:model`, `:command`, `:check` or
   `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
   `:detail` and, for an unresolved placeholder, `:field` (see
   `PropertyDamage.Failure.Setup`).
   """
   @spec setup_failed(Setup.cause(), keyword()) :: t()
-  def setup_failed(cause, fields) when cause in [:command, :check, :unresolved_placeholder] do
+  def setup_failed(cause, fields)
+      when cause in [:model, :command, :check, :unresolved_placeholder] do
     %__MODULE__{type: struct!(Setup, Keyword.put(fields, :cause, cause))}
   end
 

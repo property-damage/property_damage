@@ -356,6 +356,14 @@ defmodule Mix.Tasks.Pd.Replay do
   end
 
   defp print_replay_error(
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :model}} = failure
+       ) do
+    print_color(:red, "ERROR: model code failed while the target came up\n")
+    IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
+    print_hint("The adapter's setup/1 succeeded. Check the model's projections and checks.")
+  end
+
+  defp print_replay_error(
          %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
        ) do
     print_color(:red, "ERROR: the setup commands failed\n")
