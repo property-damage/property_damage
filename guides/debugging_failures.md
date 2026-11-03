@@ -1049,14 +1049,23 @@ observation, or in another target, is a different failure and is rejected too.
 A run can hold several failures. Only the primary one is shrunk: the first by
 root, then by target order. Here "reference" means the first target in
 `targets:`. A failure in the reference ends the run. A target other than the
-reference leaves the run after its adapter fails, and the others go on. That
-retirement case needs three or more targets: with two, a failure in the second
-target ends the run, because no target other than the reference is left.
+reference leaves the run if its adapter fails at a root or its setup fails, and
+the others go on. With two targets, a failure in the second one ends the run,
+because no target other than the reference is left.
 
-By default, `report.other_failures` holds the other failures of the shrunk
-reproduction, which can differ from the original run's. A failure past the
-last root of the shrunk sequence drops out. With `shrink: false`, it keeps the
-other failures of the original run.
+Several failures need no extra target. A check can fail while a target
+finalizes its run (an `@eventually` timeout, a `:teardown` check), a check can
+be recorded under `check_mode: :record`, and a comparison can fail at the same
+root as a check.
+
+When a run fails, it executes the reported sequence once more, and
+`report.other_failures` lists the other failures of that execution. By default
+the reported sequence is the shrunk one, so a failure past its last root drops
+out and the list can differ from the original run's. With `shrink: false`, the
+reported sequence is the original one. If the execution does not reproduce the
+primary failure (for example, a nondeterministic system), the report keeps the
+original run's `other_failures`. A failed target setup is reported as found,
+without shrinking.
 
 ### Shrinking and References
 
