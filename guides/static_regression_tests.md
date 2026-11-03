@@ -179,8 +179,9 @@ PropertyDamage.run(
 ```
 
 The artifact records the setup commands and the commands of the shrunk failure, so
-the replay generates nothing new. `targets:` must name the targets the artifact
-records. See [Debugging Failures](debugging_failures.md) for the file
+the replay generates nothing new. The artifact does not record `external_markers:`,
+so a run that named it passes the same option to the replaying `run/1` call.
+`targets:` must name the targets the artifact records. See [Debugging Failures](debugging_failures.md) for the file
 naming, the replay result and `shrink:` under replay.
 
 To read the failure before you capture it, set `report_html: "some/dir"` (or the

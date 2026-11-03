@@ -16,6 +16,9 @@ defmodule Mix.Tasks.Pd.Reshrink do
   The failure file records which model and targets produced it, so no
   `--model` / `--adapter` flags are needed. Those modules must be compiled and
   loadable in the current project, otherwise the file cannot be decoded. The
+  file does not record the atom markers a run named through `external_markers:`,
+  and this task has no flag for them. To re-shrink such a run, call
+  `PropertyDamage.shrink_further/2` with `external_markers:`. The
   re-shrink runs every target the failure records, with the failure's
   `concurrency`, and keeps the failure's kind and failing target.
 

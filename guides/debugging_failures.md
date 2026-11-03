@@ -403,7 +403,8 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "propert
 
 Every target executes the commands the file records, so the replay needs the
 same `targets:` the report printed. `shrink:` defaults to false under
-`only: [replay: path]`. A replay that reproduces the failure returns
+`only: [replay: path]`. The artifact does not record `external_markers:`, so a run
+that named it passes the same option to the replaying `run/1` call. A replay that reproduces the failure returns
 `{:error, report}`, the same shape as a failing run. A replay that does not
 fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
 `:not_reproduced`. The bank's replay file is
@@ -1111,7 +1112,8 @@ mix pd.reshrink failures/the-failure.pd --strategy exhaustive
 It prints the before/after command counts and, by default, writes nothing. Pass
 `--output PATH` to save the smaller report, or `--overwrite` to replace the input
 file in place. Re-shrinking re-runs the engine, so against a live SUT it exercises
-the service repeatedly.
+the service repeatedly. The file does not record `external_markers:`. To re-shrink a
+run that named it, call `shrink_further/2` with the same `external_markers:` option.
 
 ### Understanding Shrink Stats
 

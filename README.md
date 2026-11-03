@@ -298,7 +298,8 @@ PropertyDamage.run(
 ```
 
 Pass the same `targets:` the report printed, and no `seed:` (the artifact records
-it). Shrinking is off by default in a replay. A replay that fails the same way
+it). If the run named `external_markers:`, pass the same option too, because the
+artifact does not record it. Shrinking is off by default in a replay. A replay that fails the same way
 returns `{:error, report}`. A replay that passes returns `{:ok, stats}` with
 `stats.replay` set to `:not_reproduced`.
 
@@ -313,6 +314,9 @@ If the initial shrinking didn't produce a minimal sequence:
   max_time_ms: 120_000
 )
 ```
+
+If the run named `external_markers:`, pass the same option to `shrink_further/2`:
+the failure report does not record it.
 
 Strategies:
 - `:quick` - Fast, may miss some reductions

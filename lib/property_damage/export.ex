@@ -14,6 +14,14 @@ defmodule PropertyDamage.Export do
     - `:python` - Python with requests library
   - **LiveBook** (`:livebook`) - Interactive notebooks for exploration
 
+  The script and LiveBook exports re-execute the report's commands to resolve
+  values the system under test minted. The report does not record the atom
+  markers a run named through `external_markers:`, and these functions have no
+  option for them. For a model with expansions that relied on them, a command
+  that consumes such a value exports with a placeholder no registry knows. A
+  generated ExUnit test that replays an artifact does not name the option
+  either: add `external_markers:` to its `run/1` call.
+
   ## Usage
 
   ### Export to String
