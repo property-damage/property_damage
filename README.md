@@ -613,7 +613,12 @@ mix pd.scaffold --from openapi.json --operations createUser,updateUser
 
 # Preview without writing
 mix pd.scaffold --from openapi.json --dry-run
+
+# Regenerate over existing files (overwrites them)
+mix pd.scaffold --from openapi.json --output lib/my_app_test/commands/ --force
 ```
+
+A rerun that would touch an existing file exits 1, names the files and writes nothing unless you pass `--force`. `--force` overwrites every file the run generates, so it discards your edits to them.
 
 Generated commands include:
 - Struct fields from request body schemas

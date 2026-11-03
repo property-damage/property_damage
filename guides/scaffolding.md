@@ -194,7 +194,7 @@ defmodule WidgetTest.Commands.CreateWidget do
   ...
   """
 
-  use PropertyDamage.Command
+  use PropertyDamage.Command, observables: [WidgetTest.Events.WidgetCreated]
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:color, :name]
@@ -222,8 +222,8 @@ end
 ```
 
 `GetWidget` is generated the same way; because it is a read, it is emitted with
-`use PropertyDamage.Command, shrink: :prefer_remove` (the shrinker drops reads
-first) and its path parameter shows up as `def __path_params__, do: [:id]`.
+`use PropertyDamage.Command, shrink: :prefer_remove, observables:
+[WidgetTest.Events.WidgetRetrieved]` (the shrinker drops reads first) and its path parameter shows up as `def __path_params__, do: [:id]`.
 
 ### Events: from response schemas
 
@@ -361,8 +361,9 @@ projection and the optional expansions.
 
 The `openapi_bench` project in this repository is a complete, CI-gated worked
 example of exactly this flow. Its `lib/generated/` is real `mix pd.scaffold`
-output (from `spec/openapi.json`, a tiny key/value register API) with only the
-documented next-steps filled in; the invariant lives in a hand-written
+output (from `spec/openapi.json`, a tiny key/value register API) with the
+documented next-steps filled in by hand, inside the generated files (each
+command's `events/3`, the adapter's `setup/1` and the model wiring); the invariant lives in a hand-written
 projection (`OpenapiBench.Consistency`). The System Under Test is an in-process
 HTTP server, so you can run the whole loop with no external services:
 
@@ -377,8 +378,8 @@ N tests, 0 failures
 The timing and test count above are abridged and vary by release.
 
 The payoff is `seeded_bug_test.exs`. The bench can flip a `bug` flag that makes
-the SUT answer `PUT` with `200` but silently drop the write. The **unmodified
-generated client** catches the resulting read-consistency violation and the
+the SUT answer `PUT` with `200` but silently drop the write. The **generated
+client with its next-step fill-ins** catches the resulting read-consistency violation and the
 shrinker reduces it to the minimal reproduction:
 
 ```elixir
@@ -421,9 +422,11 @@ honest proof that the generated code drives the API for real.
 
 Re-running `mix pd.scaffold` refuses to touch existing files unless you pass `--force`, which overwrites the generated files. Keep your fill-ins
 (events/3, projections, model wiring) in separate modules or under version
-control so a regeneration only touches the generated base. `openapi_bench`
-follows this convention: the generated client is regenerated verbatim, while the
-projection and simulator are hand-written alongside it.
+control so a regeneration only touches the generated base. `openapi_bench` does
+not follow this convention for its `events/3` clauses, adapter `setup/1` and
+model wiring, which live inside `lib/generated/`, so a `--force` run there would
+overwrite them. Only its projection and simulator are hand-written in separate
+modules.
 
 ## Where to go next
 
