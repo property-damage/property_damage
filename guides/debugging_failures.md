@@ -221,8 +221,8 @@ variant's at the failing boundary. For a real report, see the excerpt in the
 A failure page can carry an explanation of its failure: a summary, ranked hypotheses and talking points, each claim citing the page. Reading one takes four steps:
 
 1. Write the page. Set `report_html:` or `PD_REPORT_HTML` as the [README](../README.md#explaining-a-failure-page) shows, and let a run fail.
-2. Get an explanation written. Either ask an agent that has the `pd-explain` skill to explain the page, or run `mix pd.explain PAGE --with "my-agent --print"`, where the command reads the prompt on standard input and prints the explanation as JSON.
-3. Apply it. The skill runs `mix pd.explain PAGE --apply explanation.json`, and `--with` applies its own answer. The task checks the explanation against the page and refuses one that cites an id the page does not hold. A refused explanation leaves the page as it was.
+2. Get an explanation written. Either ask an agent that has the `pd-explain` skill to explain the page (the skill runs `mix pd.explain PAGE --files`, so a project that sets `explain_with` still gets the files for the agent to read), or run `mix pd.explain PAGE --with "my-agent --print"`, where the command reads the prompt on standard input and prints the explanation as JSON.
+3. Apply it. The skill keeps `explanation.json` under `PAGE.explain/` and runs `mix pd.explain PAGE --apply PAGE.explain/explanation.json`, and `--with` applies its own answer. The task checks the explanation against the page and refuses one that cites an id the page does not hold. A refused explanation leaves the page as it was.
 4. Reopen the page in a browser.
 
 A page with an explanation opens on an Explanation tab, next to the Run tab. The tab lists the summary, the hypotheses and the talking points. Each hypothesis prints with its rank and its likelihood, as `Hypothesis 1 (likely)`, then its claim, with its numbered markers at the end of the claim, and its next steps.
@@ -320,7 +320,7 @@ branch (if any) on the envelope:
 }
 ```
 
-There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
+There are seven **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 
 - `:check` — a property or invariant did not hold (`:check_failed`,
   `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
@@ -329,10 +329,22 @@ There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 - `:execution` — the machinery around the SUT failed to run a command
   (an adapter raise or `{:error, _}` answer is `:adapter_error` in every run,
   never compared as an observation; `:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
-  `:resource_poller_error`, `:poll_error`, ...). Often a test-harness or
+  `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`,
+  `:malformed_adapter_return`). Often a test-harness or
   infrastructure problem rather than a SUT bug.
 - `:framework` — PropertyDamage itself could not proceed
   (`:placeholder_resolution`, `:unknown`).
+- `:divergence` — in a comparison run, a variant's boundary observation differed
+  from the reference's (kind `:diverged`).
+- `:convergence` — in a comparison run, a variant's boundary observation was
+  still pending when the convergence bound expired (kind `:did_not_converge`).
+- `:setup` — a target could not be brought up, so no root ran in it (kind
+  `:setup_failed`).
+- `:latency` — a variant's latency statistic exceeded its `latency:` bound over
+  the whole campaign (kind `:latency_exceeded`).
+
+The last four classes each carry one kind, so the class and the kind identify
+the same failure.
 
 Read a failure with the accessors rather than matching the struct by hand:
 `PropertyDamage.Failure.kind/1`, `name/1`, `detail/1`, `class/1`, `branch_id/1`,
@@ -942,7 +954,7 @@ end
 
 ## Verbose Output Mode
 
-Enable verbose output to see what PropertyDamage generates and executes:
+Enable verbose output to see how a run progresses:
 
     PropertyDamage.run(
       model: MyModel,
@@ -950,64 +962,82 @@ Enable verbose output to see what PropertyDamage generates and executes:
       verbose: true
     )
 
-Verbose mode shows:
-- Each generated command with field values and placeholders
-- Execution results (events returned by the adapter)
-- Checks (which triggers fired, pass/fail)
-- Projection state updates
+Verbose mode prints progress and configuration, nothing per step:
+- A header with the model, each target (index, name, adapter), the run and
+  command limits, and the seed if you gave one
+- One line per run: the run number, the command count and the branch count
+- A final summary: the run totals and seed on success, or the failure summary
+  on failure
 
-This is useful when:
-- Commands aren't being generated as expected (check `when:` predicates)
-- You want to understand what sequences look like before failures
-- Debugging adapter issues (seeing exact command values sent)
+It does not print commands, events, check firings or projection state. Use it
+to see how far a long run has got and how big the generated sequences are.
+
+For per-step detail, use these instead:
+- `PropertyDamage.log/2` in the adapter, to record each request and answer
+  (see the [log lines guide](log_lines.md))
+- `PropertyDamage.replay/2` to rerun a saved failure and watch it again
+- `RunTrace.state_timeline/1` to read the projection state after each command
+  of a failed run (see above)
 
 ## Shrinking Deep Dive
 
 ### How Shrinking Works
 
-PropertyDamage shrinks by:
+PropertyDamage first drops everything after the failing root. Then it runs a
+cycle of four phases, in order, each on what the one before left:
 
-1. **Removing commands** - Try removing each command
-2. **Simplifying values** - Try smaller numbers, shorter strings
-3. **Simplifying refs** - Try using earlier refs
+1. **Dropping roots** - Try removing each root command, in groups by dependency
+   depth first, then one at a time
+2. **Collapsing the reference's expansions** - For each root, try the root
+   command alone, then each earlier entry of the root's expansion list
+3. **Collapsing the other targets' expansions** - Make each other target run
+   what the reference runs at that root
+4. **Simplifying arguments** - Try smaller numbers, shorter strings, shorter
+   lists
+
+The cycle repeats until a whole cycle adopts no candidate, or the shrink budget
+runs out. Placeholders (`external()` fields) are never shrunk, because that
+would break the commands that depend on them. A run without expansions skips
+phases 2 and 3 (see the [path equivalence guide](path_equivalence_testing.md)
+for expansions).
 
 ### Shrinking in Action
 
-Here's what a shrinking run looks like in practice. Suppose a test fails at command
-index 15 in a 23-command sequence:
+Here is an illustrative shrink, not captured output. The shrinker does not print
+its steps. Suppose a test fails at command index 15 in a 23-command sequence
+with no expansions:
 
     Original sequence: 23 commands, failure at index 15
 
-    Phase 1: Sequence Shrinking
+    Truncate after the failing root:
+      16 commands remaining, failure still at index 15 ✓
 
-    Step 1 — Drop unexecuted (commands 16-22):
-      18 commands remaining, failure still at index 15 ✓
+    Phase 1: drop roots
+      Hierarchical (groups by dependency depth):
+        Try removing depth-3 group (commands 10, 13, 14): failure at index 12 ✓
+        Try removing depth-2 group (commands 6, 8): no failure ✗ (rejected)
+        Try removing depth-1 group (commands 3, 5): failure at index 10 ✓
+      Linear (one at a time):
+        Try removing command 0: no failure ✗
+        Try removing command 1: failure at index 9 ✓
+        ...
+      Result: 4 commands
 
-    Step 2 — Hierarchical shrinking (by dependency depth):
-      Try removing depth-3 group (commands 10, 13, 14): failure at index 12 ✓
-      15 commands remaining
-      Try removing depth-2 group (commands 6, 8): no failure ✗ (rejected)
-      Try removing depth-1 group (commands 3, 5): failure at index 10 ✓
-      13 commands remaining
+    Phase 2 and 3: nothing to collapse (no expansions)
 
-    Step 3 — Linear shrinking (one at a time):
-      Try removing command 0: no failure ✗
-      Try removing command 1: failure at index 9 ✓ → 12 commands
-      Try removing command 2: no failure ✗
-      ...
-      Try removing command 7: failure at index 5 ✓ → 8 commands
-      ...done, no more removable
-
-    Result: 4 commands (from original 23)
-
-    Phase 2: Argument Shrinking
-
+    Phase 4: simplify arguments
       command 0: amount 4827 → 1 ✓
       command 1: currency "GBP" → "A" ✓
       command 2: amount 391 → 0, no failure ✗ → try 195, failure ✓
       ...
 
+    Cycle 2: no candidate adopted, done.
     Final: 4 commands with simplified arguments
+
+With expansions, phases 2 and 3 work on what each target runs at each root.
+The shrinker tries the root alone first, so the report shows the smallest
+expansion that still fails. Phase 4 then simplifies the arguments of the roots
+and of the leaves that remain.
 
 Each candidate is only accepted if it reproduces the **same failure** — same failure
 type and same check name. If removing a command causes a different failure, it's
