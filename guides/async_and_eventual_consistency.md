@@ -767,15 +767,18 @@ end
 
 ```elixir
 defmodule MyTest.WebhookHandler do
-  use Plug.Router
+  # Cowboy passes the options given to `Plug.Cowboy.http/3` to `init/1`,
+  # and `call/2` receives them. `copy_opts_to_assign` stores them in
+  # `conn.assigns.webhook_opts` so each route can read them.
+  use Plug.Router, copy_opts_to_assign: :webhook_opts
 
   plug Plug.Parsers, parsers: [:json], json_decoder: Jason
   plug :match
   plug :dispatch
 
   post "/webhooks/payment" do
-    event_queue = conn.private[:event_queue]
-    adapter = conn.private[:adapter]
+    event_queue = conn.assigns.webhook_opts[:event_queue]
+    adapter = conn.assigns.webhook_opts[:adapter]
 
     case adapter.to_event(conn.body_params) do
       {:ok, event} ->
