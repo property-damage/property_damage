@@ -1290,6 +1290,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`PropertyDamage.run/1` forwards the `external_markers:` option.** An atom
+  marker such as `:__external__` is now treated as an `external()` value and
+  resolved into later commands, instead of reaching them as the literal atom.
 - **A check that exits or throws, or a projection with a malformed
   `__checks__/0` entry, is no longer reported as an adapter setup failure.** A
   check body that exits or throws now fails that check, as a raise does. Other

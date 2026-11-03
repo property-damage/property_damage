@@ -430,7 +430,8 @@ side still pending; only the third is did not converge.
 | did not converge | `:did_not_converge` | a side is still pending at the bound |
 
 With several keys failing at one boundary the first in declaration order is
-reported, and within a key a pending side before a difference. An `@eventually`
+reported, and within a key a pending side before a difference. Every further
+key goes into the failure's `other_keys` and the printed report. An `@eventually`
 window that expires while the loop waits is a `:check_failed` at once; a
 polling `@eventually` that has not expired does not block agreement.
 
@@ -566,6 +567,16 @@ case PropertyDamage.run(model: MyModel, targets: [ReferenceAdapter, NewAdapter],
 end
 ```
 
+### The HTML failure page
+
+Pass `report_html: dir`, or set `PD_REPORT_HTML=dir`, and each failing run
+also writes its report as one HTML page into `dir`. The page shows one column
+per target and compares the events of each step across targets. For a
+comparison failure, `PropertyDamage.FailureReport.reference_steps/1` returns
+the steps of the reference target's run, built from the report's
+`reference_trace`, in the same shape as `steps/1`. To have an agent explain a
+page, see [Debugging Failures](debugging_failures.md) and `mix pd.explain`.
+
 ### Divergences and failures to converge
 
 A divergence is a report with `kind: :diverged`, and a failure to converge one
@@ -575,7 +586,7 @@ with `kind: :did_not_converge`. Both carry:
 |-------|---------|
 | `variant` | `%{index, name}` of the first target (in target order) that differed from the reference or was still pending |
 | `failed_at_index` | 0-based index of the root where the loop ended |
-| `failure_reason` | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value` and `mismatch`; `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), the time waited and the bound. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
+| `failure_reason` | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value`, `mismatch`, `using` (the observation's `using:` term, `nil` under `==`), `waited_ms`, `within_ms` and `other_keys` (the further keys that failed at the same boundary); `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), `waited_ms`, `within_ms` and `other_keys`. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
 | `compare` | `[converge_within: ms]` |
 | `compare_counts` | the counters per key |
 | `other_failures` | the failures found in the run besides this one (see [Adapter errors](#adapter-errors)) |
@@ -635,8 +646,9 @@ failure and for a startup check, which belong to no command.
 | `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). A raise in a `@compare` function or a `using:` relation is one too. |
 | `:diverged` | Ready sides of a `@compare` observation differ at the convergence bound. |
 | `:did_not_converge` | A side of a `@compare` observation is still pending at the convergence bound. |
-| `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too. A setup failure is not shrunk. |
+| `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too, and so does a failing setup command: one whose adapter answered `{:error, _}` or raised, a setup `@check` that failed, or a placeholder that stayed unresolved. A setup failure is not shrunk. |
 | `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a nemesis, stutter or placeholder step failed. |
+| `:latency_exceeded` | A `latency:` budget was breached. It is judged once at the end of the run and is not shrunk (see [Latency](#latency)). |
 
 ### Adapter errors
 

@@ -116,7 +116,11 @@ First failure:
 
 (Seeds are random per run, so yours will differ.) Each entry in
 `result.failures` is a `PropertyDamage.FailureReport` you can inspect, replay, or
-save; see [Debugging Failures](debugging_failures.md).
+save; see [Debugging Failures](debugging_failures.md). To read a failure as a
+page in a browser, set `PD_REPORT_HTML=_build/pd_reports` before the run
+(`PropertyDamage.Integration.run/1` and `mix pd.integration` read the variable;
+`PropertyDamage.run/1` also takes a `report_html:` option). See
+[Sharing a failure page](debugging_failures.md#sharing-a-failure-page).
 
 ## The `mix pd.integration` Task
 
@@ -238,7 +242,11 @@ The quick start already used `PropertyDamage.Integration.run/1`. Its full option
 set:
 
 ```elixir
-{:ok, result} =
+# The report option writes one file but does not create its directory
+# (`mix pd.integration` does), so create it first.
+File.mkdir_p!("reports")
+
+run_result =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}],
@@ -252,14 +260,14 @@ set:
     },
     # Optional: write a report file.
     report: %{format: :markdown, path: "reports/integration.md"},
-    # Optional: save each failing sequence as JSON here.
+    # Optional: save each failing sequence as JSON here (created if missing).
     save_failures: "bugs/"
   )
 
-if result.success do
-  IO.puts("All #{result.total_runs} runs passed!")
-else
-  IO.puts("#{result.failed} runs failed")
+# `run/1` returns {:error, result} when any run fails, so match both shapes.
+case run_result do
+  {:ok, result} -> IO.puts("All #{result.total_runs} runs passed!")
+  {:error, result} -> IO.puts("#{result.failed} of #{result.total_runs} runs failed")
 end
 ```
 
@@ -274,17 +282,23 @@ failures (deduplicated by fingerprint), rather than a fixed number of runs:
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}],
     stop_after: 3,
-    max_runs: :unlimited,
+    max_runs: 500,
     save_to: "discovered_bugs/"
   )
 
-# Each bug is %{fingerprint, failure, occurrences, first_seen_run}.
+# Each bug is %{fingerprint, failure, occurrences, first_seen_run}. The list
+# can hold fewer than `stop_after` entries, or none.
 for bug <- bugs do
   IO.puts("#{inspect(bug.fingerprint.check_name)}: " <>
           "seed #{bug.failure.seed}, seen #{bug.occurrences}x " <>
           "(first on run #{bug.first_seen_run})")
 end
 ```
+
+Always set a finite `max_runs:`. The default is `:unlimited`, so a hunt that
+never reaches `stop_after` unique bugs runs until you interrupt it. When the
+bound is reached first, `hunt_bugs/1` still returns `{:ok, bugs}` with the bugs
+found so far, which can be fewer than `stop_after` or an empty list.
 
 ## Report Formats
 
@@ -378,26 +392,31 @@ To keep a shrunk, replayable `.pd` failure instead, save it from a
 Tests](static_regression_tests.md)), then replay it:
 
 ```bash
-# Re-run the failing sequence against the SUT and print a verdict. The exit code
-# answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
+# Re-run the failing sequence against the SUT and print a verdict. Exit codes:
+# 0 = fixed, 1 = the bug still reproduces, 125 = the replay could not run (the
+# file fails to load or the target's setup fails), 2 = usage error.
 mix pd.replay bugs/read_consistent-seed352687743.pd
 
 # Show per-step events and projection state
 mix pd.replay bugs/read_consistent-seed352687743.pd --verbose
 ```
 
-The `.pd` file records its own model and adapter, so no `--model` / `--adapter`
+The `.pd` file records its own model and targets, so no `--model` / `--adapter`
 flags are needed; those modules just have to be compiled in the current project.
 Because the exit code is a regression signal, `mix pd.replay` drops straight into
 a CI gate or a `git bisect`.
 
-For custom adapter config (e.g. a different base URL) or stutter, replay
+For custom adapter config (e.g. a different base URL), replay
 programmatically:
 
 ```elixir
 {:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
 PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
 ```
+
+Replay does not apply stutter. To re-shrink a failure that stutter found, use
+`PropertyDamage.shrink_further/2`, which re-applies the report's `stutter:`
+configuration (see [Idempotency Testing](idempotency_testing.md)).
 
 ## Cleaning Up a Shared Target
 
@@ -562,7 +581,7 @@ jobs:
         run: docker compose up -d
 
       - uses: erlef/setup-beam@v1
-        overrides:
+        with:
           elixir-version: '1.17'
           otp-version: '27'
 
@@ -580,7 +599,7 @@ jobs:
       - name: Publish results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
-        overrides:
+        with:
           files: reports/*.xml
 ```
 

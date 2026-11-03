@@ -63,6 +63,8 @@ as "the UI did something the API didn't." The call returns `{:error, report}` wi
 The framework shrinks the sequence first, so
 `PropertyDamage.FailureReport.shrunk_sequence/1` is the minimal sequence that
 still diverges, and `PropertyDamage.FailureReport.reproduction_command/1` reruns it.
+To read the failure with one column per target, pass `report_html: dir` or set
+`PD_REPORT_HTML=dir`: the run then also writes the report as an HTML page into `dir`.
 Each target runs as its own variant (its own process), and the targets advance in
 lockstep: both execute command `r`, the observations are compared, and only then does
 either start command `r + 1`.

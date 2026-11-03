@@ -336,7 +336,8 @@ The shrinker cut ten roots down to one, kept the reference on the plain
 command, and could not move `"right"` onto it without losing the failure. The
 one difference left between the targets is the path: a path bug.
 
-In the HTML page the header of each root band says the same in plain words,
+In the HTML page (written when you pass `report_html: dir` or set
+`PD_REPORT_HTML=dir`) the header of each root band says the same in plain words,
 for each target that ran the root under a listed entry: `right split it into
 Add (step 0.0) and Add (step 0.1)`, `left kept it as one step`, or, for an
 entry with no commands, `left dropped it`. The terminal listing says the same
@@ -500,7 +501,7 @@ def total(state, _root), do: state.total
 - Values agree under `==` unless `using:` names another relation: `:fun` (a
   function of the projection, public or private), `{Mod, :fun}` or
   `{Mod, :fun, args}`, called with the reference's value and the variant's
-  value first and returning a verdict: truthy to agree, `false` or
+  value first and returning a verdict: truthy to agree, `false`, `nil` or
   `{:fail, reason}` to disagree (DR-051). Normalize in the observation body
   with `PropertyDamage.Equivalence.normalize/1` (drops id and timestamp keys)
   and `drop_keys/2`, and keep `using:` for relations that are not equalities,
