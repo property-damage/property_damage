@@ -15,8 +15,10 @@ injecting bugs and seeing whether your tests catch them.
 `MutatingAdapter` that perturbs the events the SUT returns, then runs your
 property against the mutated responses:
 
-1. It collects sample events for each command from a baseline run.
-2. For each command it generates mutations (via the configured operators).
+1. It runs the property once as a baseline (one whole run of up to 10
+   commands) and keeps the events of that run as samples.
+2. For each command it generates mutations (via the configured operators)
+   from those sample events.
 3. It runs your property against each mutated adapter.
 4. A mutation is **killed** if a check now fails (good: the bug was caught) and
    **survived** if your tests still pass (bad: the bug slipped through).
@@ -110,8 +112,11 @@ IO.puts(PropertyDamage.Mutation.Analysis.format(analysis))
 IO.puts(PropertyDamage.Mutation.format(report, :markdown))
 ```
 
-When any mutation was killed by error, the output names the count and says the
-score excludes it. The terminal output shows a line such as:
+When any mutation was killed by error, the terminal and Markdown outputs name
+the count and say the score excludes it. The JSON output carries
+`killed_by_error` as a number only (in the report, in each `by_command` and
+`by_operator` entry) and does not say that the score excludes it. The terminal
+output shows a line such as:
 
 ```text
 Mutation Score: 14.3% (3/21 killed)  ✗ FAIL (target: 80.0%)
@@ -170,7 +175,7 @@ The authoritative report is still the `{:ok, report}` return value;
 | `:model` | required | Model module implementing `PropertyDamage.Model` |
 | `:targets` | required | List with one target: `[Adapter]` or `[{Adapter, config: %{...}}]` |
 | `:operators` | all | Mutation operators to use |
-| `:mutations_per_command` | 5 | Max mutations generated per command type |
+| `:mutations_per_command` | 5 | Max mutations each operator generates per command type (so a command gets up to this number times the number of operators) |
 | `:max_runs` | 10 | Property test runs per mutation |
 | `:target_score` | 0.80 | Score `passes?/1` checks against |
 | `:timeout_ms` | 30000 | Timeout per mutation test |
