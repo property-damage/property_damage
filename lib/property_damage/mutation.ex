@@ -15,6 +15,15 @@ defmodule PropertyDamage.Mutation do
   `killed / (total - killed_by_error)`. The report shows the count next to
   killed and survived (see DR-059).
 
+  Before it mutates a command, `run/1` runs that command's model once with the
+  unmodified adapter to collect sample events. If that baseline run fails with
+  an adapter error, `run/1` stops and returns
+  `{:error, {:baseline_failed, command_module, message}}`. Without this guard
+  every mutation would fail with the same error and be reported as killed by
+  error, which hides that the adapter is broken. The message is the failure
+  message of the baseline run. A baseline that fails a check is not an
+  adapter error and is not guarded.
+
   ## Usage
 
       # Run mutation testing
@@ -58,7 +67,8 @@ defmodule PropertyDamage.Mutation do
     `{AdapterModule, config: map}`; see `PropertyDamage.Target`. `injectors:` and
     `mocks:` are not supported and raise.
   - `:operators` - List of operator names (default: all)
-  - `:mutations_per_command` - Max mutations per command (default: 5)
+  - `:mutations_per_command` - Max mutations per operator (default: 5). A command
+    gets up to this cap times the number of operators.
   - `:max_runs` - Property test runs per mutation (default: 10)
   - `:target_score` - Target mutation score (default: 0.80)
   - `:timeout_ms` - Timeout per mutation test (default: 30000)
@@ -70,7 +80,9 @@ defmodule PropertyDamage.Mutation do
   @doc """
   Runs mutation testing against a model.
 
-  Returns `{:ok, report}` with mutation testing results.
+  Returns `{:ok, report}` with mutation testing results, or
+  `{:error, {:baseline_failed, command_module, message}}` when the baseline run
+  for `command_module` fails with an adapter error.
 
   ## Examples
 
@@ -86,7 +98,9 @@ defmodule PropertyDamage.Mutation do
       report.killed_by_error # => 2
       report.survived        # => 3
   """
-  @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
+  @spec run(keyword()) ::
+          {:ok, Report.t()}
+          | {:error, {:baseline_failed, module(), String.t()}}
   defdelegate run(opts), to: Runner
 
   @doc """

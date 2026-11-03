@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Mutation.Runner do
   @moduledoc false
 
-  alias PropertyDamage.{FailureReport, Options, Telemetry}
+  alias PropertyDamage.{Failure, FailureReport, Options, Telemetry}
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate, Reporter}
@@ -16,7 +16,8 @@ defmodule PropertyDamage.Mutation.Runner do
     `{AdapterModule, name:, config:}`. `injectors:` and `mocks:` are not supported
     and raise. See `PropertyDamage.Target`.
   - `:operators` - List of operator names to use (default: all)
-  - `:mutations_per_command` - Max mutations per command type (default: 5)
+  - `:mutations_per_command` - Max mutations per operator (default: 5). A command
+    gets up to this cap times the number of operators.
   - `:max_runs` - Property test runs per mutation (default: 10)
   - `:target_score` - Target mutation score (default: 0.80)
   - `:timeout_ms` - Timeout per mutation test (default: 30000)
@@ -24,8 +25,16 @@ defmodule PropertyDamage.Mutation.Runner do
   - `:on_progress` - Progress consumer (DR-022). A 1-arity function called with a
     `%PropertyDamage.Progress{}` per mutation (`data: %MutationUpdate{}`) and once
     at the end with the terminal report (`data: %MutationResult{}`).
+
+  ## Returns
+
+  `{:ok, report}`, or `{:error, {:baseline_failed, command_module, message}}`
+  when the unmutated baseline run for `command_module` fails with an adapter
+  error (report kind `:execution_failed`). See `PropertyDamage.Mutation`.
   """
-  @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
+  @spec run(keyword()) ::
+          {:ok, Report.t()}
+          | {:error, {:baseline_failed, module(), String.t()}}
   def run(opts) do
     opts = Options.validate_mutation!(opts)
     [target] = opts[:targets]
@@ -74,19 +83,28 @@ defmodule PropertyDamage.Mutation.Runner do
     operators = Operator.operators_by_name(config.operators)
 
     # Generate and test mutations
-    report =
-      Enum.reduce(commands, report, fn command, acc_report ->
-        test_command_mutations(command, operators, config, acc_report)
+    result =
+      Enum.reduce_while(commands, {:ok, report}, fn command, {:ok, acc_report} ->
+        case test_command_mutations(command, operators, config, acc_report) do
+          {:ok, _} = ok -> {:cont, ok}
+          {:error, _} = error -> {:halt, error}
+        end
       end)
 
-    completed_at = DateTime.utc_now()
-    report = Report.finalize(report, started_at, completed_at)
+    case result do
+      {:ok, report} ->
+        completed_at = DateTime.utc_now()
+        report = Report.finalize(report, started_at, completed_at)
 
-    # Terminal notification (DR-022): a copy of the authoritative report for
-    # consumers. The returned `{:ok, report}` remains the source of truth.
-    Reporter.emit(config.reporter, fn -> %MutationResult{report: report} end)
+        # Terminal notification (DR-022): a copy of the authoritative report for
+        # consumers. The returned `{:ok, report}` remains the source of truth.
+        Reporter.emit(config.reporter, fn -> %MutationResult{report: report} end)
 
-    {:ok, report}
+        {:ok, report}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   # ============================================================================
@@ -109,32 +127,40 @@ defmodule PropertyDamage.Mutation.Runner do
   end
 
   defp test_command_mutations(command, operators, config, report) do
-    # First, run a baseline test to get sample events
-    sample_events = get_sample_events(command, config)
+    # First, run a baseline test to get sample events. A baseline that fails
+    # with an adapter error stops the run: every mutation would fail the same
+    # way and be reported as killed by error.
+    with {:ok, sample_events} <- get_sample_events(command, config) do
+      # Generate mutations from each operator. Each operator yields up to
+      # `mutations_per_command` mutations, and the command keeps up to that cap
+      # times the operator count.
+      mutations =
+        operators
+        |> Enum.flat_map(fn operator ->
+          generate_mutations_for_command(operator, sample_events, config)
+        end)
+        |> Enum.take(config.mutations_per_command * length(operators))
 
-    # Generate mutations from each operator
-    mutations =
-      operators
-      |> Enum.flat_map(fn operator ->
-        generate_mutations_for_command(operator, sample_events, config)
-      end)
-      |> Enum.take(config.mutations_per_command * length(operators))
-
-    # Test each mutation
-    Enum.reduce(mutations, report, fn {operator, mutation}, acc_report ->
-      result = test_single_mutation(command, operator, mutation, config)
-      emit_progress(config.reporter, result)
-      Report.record_result(acc_report, result)
-    end)
+      # Test each mutation
+      {:ok,
+       Enum.reduce(mutations, report, fn {operator, mutation}, acc_report ->
+         result = test_single_mutation(command, operator, mutation, config)
+         emit_progress(config.reporter, result)
+         Report.record_result(acc_report, result)
+       end)}
+    end
   end
 
   defp get_sample_events(command, config) do
     # Run a single test to get sample events for this command type.
     # This gives us realistic events to mutate.
-    run_baseline_test(command, config)
+    case run_baseline_test(config) do
+      {:error, message} -> {:error, {:baseline_failed, command, message}}
+      {:ok, events} -> {:ok, events}
+    end
   end
 
-  defp run_baseline_test(_command, config) do
+  defp run_baseline_test(config) do
     # Harvest realistic events to mutate by capturing a full run trace (DR-033).
     # The trace carries the complete event log regardless of outcome, so sample
     # events are available for the normal case of mutation testing: a model
@@ -149,6 +175,20 @@ defmodule PropertyDamage.Mutation.Runner do
         max_commands: 10
       )
 
+    case trace.outcome do
+      {:fail, %Failure{} = failure} ->
+        if FailureReport.kind_of(failure) == :execution_failed do
+          {:error, FailureReport.failure_message(failure) || inspect(failure)}
+        else
+          {:ok, sample_events(trace)}
+        end
+
+      _ ->
+        {:ok, sample_events(trace)}
+    end
+  end
+
+  defp sample_events(trace) do
     Enum.flat_map(trace.event_log, fn
       %{event: event} -> [event]
       _ -> []

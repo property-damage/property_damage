@@ -888,6 +888,73 @@ defmodule PropertyDamage.MutationTest do
     end
   end
 
+  # Adapters that fail without any mutation. `AlwaysErrorAdapter` fails every
+  # command. `ErrorAfterFirstAdapter` answers the first command of a run and
+  # fails the rest, so the baseline run harvests events and still fails.
+  defmodule AlwaysErrorAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(_command, _context, _runtime), do: {:error, :backend_down}
+  end
+
+  defmodule ErrorAfterFirstAdapter do
+    use PropertyDamage.Adapter
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def setup(_config), do: {:ok, %{calls: :atomics.new(1, [])}}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(command, %{calls: calls}, _runtime) do
+      case :atomics.add_get(calls, 1, 1) do
+        1 -> {:ok, [%ItemCreated{item_ref: "item_0", name: command.name, quantity: 1}]}
+        _ -> {:error, :backend_down}
+      end
+    end
+  end
+
+  describe "run/1 baseline guard" do
+    @opts [
+      model: PassingModel,
+      operators: [:value, :status],
+      mutations_per_command: 3,
+      max_runs: 1
+    ]
+
+    test "an adapter that errors without any mutation returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [AlwaysErrorAdapter]] ++ @opts)
+
+      assert is_binary(message)
+      assert message =~ "backend_down"
+    end
+
+    test "an adapter that errors after harvesting events returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [ErrorAfterFirstAdapter]] ++ @opts)
+
+      assert message =~ "backend_down"
+    end
+
+    test "a healthy adapter still yields a report (control)" do
+      assert {:ok, %Report{total: total}} =
+               Mutation.run([targets: [PropertyDamage.Test.TestAdapter]] ++ @opts)
+
+      assert total > 0
+    end
+  end
+
   describe "run/1 adapter-error kills" do
     test "error kills are counted apart and excluded from the score" do
       {:ok, report} =
