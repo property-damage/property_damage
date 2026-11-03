@@ -64,7 +64,7 @@ Derive, never ask in jargon:
 | You learn | You record |
 |---|---|
 | "It changes the system" | `execution: sync` (default) |
-| "I call it just to look / it changes nothing" | `execution: probe` (also `shrink: prefer_remove`: the shrinker drops it first) |
+| "I call it just to look / it changes nothing" | `execution: probe`, plus `shrink: prefer_remove` in the command block (the shrinker drops it first) |
 | "It kicks off work that completes later" | `execution: async` |
 
 For an `async` command, ask: "how do you learn that it finished?" Two

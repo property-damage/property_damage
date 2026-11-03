@@ -9,7 +9,8 @@ opens with a header comment naming its regeneration class; keep the wording:
 
 Layout per model (from the spec's `dir:`): `model.ex`, `commands/` (one file
 per command), `events/` (one per event), `projections/` (one per projection),
-`simulator.ex`, `adapter.ex`, next to `model_spec.md`. The dir lives under
+`simulator.ex`, `smoke.exs`, `adapter.ex`, and, when the spec has injected
+events, an injector stub, next to `model_spec.md`. The dir lives under
 `test/support/`, so run every mix command on it under `MIX_ENV=test` (see
 "The smoke run" below).
 
@@ -18,7 +19,7 @@ for that item, and every `@check` and `@eventually` function carries a `@doc`
 written from the invariant's prose. Write them in the domain's words. The
 failure report prints this text under "What this checks", and `mix pd.explain`
 cites it as evidence. A module with no doc prints a "no description" gap line
-instead, and an explanation cannot cite a gap.
+instead, and an explanation cannot cite a gap as evidence.
 
 In every module that uses a PropertyDamage macro (`use PropertyDamage.Command`,
 `.Model`, `.Model.Projection` or `.Adapter`), the `use` line comes before the
@@ -172,8 +173,10 @@ Spec `execution:` maps to further `use` options: `sync` is the default;
 `probe` and `async` add `execution: :probe` (or `:async`) to the same `use`
 call, as in `use PropertyDamage.Command, execution: :probe, observables: [...]`.
 The `execution:` and `shrink:` options are independent: `execution: :probe`
-does not imply a shrink priority. A read-only command also writes
-`shrink: :prefer_remove`, which makes the shrinker drop it first.
+does not imply a shrink priority. A command whose spec block says
+`shrink: prefer_remove` (a read-only command) writes `shrink: :prefer_remove`,
+which makes the shrinker drop it first. `neutral` is the default, so the spec's
+`neutral` writes nothing.
 
 ## Projections
 
@@ -406,10 +409,10 @@ and let the user fill in the transport:
       @emits [MyStore.PD.Wallets.Events.PaymentConfirmed]
 
       @impl true
-      def setup(_config) do
-        # TODO(pd-model-interview): start listening for the webhook and push
-        # each payload to config.event_queue (see PropertyDamage.Adapter.Injector).
-        {:ok, %{}}
+      def setup(config) do
+        # TODO(pd-model-interview): start listening for the webhook, and call
+        # deliver(payload, queue) for each payload it receives.
+        {:ok, %{queue: config.event_queue}}
       end
 
       @impl true
@@ -420,6 +423,15 @@ and let the user fill in the transport:
         # TODO(pd-model-interview): turn the payload into a PaymentConfirmed event.
         :skip
       end
+
+      # The queue stores whatever it receives as the event and the framework
+      # never calls to_event/1 for an injector, so convert before pushing.
+      def deliver(payload, queue) do
+        case to_event(payload) do
+          {:ok, event} -> PropertyDamage.EventQueue.push(queue, __MODULE__, event)
+          :skip -> :ok
+        end
+      end
     end
 
 and attach the injector to the target with `injectors:`, in the first-run
@@ -427,8 +439,9 @@ command (`targets: [{MyStore.PD.Wallets.Adapter, injectors:
 [MyStore.PD.Wallets.PaymentWebhook]}]`) and in the ladder, where
 `mix pd.validate` takes `--targets` in place of the positional adapter
 (`--targets '[{MyStore.PD.Wallets.Adapter, injectors:
-[MyStore.PD.Wallets.PaymentWebhook]}]'`). Validation fails with "injectable
-event not covered" until the injector is attached.
+[MyStore.PD.Wallets.PaymentWebhook]}]'`). Without the injector, validation fails
+with "Injectable event MyStore.PD.Wallets.Events.PaymentConfirmed not covered
+by any InjectorAdapter @emits".
 
 When the spec lists setup or teardown commands (fixtures), the model also
 defines `setup_each/0` and `teardown_each/0`. They take the same entries as
@@ -527,12 +540,22 @@ runs under `MIX_ENV=test` for the same reason.
 The run also checks that every command in `commands/0` executed at least
 once. A command whose guard never opens is never generated, and the run still
 passes, so a pass alone proves nothing about that command. The check counts
-`[:property_damage, :command, :start]` events (the commands run in another
-process, so the counts live in an `Agent`) and raises, naming each command
-that never ran.
+`[:property_damage, :command, :start]` events and raises, naming each command
+that never ran. The commands run in another process, so the counts live in an
+`Agent`. The handler is a named module function, because `:telemetry` logs an
+info notice on every run for an anonymous one.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
+defmodule SmokeCounts do
+  @moduledoc false
+
+  # A named handler: telemetry logs an info line for an anonymous one.
+  def handle_event(_event, _measurements, %{command: command}, agent) do
+    Agent.update(agent, &Map.update(&1, command, 1, fn n -> n + 1 end))
+  end
+end
+
 model = MyStore.PD.Wallets.Model
 
 listed =
@@ -546,9 +569,7 @@ listed =
 :telemetry.attach(
   "smoke-run-command-counts",
   [:property_damage, :command, :start],
-  fn _event, _measurements, %{command: command}, agent ->
-    Agent.update(agent, &Map.update(&1, command, 1, fn n -> n + 1 end))
-  end,
+  &SmokeCounts.handle_event/4,
   counts
 )
 

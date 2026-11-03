@@ -12,14 +12,27 @@ and show your work.
 2. Read the chosen spec fully, including not-modeled markers and header state.
 3. `interview: checkpoint` → resume the interview at the recorded gap before
    any regeneration.
-4. OpenAPI-composed spec → hash the referenced document. Mismatch: diff the
+4. Compare the spec's `pd_version` with the installed PropertyDamage version.
+   Read the installed one with `MIX_ENV=test mix run --no-start -e
+   'IO.puts(Application.spec(:property_damage, :vsn))'`, which works for a
+   Hex, git or path dependency. On a mismatch, read the library's
+   `CHANGELOG.md` (in `deps/property_damage/`, or in the checkout for a path
+   dependency) for the entries between the two versions, and look for
+   breaking changes that affect generated files. Raise any you find with the
+   user before regenerating. After a successful regeneration, set
+   `pd_version` in the spec to the installed version.
+5. OpenAPI-composed spec → hash the referenced document. Mismatch: diff the
    operations against the spec's commands and delta-interview the difference.
    File missing: ask whether it moved; update the path if so. Never rerun
    `mix pd.scaffold` whole over a hand-owned adapter: it overwrites `adapter.ex`
    and `model.ex` unconditionally. Use `MIX_ENV=test mix pd.scaffold --from
    <openapi path> --output <dir> --namespace <Namespace> --dry-run` to see what
-   changed, or `--commands-only --operations <ids>` to write only new
-   commands, then add the class header lines to the new files.
+   changed. To add operations, run it again with `--commands-only --operations
+   <ids>`: it writes each named operation's command and its
+   `events/<Operation>Completed.ex` file, and it overwrites any file of the
+   same name without asking. Name only operations that have no files yet,
+   check the `--dry-run` output first, then add the class header lines to the
+   new files.
 
 ## The delta interview
 

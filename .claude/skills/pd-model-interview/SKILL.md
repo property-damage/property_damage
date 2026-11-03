@@ -63,7 +63,10 @@ Run it with `--dry-run` first, show the user the list, then run it again
 without `--dry-run`. Run it once, before the adapter becomes hand-owned: it
 overwrites `adapter.ex` and `model.ex` unconditionally. When the OpenAPI
 document drifts later, never rerun it whole; use `--dry-run` to see the
-difference, or `--commands-only --operations <ids>` to add commands only.
+difference. To add operations, `--commands-only --operations <ids>` writes
+each named operation's command and its `events/<Operation>Completed.ex`
+file, and overwrites any file of the same name without asking: name only
+operations that have no files yet, after a `--dry-run`.
 What it writes differs from the layout above: it writes `commands/`,
 `events/` (named `<Operation>Completed`), `adapter.ex` and `model.ex`, but no
 `projections/` and no `simulator.ex`; its `model.ex` raises in

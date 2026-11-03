@@ -20,7 +20,7 @@ Opens the file as a fenced `yaml` block:
 model: OrderBook                      # model module basename
 namespace: MyApp.PD.OrderBook         # module prefix for generated code
 dir: test/support/pd/order_book/      # this directory
-pd_version: "0.2.0"                   # PD version scaffolded against
+pd_version: "0.2.0"                   # PD version scaffolded against (see below)
 transport: in_process                 # in_process | http | other (prose below)
 reset: ecto_sandbox                   # adapter-only side effects that give a run a clean SUT
 openapi:                              # only when composed with an OpenAPI spec
@@ -29,6 +29,10 @@ openapi:                              # only when composed with an OpenAPI spec
 interview: complete                   # complete | checkpoint
 missing: []                           # checkpoint only: what was not covered
 ```
+
+Regeneration reads `pd_version`: it compares the key with the installed
+PropertyDamage version and writes the installed version back after a
+successful regeneration (see `regeneration.md`).
 
 `interview: checkpoint` + `missing:` is the resume mechanism: a later session
 (possibly a different agent) must be able to continue from the spec alone.
@@ -59,8 +63,15 @@ fields:
   currency: "ISO 4217 code from the supported set"
 when: "at least one open account exists"
 weight: 5
+shrink: neutral            # neutral (default) | prefer_remove | prefer_keep
 events: [OrderPlaced, OrderRejected]
 ```
+
+`shrink:` tells the shrinker how to treat the command when it cuts a failing
+sequence down. Write `prefer_remove` for a read-only command, so the shrinker
+drops it first, and `prefer_keep` for a command a failure usually needs;
+leave it out for `neutral`. The scaffold passes it as the command's
+`shrink:` option.
 
 Field values are **generator notes** in plain language, not StreamData code -
 the scaffolder translates. `when:` is prose describing the precondition; the
