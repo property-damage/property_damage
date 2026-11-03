@@ -13,8 +13,10 @@ const files = fs
   .filter((f) => f.endsWith(".html") && f !== "index.html")
   .sort();
 
+// The generator explains the check failure only; the other page has no
+// explanation, whatever its kind is named.
 const explained = files.find((f) => f.includes("check_failed"));
-const plain = files.find((f) => f.includes("execution_failed"));
+const plain = files.find((f) => f !== explained);
 
 const url = (file) => pathToFileURL(path.join(dir, file)).href;
 
