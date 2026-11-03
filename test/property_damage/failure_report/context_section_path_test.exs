@@ -121,11 +121,25 @@ defmodule PropertyDamage.FailureReport.ContextSectionPathTest do
     report = U.refund_diverged(u, [], [], max_commands: 1)
 
     assert [%{head: a}, %{head: b}] = paths(report)
-    assert a == ~s|"a" ran Refund (step 0) as itself, as its listed entry|
-    assert b == ~s|"b" ran Refund (step 0) as itself, as its listed entry|
+    assert a == ~s|"a" kept Refund (step 0) as one step|
+    assert b == ~s|"b" kept Refund (step 0) as one step|
 
     for rendering <- [:markdown, :html] do
-      assert report |> U.body!(rendering) |> Enum.join("\n") =~ "ran Refund (step 0) as itself"
+      assert report |> U.body!(rendering) |> Enum.join("\n") =~ "kept Refund (step 0) as one step"
+    end
+  end
+
+  test "a root that ran as no leaves says it was dropped" do
+    u = U.define(commands: :refund, entries: "[[]]")
+    on_exit(fn -> U.purge(u) end)
+
+    report = U.refund_diverged(u, [expansion: :identity], [], max_commands: 1)
+
+    assert [%{head: head}] = paths(report)
+    assert head == ~s|"b" dropped Refund (step 0)|
+
+    for rendering <- [:markdown, :html] do
+      assert report |> U.body!(rendering) |> Enum.join("\n") =~ ~s|"b" dropped Refund (step 0)|
     end
   end
 
