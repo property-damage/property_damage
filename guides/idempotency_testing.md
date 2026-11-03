@@ -227,11 +227,16 @@ end
 
 ## Adapter Integration
 
-On retry executions, the adapter receives stutter context through the
-`%PropertyDamage.Runtime{}` handle passed as the third argument to `execute/3`.
-On the first (non-retry) execution `runtime.stutter` is `nil` -- only retries
-populate it. You can also use `PropertyDamage.Runtime.stuttering?(runtime)` to
-test whether the current execution is a retry.
+Send the command's `idempotency_key` on every execution, the first one
+included. A server can only recognize a retry as a repeat if the original
+request carried the same key. Stutter retries reuse the key that
+`idempotency_key/1` returns for the command.
+
+The adapter also receives stutter context through the `%PropertyDamage.Runtime{}`
+handle passed as the third argument to `execute/3`. On the first (non-retry)
+execution `runtime.stutter` is `nil`; only retries populate it. Use
+`PropertyDamage.Runtime.stuttering?(runtime)` to test whether the current
+execution is a retry, for example to label it in logs.
 
 ```elixir
 defmodule MyAdapter do
@@ -239,21 +244,10 @@ defmodule MyAdapter do
 
   def setup(_config), do: {:ok, %{}}
 
-  def execute(
-        %CreateOrder{} = cmd,
-        _user_context,
-        %PropertyDamage.Runtime{stutter: %{idempotency_key: key}}
-      )
-      when is_binary(key) do
-    # Retry execution -- include idempotency header
-    headers = [{"Idempotency-Key", key}]
-    result = HttpClient.post("/orders", %{amount: cmd.amount}, headers: headers)
-    {:ok, [result.event]}
-  end
-
   def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
-    # First execution -- runtime.stutter is nil
-    result = HttpClient.post("/orders", %{amount: cmd.amount})
+    # The same header goes out on the first execution and on every retry.
+    headers = [{"Idempotency-Key", cmd.idempotency_key}]
+    result = HttpClient.post("/orders", %{amount: cmd.amount}, headers: headers)
     {:ok, [result.event]}
   end
 

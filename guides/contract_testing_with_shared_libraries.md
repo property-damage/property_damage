@@ -33,7 +33,7 @@ A mature PropertyDamage setup typically has three layers:
 │  ┌────────┴───────────────────┴────────┐                    │
 │  │ Pure Elixir structs                  │                    │
 │  │ - Events: PaymentAuthorized, etc.    │                    │
-│  │ - Commands: AuthorizePayment, etc.   │                    │
+│  │ - Commands: none, model libraries    │                    │
 │  │ - NO PropertyDamage dependency       │                    │
 │  └──────────────────────────────────────┘                    │
 └─────────────────────────────────────────────────────────────┘
@@ -258,11 +258,6 @@ The seed library tracks `dependency_versions` for each entry, helping identify w
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-# lib/company_domain/commands/create_order.ex
-defmodule CompanyDomain.Commands.CreateOrder do
-  defstruct [:customer_id, :amount, :currency]
-end
-
 # lib/company_domain/events/order_created.ex
 defmodule CompanyDomain.Events.OrderCreated do
   defstruct [
@@ -274,11 +269,6 @@ defmodule CompanyDomain.Events.OrderCreated do
   ]
 end
 
-# lib/company_domain/commands/ship_order.ex
-defmodule CompanyDomain.Commands.ShipOrder do
-  defstruct [:order_id]
-end
-
 # lib/company_domain/events/order_shipped.ex
 defmodule CompanyDomain.Events.OrderShipped do
   defstruct [:order_id]
@@ -287,6 +277,9 @@ end
 
 ### Model Library (order_model)
 
+The domain library holds events only. Commands are PropertyDamage behaviours
+(`use PropertyDamage.Command`), so they belong to the model library, which owns
+the only `CreateOrder` and `ShipOrder` structs. The adapter matches on those.
 The command and projection modules live in `order_model` and implement the
 PropertyDamage behaviours. The **shared contract surface is the event struct**
 (`CompanyDomain.Events.OrderCreated`): it flows through the projection and the
@@ -426,6 +419,10 @@ defmodule OrderTest do
   use ExUnit.Case
 
   test "orders maintain valid state" do
+    # The seed library file is written on a failure, but its directory is not
+    # created for you, and a missing directory is only reported with verbose: true.
+    File.mkdir_p!("seeds")
+
     result = PropertyDamage.run(
       model: OrderModel,
       targets: [OrderHttpAdapter],

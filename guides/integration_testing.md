@@ -242,7 +242,11 @@ The quick start already used `PropertyDamage.Integration.run/1`. Its full option
 set:
 
 ```elixir
-{:ok, result} =
+# The report option writes one file but does not create its directory
+# (`mix pd.integration` does), so create it first.
+File.mkdir_p!("reports")
+
+run_result =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}],
@@ -256,14 +260,14 @@ set:
     },
     # Optional: write a report file.
     report: %{format: :markdown, path: "reports/integration.md"},
-    # Optional: save each failing sequence as JSON here.
+    # Optional: save each failing sequence as JSON here (created if missing).
     save_failures: "bugs/"
   )
 
-if result.success do
-  IO.puts("All #{result.total_runs} runs passed!")
-else
-  IO.puts("#{result.failed} runs failed")
+# `run/1` returns {:error, result} when any run fails, so match both shapes.
+case run_result do
+  {:ok, result} -> IO.puts("All #{result.total_runs} runs passed!")
+  {:error, result} -> IO.puts("#{result.failed} of #{result.total_runs} runs failed")
 end
 ```
 
@@ -278,17 +282,23 @@ failures (deduplicated by fingerprint), rather than a fixed number of runs:
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}],
     stop_after: 3,
-    max_runs: :unlimited,
+    max_runs: 500,
     save_to: "discovered_bugs/"
   )
 
-# Each bug is %{fingerprint, failure, occurrences, first_seen_run}.
+# Each bug is %{fingerprint, failure, occurrences, first_seen_run}. The list
+# can hold fewer than `stop_after` entries, or none.
 for bug <- bugs do
   IO.puts("#{inspect(bug.fingerprint.check_name)}: " <>
           "seed #{bug.failure.seed}, seen #{bug.occurrences}x " <>
           "(first on run #{bug.first_seen_run})")
 end
 ```
+
+Always set a finite `max_runs:`. The default is `:unlimited`, so a hunt that
+never reaches `stop_after` unique bugs runs until you interrupt it. When the
+bound is reached first, `hunt_bugs/1` still returns `{:ok, bugs}` with the bugs
+found so far, which can be fewer than `stop_after` or an empty list.
 
 ## Report Formats
 
@@ -382,8 +392,9 @@ To keep a shrunk, replayable `.pd` failure instead, save it from a
 Tests](static_regression_tests.md)), then replay it:
 
 ```bash
-# Re-run the failing sequence against the SUT and print a verdict. The exit code
-# answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
+# Re-run the failing sequence against the SUT and print a verdict. Exit codes:
+# 0 = fixed, 1 = the bug still reproduces, 125 = the replay could not run (the
+# file fails to load or the target's setup fails), 2 = usage error.
 mix pd.replay bugs/read_consistent-seed352687743.pd
 
 # Show per-step events and projection state
