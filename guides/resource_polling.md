@@ -68,6 +68,22 @@ defmodule MyAdapter do
 end
 ```
 
+## Logging From a Poller
+
+`poll_fn` and `handler` run in a `GenServer` that `start_poller` starts, not in
+the process of the command. `PropertyDamage.log/2` finds its log scope only in
+the calling process and its `$callers` chain, and a `GenServer` carries no
+`$callers`. A `PropertyDamage.log/2` call inside `poll_fn` or `handler` therefore
+raises `PropertyDamage.Log.NoScopeError`, and the poller reports that raise as
+`{:poll_fn_error, ...}` or `{:handler_error, ...}`.
+
+`PropertyDamage.Runtime.log/3` does not raise there, but it drops a line written
+after the command ended, and a poller usually runs past that point. To record
+progress from a poller, inject an event from `handler` (`{:inject, event}`), which shows up in the
+report beside the events of the command, or put the reason in the
+`{:error, reason}` that [`on_timeout`](#timeout-handling) returns. To log from
+the command itself, see [Log Lines in the Failure Report](log_lines.md).
+
 ## Handler Return Values
 
 The handler function receives the response from `poll_fn` and must return one of:
