@@ -487,7 +487,7 @@ defmodule PropertyDamage.RunTrace do
     failing =
       if root_step.failed? do
         executed_leaves =
-          for leaf <- 0..last, Map.has_key?(executed, leaf_position(choice, leaf)), do: leaf
+          for leaf <- 0..last//1, Map.has_key?(executed, leaf_position(choice, leaf)), do: leaf
 
         List.last(executed_leaves) || last
       end
