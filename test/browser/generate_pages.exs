@@ -1,0 +1,211 @@
+# Writes real failure pages and their index into a directory, for the browser
+# specs to open over file://.
+#
+#     mix run test/browser/generate_pages.exs DIR
+#
+# Two small models fail in different ways: one on a check, one on an adapter
+# error. The page of the check failure also gets an explanation, applied with
+# `mix pd.explain --apply`, so the Explanation tab and its citations exist.
+
+defmodule BrowserPages.Deposited do
+  @moduledoc false
+  defstruct [:amount]
+end
+
+defmodule BrowserPages.Pinged do
+  @moduledoc false
+  defstruct [:n]
+end
+
+defmodule BrowserPages.Deposit do
+  @moduledoc "Puts a small amount into the account."
+  use PropertyDamage.Command
+  defstruct [:amount]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{amount: StreamData.integer(1..9)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule BrowserPages.Ping do
+  @moduledoc "Asks the service whether it is up."
+  use PropertyDamage.Command
+  defstruct [:n]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{n: StreamData.constant(0)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule BrowserPages.Steps do
+  @moduledoc "Counts the commands of a sequence."
+  @behaviour PropertyDamage.Model.Projection
+
+  @impl true
+  def init, do: %{count: 0}
+
+  @impl true
+  def apply(state, %BrowserPages.Deposit{}), do: %{state | count: state.count + 1}
+  def apply(state, %BrowserPages.Ping{}), do: %{state | count: state.count + 1}
+  def apply(state, _other), do: state
+end
+
+defmodule BrowserPages.Ledger do
+  @moduledoc "Keeps the running total of deposits and holds it under a limit."
+  use PropertyDamage.Model.Projection
+
+  @impl true
+  def init, do: %{total: 0}
+
+  @impl true
+  def apply(state, %BrowserPages.Deposited{amount: amount}),
+    do: %{state | total: state.total + amount}
+
+  def apply(state, _other), do: state
+
+  @check every: BrowserPages.Deposited
+  def total_under_limit(state, _event) do
+    state.total <= 8 or PropertyDamage.fail!("total passed the limit", total: state.total)
+  end
+end
+
+defmodule BrowserPages.AccountModel do
+  @moduledoc "Deposits into an account whose total must stay at or under 8."
+  use PropertyDamage.Model
+
+  @impl true
+  def commands, do: [BrowserPages.Deposit]
+
+  @impl true
+  def command_sequence_projection, do: BrowserPages.Steps
+
+  @impl true
+  def check_projections, do: [BrowserPages.Ledger]
+end
+
+defmodule BrowserPages.ServiceModel do
+  @moduledoc "Pings a service that stops answering after its first reply."
+  use PropertyDamage.Model
+
+  @impl true
+  def commands, do: [{BrowserPages.Ping, overrides: &number/1}]
+
+  # Each ping carries its position in the sequence.
+  defp number(state), do: %{n: state.count}
+
+  @impl true
+  def command_sequence_projection, do: BrowserPages.Steps
+end
+
+defmodule BrowserPages.Adapter do
+  @moduledoc "Answers each command from memory; a Ping fails once the service is down."
+  use PropertyDamage.Adapter
+
+  @impl true
+  def setup(config), do: {:ok, config}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
+  def execute(%BrowserPages.Deposit{amount: amount}, _ctx, _runtime),
+    do: {:ok, [%BrowserPages.Deposited{amount: amount}]}
+
+  def execute(%BrowserPages.Ping{n: 0}, _ctx, _runtime),
+    do: {:ok, [%BrowserPages.Pinged{n: 0}]}
+
+  def execute(%BrowserPages.Ping{}, _ctx, _runtime), do: {:error, :service_down}
+end
+
+defmodule BrowserPages.Generate do
+  @moduledoc false
+
+  alias PropertyDamage.FailureReport.HTML
+
+  def main([dir]) do
+    dir = Path.expand(dir)
+    File.rm_rf!(dir)
+    File.mkdir_p!(dir)
+
+    check_page = run!(BrowserPages.AccountModel, "alice", 11, dir)
+    run!(BrowserPages.ServiceModel, "bob", 12, dir)
+
+    explain!(check_page, dir)
+
+    pages = dir |> File.ls!() |> Enum.reject(&(&1 == "index.html")) |> Enum.sort()
+    IO.puts("wrote #{length(pages)} pages and index.html into #{dir}")
+  end
+
+  def main(_args), do: Mix.raise("usage: mix run test/browser/generate_pages.exs DIR")
+
+  # Runs the model until it fails and returns the page the run wrote.
+  defp run!(model, name, seed, dir) do
+    before = File.ls!(dir)
+
+    result =
+      PropertyDamage.run(
+        model: model,
+        targets: [{BrowserPages.Adapter, name: name, config: %{}}],
+        max_runs: 20,
+        max_commands: 6,
+        seed: seed,
+        replay_dir: false,
+        report_html: dir
+      )
+
+    with {:error, %PropertyDamage.FailureReport{}} <- result,
+         [page] <- File.ls!(dir) -- (before ++ ["index.html"]) do
+      Path.join(dir, page)
+    else
+      other -> Mix.raise("#{inspect(model)} did not write one failure page: #{inspect(other)}")
+    end
+  end
+
+  # Applies an explanation that cites ids taken from the page's own bundle.
+  defp explain!(page, dir) do
+    bundle = page |> File.read!() |> bundle()
+    entry = bundle["listing"] |> Enum.flat_map(& &1["steps"]) |> Enum.find(&(&1["entries"] != []))
+    event = hd(entry["entries"])["id"]
+    failure = hd(bundle["failure"]["fields"])["id"]
+    section = hd(bundle["sections"])["id"]
+    module = Enum.find(bundle["modules"], &String.ends_with?(&1["module"], "Ledger"))
+    source = "source:#{module["module"]}:1-3"
+
+    explanation = %{
+      "summary" => [
+        %{"text" => "A deposit pushed the total over its limit.", "cites" => [failure]}
+      ],
+      "hypotheses" => [
+        %{
+          "rank" => 1,
+          "likelihood" => "likely",
+          "claim" => "The ledger check ran after a deposit that crossed the limit.",
+          "evidence" => [entry["id"], event, source],
+          "next_steps" => ["Read the total in the Failure section."]
+        }
+      ],
+      "talking_points" => [%{"text" => "The limit is part of the model.", "cites" => [section]}]
+    }
+
+    path = Path.join(dir, "explanation.json")
+    File.write!(path, Jason.encode!(explanation))
+    Mix.Task.rerun("pd.explain", [page, "--apply", path])
+    File.rm!(path)
+    {:ok, _index} = HTML.write_index(dir)
+  end
+
+  defp bundle(html) do
+    [_, json] =
+      Regex.run(~r{<script type="application/json" id="pd-bundle">(.*?)</script>}s, html)
+
+    Jason.decode!(json)
+  end
+end
+
+BrowserPages.Generate.main(System.argv())
