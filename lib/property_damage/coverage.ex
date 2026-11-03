@@ -507,7 +507,7 @@ defmodule PropertyDamage.Coverage do
           cells =
             Enum.map(classes, fn to ->
               count = get_in(matrix, [from, to]) || 0
-              format_state_class_cell(count, from == to, col_width)
+              format_matrix_cell(count, from == to, col_width)
             end)
 
           "#{from_name}  #{Enum.join(cells, "  ")}"
@@ -725,14 +725,17 @@ defmodule PropertyDamage.Coverage do
   - `░░░░` = lightly tested (1-5 occurrences)
   - `    ` = untested
 
+  A diagonal cell, a command that follows itself, shows its count, or `·`
+  when it never does.
+
   ## Example
 
       Transition Matrix
-      ───────────────────────────────────────
-                    → Create  Credit  Debit
-      Create           ·      ████    ████
-      Credit         ████       ·     ▓▓▓▓
-      Debit          ░░░░    ████       ·
+      ────────────────────────────────
+              → Create  Credit  Debit
+      Create  ·       ████    ████
+      Credit  ████    4       ▓▓▓▓
+      Debit   ░░░░    ████    ·
   """
   @spec format_transition_matrix(t()) :: String.t()
   def format_transition_matrix(%__MODULE__{command_modules: all} = tracker) do
@@ -766,7 +769,7 @@ defmodule PropertyDamage.Coverage do
           cells =
             Enum.map(commands, fn to ->
               count = get_in(matrix, [from, to]) || 0
-              format_cell(count, from == to, col_width)
+              format_matrix_cell(count, from == to, col_width)
             end)
 
           "#{from_name}  #{Enum.join(cells, "  ")}"
@@ -781,19 +784,14 @@ defmodule PropertyDamage.Coverage do
     end
   end
 
-  # A same-class transition prints its count, since a bar would hide how often
-  # it happened; a diagonal cell with no transition keeps the dot.
-  defp format_state_class_cell(0, true, width), do: String.pad_trailing("·", width)
+  # A same-command or same-class transition prints its count, since a bar would
+  # hide how often it happened; a diagonal cell with no transition keeps the dot.
+  defp format_matrix_cell(0, true, width), do: String.pad_trailing("·", width)
 
-  defp format_state_class_cell(count, true, width),
+  defp format_matrix_cell(count, true, width),
     do: String.pad_trailing(Integer.to_string(count), width)
 
-  defp format_state_class_cell(count, false, width), do: format_cell(count, false, width)
-
-  defp format_cell(_count, true, width) do
-    # Diagonal (same command twice) - show dot
-    String.pad_trailing("·", width)
-  end
+  defp format_matrix_cell(count, false, width), do: format_cell(count, false, width)
 
   defp format_cell(0, false, width) do
     # Untested

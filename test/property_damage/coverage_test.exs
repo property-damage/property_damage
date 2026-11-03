@@ -370,6 +370,30 @@ defmodule PropertyDamage.CoverageTest do
       assert output =~ "Update"
     end
 
+    test "matrix format prints the count of a command that follows itself" do
+      tracker =
+        Coverage.record(
+          Coverage.new(TestModel),
+          mock_result([
+            %TestCommand.Create{id: "1"},
+            %TestCommand.Update{id: "1", value: "a"},
+            %TestCommand.Update{id: "1", value: "b"},
+            %TestCommand.Update{id: "1", value: "c"}
+          ])
+        )
+
+      [create_row, update_row] =
+        tracker
+        |> Coverage.format(:matrix)
+        |> String.split("\n")
+        |> Enum.filter(&String.match?(&1, ~r/^(Create|Update)\s{2}/))
+
+      # Update follows Update twice
+      assert update_row =~ ~r/^Update\s+2\s*$/
+      # Create never follows itself, so its diagonal keeps the dot
+      assert create_row =~ ~r/^Create\s+·/
+    end
+
     test "full format includes everything" do
       tracker = Coverage.new(TestModel)
       tracker = Coverage.record(tracker, mock_result([%TestCommand.Create{id: "1"}]))
