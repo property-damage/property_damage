@@ -37,7 +37,10 @@ defmodule PropertyDamage.FailureReport.ContextSectionPathTest do
     end)
   end
 
-  defp name(target, root), do: ~s("#{target}" ran Refund as steps [#{root}.0],[#{root}.1])
+  defp name(target, root),
+    do:
+      ~s|"#{target}" split Refund (step #{root}) into | <>
+        "Credit (step #{root}.0) and Credit (step #{root}.1)"
 
   test "a target that ran the root as an entry prints its name and the entry's doc", %{u: u} do
     report = U.refund_diverged(u, [], [], max_commands: 1)
@@ -77,7 +80,52 @@ defmodule PropertyDamage.FailureReport.ContextSectionPathTest do
     for rendering <- [:terminal, :markdown, :html] do
       body = report |> U.body!(rendering) |> Enum.join("\n")
       refute body =~ ~r/Refund\[\d+\]/, "#{rendering}"
-      assert body =~ "ran Refund as steps", "#{rendering}"
+      assert body =~ "split Refund (step 0) into Credit (step 0.0)", "#{rendering}"
+    end
+  end
+
+  test "a root that ran as three leaves names each leaf with its step" do
+    leaf = fn part -> "{__P__.Credit, overrides: %{n: n, amount: 1, part: #{part}}}" end
+    entries = "[[#{Enum.map_join(0..2, ", ", leaf)}]]"
+    u = U.define(commands: :refund, entries: entries)
+    on_exit(fn -> U.purge(u) end)
+
+    report = U.refund_diverged(u, [], [], max_commands: 1)
+
+    assert [%{head: a}, %{head: b}] = paths(report)
+
+    assert a ==
+             ~s|"a" split Refund (step 0) into Credit (step 0.0), | <>
+               "Credit (step 0.1) and Credit (step 0.2)"
+
+    assert b == String.replace(a, ~s("a"), ~s("b"), global: false)
+  end
+
+  test "a root that ran as one leaf names the leaf with its step" do
+    u =
+      U.define(
+        commands: :refund,
+        entries: "[[{__P__.Credit, overrides: %{n: n, amount: 1, part: 0}}]]"
+      )
+
+    on_exit(fn -> U.purge(u) end)
+
+    assert [%{head: a}, _] = U.refund_diverged(u, [], [], max_commands: 1) |> paths()
+    assert a == ~s|"a" split Refund (step 0) into Credit (step 0.0)|
+  end
+
+  test "a root that ran as itself under a listed entry says so in plain words" do
+    u = U.define(commands: :refund, entries: "[[%__P__.Refund{n: n, amount: amount}]]")
+    on_exit(fn -> U.purge(u) end)
+
+    report = U.refund_diverged(u, [], [], max_commands: 1)
+
+    assert [%{head: a}, %{head: b}] = paths(report)
+    assert a == ~s|"a" ran Refund (step 0) as itself, as its listed entry|
+    assert b == ~s|"b" ran Refund (step 0) as itself, as its listed entry|
+
+    for rendering <- [:markdown, :html] do
+      assert report |> U.body!(rendering) |> Enum.join("\n") =~ "ran Refund (step 0) as itself"
     end
   end
 
