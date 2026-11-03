@@ -1,8 +1,9 @@
 # Deterministic Generation
 
 PropertyDamage generates a command sequence as a **pure function of the seed**.
-Reproducing a failure with `mix test ... seed: N`, and comparing two runs of the
-same plan, both depend on that purity. This guide states the contract, shows the
+Reproducing a failure with the `seed: N` run option (not ExUnit's
+`mix test --seed`), and comparing two runs of the same plan, both depend on
+that purity. This guide states the contract, shows the
 four blessed ways to model nondeterministic needs without breaking it, and
 points at the audit that enforces it.
 

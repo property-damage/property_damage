@@ -29,6 +29,9 @@ end
 The command generators in this guide call `StreamData` functions directly, so
 your project lists `:stream_data` itself.
 
+Each module in the steps below goes in its own file under `lib/my_app/` (for
+example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run.
+
 ## Core Concepts
 
 PropertyDamage has five key components:
@@ -184,6 +187,22 @@ end
 The failure report shows a check by its function name without the `assert_`
 prefix, so a failing `assert_emails_unique` appears as `emails_unique`.
 
+Optional: to see a failure, replace the body of `assert_emails_unique` with a
+check that fails on purpose, then run as in Step 7 with
+`report_html: "_build/pd_reports"` and open the page it writes (see
+[Understanding Results](#understanding-results)). Restore the `:ok` body
+afterward.
+
+```elixir
+def assert_emails_unique(state, _cmd_or_event) do
+  if MapSet.size(state.emails) >= 1 do
+    {:fail, "broken on purpose: a user exists"}
+  else
+    :ok
+  end
+end
+```
+
 ## Step 5: Define the Model
 
 The model ties everything together. Every module that calls
@@ -338,6 +357,9 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 
 ### Basic Run
 
+Put the call in a script such as `run.exs` and start it with `mix run run.exs`,
+or paste it into `iex -S mix`.
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
@@ -409,7 +431,9 @@ variable wins when both are set). Each failing run then writes a page there, and
 the directory's `index.html` browses them all; see
 [The report in a browser](debugging_failures.md#the-report-in-a-browser).
 [Reading the report](debugging_failures.md#reading-the-report) walks through a
-real one. To put your own lines in it, such as the requests an
+real one. Shrinking can simplify a command's values to ones your generator
+would never draw, such as an empty string for a name that needs five
+characters; the shrunk failure still fails the same way. To put your own lines in it, such as the requests an
 adapter sends, call `PropertyDamage.log/2`; see the
 [log lines guide](log_lines.md).
 

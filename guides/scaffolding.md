@@ -303,13 +303,18 @@ end
 ## 4. Fill in what the spec cannot know
 
 The scaffold gets you a faithful *client*; you still supply the *meaning*. The
-generated files' "next steps" footer lists exactly what is left:
+task's printed "Next steps" footer (shown in step 2; the task prints it and
+writes it to no file) lists five items. The steps below cover the same work in
+a different order and add the projection and the optional expansions. Where the
+footer says "Implement simulate/2 in Model", read step 4: the model names a
+simulator module with `simulator/0`, and that module defines `simulate/2`.
 
 1. **Map responses to events** — implement each command's `events/3`. Keying on
    status is the norm:
 
    ```elixir
-   def events(_command, 201, %{"id" => id, "name" => name, "color" => color}) do
+   def events(_command, 201, %{"id" => id, "name" => name} = body) do
+     color = Map.get(body, "color", :unset)
      [%WidgetTest.Events.WidgetCreated{id: id, name: name, color: color}]
    end
 

@@ -270,7 +270,7 @@ decorating attribute, and each answers a different question.
 
 | Kind | Question | Looks at | Schedule | Fails when |
 |------|----------|----------|----------|------------|
-| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, Module}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
@@ -327,8 +327,9 @@ end
 
 Supported `every:` forms: `1` (every step), `N` (every Nth step),
 `:command`/`:event` (after any command/event), `Module`/`[Modules]` (after a
-specific module), and `{N, target}` variants. Sample with `every: N` for
-expensive checks.
+specific module), and the counted forms `{N, :command}` (every Nth command)
+and `{N, Module}` (every Nth command or event of that module). Sample with
+`every: N` for expensive checks.
 
 ### Lifecycle-boundary checks (`at:`)
 
@@ -606,7 +607,7 @@ end
 
 A long mutation run can be slow, so pass an `on_progress` function to watch it.
 It receives a `%PropertyDamage.Progress{}` projection (DR-022): a `MutationUpdate`
-per mutation as it is killed, survived, or timed out, then a terminal
+per mutation as it is killed, killed by an error, survived, or timed out, then a terminal
 `MutationResult` carrying a copy of the final report. The same stream drives
 `verbose:` and the `[:property_damage, :mutation, :progress | :result]` telemetry
 events.

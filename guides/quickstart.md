@@ -42,6 +42,11 @@ configurable intervals (every step, every N commands, on specific event types).
 
 ## Minimal Example
 
+Put the modules below in one file under `lib/` (for example `lib/account.ex`),
+after adding `{:property_damage, "~> 0.2"}` and `{:stream_data, "~> 1.0"}` to
+the `deps` in `mix.exs`. Put the run snippet at the end in a script such as
+`run.exs` and start it with `mix run run.exs`, or paste it into `iex -S mix`.
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
 # --- Event ---
