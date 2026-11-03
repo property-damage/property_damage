@@ -64,11 +64,20 @@ without `--dry-run`. Run it once, before the adapter becomes hand-owned: it
 overwrites `adapter.ex` and `model.ex` unconditionally. When the OpenAPI
 document drifts later, never rerun it whole; use `--dry-run` to see the
 difference. To add operations, `--commands-only --operations <ids>` writes
-each named operation's command and its `events/<Operation>Completed.ex`
-file, and overwrites any file of the same name without asking: name only
-operations that have no files yet, after a `--dry-run`.
+each named operation's command (`commands/create_user.ex`) and its event file,
+and overwrites any file of the same name without asking. The event name comes
+from the operationId: `create`, `update`, `delete`, `get` and `list` prefixes
+give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
+(`createUser` gives `UserCreated`, file `events/user_created.ex`); `find` and
+`search` also strip the prefix but give `<Resource>Completed`, so `findUser`
+and `searchUser` share `UserCompleted`; any other operationId gives
+`<OperationId>Completed`. An operation whose success response has no schema
+writes no event file. Run `--dry-run` first, turn each command and event
+module it lists into its file path, and leave out every operation whose
+command file or event file already exists, including an event file that
+another operation shares.
 What it writes differs from the layout above: it writes `commands/`,
-`events/` (named `<Operation>Completed`), `adapter.ex` and `model.ex`, but no
+`events/` (named as above), `adapter.ex` and `model.ex`, but no
 `projections/` and no `simulator.ex`; its `model.ex` raises in
 `command_sequence_projection/0` until a projection exists, and its files carry
 no class header. Add the class header lines from

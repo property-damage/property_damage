@@ -430,18 +430,23 @@ and let the user fill in the transport:
         case to_event(payload) do
           {:ok, event} -> PropertyDamage.EventQueue.push(queue, __MODULE__, event)
           :skip -> :ok
+
+          {:error, reason} ->
+            raise "#{inspect(__MODULE__)}: to_event/1 returned an error: #{inspect(reason)}"
         end
       end
     end
 
 and attach the injector to the target with `injectors:`, in the first-run
 command (`targets: [{MyStore.PD.Wallets.Adapter, injectors:
-[MyStore.PD.Wallets.PaymentWebhook]}]`) and in the ladder, where
+[MyStore.PD.Wallets.PaymentWebhook]}]`) and in the ladder. There,
 `mix pd.validate` takes `--targets` in place of the positional adapter
 (`--targets '[{MyStore.PD.Wallets.Adapter, injectors:
-[MyStore.PD.Wallets.PaymentWebhook]}]'`). Without the injector, validation fails
-with "Injectable event MyStore.PD.Wallets.Events.PaymentConfirmed not covered
-by any InjectorAdapter @emits".
+[MyStore.PD.Wallets.PaymentWebhook]}]'`), and the smoke run uses the same
+`targets:` form in its `PropertyDamage.run` call. Without the injector,
+validation and the smoke run fail with "Injectable event
+MyStore.PD.Wallets.Events.PaymentConfirmed not covered by any InjectorAdapter
+@emits".
 
 When the spec lists setup or teardown commands (fixtures), the model also
 defines `setup_each/0` and `teardown_each/0`. They take the same entries as
@@ -536,6 +541,11 @@ script below as `smoke.exs` next to the spec and run
 `MIX_ENV=test mix run test/support/pd/<slug>/smoke.exs`. Every ladder
 rung (`mix compile`, `mix pd.validate`, the smoke run, the first real run)
 runs under `MIX_ENV=test` for the same reason.
+
+When the spec has injected events, write the target in `smoke.exs` as
+`targets: [{MyStore.PD.Wallets.Adapter, injectors:
+[MyStore.PD.Wallets.PaymentWebhook]}]`. The fence below has no injected
+event and keeps the plain adapter.
 
 The run also checks that every command in `commands/0` executed at least
 once. A command whose guard never opens is never generated, and the run still

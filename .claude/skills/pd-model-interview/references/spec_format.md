@@ -21,6 +21,7 @@ model: OrderBook                      # model module basename
 namespace: MyApp.PD.OrderBook         # module prefix for generated code
 dir: test/support/pd/order_book/      # this directory
 pd_version: "0.2.0"                   # PD version scaffolded against (see below)
+pd_source: hex                        # hex | locked git ref | checkout commit (see below)
 transport: in_process                 # in_process | http | other (prose below)
 reset: ecto_sandbox                   # adapter-only side effects that give a run a clean SUT
 openapi:                              # only when composed with an OpenAPI spec
@@ -30,9 +31,35 @@ interview: complete                   # complete | checkpoint
 missing: []                           # checkpoint only: what was not covered
 ```
 
-Regeneration reads `pd_version`: it compares the key with the installed
-PropertyDamage version and writes the installed version back after a
-successful regeneration (see `regeneration.md`).
+`pd_version` and `pd_source` record which PropertyDamage the code was
+scaffolded against. Fill both at the first scaffold, from the project that
+hosts the model, with commands that do not compile the project (a generated
+file that no longer compiles must not hide the answer):
+
+```
+MIX_ENV=test mix deps
+```
+
+Find the `property_damage` entry. Its first line holds the installed version
+and the kind of dependency:
+
+- Hex release: `* property_damage 0.2.0 (Hex package) (mix)`. Set
+  `pd_version` to the version and `pd_source` to `hex`.
+- Git dependency: `* property_damage 0.2.0 (<url> - <ref>) (mix)`, then
+  `locked at 704af9a (branch: main)`. Set `pd_source` to the locked commit
+  (`704af9a`). `mix.lock` holds the full commit.
+- Path dependency: `* property_damage 0.2.0 (<path>) (mix)`. Set `pd_source`
+  to the output of `git -C <path> rev-parse HEAD`, or to `path` when the
+  checkout is not a git repository.
+
+If the entry says `the dependency build is outdated`, run
+`MIX_ENV=test mix deps.compile` first (it compiles the dependencies, not the
+project) and read `mix deps` again.
+
+A git or path dependency keeps its version while the library changes, so
+`pd_source` is the signal that the library moved. Regeneration compares both
+keys with the installed values and writes both back after a successful
+regeneration (see `regeneration.md`).
 
 `interview: checkpoint` + `missing:` is the resume mechanism: a later session
 (possibly a different agent) must be able to continue from the spec alone.
@@ -63,7 +90,7 @@ fields:
   currency: "ISO 4217 code from the supported set"
 when: "at least one open account exists"
 weight: 5
-shrink: neutral            # neutral (default) | prefer_remove | prefer_keep
+shrink: prefer_keep        # prefer_remove | prefer_keep; leave the key out for neutral
 events: [OrderPlaced, OrderRejected]
 ```
 

@@ -12,15 +12,25 @@ and show your work.
 2. Read the chosen spec fully, including not-modeled markers and header state.
 3. `interview: checkpoint` → resume the interview at the recorded gap before
    any regeneration.
-4. Compare the spec's `pd_version` with the installed PropertyDamage version.
-   Read the installed one with `MIX_ENV=test mix run --no-start -e
-   'IO.puts(Application.spec(:property_damage, :vsn))'`, which works for a
-   Hex, git or path dependency. On a mismatch, read the library's
-   `CHANGELOG.md` (in `deps/property_damage/`, or in the checkout for a path
-   dependency) for the entries between the two versions, and look for
-   breaking changes that affect generated files. Raise any you find with the
-   user before regenerating. After a successful regeneration, set
-   `pd_version` in the spec to the installed version.
+4. Compare the spec's `pd_version` and `pd_source` with the installed ones.
+   Read the installed values with `MIX_ENV=test mix deps`, as described under
+   the header in [spec_format.md](spec_format.md): the command works for a
+   Hex, git or path dependency and does not compile the project, so it still
+   answers when generated files no longer compile. (Do not use `mix run`: it
+   compiles the project first and fails before it prints.)
+   - Both equal: no library change to check.
+   - `pd_version` differs: read the library's `CHANGELOG.md` (in
+     `deps/property_damage/`, or in the checkout for a path dependency) for
+     the entries between the two versions.
+   - Dependency is a git or path one, and `pd_source` differs or the spec
+     has none: the version may be unchanged while breaking changes sit under
+     `[Unreleased]`. Read the `[Unreleased]` section in full, together with
+     any entries between the two versions.
+
+   Look in those entries for breaking changes that affect generated files, and
+   raise any you find with the user before regenerating. After a successful
+   regeneration, set `pd_version` and `pd_source` in the spec to the installed
+   values.
 5. OpenAPI-composed spec → hash the referenced document. Mismatch: diff the
    operations against the spec's commands and delta-interview the difference.
    File missing: ask whether it moved; update the path if so. Never rerun
@@ -28,11 +38,17 @@ and show your work.
    and `model.ex` unconditionally. Use `MIX_ENV=test mix pd.scaffold --from
    <openapi path> --output <dir> --namespace <Namespace> --dry-run` to see what
    changed. To add operations, run it again with `--commands-only --operations
-   <ids>`: it writes each named operation's command and its
-   `events/<Operation>Completed.ex` file, and it overwrites any file of the
-   same name without asking. Name only operations that have no files yet,
-   check the `--dry-run` output first, then add the class header lines to the
-   new files.
+   <ids>`: it writes each named operation's command and its event file, and
+   it overwrites any file of the same name without asking. The event name
+   follows the operationId: `createUser` gives `events/user_created.ex`
+   (`update`, `delete`, `get` and `list` give `Updated`, `Deleted`,
+   `Retrieved` and `Listed`), `findUser` and `searchUser` both give
+   `events/user_completed.ex`, and any other operationId gives
+   `<operation_id>_completed.ex`. Run the `--dry-run` first, turn each
+   command and event module it lists into its file path, and leave out every
+   operation whose command file or event file already exists, including an
+   event file that another operation shares. Then add the class header lines
+   to the new files.
 
 ## The delta interview
 
