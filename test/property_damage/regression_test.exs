@@ -1,6 +1,8 @@
 defmodule PropertyDamage.RegressionTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Regression
@@ -515,6 +517,36 @@ defmodule PropertyDamage.RegressionTest do
       # SeedLibrary should deduplicate by seed
       seeds = Enum.map(data["entries"], & &1["seed"])
       assert Enum.count(seeds, &(&1 == 12_345)) == 1
+    end
+
+    @tag :tmp_dir
+    test "a failed library write logs a warning without verbose", %{tmp_dir: tmp_dir} do
+      blocker = Path.join(tmp_dir, "blocker")
+      File.write!(blocker, "not a directory")
+      library_path = Path.join([blocker, "seeds", "seeds.json"])
+
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), seed_library: library_path)
+          assert {:error, _} = result.added_to_library
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ library_path
+    end
+
+    @tag :tmp_dir
+    test "a duplicate seed does not log a warning", %{tmp_dir: tmp_dir} do
+      library_path = Path.join(tmp_dir, "seeds.json")
+      failure = make_failure(12_345)
+      Regression.handle_failure(failure, seed_library: library_path)
+
+      log =
+        capture_log(fn ->
+          Regression.handle_failure(failure, seed_library: library_path)
+        end)
+
+      refute log =~ "seed_library"
     end
   end
 end

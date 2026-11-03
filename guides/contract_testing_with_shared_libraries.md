@@ -422,8 +422,8 @@ defmodule OrderTest do
 
   test "orders maintain valid state" do
     # A failure appends its seed to the seed library file. The run creates the
-    # seeds/ directory if it is missing. If the write still fails, the reason
-    # prints only with regression: [verbose: true].
+    # seeds/ directory if it is missing. If the write still fails, the run logs
+    # a warning with the path and the reason, whatever verbose: says.
     result = PropertyDamage.run(
       model: OrderModel,
       targets: [OrderHttpAdapter],

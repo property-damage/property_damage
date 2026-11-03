@@ -490,6 +490,7 @@ defmodule PropertyDamage.Regression do
 
       path ->
         result = do_add_to_library(failure, path, opts)
+        warn_library_failure(result, path)
 
         if verbose do
           case result do
@@ -504,6 +505,20 @@ defmodule PropertyDamage.Regression do
         result
     end
   end
+
+  # A duplicate seed is an expected no-op; any other error means the library
+  # was not updated, so report it whatever `verbose:` says.
+  defp warn_library_failure({:error, {:duplicate_seed, _}}, _path), do: :ok
+
+  defp warn_library_failure({:error, reason}, path) do
+    require Logger
+
+    Logger.warning(
+      "PropertyDamage seed_library could not be saved to #{path}: #{inspect(reason)}"
+    )
+  end
+
+  defp warn_library_failure(_result, _path), do: :ok
 
   defp maybe_generate_test(failure, opts, verbose) do
     case Keyword.get(opts, :generate_tests) do
