@@ -1,0 +1,11 @@
+{
+  "name": "property-damage-viewer-browser-specs",
+  "private": true,
+  "description": "Browser specs for the failure report viewer",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

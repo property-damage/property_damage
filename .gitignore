@@ -34,3 +34,8 @@ property_damage-*.tar
 
 # Replay artifacts written by failing runs (`replay_dir:`).
 /property_damage_replays/
+
+# Browser specs for the failure report viewer (test/browser).
+/test/browser/node_modules/
+/test/browser/playwright-report/
+/test/browser/test-results/

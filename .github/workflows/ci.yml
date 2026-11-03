@@ -94,6 +94,62 @@ jobs:
       - name: Report excerpts match a fresh run
         run: elixir scripts/regen_report_excerpts.exs --check
 
+  # Opens real failure pages in Chromium over file:// (test/browser): the tabs,
+  # the citations of an explanation and the index page. The pages come from
+  # small models run through the framework, so the viewer is checked against
+  # what the framework writes.
+  browser:
+    name: Viewer browser specs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          # The same pair as the documentation gate.
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: mix-1.20-27-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-1.20-27-
+
+      - run: mix deps.get
+
+      - name: Generate the failure pages
+        run: mix run test/browser/generate_pages.exs "$RUNNER_TEMP/pd_pages"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install the specs' dependencies
+        working-directory: test/browser
+        run: npm ci
+
+      - name: Install Playwright Chromium (with OS deps)
+        working-directory: test/browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the specs
+        working-directory: test/browser
+        env:
+          PD_PAGES_DIR: ${{ runner.temp }}/pd_pages
+        run: npx playwright test
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: test/browser/playwright-report/
+          retention-days: 7
+
   package:
     name: Hex package contents
     runs-on: ubuntu-24.04
