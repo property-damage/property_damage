@@ -207,12 +207,16 @@ model:
 
 ## Example: Account Operations Under Branching
 
-> This example highlights only the branching wiring. The `CreateAccount` /
-> `Deposit` / `Withdraw` / `Transfer` commands, their events, and
-> `AccountApiAdapter` are assumed; define them following
-> [Writing Commands](writing_commands.md) and [Getting Started](getting_started.md).
+> This example highlights only the branching wiring. The `Deposit` and
+> `Withdraw` commands (each with an `amount` field), the `Deposited` and
+> `Withdrawn` events (each carrying the `amount` and the account `balance` the
+> system reports after the operation), and `AccountApiAdapter` are assumed;
+> define them following [Writing Commands](writing_commands.md) and
+> [Getting Started](getting_started.md).
 
-Two branches both deposit to and withdraw from a shared account:
+Two branches both deposit to and withdraw from one shared account. The model
+has a simulator, so the linearization checker has predictions to compare with
+the observed events:
 
 ```elixir
 defmodule AccountModel do
@@ -220,19 +224,26 @@ defmodule AccountModel do
 
   def commands do
     [
-      {CreateAccount, weight: 2},
-      {Deposit, weight: 3, when: &has_accounts?/1},
-      {Withdraw, weight: 3, when: &has_accounts?/1},
-      {Transfer, weight: 2, when: &has_two_accounts?/1}
+      {Deposit, weight: 3},
+      {Withdraw, weight: 3}
     ]
   end
 
-  def command_sequence_projection, do: AccountState
+  def command_sequence_projection, do: BalanceInvariant
 
   def check_projections, do: [BalanceInvariant]
 
-  defp has_accounts?(state), do: map_size(state.accounts) > 0
-  defp has_two_accounts?(state), do: map_size(state.accounts) >= 2
+  def simulator, do: AccountSimulator
+end
+
+defmodule AccountSimulator do
+  @behaviour PropertyDamage.Model.Simulator
+
+  # `balance: nil` leaves the reported balance open: the checker compares only
+  # the fields the prediction sets. The check below judges the balance.
+  @impl true
+  def simulate(%Deposit{amount: amt}, _state), do: [%Deposited{amount: amt, balance: nil}]
+  def simulate(%Withdraw{amount: amt}, _state), do: [%Withdrawn{amount: amt, balance: nil}]
 end
 
 defmodule BalanceInvariant do
@@ -240,12 +251,12 @@ defmodule BalanceInvariant do
 
   def init, do: %{deposits: 0, withdrawals: 0, observed_balance: 0}
 
-  def apply(state, %Deposited{amount: amt}) do
-    %{state | deposits: state.deposits + amt}
+  def apply(state, %Deposited{amount: amt, balance: balance}) do
+    %{state | deposits: state.deposits + amt, observed_balance: balance}
   end
 
-  def apply(state, %Withdrawn{amount: amt}) do
-    %{state | withdrawals: state.withdrawals + amt}
+  def apply(state, %Withdrawn{amount: amt, balance: balance}) do
+    %{state | withdrawals: state.withdrawals + amt, observed_balance: balance}
   end
 
   def apply(state, _event), do: state
@@ -262,6 +273,9 @@ defmodule BalanceInvariant do
   end
 end
 ```
+
+Each event folds the balance the system reported into `observed_balance`, so
+the check compares the reported balance with the sum of the amounts.
 
 Run with parallel branches:
 
