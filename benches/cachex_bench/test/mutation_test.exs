@@ -11,7 +11,7 @@ defmodule CachexBench.MutationTest do
        structurally identical model with the invariant removed lets EVERY mutant
        survive), and
     2. the `PropertyDamage.Mutation.Report` shape is honest (totals reconcile,
-       the score equals killed/total, breakdowns are keyed by real command
+       the score equals killed over total minus error kills, breakdowns are keyed by real command
        modules, and killed details carry the invariant's failure message).
   """
   use ExUnit.Case, async: false
@@ -93,9 +93,19 @@ defmodule CachexBench.MutationTest do
     # report records survivors too, not only kills.
     assert report.survived > 0
 
-    # Honest arithmetic: totals reconcile and the score is exactly killed/total.
-    assert report.total == report.killed + report.survived + report.timeout
-    assert_in_delta report.mutation_score, report.killed / report.total, 1.0e-9
+    # Honest arithmetic: totals reconcile, and the score is killed / (total -
+    # killed_by_error), the rule DR-059 defines. A mutation killed by an adapter
+    # error says nothing about the checks, so the score leaves it out. These
+    # operators seldom produce error kills, but the reconciliation counts them
+    # so it stays true if they do.
+    assert report.total ==
+             report.killed + report.killed_by_error + report.survived + report.timeout
+
+    assert report.total - report.killed_by_error > 0
+
+    assert_in_delta report.mutation_score,
+                    report.killed / (report.total - report.killed_by_error),
+                    1.0e-9
 
     # Breakdowns are keyed by the real command MODULES (the earlier bug keyed
     # them by option lists like `[weight: 5]`). Keys are a subset of the model's
