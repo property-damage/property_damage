@@ -1240,7 +1240,7 @@ Probes and async commands use settle configuration for retry behavior:
     }
 
 With `:linear` backoff, retries happen at fixed intervals. With `:exponential`, the
-interval doubles after each retry (capped at the timeout).
+interval doubles after each retry, capped by the time left before the deadline.
 
 ## Summary
 

@@ -266,14 +266,17 @@ its stacktrace and reported as `{:on_timeout_error, exception, stacktrace}`.
 
 ## Error Handling
 
-Errors from pollers are handled based on `check_mode`:
+The executor collects poller results once, at the end of the sequence. A
+poller error never interrupts the commands that run after it. Every command in
+the sequence still executes, and `check_mode` decides what happens when the
+executor collects the error:
 
 | Mode | Behavior |
 |------|----------|
-| `:halt` | First error stops execution, reported as failure |
-| `:record` | Errors recorded, sequence continues, all failures reported at end |
-| `:log` | Errors logged as warnings, sequence continues |
-| `:disabled` | Errors ignored |
+| `:halt` | The run fails with a resource poller error when the sequence ends. The first failed poller is the one reported |
+| `:record` | Every poller error becomes a recorded failure (check name `resource_poller`) when the sequence ends |
+| `:log` | Errors are logged as warnings, and the run passes |
+| `:disabled` | Errors are ignored |
 
 ### Error Types
 
@@ -321,13 +324,19 @@ test "authorization polling" do
   ctx = %{client: mock_client}
 
   # Framework keys live on the runtime handle
+  test_pid = self()
+
   runtime = %PropertyDamage.Runtime{
     inject: fn _ -> :ok end,
     start_poller: fn opts ->
-      ResourcePoller.start(Keyword.merge(opts, [
+      poller = ResourcePoller.start(Keyword.merge(opts, [
         event_queue: queue,
         command_index: 0
       ]))
+
+      # Hand the poller handle to the test so it can await it
+      send(test_pid, {:poller, poller})
+      poller
     end
   }
 
@@ -336,10 +345,11 @@ test "authorization polling" do
 
   # Initial event returned immediately
   assert [%AuthorizationCreated{}] = events
+  assert_receive {:poller, poller}
 
-  # Wait for poller to complete
-  # (In real tests, the executor does this automatically)
-  Process.sleep(100)
+  # Wait for the poller to finish
+  # (In real runs, the executor does this at the end of the sequence)
+  assert {:success, _id} = ResourcePoller.await(poller)
 
   # Check injected events
   entries = EventQueue.drain(queue)

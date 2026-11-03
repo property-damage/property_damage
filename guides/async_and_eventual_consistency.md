@@ -6,6 +6,7 @@ eventual consistency, including:
 - **Probe commands** - Query until data appears
 - **Async commands** - Create resource and poll until settled
 - **Mid-execution injection** - Emit events as they happen during polling
+- **Built-in resource poller** - Let `runtime.start_poller` poll in the background
 - **Adapter.Injector** - Handle webhook/callback events
 
 Three different waits appear in this guide, with three different bounds. They
@@ -297,8 +298,8 @@ Each settle attempt is a log scope: a `PropertyDamage.log/2` call in
 `execute/3` lands under the attempt that wrote it, as in the adapter of the
 [runnable example](#a-runnable-probe-example). A command that retries hundreds
 of times would flood the report, so the report keeps the lines of the first
-attempt and of the last three, and prints `... N attempts omitted` where it
-dropped the rest. `log: [keep_attempts: n]` on `PropertyDamage.run/1` keeps the
+attempt and of the last three, and prints `... N attempts omitted (M lines)` where it
+dropped the rest, with `M` the number of log lines in the dropped attempts. `log: [keep_attempts: n]` on `PropertyDamage.run/1` keeps the
 last `n` attempts instead of three. An attempt that logs nothing leaves no
 gap. See [Log Lines in the Failure Report](log_lines.md#retried-commands).
 
@@ -659,6 +660,35 @@ end
 - Event timeline accuracy matters for debugging/visualization
 - You want to emit `Created` event immediately, then `Settled` event after polling
 
+### Alternative: Built-in Resource Poller
+
+To keep `execute/3` short and still see the later events, start a background
+poller with `runtime.start_poller`. The command returns its first event at
+once. The poller injects the later events between commands, and the executor
+awaits every poller at the end of the sequence:
+
+```elixir
+def execute(%CreateAuthorization{} = cmd, %{client: client}, runtime) do
+  {:ok, %{body: %{"id" => id}}} = Req.post(client, url: "/authorizations", json: %{amount: cmd.amount})
+
+  runtime.start_poller.(
+    poll_fn: fn -> Req.get(client, url: "/authorizations/#{id}") end,
+    interval_ms: 200,
+    timeout_ms: 10_000,
+    handler: fn
+      {:ok, %{body: %{"status" => "approved"}}} -> {:done, %AuthorizationApproved{authorization_id: id}}
+      {:ok, %{body: %{"status" => "declined"}}} -> {:done, %AuthorizationDeclined{authorization_id: id}}
+      _ -> :continue
+    end
+  )
+
+  {:ok, [%AuthorizationCreated{authorization_id: id}]}
+end
+```
+
+See the [Resource Polling guide](resource_polling.md) for the handler return
+values, timeouts and error handling.
+
 ### Async Shrinking Protection
 
 An `:async` command gets **shrinking protection**. When a test fails, the
@@ -704,7 +734,7 @@ defmodule MyTest.PaymentWebhookAdapter do
   def setup(config) do
     # Start a mock webhook server
     {:ok, server} = Plug.Cowboy.http(
-      WebhookHandler,
+      MyTest.WebhookHandler,
       [event_queue: config.event_queue, adapter: __MODULE__],
       port: config[:webhook_port] || 4001
     )
@@ -833,12 +863,16 @@ event so the simulated projection state matches a live, correlated run (the
 
 ### Model Configuration
 
-Declare which events can be injected in your model:
+A model may declare which events can be injected. The callback is optional, and
+a model without it still folds injected events into its projections. Its only
+consumer is the validation check: every event listed in `injectable_events/0`
+must appear in the `@emits` of at least one injector, or validation fails.
 
 ```elixir
 defmodule MyTest.Model do
   use PropertyDamage.Model
 
+  @impl true
   def injectable_events do
     [PaymentApproved, PaymentDeclined]
   end
@@ -849,9 +883,21 @@ end
 
 ## Polling Adapter.Injector (Advanced)
 
-For systems where you must **actively poll** for status changes but want events
-processed through the injection system (e.g., between commands rather than
-blocking a single command), you can create a polling Adapter.Injector:
+For most polling needs, call `runtime.start_poller` from the main adapter's
+`execute/3` instead. The framework starts a `PropertyDamage.ResourcePoller`
+for you, routes its events through the injection system between commands, and
+awaits it at the end of the sequence. See the
+[Resource Polling guide](resource_polling.md).
+
+Write a polling Adapter.Injector by hand when one long-lived process must watch
+many resources across commands, or when the poll loop needs state that a
+`poll_fn` and `handler` pair cannot hold. The injector starts the poller in
+`setup/1`, and the poller pushes events to the shared `EventQueue` (e.g.,
+between commands rather than blocking a single command).
+
+The main adapter cannot reach the injector's context, so it cannot read a poller
+pid from it. Register the poller under a name instead. Any process on the node
+then reaches it by that name:
 
 ```elixir
 defmodule MyTest.AuthorizationPollerAdapter do
@@ -884,11 +930,6 @@ defmodule MyTest.AuthorizationPollerAdapter do
   def to_event(%AuthorizationApproved{} = event), do: {:ok, event}
   def to_event(%AuthorizationDeclined{} = event), do: {:ok, event}
   def to_event(_), do: :skip
-
-  # Called by main adapter after creating an authorization
-  def watch(poller, authorization_id) do
-    AuthorizationPoller.watch(poller, authorization_id)
-  end
 end
 
 defmodule MyTest.AuthorizationPoller do
@@ -896,10 +937,11 @@ defmodule MyTest.AuthorizationPoller do
 
   alias MyTest.Events.{AuthorizationApproved, AuthorizationDeclined}
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+  # The name lets the main adapter call watch/1 without holding a pid
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  def watch(poller, authorization_id) do
-    GenServer.cast(poller, {:watch, authorization_id})
+  def watch(authorization_id) do
+    GenServer.cast(__MODULE__, {:watch, authorization_id})
   end
 
   @impl true
@@ -959,6 +1001,19 @@ defmodule MyTest.AuthorizationPoller do
   end
 end
 ```
+
+The main adapter hands each new authorization to the poller by name:
+
+```elixir
+def execute(%CreateAuthorization{} = cmd, %{base_url: base_url}, _runtime) do
+  {:ok, %{body: %{"id" => id}}} = Req.post("#{base_url}/authorizations", json: %{amount: cmd.amount})
+  MyTest.AuthorizationPoller.watch(id)
+  {:ok, [%AuthorizationCreated{authorization_id: id}]}
+end
+```
+
+A registered name allows one poller per node, so several targets that each list
+this injector would collide on the name. In that case use `runtime.start_poller`.
 
 ## Writing an `@eventually` predicate
 
@@ -1241,10 +1296,12 @@ slow and not wrong: raise the matching bound before you hunt for a bug.
 | **Async (internal poll)** | Create + wait for completion | Poll inside `execute/3` |
 | **Async (runtime.inject)** | Create + wait, need accurate event timing | Call `runtime.inject.(event)` mid-execution |
 | **Adapter.Injector** | External system pushes webhooks | Implement `to_event/1` callback |
-| **Polling Adapter.Injector** | Poll but inject events between commands | Background GenServer + EventQueue |
+| **Resource poller** | Create + wait, polling in the background | Call `runtime.start_poller.(opts)` |
+| **Polling Adapter.Injector** | One long-lived watcher process for many resources | Background GenServer + EventQueue |
 
 Choose the simplest pattern that fits your use case:
 
 - **Most async create operations**: Use **internal polling** (simplest)
 - **Need intermediate state visibility**: Use **runtime.inject** for accurate event timing
+- **Polling without blocking the command**: Use **runtime.start_poller**, and reach for a hand-rolled polling Adapter.Injector only when one process must watch many resources
 - **External webhooks/callbacks**: Use **Adapter.Injector**
