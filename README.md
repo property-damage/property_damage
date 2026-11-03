@@ -16,7 +16,9 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Branching Sequences**: Prefix, branches and suffix, run one branch at a time and checked for linearizability against the model (no race detection yet)
 - **Linearization Checking**: Verify parallel results are sequentially explainable
 - **Idempotency Testing**: Built-in stutter testing for retry safety
-- **Rich Failure Reports**: Comprehensive diagnostics when tests fail
+- **Rich Failure Reports**: Comprehensive diagnostics when tests fail, with your own log lines attached
+- **HTML Failure Page**: One self-contained page per failing run, with one column per target
+- **Failure Explanation**: `mix pd.explain` hands a failure page to a model or agent and embeds the explanation it writes
 - **Failure Persistence**: Save failures for later analysis and regression testing
 - **Step-by-Step Replay**: Debug failures by executing commands one at a time
 - **Seed Library**: Replay recently-failing seeds first; a self-pruning working set
@@ -26,7 +28,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Failure Bisection**: `mix pd.bisect` drives `git bisect` to find the commit where a saved failure first reproduces
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
-- **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
+- **Fault Injection (Nemesis)**: Built-in network faults (latency, partition, packet loss), Toxiproxy-backed, plus your own nemeses
 - **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
 - **Path Equivalence Testing**: List command sequences that mean the same as a command (`expansions/0`); each target picks its own path and the targets' `@compare` observations must agree, and a divergence shrinks to the one path that matters and replays from a file
 
@@ -272,6 +274,34 @@ A failure report can also carry your own lines, such as the requests an adapter
 sends: call `PropertyDamage.log/2`, as the [log lines guide](guides/log_lines.md)
 shows.
 
+To read a failure in a browser instead, set the `report_html:` run option or the
+`PD_REPORT_HTML` environment variable to a directory. Each failing run then writes
+an HTML page there, with an `index.html` that browses them. See
+[Explaining a failure page](#explaining-a-failure-page) and the
+[debugging guide](guides/debugging_failures.md).
+
+### Replay the shrunk failure
+
+Every failing run writes a replay artifact into the `replay_dir:` directory
+(default `property_damage_replays`; `replay_dir: false` writes none). The file is
+named `<model>_seed<seed>.replay.exs`, where `<model>` is the last segment of the
+model's module name. If that name already holds a different failure or other
+targets, the file gets a `_<k>` suffix (`<model>_seed<seed>_2.replay.exs`). The printed report ends with the call that runs it again
+without generating anything:
+
+```elixir
+PropertyDamage.run(
+  model: MyApp.TestModel,
+  targets: [MyApp.TestAdapter],
+  only: [replay: "property_damage_replays/TestModel_seed12345.replay.exs"]
+)
+```
+
+Pass the same `targets:` the report printed, and no `seed:` (the artifact records
+it). Shrinking is off by default in a replay. A replay that fails the same way
+returns `{:error, report}`. A replay that passes returns `{:ok, stats}` with
+`stats.replay` set to `:not_reproduced`.
+
 ### Interactive Shrinking
 
 If the initial shrinking didn't produce a minimal sequence:
@@ -302,7 +332,8 @@ for step <- steps do
 
   case step.result do
     :ok -> IO.puts("  OK")
-    {:check_failed, check, msg} -> IO.puts("  FAILED: #{msg}")
+    {:check_failed, check, error} -> IO.puts("  FAILED #{check}: #{Exception.message(error)}")
+    {:error, reason} -> IO.puts("  ERROR: #{inspect(reason)}")
   end
 end
 ```
@@ -315,9 +346,12 @@ alias PropertyDamage.Replay
 {:ok, session} = Replay.start(failure)
 {:ok, session, step1} = Replay.step(session)
 IO.inspect(Replay.current_state(session))
-{:ok, session, step2} = Replay.step(session)
-# ... continue stepping
-Replay.stop(session)
+
+# A failure that shrinks to one command has no second step: `{:done, session}`
+case Replay.step(session) do
+  {:ok, session, _step2} -> Replay.stop(session)  # or keep calling Replay.step/1 here
+  {:done, session} -> Replay.stop(session)
+end
 ```
 
 ### Visual Debugging Tools
@@ -444,15 +478,14 @@ Track how thoroughly your model is being exercised:
 ```elixir
 alias PropertyDamage.Coverage
 
-# Single run coverage
-result = PropertyDamage.run(model: M, targets: [A])
-coverage = PropertyDamage.coverage(result, M)
+# Single run coverage: `coverage: true` attaches the tracker to the success stats
+{:ok, stats} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+coverage = stats.coverage
 IO.puts(Coverage.format(coverage))
 
-# Track across multiple runs
-tracker = Coverage.new(M)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
+# Track across multiple runs: merge the trackers
+{:ok, stats2} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+tracker = Coverage.merge(stats.coverage, stats2.coverage)
 
 # Check thresholds in CI
 unless Coverage.meets_threshold?(tracker, command: 80, transition: 50) do
@@ -477,7 +510,7 @@ IO.puts(Coverage.format(tracker, :matrix))
 # Full - includes everything
 IO.puts(Coverage.format(tracker, :full))
 
-# State classes (when classifier is set)
+# State classes (needs a tracker built with Coverage.new/2 and state_classifier:, see below)
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
 
@@ -501,40 +534,51 @@ top = Coverage.top_transitions(tracker, 5)
 
 ### State Class Coverage
 
-For more meaningful coverage, define a state classifier to group concrete states into abstract classes:
+A state classifier groups concrete states into abstract classes. `Coverage.record/2` classifies one state per recorded failing run: the merged projection state at the failure. Counts accumulate across all recorded runs. A transition pairs the class of the previous recorded run with the class of the current one, so it spans runs, not steps inside a run. Nothing is classified while a run executes.
+
+The classifier is an option of `Coverage.new/2` only (not of `run/1`), and `record/2` takes a failing run's `{:error, report}`. A passing `run/1` result has no failure state to classify, and `coverage: true` / `stats.coverage` records no state classes.
 
 ```elixir
 # Define a classifier function
 classifier = fn state ->
   cond do
     state.accounts == %{} -> :no_accounts
-    Enum.all?(state.accounts, fn {_, a} -> a.balance == 0 end) -> :all_zero_balance
-    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :has_negative
-    true -> :has_positive
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < -50 end) -> :deeply_overdrawn
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :slightly_overdrawn
+    true -> :in_credit
   end
 end
 
-# Create tracker with classifier
+# Record the failing runs of several seeds
 tracker = Coverage.new(MyModel, state_classifier: classifier)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
 
-# View state class distribution
-counts = Coverage.state_class_counts(tracker)
-# => %{no_accounts: 5, all_zero_balance: 12, has_positive: 83}
+tracker =
+  Enum.reduce(1..6, tracker, fn seed, tracker ->
+    {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: seed)
+    Coverage.record(tracker, {:error, report})
+  end)
 
-# View state class transitions (what state classes lead to what)
-transitions = Coverage.state_class_transitions(tracker)
-# => %{{:no_accounts, :all_zero_balance} => 5, {:all_zero_balance, :has_positive} => 10, ...}
+# Failing-state classes seen, and how often (one possible outcome; the
+# classes and counts depend on the model and the seeds)
+Coverage.state_class_counts(tracker)
+# => %{deeply_overdrawn: 1, slightly_overdrawn: 5}
 
-# Get state class matrix for visualization
-state_matrix = Coverage.state_class_matrix(tracker)
+# Class of one recorded failure followed by the class of the next
+Coverage.state_class_transitions(tracker)
+# => %{
+#      {:deeply_overdrawn, :slightly_overdrawn} => 1,
+#      {:slightly_overdrawn, :deeply_overdrawn} => 1,
+#      {:slightly_overdrawn, :slightly_overdrawn} => 3
+#    }
 
-# Format with state class matrix
+# The same transitions as a nested map, for visualization
+Coverage.state_class_matrix(tracker)
+
+# Format with the state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
 
-State class coverage helps answer: "Have we tested all interesting state configurations?"
+The transitions pair consecutive recorded results, so six recorded failures give five transitions. The section answers two questions: which classes of final failing state were seen, and how often one followed another across the recorded failures.
 
 ## OpenAPI Scaffolding
 
@@ -565,14 +609,29 @@ Generated commands include:
 Validate your model before running tests:
 
 ```bash
-mix pd.validate --model MyApp.TestModel
+mix pd.validate MyApp.TestModel MyApp.TestAdapter
 ```
 
-This checks:
-- All commands implement required callbacks
-- Projections handle their declared events
-- Checks reference valid projections
-- No circular dependencies
+To validate against several targets, pass the same list as the `targets:` run
+option instead of an adapter:
+
+```bash
+mix pd.validate MyApp.TestModel --targets "[MyApp.TestAdapter]"
+```
+
+It fails on:
+- A missing model, adapter, command or projection module, or a missing required callback
+- Injectable events that no injector adapter covers
+- A removed lifecycle hook, or a nemesis in `setup_each/0` or `teardown_each/0`
+
+It warns about:
+- Commands that declare no `:observables`
+- Events that no check projection handles
+- Two targets that share an adapter and an identical `config:`
+
+`--verbose` shows more detail and `--strict` turns warnings into errors. For a
+model with `expansions/0`, `--seeds N` sets how many root sequences to sample
+(default 100) and `--seed S` samples the seeds S, S+1, and so on.
 
 ## Configuration
 
@@ -590,8 +649,7 @@ PropertyDamage.run(
   seed: 12345,             # Deterministic seed (optional)
 
   # Shrinking
-  shrink_timeout_ms: 30_000,
-  max_shrink_iterations: 1000,
+  shrinker_config: %PropertyDamage.Shrinker.Config{max_iterations: 1000, max_time_ms: 30_000},
 
   # Failure page: a failing run writes an HTML page, plus an index.html, into this
   # directory (default false; the PD_REPORT_HTML environment variable replaces it)
@@ -611,9 +669,10 @@ defmodule MyModel do
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]
   def command_sequence_projection, do: MyStateProjection
-  def check_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
+  def check_projections, do: [MyExtraProjection, ...]  # Projections whose checks run
+  def expansions, do: [{CommandModule, fn command, state -> ... end}]  # Equivalent sequences
   def injectable_events, do: []  # For Adapter.Injector
   def simulator, do: MySimulatorModule  # Returns module implementing Simulator behaviour
   def setup_each, do: []     # Setup commands: run before the first root of every run/shrink attempt
@@ -640,7 +699,7 @@ PropertyDamage.run(
   max_runs: 100,
   branching: [
     branch_probability: 0.3,   # Probability of creating branch points
-    max_branches: 3,           # Max parallel branches
+    max_branches: 3,           # Max branches per branch point
     max_branch_length: 5,      # Max commands per branch
     min_prefix_length: 3       # Min commands before branching
   ]
@@ -672,7 +731,8 @@ Suffix: [cmd5]
 After the branches have run, PropertyDamage verifies that the observed events
 can be explained by some ordering of the branch commands that keeps each
 branch's own order, against the model's simulator. If no valid ordering exists,
-a `:linearization_failed` error is raised.
+`PropertyDamage.run/1` returns `{:error, report}` whose failure kind is
+`:linearization`.
 
 ```elixir
 alias PropertyDamage.Linearization
@@ -697,84 +757,82 @@ The shrinker handles branching sequences with special strategies:
 3. **Shrink branches**: Remove commands within individual branches
 4. **Shrink prefix/suffix**: Remove non-essential sequential commands
 
-### Ref Constraints in Parallel Execution
+### Placeholder Visibility in Parallel Execution
 
-Symbolic references follow strict rules in branching sequences:
+A command takes an `external()` value from the event of an earlier command, as
+a placeholder. Branching sequences limit which placeholders a command sees:
 
-- Refs from prefix can be used in any branch
-- Refs from one branch **cannot** be used in another branch
-- Refs from branches can be used in suffix
+- A placeholder from the prefix is visible in any branch
+- A placeholder from one branch is **not** visible in another branch
+- A placeholder from a branch is visible in the suffix
 
-```elixir
-# Valid: prefix ref used in branch
-prefix = [CreateUser.new()]  # Creates :user_ref
-branches = [[GetUser.new(user_ref: :user_ref)], [UpdateUser.new(user_ref: :user_ref)]]
-
-# Invalid: cross-branch ref usage
-branches = [[CreateItem.new()],  # Creates :item_ref
-            [ViewItem.new(item_ref: :item_ref)]]  # ERROR: :item_ref not visible
-```
+For example, a command in branch B cannot use the id that a `CreateItem` in
+branch A mints. The generator never builds such a sequence. See the
+[Parallel Testing](guides/parallel_testing.md#placeholder-scoping) guide.
 
 ## Eventual Consistency (Async Support)
 
 For systems with eventual consistency, PropertyDamage provides probe and async
-command semantics with automatic settle/retry logic.
+commands with automatic settle/retry logic.
 
-### Command Semantics
+### Execution Modes
 
-Commands can declare their semantics via the `semantics/0` callback:
+A command declares how it executes in its `use` options, and may tune the retry loop:
 
 ```elixir
 defmodule MyTest.Commands.GetOrderStatus do
-  @behaviour PropertyDamage.Command
+  # A probe queries state and may need to retry until it settles
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    settle: %{
+      timeout_ms: 5_000,     # Max time to wait
+      interval_ms: 200,      # Time between retries
+      backoff: :exponential  # :linear or :exponential
+    }
 
   defstruct [:order_id]
 
-  # This is a probe - it queries state and may need to retry
-  def semantics, do: :probe
-
-  # Configure settle behavior
-  def settle_config do
-    %{
-      timeout_ms: 5_000,    # Max time to wait
-      interval_ms: 200,     # Time between retries
-      backoff: :exponential # :linear or :exponential
-    }
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{order_id: StreamData.string(:alphanumeric, min_length: 1)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  def read_only?, do: true
 end
 ```
 
-### Semantics Types
-
-| Semantics | Purpose | Settle Behavior |
-|-----------|---------|-----------------|
+| `execution:` | Purpose | Settle Behavior |
+|--------------|---------|-----------------|
 | `:sync` | Mutates state (default) | Execute once |
 | `:probe` | Queries state | Retry until success or timeout |
 | `:async` | Waits for async completion | Retry until complete |
 
 ### Adapter Integration
 
-Adapters return settle-compatible results for probes:
+The adapter asks for a retry with `{:retry, reason}`. The framework runs the
+retry loop and calls `execute/3` again, so the adapter never sleeps or polls:
 
 ```elixir
-def execute(%GetOrderStatus{order_id: id}, ctx) do
+def execute(%GetOrderStatus{order_id: id}, _context, _runtime) do
   case MyAPI.get_order(id) do
     {:ok, %{status: "pending"}} ->
-      {:retry, :still_pending}  # Keep trying
+      {:retry, :still_pending}  # Not settled yet: call me again
 
     {:ok, order} ->
-      {:ok, order}  # Success - stop retrying
+      {:ok, [%OrderStatusObserved{order_id: id, status: order.status}]}  # Settled: stop retrying
 
     {:error, :not_found} ->
-      {:retry, :not_found}  # Keep trying
+      {:retry, :not_found}
 
     {:error, reason} ->
-      {:error, reason}  # Hard failure - stop immediately
+      {:error, reason}  # Hard failure: stop immediately
   end
 end
 ```
+
+A `:sync` command must not return `{:retry, _}`: the run fails with a
+`:retry_from_sync_command` failure.
 
 See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
 for complete documentation including bridge commands, `Adapter.Injector`, and
@@ -783,7 +841,7 @@ handling async operations that require polling.
 ## Fault Injection (Nemesis)
 
 Test system resilience by injecting faults like network partitions, latency,
-and node crashes.
+and packet loss.
 
 ### Defining a Nemesis Command
 
@@ -796,27 +854,43 @@ defmodule MyTest.Nemesis.PartitionNetwork do
   @impl true
   def precondition(_state), do: true
 
+  # Required for any nemesis listed in commands/0: the generator calls it
+  @impl true
+  def new!(_state, overrides \\ %{}) do
+    StreamData.bind(StreamData.member_of([:full, :upstream, :downstream]), fn type ->
+      StreamData.constant(%__MODULE__{
+        partition_type: Map.get(overrides, :partition_type, type),
+        duration_ms: Map.get(overrides, :duration_ms, 5_000)
+      })
+    end)
+  end
+
   @impl true
   def inject(%__MODULE__{partition_type: type}, ctx) do
-    :ok = Toxiproxy.partition(ctx.proxy, type)
-    {:ok, [%NetworkPartitioned{type: type}]}
+    # ctx.adapter_context is what the adapter's setup/1 returned
+    :ok = Toxiproxy.partition(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionStarted{type: type}]}
   end
 
   @impl true
   def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.proxy, type)
-    {:ok, [%NetworkRestored{type: type}]}
+    Toxiproxy.restore(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionEnded{type: type}]}
   end
 
   # Auto-restore after duration
+  @impl true
   def auto_restore?, do: true
+
+  @impl true
   def duration_ms(%__MODULE__{duration_ms: d}), do: d
 end
 ```
 
 ### Using Nemesis in Models
 
-Add nemesis commands with lower weights:
+Add nemesis commands with lower weights. Every nemesis listed here must
+implement `new!/2` (see above), or generation raises an `ArgumentError`:
 
 ```elixir
 def commands do
@@ -848,7 +922,7 @@ alias PropertyDamage.Nemesis.NetworkLatency
 def commands do
   [
     {CreateOrder, weight: 5},
-    {NetworkLatency, weight: 1}  # Uses defaults: 100ms latency, 5s duration
+    {NetworkLatency, weight: 1}  # Drawn per command: 50-500ms latency, 0-50ms jitter, 1-10s duration
   ]
 end
 
@@ -1065,6 +1139,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 
 # Generate ExUnit regression test
 test_code = PropertyDamage.Export.to_exunit(failure)
+File.mkdir_p!("test/regressions")
 File.write!("test/regressions/seed_#{failure.seed}_test.exs", test_code)
 
 # Generate standalone scripts
@@ -1124,12 +1199,13 @@ For scripts to make HTTP calls, your adapter needs to implement `http_spec/2`:
 
 ```elixir
 defmodule MyHTTPAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
 
   alias PropertyDamage.Export.HTTPSpec
 
-  # Standard adapter callbacks...
-  def execute(cmd, ctx), do: # ...
+  # Standard adapter callbacks (setup/1, execute/3, teardown/1)...
+  @impl true
+  def execute(cmd, ctx, runtime), do: # ...
 
   # Optional: HTTP mapping for export
   def http_spec(%CreateAccount{currency: curr}, _ctx) do
@@ -1140,20 +1216,20 @@ defmodule MyHTTPAdapter do
     }
   end
 
-  def http_spec(%CreditAccount{account_ref: ref, amount: amt}, _ctx) do
+  def http_spec(%CreditAccount{account_id: id, amount: amt}, _ctx) do
     %HTTPSpec{
       method: :post,
       path: "/api/accounts/:account_id/credit",
-      path_params: %{account_id: ref},
+      path_params: %{account_id: id},
       body: %{amount: amt}
     }
   end
 
-  def http_spec(%DebitAccount{account_ref: ref, amount: amt}, _ctx) do
+  def http_spec(%DebitAccount{account_id: id, amount: amt}, _ctx) do
     %HTTPSpec{
       method: :post,
       path: "/api/accounts/:account_id/debit",
-      path_params: %{account_id: ref},
+      path_params: %{account_id: id},
       body: %{amount: amt}
     }
   end
@@ -1299,17 +1375,18 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 
 ### Options
 
+These are the options of the `regression:` option of `PropertyDamage.run/1`. `Regression.process_batch/2` takes its own list, which also includes `:description` and `:dedup_source`.
+
 | Option | Description |
 |--------|-------------|
 | `:save_failures` | Directory to save failure files |
 | `:seed_library` | Path to seed library JSON file |
 | `:generate_tests` | Directory for ExUnit test files |
 | `:tags` | Tags for seed library entries (default: `[:auto_detected]`) |
-| `:description` | Description for seed library entries |
 | `:dedup` | Enable deduplication (default: false) |
 | `:dedup_threshold` | Similarity threshold (default: 0.90) |
-| `:dedup_source` | Where to check: `:failures`, `:library`, or `:both` |
 | `:verbose` | Print actions taken (default: false) |
+| `:targets` | Single-entry target for generated regression tests (default: the run's target) |
 
 ## Differential Testing
 
@@ -1394,7 +1471,7 @@ def orders(state, _root), do: state.orders |> normalize() |> drop_keys([:fees])
 @compare every: 1, using: {PropertyDamage.Equivalence, :within, [1]}
 def total_cents(state, _root), do: state.total_cents
 
-# A relation of your own: a verdict, truthy to agree, false or {:fail, reason} to disagree
+# A relation of your own: a verdict, truthy to agree, `false`, `nil` or `{:fail, reason}` to disagree
 @compare every: 1, using: :same_members
 def members(state, _root), do: state.members
 
@@ -1529,7 +1606,7 @@ PropertyDamage
 │
 ├── Shrinking (Tier 2)
 │   ├── Shrinker     - Sequence minimization (supports branching)
-│   ├── Validator    - Sequence validation
+│   ├── Sequence.Validator - Sequence validation
 │   └── Graph        - Dependency analysis
 │
 ├── Diagnostics
@@ -1562,7 +1639,7 @@ PropertyDamage
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
 > docs front page: invariant suggestions, failure intelligence
-> (clustering/verification), production forensics, and Livebook visualization.
+> (clustering/verification), and production forensics.
 > They compile and have moduledocs, but have not been validated against a real
 > SUT yet. Use them at your own risk.
 
