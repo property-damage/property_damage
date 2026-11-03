@@ -355,7 +355,8 @@ If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 `terminate_early?/3` receives the state after a command, the command that was
 just added, and the events the simulator predicts for it. The generator calls
 it while it builds the sequence, before anything runs, so the events are a
-prediction and never a real answer from the SUT. It does not receive a step
+prediction and never a real answer from the SUT. A model without a
+`simulator/0` always passes `[]` as the events. It does not receive a step
 count, so decide from the state:
 
 ```elixir

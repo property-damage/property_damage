@@ -15,10 +15,11 @@ injecting bugs and seeing whether your tests catch them.
 `MutatingAdapter` that perturbs the events the SUT returns, then runs your
 property against the mutated responses:
 
-1. It runs the property once as a baseline (one whole run of up to 10
-   commands) and keeps the events of that run as samples.
-2. For each command it generates mutations (via the configured operators)
-   from those sample events.
+1. For each command, it runs the property once as a baseline (one whole run
+   of up to 10 commands, with its own random seed) and keeps the events of
+   that run, from all commands, as samples.
+2. It generates that command's mutations (via the configured operators) from
+   its own samples, so two commands do not share one sample set.
 3. It runs your property against each mutated adapter.
 4. A mutation is **killed** if a check now fails (good: the bug was caught) and
    **survived** if your tests still pass (bad: the bug slipped through).
