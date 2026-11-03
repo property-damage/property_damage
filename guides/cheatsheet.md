@@ -225,7 +225,7 @@ without `else` does not compile. A verdict is not a boolean: `&&` and
 
 | Kind | Options | Fails when |
 |------|---------|------------|
-| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, :event}`, `{N, Module}`, `{N, [Modules]}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still falsy at `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
 
