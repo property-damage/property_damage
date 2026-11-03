@@ -4,16 +4,29 @@ defmodule Mix.Tasks.Pd.Replay do
 
   Loads a `.pd` failure file and re-executes its shrunk command sequence through
   the real engine, printing each step and a final verdict. This is a thin CLI
-  shell over `PropertyDamage.load_failure/1` and `PropertyDamage.replay/2`; for
-  anything beyond what the flags expose (custom adapter config, stutter), use
-  those functions directly.
+  shell over `PropertyDamage.load_failure/1` and `PropertyDamage.replay/2`.
+
+  The replay re-runs the recorded model against the recorded target and applies
+  the run's checks and projections.
+
+  For anything beyond what the flags expose, call those functions directly.
+  `PropertyDamage.replay/2` also accepts:
+
+  - `targets:` a single-entry list that overrides the target to replay against
+    (for example, the same system with a different `config:`). An entry with
+    `injectors:` or `mocks:` raises, because a replay cannot honor them.
+  - `stop_on_failure:` to go on past the first failing step.
+  - `log:` to set how many of a step's last settle attempts keep their log
+    lines.
+
+  `PropertyDamage.Replay` steps through a failure one command at a time.
 
   ## Usage
 
       mix pd.replay path/to/failure.pd [--verbose]
 
-  The failure file already records which model and adapter produced it, so no
-  `--model` / `--adapter` flags are needed. Those modules must be compiled and
+  The failure file already records which model and target produced it, so no
+  `--model` or `--target` flags are needed. Those modules must be compiled and
   loadable in the current project, otherwise the file cannot be decoded.
 
   ## Exit code
@@ -27,8 +40,8 @@ defmodule Mix.Tasks.Pd.Replay do
   - **1** when the failure reproduces: a command failed its check or errored
     during execution (*bad*).
   - **125** when the replay could not run at all: the project does not compile,
-    the file fails to load, it records no model/adapter, the sequence is
-    branching, or the target's setup failed (its adapter's `setup/1`, or one of
+    the file fails to load, it records no model or target, the sequence is
+    branching, or the target's setup failed (the target's `setup/1`, or one of
     the setup commands the replay runs before the first step). The outcome is *indeterminate*, not a reproduction, so `git bisect`
     treats it as *skip* rather than wrongly blaming the commit (*skip*). 125 is
     still non-zero, so the headline "non-zero means not-confirmed-fixed" contract
