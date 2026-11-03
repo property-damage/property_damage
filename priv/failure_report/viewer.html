@@ -1238,13 +1238,13 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       var para = b.closest("p"), at = para, n = b.textContent;
       while (at.nextElementSibling && at.nextElementSibling.classList.contains("xcode")) {
         at = at.nextElementSibling;
-        if (at.getAttribute("data-src-of") === id && at.getAttribute("data-cite") === n) { at.parentNode.removeChild(at); b.setAttribute("aria-expanded", "false"); return; }
+        if (at.getAttribute("data-src-of") === id && at.getAttribute("data-src-n") === n) { at.parentNode.removeChild(at); b.setAttribute("aria-expanded", "false"); return; }
       }
       var s = sourceOf(id), h = "";
       if (!s) return;
       for (var k = s.from; k <= s.to; k++) h += '<div class="xl"><span class="xn">' + k + '</span><span class="xt">' + esc(s.lines[k - 1].replace(/\r$/, "")) + "</span></div>";
       var blk = document.createElement("div");
-      blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.setAttribute("data-cite", n); blk.innerHTML = h;
+      blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.setAttribute("data-src-n", n); blk.innerHTML = h;
       at.parentNode.insertBefore(blk, at.nextSibling);
       b.setAttribute("aria-expanded", "true");
     }

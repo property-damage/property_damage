@@ -106,4 +106,20 @@ test.describe("the citation markers of an explanation", () => {
     await expect(cite).toHaveAttribute("aria-expanded", "false");
     await expect(block).toHaveCount(0);
   });
+
+  test("an unfolded source block still folds after a citation jump, and marks no element of the run", async ({ page }) => {
+    await page.goto(url(explained));
+
+    const cite = page.locator(".xcite.xsrc");
+    await cite.click();
+    await expect(page.locator(".xcode")).toHaveCount(1);
+
+    await page.locator(".xcite[data-ref]:not(.xsrc)").first().click();
+    await expect(page.locator("[data-cite]")).toHaveCount(1);
+    await page.locator('#pd-tabs [data-view="explanation"]').click();
+
+    await cite.click();
+    await expect(cite).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".xcode")).toHaveCount(0);
+  });
 });
