@@ -29,8 +29,10 @@ end
 The command generators in this guide call `StreamData` functions directly, so
 your project lists `:stream_data` itself.
 
-Each module in the steps below goes in its own file under `lib/my_app/` (for
-example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run.
+Each module in Steps 1 to 6 goes in its own file under `lib/my_app/` (for
+example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run;
+its test module goes under `test/` (for example `test/property_test.exs`), so
+`mix test` runs it.
 
 ## Core Concepts
 
@@ -433,9 +435,9 @@ the directory's `index.html` browses them all; see
 [Reading the report](debugging_failures.md#reading-the-report) walks through a
 real one. Shrinking can simplify a command's values to ones your generator
 would never draw, such as an empty string for a name that needs five
-characters; the shrunk failure still fails the same way. To put your own lines in it, such as the requests an
-adapter sends, call `PropertyDamage.log/2`; see the
-[log lines guide](log_lines.md).
+characters; the shrunk failure still fails the same way. To put your own lines
+in the report, such as the requests an adapter sends, call
+`PropertyDamage.log/2`; see the [log lines guide](log_lines.md).
 
 ## Next Steps
 

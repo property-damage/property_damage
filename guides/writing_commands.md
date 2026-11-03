@@ -102,10 +102,9 @@ defmodule MyTest.Commands.ViewOrder do
 end
 ```
 
-The Model wires this command with state:
-
 The model needs a projection to hold the orders it has seen. `apply/2` stores
-each simulated `OrderCreated` under its (placeholder) id:
+each simulated `OrderCreated` under its (placeholder) id, and the Model wires
+the command with that state:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -1079,6 +1078,8 @@ defmodule ModelA do
 
   import SharedWiring.Orders
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
+
   def commands do
     [
       CreateOrder,
@@ -1096,6 +1097,8 @@ defmodule ModelB do
 
   import SharedWiring.Orders
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
+
   def commands do
     [
       CreateOrder,
@@ -1107,6 +1110,9 @@ defmodule ModelB do
   def command_sequence_projection, do: MyTest.PendingOrderProjection
 end
 ```
+
+These two models show only the wiring. Add a simulator, as in the first
+example, so that the `when:` guards can open.
 
 ### Pattern 3: Command Documentation
 

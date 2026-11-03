@@ -270,7 +270,7 @@ decorating attribute, and each answers a different question.
 
 | Kind | Question | Looks at | Schedule | Fails when |
 |------|----------|----------|----------|------------|
-| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, Module}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, :event}`, `{N, Module}`, `{N, [Modules]}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
@@ -327,8 +327,9 @@ end
 
 Supported `every:` forms: `1` (every step), `N` (every Nth step),
 `:command`/`:event` (after any command/event), `Module`/`[Modules]` (after a
-specific module), and the counted forms `{N, :command}` (every Nth command)
-and `{N, Module}` (every Nth command or event of that module). Sample with
+specific module), and the counted forms `{N, :command}` (every Nth command),
+`{N, :event}` (every Nth event), `{N, Module}` (every Nth command or event of
+that module) and `{N, [Modules]}` (every Nth of any listed module). Sample with
 `every: N` for expensive checks.
 
 ### Lifecycle-boundary checks (`at:`)

@@ -17,7 +17,7 @@ you at a complete, runnable worked example that ships in this repository.
 
 Save this minimal OpenAPI 3 document as `widgets.json`. It has two operations
 (create and fetch), a path parameter, a request body with an enum, and a
-server-generated `id` — enough to exercise every part of the generator:
+server-generated `id`, enough to exercise every part of the generator:
 
 ```json
 {
@@ -180,7 +180,7 @@ That is your first visible result: a complete test scaffold on disk, already
 
 ## 3. Tour the generated code
 
-### Commands — one per operation
+### Commands: one per operation
 
 Each operation becomes a `PropertyDamage.Command` with a `StreamData` generator
 inferred from the schema (an enum becomes `member_of`, a bounded string becomes
@@ -225,7 +225,7 @@ end
 `use PropertyDamage.Command, shrink: :prefer_remove` (the shrinker drops reads
 first) and its path parameter shows up as `def __path_params__, do: [:id]`.
 
-### Events — from response schemas
+### Events: from response schemas
 
 Every 2xx response schema becomes an event struct. A field named `id` is treated
 as **server-generated** and defaults to `external()`, PropertyDamage's marker for
@@ -253,7 +253,7 @@ The trailing comments list each response field and its type. The `events/3` you
 write in the command sets them, and a field may be `:unset` when your mapping
 does not record it.
 
-### Adapter — drives the real API
+### Adapter: drives the real API
 
 The adapter has one `execute/3` clause per command that builds the URL (filling
 path params), body, and query string, then calls the API. It prefers
@@ -287,7 +287,7 @@ If the spec declares `securitySchemes`, the adapter also gets a
 `build_auth_headers/1` helper and its moduledoc shows the matching
 target `config:` keys (`bearer_token:`, `api_key:`, `basic_auth:`).
 
-### Model — command weights, projection slots
+### Model: command weights, projection slots
 
 The model lists the commands with inferred weights (reads > creates > updates >
 deletes) and names a starter state projection, `Projections.State`, that
@@ -309,10 +309,12 @@ def command_sequence_projection, do: Projections.State
 
 The scaffold gets you a faithful *client*; you still supply the *meaning*. The
 task's printed "Next steps" footer (shown in step 2; the task prints it and
-writes it to no file) lists five items. The steps below cover the same work in
-a different order and add the projection and the optional expansions.
+writes it to no file) lists five items. The steps below take them in a different
+order. Item 1 (review the generators) is the tour in section 3, and item 3 (`when:`
+and `overrides:`) goes with the simulator in item 4 below. The steps also add the
+projection and the optional expansions.
 
-1. **Map responses to events** — implement each command's `events/3`. Keying on
+1. **Map responses to events**: implement each command's `events/3`. Keying on
    status is the norm:
 
    ```elixir
@@ -324,18 +326,19 @@ a different order and add the projection and the optional expansions.
    def events(_command, _status, _body), do: []
    ```
 
-2. **Write a state projection with invariants** — this is the part that catches
+2. **Write a state projection with invariants**: this is the part that catches
    bugs. It reduces events into model state and asserts properties with
    `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
    Catalogs*.
 
-3. **Wire the projection into the model** — fill in the generated
+3. **Wire the projection into the model**: fill in the generated
    `Projections.State` (or point `command_sequence_projection/0` at your own
    module), and list check projections.
 
 4. **Add a simulator**: a module with `simulate/2`, named by the model's
    `simulator/0`. You need it if you want state-dependent command
-   selection (`when:`/`overrides:`) during the symbolic phase.
+   selection during the symbolic phase: the `when:` and `overrides:` options
+   in the model's `commands/0` read the state that the simulator's events build.
 
 5. **Point the adapter at your API** via `targets: [{Adapter, config: %{base_url: ...}}]` and
    any auth keys.
@@ -424,9 +427,9 @@ projection and simulator are hand-written alongside it.
 
 ## Where to go next
 
-- **Writing Effective Invariants** — the projection checks that catch bugs.
-- **Coverage and Invariant Catalogs** — prove your invariants are actually
+- **Writing Effective Invariants**: the projection checks that catch bugs.
+- **Coverage and Invariant Catalogs**: prove your invariants are actually
   exercised (anti-vacuity).
-- **Writing Commands** — how `external()` values flow from one command to the
+- **Writing Commands**: how `external()` values flow from one command to the
   next.
-- **Debugging Failures** — read, replay, and export the failures you find.
+- **Debugging Failures**: read, replay, and export the failures you find.
