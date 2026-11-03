@@ -348,7 +348,7 @@ dev/
 From `dev/my_app/.claude/skills/`, `..` is `.claude`, `../..` is `my_app` and `../../..` is `dev`. Three levels up reach `dev`, where `property_damage` sits:
 
 ```bash
-# from your project root; skip mkdir if .claude/skills exists
+# run from your project root
 mkdir -p .claude/skills
 cd .claude/skills
 ln -s ../../../property_damage/priv/claude/skills/pd-explain pd-explain
@@ -359,7 +359,7 @@ If the checkout lives elsewhere, keep `../../` (it reaches your project root) an
 With a Hex dependency, the package sits in your project's `deps/` directory, so two levels up from `.claude/skills/` are enough:
 
 ```bash
-# from your project root; skip mkdir if .claude/skills exists
+# run from your project root
 mkdir -p .claude/skills
 cd .claude/skills
 ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
