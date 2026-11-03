@@ -52,7 +52,7 @@ defmodule PropertyDamage.Failure.Explain do
 
   def meaning(:setup_failed),
     do:
-      "Unable to test the system: a target could not be prepared before the test plan ran. The Cause field says which part failed: the adapter's setup, a setup command, a check on a setup event, or a value a setup command should have produced."
+      "Unable to test the system: a target could not be prepared before the test plan ran. The Cause field says which part failed: the adapter's setup, the model's own code, a setup command, a check on a setup event, or a value a setup command should have produced."
 
   def meaning(:adapter_error),
     do:
