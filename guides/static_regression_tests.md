@@ -72,7 +72,27 @@ end
 - Cannot capture injected events (webhooks, callbacks): the `runtime` handle's
   `inject`/`start_poller` are no-ops here
 - Must manually chain values between commands
-- No automatic ref resolution
+- No automatic `external()` value resolution
+- An adapter that writes log lines breaks when called directly (see below)
+
+### Adapters that log
+
+An adapter that calls `PropertyDamage.log/2` raises
+`PropertyDamage.Log.NoScopeError` when a test calls it directly, because no run
+has opened a log scope. Wrap the call in `PropertyDamage.Log.capture/1`. It opens
+a scope, returns `{result, lines}`, and hands you the lines the adapter wrote:
+
+```elixir
+{{:ok, events}, lines} =
+  PropertyDamage.Log.capture(fn ->
+    TestAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx, runtime)
+  end)
+```
+
+An adapter that calls `PropertyDamage.Runtime.log/3` needs a runtime with a log
+function. The hand-built runtime above has none (`log: nil`), so that call raises
+`ArgumentError`, and `capture/1` does not change it. Use `PropertyDamage.execute/2`
+for such an adapter.
 
 ## Approach 2: PropertyDamage.execute/2
 
@@ -96,8 +116,8 @@ defmodule MyApp.RegressionTest do
     test "payment confirmation triggers webhook" do
       # CreatePayment produces a PaymentCreated event whose `payment_id` is
       # `external()` (server-generated). Build a placeholder for that producer
-      # (command 0, its first event) and reuse it downstream; execute/3 captures
-      # the real value and resolves it.
+      # (command 0, its first event) and reuse it downstream; `PropertyDamage.execute/2`
+      # captures the real value from that command's events and resolves it.
       payment_id = Placeholder.new_at(PaymentCreated, [:payment_id], Position.prefix(0), 0)
 
       commands = [
@@ -140,26 +160,59 @@ end
 
 ## Capturing Regression Test Sequences
 
-When PropertyDamage finds a bug, the failure report contains the shrunk sequence.
-Here's how to extract it for a regression test:
+When PropertyDamage finds a bug, it records what it found. Pick the capture that
+matches how you want to replay it.
 
-### From a Failure Report
+### From the Replay Artifact
+
+Every failure writes a replay artifact, `<Model>_seed<n>.replay.exs`, into the
+`replay_dir:` directory (default `property_damage_replays`). `<Model>` is the last
+segment of the model's module name, so `MyApp.Model` gives
+`Model_seed20.replay.exs`. The failure report ends with the call that replays it:
 
 ```elixir
-# Run property test
-{:error, failure} = PropertyDamage.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [MyAdapter],
-  on_failure: fn report ->
-    # Log the shrunk sequence for later use
-    IO.puts("Shrunk sequence:")
-    IO.inspect(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report)))
-  end
+  only: [replay: "property_damage_replays/MyModel_seed3.replay.exs"]
 )
-
-# Or programmatically extract the sequence
-commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 ```
+
+The artifact records the setup commands and the commands of the shrunk failure, so
+the replay generates nothing new. `targets:` must name the targets the artifact
+records. See [Debugging Failures](debugging_failures.md) for the file
+naming, the replay result and `shrink:` under replay.
+
+To read the failure before you capture it, set `report_html: "some/dir"` (or the
+`PD_REPORT_HTML` environment variable): a failing run then writes the report as an
+HTML page into that directory.
+
+### From a Failure Report, for execute/2
+
+To keep a plain command list for `PropertyDamage.execute/2`, read the shrunk
+sequence from the failure report:
+
+```elixir
+alias PropertyDamage.{FailureReport, Sequence}
+
+{:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
+sequence = FailureReport.shrunk_sequence(report)
+
+commands =
+  Sequence.setup_commands(sequence) ++
+    Sequence.to_list(sequence) ++
+    Sequence.teardown_commands(sequence)
+```
+
+`Sequence.to_list/1` returns the roots only (prefix, branches and suffix). The
+model's `setup_each/0` and `teardown_each/0` commands live in separate fields of
+the sequence, and `execute/2` runs exactly the list you give it. If you pass
+`Sequence.to_list/1` alone, a model with `setup_each/0` loses its fixture commands.
+
+A placeholder names the command that produces its value by position, and
+`execute/2` captures a command's events under `Position.prefix(index)`, where
+`index` is the command's place in the list you pass. After you prepend setup
+commands, build each placeholder with the producer's new index.
 
 ### From Generated Test Code
 
@@ -219,9 +272,13 @@ Execute a fixed command sequence without a model.
 **Options:**
 
 - `:targets` - A list with exactly one entry (required): the adapter module, or
-  `{Module, config: map, injectors: [...], mocks: [...]}`. `config:` is passed to
-  `adapter.setup/1` (default: `%{}`)
-- `:refs` - Initial ref resolution map (default: `%{}`)
+  `{Module, config: map, injectors: [...]}`. `config:` is passed to
+  `adapter.setup/1` (default: `%{}`). `execute/2` refuses `mocks:` on the entry and
+  raises `NimbleOptions.ValidationError`; use `PropertyDamage.run/1` to run with
+  mocks. It takes no other options, so `refs:` is rejected as an unknown option.
+  To supply a server-minted value to a later command, build a placeholder with
+  `PropertyDamage.Placeholder.new_at(event_module, path, position, event_index)`,
+  as in Approach 2.
 
 **Returns:**
 
@@ -244,4 +301,4 @@ Execute a fixed command sequence without a model.
 
 - [Debugging Failures](debugging_failures.md) - Understanding failure reports
 - [Integration Testing](integration_testing.md) - Full integration test setup
-- [Writing Commands](writing_commands.md) - Command and ref patterns
+- [Writing Commands](writing_commands.md) - Command patterns
