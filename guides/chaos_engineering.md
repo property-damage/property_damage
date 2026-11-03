@@ -234,15 +234,22 @@ result =
 IO.inspect(result, label: "run result")
 ```
 
-It prints a passing result (your `check_fires` count varies with the seed):
+It prints a passing result. The run is seeded, but the number of times the check
+fired can differ from the one shown (the `check_fires` count depends on the
+commands the run happens to generate):
 
 ```
 run result: {:ok,
  %{
    seed: 7,
-   check_fires: %{{Cache.State, :reads_are_consistent} => 212},
+   targets: [%{index: 0, name: "Adapter"}],
    runs: 20,
-   total_commands: 240
+   setup_commands: 0,
+   teardown_commands: 0,
+   total_commands: 240,
+   check_fires: %{{Cache.State, :reads_are_consistent} => 106},
+   compare_counts: %{},
+   expansion_counts: %{"Adapter" => %{}}
  }}
 ```
 
@@ -271,7 +278,7 @@ PropertyDamage.Nemesis.simulated_event?(event)
 
 To make the fault real, point the nemesis at a running Toxiproxy. The repo ships a
 ready-made recipe at `benches/redis_bench/docker-compose.yml` (Redis behind a
-Toxiproxy on control port `8474`); bring it up overrides:
+Toxiproxy on control port `8474`); bring it up:
 
 ```bash
 cd benches/redis_bench && docker compose up -d
@@ -344,6 +351,11 @@ defmodule MyApp.ChaosModel do
   # ... rest of model
 end
 ```
+
+A nemesis module listed in `commands/0` generates its commands through
+`new!/2`. The built-in nemeses define it. A custom nemesis must define it too,
+or the run refuses to start with `Command ... is missing required callback
+new!/2`.
 
 ### 2. Add Nemesis-Aware Invariants
 
@@ -457,11 +469,8 @@ def assert_response_time_sla(state, _cmd_or_event) do
   if has_active_fault?(state, :network_partition) do
     :ok
   else
-    if state.last_response_ms < 100 do
-      :ok
-    else
-      {:error, "SLA violated: #{state.last_response_ms}ms"}
-    end
+    state.last_response_ms < 100 or
+      PropertyDamage.fail!("SLA violated: #{state.last_response_ms}ms")
   end
 end
 
@@ -469,6 +478,11 @@ defp has_active_fault?(state, type) do
   Map.has_key?(state.active_faults, type)
 end
 ```
+
+A check fails when it raises (`PropertyDamage.fail!/2` raises with a message and
+data) or returns `false`, `nil` or `{:fail, reason}`. A returned
+`{:error, reason}` is not a verdict, so use `PropertyDamage.fail!/2` to fail
+with a message.
 
 ## Toxiproxy Integration
 
@@ -551,7 +565,10 @@ end
 5. **Use auto-restore** - Nemesis operations automatically restore after
    their duration
 
-6. **Log fault injection** - Track when faults are active for debugging
+6. **Log fault injection** - A nemesis's `inject/2` and `restore/2` each run
+   under a log scope, so a custom nemesis can call `PropertyDamage.log/2` in
+   them. The lines print under the nemesis step in the failure report, which
+   shows when a fault was active. See [Log Lines](log_lines.md).
 
 ## What Chaos Engineering Detects
 
