@@ -120,7 +120,7 @@ save; see [Debugging Failures](debugging_failures.md). To read a failure as a
 page in a browser, set `PD_REPORT_HTML=_build/pd_reports` before the run
 (`PropertyDamage.Integration.run/1` and `mix pd.integration` read the variable;
 `PropertyDamage.run/1` also takes a `report_html:` option). See
-[Sharing a failure page](debugging_failures.md#sharing-a-failure-page).
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
 
 ## The `mix pd.integration` Task
 
