@@ -30,6 +30,12 @@ defmodule MyAdapter do
   use PropertyDamage.Adapter
 
   @impl true
+  def setup(config), do: {:ok, %{client: Req.new(base_url: config[:base_url])}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
   def execute(%CreateAuthorization{user_id: user_id, amount: amount}, ctx, runtime) do
     # Step 1: Create the authorization (returns immediately)
     {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
@@ -57,11 +63,13 @@ defmodule MyAdapter do
         {:ok, %{body: %{"status" => "approved"}}} ->
           {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
 
-        {:ok, %{body: %{"status" => "declined", "decline_reason" => reason}}} ->
-          {:done, %AuthorizationDeclined{id: id, reason: reason}}
+        {:ok, %{body: %{"status" => "declined"} = body}} ->
+          {:done, %AuthorizationDeclined{id: id, reason: body["decline_reason"]}}
 
-        {:error, reason} ->
-          {:error, {:http_error, reason}}
+        # A transport error (timeout, refused connection) is usually transient,
+        # so keep polling until `timeout_ms` instead of stopping the poller.
+        {:error, _reason} ->
+          :continue
       end
     )
 
@@ -120,7 +128,7 @@ handler: fn
   {:ok, %{body: %{"status" => "queued"}}} -> :continue
   {:ok, %{body: %{"status" => "processing"}}} -> {:inject, %ProcessingStarted{id: id}}
   {:ok, %{body: %{"status" => "completed"}}} -> {:done, %ProcessingCompleted{id: id}}
-  {:error, reason} -> {:error, {:http_error, reason}}
+  {:error, _reason} -> :continue
 end
 ```
 
@@ -134,8 +142,8 @@ handler: fn
     events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
     {:done, events ++ [%BatchCompleted{count: length(items)}]}
 
-  {:error, reason} ->
-    {:error, {:http_error, reason}}
+  {:error, _reason} ->
+    :continue
 end
 ```
 
@@ -148,8 +156,8 @@ handler: fn
   {:ok, %{status: 404}} ->
     {:error, :resource_not_found}
 
-  {:error, reason} ->
-    {:error, {:http_error, reason}}
+  {:error, _reason} ->
+    :continue
 end
 ```
 
