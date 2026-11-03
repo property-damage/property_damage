@@ -246,6 +246,18 @@ defmodule PropertyDamage.IntegrationTest do
       end)
     end
 
+    test "creates the report's missing parent directory", %{result: result} do
+      dir = report_path("missing_dir")
+      path = Path.join([dir, "nested", "report.md"])
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      capture_io(fn ->
+        Integration.generate_report(result, %{format: :markdown, path: path})
+      end)
+
+      assert File.exists?(path)
+    end
+
     test "markdown format writes a file with the expected content", %{result: result} do
       path = report_path("markdown") <> ".md"
       on_exit(fn -> File.rm(path) end)

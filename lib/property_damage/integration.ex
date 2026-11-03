@@ -235,7 +235,8 @@ defmodule PropertyDamage.Integration do
   ## Options
 
   - `:format` - Report format (required)
-  - `:path` - Output file path (required for file formats)
+  - `:path` - Output file path (required for file formats); its directory is
+    created when missing
   """
   @spec generate_report(map(), keyword() | map()) :: :ok
   def generate_report(result, opts) when is_list(opts) do
@@ -248,25 +249,30 @@ defmodule PropertyDamage.Integration do
 
   def generate_report(result, %{format: :markdown, path: path}) do
     content = format_markdown_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("Report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :junit, path: path}) do
     content = format_junit_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("JUnit report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :json, path: path}) do
     content = Jason.encode!(result, pretty: true)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("JSON report saved to: #{path}")
   end
 
   # ============================================================================
   # Private Functions
   # ============================================================================
+
+  defp write_report!(path, content) do
+    path |> Path.dirname() |> File.mkdir_p!()
+    File.write!(path, content)
+  end
 
   defp print_header(model, %{adapter: adapter, config: config}, max_runs) do
     IO.puts("\n")
@@ -465,7 +471,7 @@ defmodule PropertyDamage.Integration do
     path = Path.join(dir, filename)
 
     content = Jason.encode!(sanitize_for_json(failure), pretty: true)
-    File.write!(path, content)
+    write_report!(path, content)
   end
 
   defp sanitize_for_json(data) when is_map(data) do
