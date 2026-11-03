@@ -91,7 +91,7 @@ defmodule PropertyDamage.Failure.ExplainTest do
 
   test "the meaning of setup_failed is the agreed text" do
     assert Explain.meaning(:setup_failed) ==
-             "Unable to test the system: a target could not be prepared before the test plan ran. The Cause field says which part failed: the adapter's setup, the model's own code, a setup command, a check on a setup event, or a value a setup command should have produced."
+             "Unable to test the system: a target could not be prepared before the test plan ran. The Cause field says which part failed: the adapter's setup, the model code that runs while the target comes up, the variant process that brings the target up (it died, for example by an outside kill), a setup command, a check on a setup event, or a value a setup command should have produced."
   end
 
   test "the meaning of adapter_error is the agreed text" do
