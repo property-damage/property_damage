@@ -202,7 +202,8 @@ defmodule WidgetTest.Commands.CreateWidget do
     |> StreamData.fixed_map()
   end
 
-  # Map an HTTP response to events (fill this in — next step 2).
+  # Map an HTTP response to events. The adapter calls this for every
+  # completed HTTP response (fill this in: next step 2).
   def events(command, status, response) do
     _ = {command, status, response}
     []
@@ -235,15 +236,19 @@ defmodule WidgetTest.Events.WidgetCreated do
 
   defstruct [:color, :name, id: external()]
 
-  # color: string (optional)
-  # id: UUID (required)
-  # name: string (required)
+  # color: string (set by events/3; may be :unset)
+  # id: UUID (set by events/3; may be :unset)
+  # name: string (set by events/3; may be :unset)
 end
 ```
 
+The trailing comments list each response field and its type. The `events/3` you
+write in the command sets them, and a field may be `:unset` when your mapping
+does not record it.
+
 ### Adapter — drives the real API
 
-The adapter has one `execute/2` clause per command that builds the URL (filling
+The adapter has one `execute/3` clause per command that builds the URL (filling
 path params), body, and query string, then calls the API. It prefers
 [`Req`](https://hex.pm/packages/req) when present and falls back to Erlang's
 built-in `:httpc`, so no HTTP dependency is required. Note the contract: **every
@@ -255,15 +260,21 @@ can assert on, not an error.
 @impl true
 def execute(%Commands.CreateWidget{} = cmd, ctx, _runtime) do
   url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
-  full_url = if (q = build_query(cmd)) != "", do: url <> "?" <> q, else: url
+  query = build_query(cmd)
+  full_url = if query != "", do: url <> "?" <> query, else: url
   body = build_body(cmd)
+  headers = []
 
-  case http_request(:post, full_url, body, []) do
+  case http_request(:post, full_url, body, headers) do
     {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
     {:error, reason} -> {:error, reason}
   end
 end
 ```
+
+The adapter also defines `http_spec/2`, which describes each command as an HTTP
+call so `PropertyDamage.Export` can turn a failure into curl, Python or Elixir
+scripts.
 
 If the spec declares `securitySchemes`, the adapter also gets a
 `build_auth_headers/1` helper and its moduledoc shows the matching
@@ -313,7 +324,8 @@ generated files' "next steps" footer lists exactly what is left:
 3. **Wire the projection into the model** — replace the `raise` in
    `command_sequence_projection/0`, and list check projections.
 
-4. **Add a simulator** (`simulate/2`) if you want state-dependent command
+4. **Add a simulator**: a module with `simulate/2`, named by the model's
+   `simulator/0`. You need it if you want state-dependent command
    selection (`when:`/`overrides:`) during the symbolic phase.
 
 5. **Point the adapter at your API** via `targets: [{Adapter, config: %{base_url: ...}}]` and
@@ -345,10 +357,12 @@ HTTP server, so you can run the whole loop with no external services:
 ```console
 $ cd benches/openapi_bench
 $ mix test
-...........
+...
 Finished in 1.7 seconds (0.00s async, 1.7s sync)
-18 tests, 0 failures
+N tests, 0 failures
 ```
+
+The timing and test count above are abridged and vary by release.
 
 The payoff is `seeded_bug_test.exs`. The bench can flip a `bug` flag that makes
 the SUT answer `PUT` with `200` but silently drop the write. The **unmodified
@@ -366,7 +380,7 @@ shrinker reduces it to the minimal reproduction:
 PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 ```
 
-produces:
+produces a result like this (the keys and values vary with the seed):
 
 ```elixir
 [

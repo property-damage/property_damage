@@ -15,7 +15,7 @@ PropertyDamage's architecture and gets you running fast.
 | `precondition` | Model's `when:` predicate | Declared per-command in `commands/0` |
 | `initial_state` | Projection `init/0` | Each projection has its own initial state |
 | `run_commands` | `PropertyDamage.run/1` | Generates, executes, and shrinks automatically |
-| Shrinking (automatic) | Two-phase shrinking | Sequence shrinking first, then argument simplification |
+| Shrinking (automatic) | Shrink cycle | Drops commands first, collapses expansions (when the model has any), then simplifies arguments, and repeats until nothing shrinks further |
 
 ## Key Differences
 
@@ -135,8 +135,8 @@ end
 `use PropertyDamage.Model` comes before any definition in the module: every
 `def` and `defp` comes after it. It also comes before any other `use` that
 defines functions, such as `use GenServer`; a module that breaks either rule
-does not compile. The same holds for `use PropertyDamage.Model.Projection` and
-`use PropertyDamage.Command`.
+does not compile. The same holds for `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
 
 Run it:
 
@@ -151,7 +151,10 @@ PropertyDamage.run(
 ```
 
 A failing run returns `{:error, report}`; `IO.inspect(report, pretty: true)`
-shows it. To add your own lines to that report, call `PropertyDamage.log/2`
+shows it. To read the failure as an HTML page instead, pass
+`report_html: "_build/pd_reports"` to the run, or set the environment variable
+`PD_REPORT_HTML` to a directory; each failing run then writes a page there (see
+[Debugging Failures](debugging_failures.md#the-report-in-a-browser)). To add your own lines to that report, call `PropertyDamage.log/2`
 from an adapter or a command; see the [log lines guide](log_lines.md).
 
 ## Placeholder Flow
@@ -237,7 +240,7 @@ PropertyDamage.run(
   ]
 )
 
-# Load test
+# Long run: many long sequences, with progress output
 PropertyDamage.run(
   model: M,
   targets: [A],
@@ -246,7 +249,21 @@ PropertyDamage.run(
   verbose: true
 )
 
+# Load test: realistic traffic at a fixed arrival rate, with latency and
+# throughput metrics (not a correctness run).
+{:ok, report} =
+  PropertyDamage.LoadTest.run(
+    model: M,
+    targets: [A],
+    arrival_rate: 100,
+    duration: {2, :minutes},
+    ramp_up: {:linear, {30, :seconds}}
+  )
+
 # Chaos / fault injection: nemeses are added to the model's commands/0 list
 # (with low weights), not passed as a run option. See the Chaos Engineering guide.
 PropertyDamage.run(model: ChaosModel, targets: [A])
 ```
+
+The [Load Testing guide](load_testing.md) covers the load-test options, and the
+[Chaos Engineering guide](chaos_engineering.md) covers nemeses.
