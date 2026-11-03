@@ -648,6 +648,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: the ExUnit export file name ends in `_test.exs`.**
+  `PropertyDamage.Export.save/4` with `:exunit` writes
+  `reproduce_<seed>_<signature>_test.exs` instead of
+  `reproduce_<seed>_<signature>.exs`, so `mix test` runs the file when you
+  save it under `test/`. The Elixir script keeps its `.exs` name. Code that
+  builds the old ExUnit path by hand must change.
+- **Validation names the real injector behavior.** The message for an
+  injectable event that no injector emits now reads "not covered by any
+  injector adapter @emits" instead of naming a module that does not exist.
 - **Breaking: the network fault event structs moved under their nemesis
   module.** `NetworkPartitioned` and `NetworkPartitionHealed` moved under
   `PropertyDamage.Nemesis.NetworkPartition`, `NetworkLatencyInjected` and
@@ -1321,6 +1330,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Export.save_all/3` keeps the ExUnit test.** The ExUnit test and the
+  Elixir script got the same `reproduce_<seed>_<signature>.exs` path, so the
+  script overwrote the test and the returned `exunit:` path held the script.
+  The default `script_languages` includes `:elixir`, so the default call lost
+  the test. Each format now gets its own file name.
 - **A replay artifact replays in a fresh VM.** `only: [replay: path]` raised
   "which this system does not know" when nothing had loaded
   `PropertyDamage.Failure` or the model's projections yet, for example a

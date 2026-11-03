@@ -167,7 +167,7 @@ defmodule PropertyDamage.ValidationTest do
         Validation.validate!(ExecutorModel, SimpleAdapter, injectors: [SimpleInjectorAdapter])
     end
 
-    test "names the real injector behaviour when an injectable event is uncovered" do
+    test "names the real injector behavior when an injectable event is uncovered" do
       error =
         assert_raise ArgumentError, fn ->
           Validation.validate!(FullModel, SimpleAdapter, injectors: [NoEmitsInjectorAdapter])
