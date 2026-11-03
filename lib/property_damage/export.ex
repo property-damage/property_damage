@@ -29,7 +29,7 @@ defmodule PropertyDamage.Export do
       # Generate ExUnit regression test
       test_code = PropertyDamage.Export.to_exunit(failure,
         model: MyModel,
-        adapter: MyHTTPAdapter
+        targets: [MyHTTPAdapter]
       )
 
       # Generate standalone scripts
