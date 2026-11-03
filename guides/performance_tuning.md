@@ -70,21 +70,32 @@ framework minimizes failing sequences.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `granularity_threshold` | `pos_integer` | `8` | Sequence length below which hierarchical shrinking switches to linear. Linear is more thorough for short sequences; hierarchical is faster for long ones. |
+| `granularity_threshold` | `pos_integer` | `8` | Sequence length at or below which hierarchical shrinking switches to linear. Linear is more thorough for short sequences; hierarchical is faster for long ones. |
 | `max_iterations` | `pos_integer` | `1000` | Total shrink attempts before stopping. Higher values find more minimal reproductions. |
 | `max_time_ms` | `pos_integer` | `30_000` | Time budget in milliseconds. Prevents shrinking from blocking CI indefinitely. |
-| `shrink_arguments` | `boolean` | `true` | Enable Phase 2 argument shrinking. Disable for faster shrinking when argument values are not relevant to the failure. |
+| `shrink_arguments` | `boolean` | `true` | Run the argument-simplifying phase of each shrink cycle (the fourth phase below). Disable for faster shrinking when argument values are not relevant to the failure. |
 
 ### Shrinking Strategy
 
-Shrinking proceeds in two phases:
+The shrinker first cuts the sequence after the failing command. It then runs a
+cycle of four phases, each on what the previous phase left:
 
-1. **Sequence shrinking** -- Remove commands to find the minimal failing
-   sequence. Uses hierarchical bisection for sequences longer than
-   `granularity_threshold`, then switches to linear (one-at-a-time) removal.
+1. **Drop roots** -- Remove commands to find the minimal failing sequence.
+   Removal is hierarchical (commands grouped by dependency depth) for sequences
+   longer than `granularity_threshold`, then linear (one command at a time).
 
-2. **Argument shrinking** -- Simplify arguments within the minimal sequence.
+2. **Collapse the reference's expansions** -- For a model with `expansions/0`,
+   collapse the reference target's expansions toward the command itself.
+
+3. **Collapse the other targets' expansions** -- Collapse the other targets'
+   expansions onto the reference's.
+
+4. **Simplify arguments** -- Simplify the arguments of the remaining commands.
    Controlled by `shrink_arguments`.
+
+The shrinker repeats the cycle until a whole cycle adopts no smaller candidate,
+or until `max_iterations` or `max_time_ms` runs out. A model without
+`expansions/0` has nothing to do in phases 2 and 3.
 
 For slow adapters (e.g., real HTTP calls), limit shrinking time:
 
@@ -122,10 +133,10 @@ defmodule CancellationHeavyModel do
 end
 ```
 
-### High Concurrency
+### Transfers with Branching
 
 ```elixir
-defmodule HighConcurrencyModel do
+defmodule TransferHeavyModel do
   use PropertyDamage.Model
 
   def commands do
@@ -143,15 +154,31 @@ defmodule HighConcurrencyModel do
 end
 ```
 
-Run the concurrency-focused model with parallel branches:
+Run the model with branching sequences:
 
 ```elixir
 PropertyDamage.run(
-  model: HighConcurrencyModel,
+  model: TransferHeavyModel,
   targets: [AccountAdapter],
   branching: [max_branches: 3, max_branch_length: 5]
 )
 ```
+
+A branching sequence has a prefix, two or more branches, and a suffix. The
+branches run one after another against the SUT, not at the same time, so this
+run does not detect a race. After the branches ran, the checker looks for an
+order of their commands that explains what the SUT returned, and judges the
+checks against it. Use branching to test that the model accepts a valid
+interleaving, not to find lost updates or dirty reads.
+
+PropertyDamage refuses `branching:` beside any of these, and raises when the
+run starts:
+
+- `latency:` (a branching run records no latency samples)
+- a `check_mode:` other than `:halt` (a branching run halts at the first
+  failing check)
+- a model that defines `expansions/0`
+- more than one target in `targets:`
 
 ## Conditional Generation with `overrides:`
 
@@ -242,9 +269,9 @@ for managing memory:
 
 - **Limit `max_commands`** -- 200 commands with complex events can consume
   significant memory. Start with 50 and increase only if needed.
-- **Use `:disabled` check mode for exploration** -- Check projections
-  maintain their own state. Disabling them during initial exploration reduces
-  memory overhead.
+- **Know what `:disabled` check mode saves** -- Every projection, check
+  projections included, still folds every event, so `:disabled` does not
+  reduce projection memory. It skips running the checks, which saves time.
 - **Keep projection state lean** -- Store only what checks need. Avoid
   accumulating full event histories in projection state.
 - **Focus with targeted models** -- A model with 3 commands at 100 runs finds
@@ -258,22 +285,33 @@ A typical CI configuration that balances speed and coverage:
 # test/property/order_property_test.exs
 defmodule OrderPropertyTest do
   use ExUnit.Case, async: false
+  use PropertyDamage.ExUnit
 
   @tag timeout: 120_000
 
-  test "order lifecycle properties" do
-    PropertyDamage.run(
-      model: OrderModel,
-      targets: [OrderAdapter],
-      max_commands: 50,
-      max_runs: 100,
-      branching: [max_branches: 2, max_branch_length: 3],
-      stutter: [probability: 0.1],
-      shrinker_config: PropertyDamage.Shrinker.Config.new(
+  property_damage "order lifecycle properties",
+    model: OrderModel,
+    targets: [OrderAdapter],
+    max_commands: 50,
+    max_runs: 100,
+    branching: [max_branches: 2, max_branch_length: 3],
+    stutter: [probability: 0.1],
+    shrinker_config:
+      PropertyDamage.Shrinker.Config.new(
         max_time_ms: 15_000,
         max_iterations: 500
       )
-    )
-  end
+end
+```
+
+`property_damage/2` fails the test with the failure report when `run/1` returns
+`{:error, report}`. A test that calls `PropertyDamage.run/1` and ignores its
+return value passes even when the SUT has a bug. If you call `run/1`
+yourself, match on the result:
+
+```elixir
+case PropertyDamage.run(model: OrderModel, targets: [OrderAdapter]) do
+  {:ok, _stats} -> :ok
+  {:error, report} -> flunk(PropertyDamage.ExUnit.format_failure(report))
 end
 ```
