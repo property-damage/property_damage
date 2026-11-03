@@ -558,7 +558,8 @@ tracker =
     Coverage.record(tracker, {:error, report})
   end)
 
-# Failing-state classes seen, and how often
+# Failing-state classes seen, and how often (one possible outcome; the
+# classes and counts depend on the model and the seeds)
 Coverage.state_class_counts(tracker)
 # => %{deeply_overdrawn: 1, slightly_overdrawn: 5}
 
