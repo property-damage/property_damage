@@ -471,6 +471,7 @@ defmodule PropertyDamage.Regression do
 
       directory ->
         result = Persistence.save(failure, directory)
+        warn_write_failure(result, "failure", directory)
 
         if verbose do
           case result do
@@ -490,7 +491,7 @@ defmodule PropertyDamage.Regression do
 
       path ->
         result = do_add_to_library(failure, path, opts)
-        warn_library_failure(result, path)
+        warn_write_failure(result, "seed_library", path)
 
         if verbose do
           case result do
@@ -506,19 +507,17 @@ defmodule PropertyDamage.Regression do
     end
   end
 
-  # A duplicate seed is an expected no-op; any other error means the library
-  # was not updated, so report it whatever `verbose:` says.
-  defp warn_library_failure({:error, {:duplicate_seed, _}}, _path), do: :ok
+  # A duplicate seed is an expected no-op; any other error means the write did
+  # not happen, so report it whatever `verbose:` says.
+  defp warn_write_failure({:error, {:duplicate_seed, _}}, _label, _path), do: :ok
 
-  defp warn_library_failure({:error, reason}, path) do
+  defp warn_write_failure({:error, reason}, label, path) do
     require Logger
 
-    Logger.warning(
-      "PropertyDamage seed_library could not be saved to #{path}: #{inspect(reason)}"
-    )
+    Logger.warning("PropertyDamage #{label} could not be saved to #{path}: #{inspect(reason)}")
   end
 
-  defp warn_library_failure(_result, _path), do: :ok
+  defp warn_write_failure(_result, _label, _path), do: :ok
 
   defp maybe_generate_test(failure, opts, verbose) do
     case Keyword.get(opts, :generate_tests) do
@@ -537,6 +536,8 @@ defmodule PropertyDamage.Regression do
             :exunit,
             PropertyDamage.Options.with_target_entries(opts)
           )
+
+        warn_write_failure(result, "generated test", directory)
 
         if verbose do
           case result do

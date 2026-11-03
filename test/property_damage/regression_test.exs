@@ -549,4 +549,60 @@ defmodule PropertyDamage.RegressionTest do
       refute log =~ "seed_library"
     end
   end
+
+  describe "handle_failure/2 write failures" do
+    @tag :tmp_dir
+    test "a failed save_failures write logs a warning without verbose", %{tmp_dir: tmp_dir} do
+      blocker = Path.join(tmp_dir, "blocker")
+      File.write!(blocker, "not a directory")
+      directory = Path.join(blocker, "failures")
+
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), save_failures: directory)
+          assert {:error, _} = result.saved_failure
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ directory
+    end
+
+    @tag :tmp_dir
+    test "a successful save_failures write logs no warning", %{tmp_dir: tmp_dir} do
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), save_failures: tmp_dir)
+          assert {:ok, _} = result.saved_failure
+        end)
+
+      refute log =~ "[warning]"
+    end
+
+    @tag :tmp_dir
+    test "a failed generate_tests write logs a warning without verbose", %{tmp_dir: tmp_dir} do
+      blocker = Path.join(tmp_dir, "blocker")
+      File.write!(blocker, "not a directory")
+      directory = Path.join(blocker, "tests")
+
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), generate_tests: directory)
+          assert {:error, _} = result.generated_test
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ directory
+    end
+
+    @tag :tmp_dir
+    test "a successful generate_tests write logs no warning", %{tmp_dir: tmp_dir} do
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), generate_tests: tmp_dir)
+          assert {:ok, _} = result.generated_test
+        end)
+
+      refute log =~ "[warning]"
+    end
+  end
 end
