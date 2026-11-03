@@ -99,6 +99,19 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       assert title =~ "alice"
     end
 
+    test "names the page by the failure kind the report states", %{dir: dir} do
+      report = F.report!(F.Model, [F.target("alice", %{quiet: true, error_at: 1})], [])
+
+      assert PropertyDamage.FailureReport.failure_type(report) == :adapter_error
+      assert {:ok, path} = HTML.write(report, dir)
+      assert Path.basename(path) =~ ~r/-adapter_error-seed\d+\.html$/
+    end
+
+    test "a check failure keeps its kind in the page name", %{dir: dir} do
+      assert {:ok, path} = HTML.write(check_report(), dir)
+      assert Path.basename(path) =~ ~r/-check_failed-seed\d+\.html$/
+    end
+
     test "the index skips files that are not report pages", %{dir: dir} do
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, "notes.html"), "<p>no title here</p>")
