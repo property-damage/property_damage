@@ -58,6 +58,45 @@ test.describe("a page with an explanation", () => {
     }
   });
 
+  for (const theme of ["light", "dark"]) {
+    test(`in the ${theme} theme, the mark on a cited element uses a color nothing else in the page uses`, async ({ page }) => {
+      await page.goto(url(explained));
+      await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+      await page.locator(".xcite[data-ref]:not(.xsrc)").first().click();
+      await selected(page, "run");
+
+      const { mark, others } = await page.evaluate(() => {
+        const marked = document.querySelector("[data-cite]");
+        const mark = getComputedStyle(marked).outlineColor;
+        const props = ["color", "backgroundColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "outlineColor"];
+        const others = new Set();
+        for (const el of document.querySelectorAll("body *")) {
+          const cs = getComputedStyle(el);
+          for (const p of props) {
+            if (el === marked && p === "outlineColor") continue;
+            if (p === "outlineColor" && cs.outlineStyle === "none") continue;
+            if (p.startsWith("border") && cs[p.replace("Color", "Style")] === "none") continue;
+            others.add(cs[p]);
+          }
+        }
+        // Every color token of the theme counts too, so a color this page happens not to render is still taken.
+        const probe = document.body.appendChild(document.createElement("span"));
+        for (const sheet of document.styleSheets)
+          for (const rule of sheet.cssRules)
+            for (const name of rule.style || [])
+              if (name.startsWith("--") && name !== "--cite") {
+                probe.style.color = `var(${name})`;
+                const c = getComputedStyle(probe).color;
+                if (probe.style.color) others.add(c);
+              }
+        probe.remove();
+        return { mark, others: [...others] };
+      });
+
+      expect(others).not.toContain(mark);
+    });
+  }
+
   test("a source citation unfolds its lines and folds them again", async ({ page }) => {
     await page.goto(url(explained));
 
