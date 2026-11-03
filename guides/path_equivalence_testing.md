@@ -335,6 +335,12 @@ The shrinker cut ten roots down to one, kept the reference on the plain
 command, and could not move `"right"` onto it without losing the failure. The
 one difference left between the targets is the path: a path bug.
 
+In the HTML page the header of each root band says the same in plain words,
+for each target that ran the root under a listed entry: `right split it into
+Add (step 0.0) and Add (step 0.1)`, `left kept it as one step`, or, for an
+entry with no commands, `left dropped it`. The terminal listing keeps
+`as Add[1]`.
+
 The Projections section shows the same boundary: `total` is 0 for the
 reference and 1 for the variant. The leaves `Add 1` and `Add -1` should add up
 to 0, but the planted bug makes `Add 1` add 2, as the first leaf's event

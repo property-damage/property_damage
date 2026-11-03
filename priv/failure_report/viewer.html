@@ -225,12 +225,12 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
 .xhyp h3 { font-size: 15px; margin: 0 0 4px; overflow-wrap: anywhere; }
 .xhyp ul { margin: 2px 0 4px; padding-left: 20px; }
 .xlbl { font-size: 13px; font-weight: 600; margin-top: 8px; }
-.xcites { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; margin-top: 4px; min-width: 0; }
-.xcite { font: 11px/1 var(--mono); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 9px; min-width: 18px; padding: 3px 5px; text-align: center; cursor: pointer; }
+.xcites { margin-left: 2px; }
+.xcite { display: inline-block; vertical-align: baseline; margin: 0 0 0 4px; font: 11px/1 var(--mono); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 9px; min-width: 18px; padding: 3px 5px; text-align: center; cursor: pointer; }
 .xcite:hover, .xcite:focus-visible, .xcite[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--panel); }
 .xcite:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .xcite.xnone { border-style: dashed; cursor: help; opacity: .75; }
-.xcode { flex-basis: 100%; min-width: 0; max-width: 100%; overflow-x: auto; font: 12px/1.45 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 6px 0; }
+.xcode { min-width: 0; max-width: 100%; margin: 0 0 8px; overflow-x: auto; font: 12px/1.45 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 6px 0; }
 .xcode .xl { display: flex; white-space: pre; }
 .xcode .xn { flex: none; width: 4.5em; padding-right: 10px; text-align: right; color: var(--muted); user-select: none; }
 .xcode .xt { padding-right: 10px; }
@@ -529,7 +529,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
   }
 
   function build(text, name) {
-    R = parseReport(text); SRC = name;
+    R = parseReport(text); SRC = name; DROPPED = null;
     NODES = {}; TAGCOUNT = {}; TAGS = []; S.open = {}; S.sel = null; S.cmpOpen = {}; S.cmpFocus = null;
     var cmds = [], evs = [];
     function countE(e) {
@@ -571,6 +571,29 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
   }
 
   // ---------- matching across targets ----------
+  // What a target did with a root it ran under an expansion entry, in the words of the Path entry
+  // of "What this checks": it split the root into leaves (steps labeled root.n under it), kept it
+  // as one step (the root line carries "as Entry"), or dropped it. A dropped root has no line
+  // note and no leaves, so only the Path lines of "What this checks" tell it from a root that recorded nothing.
+  function pathNote(root, target) {
+    var leaves = root.children.filter(function (c) { return c.label.indexOf(root.label + ".") === 0 && /^\d+$/.test(c.label.slice(root.label.length + 1)); });
+    if (leaves.length) {
+      var names = leaves.map(function (c) { return shortMod(cmdModule(c), CMDPREFIX) + " (step " + c.label + ")"; });
+      return "split it into " + (names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0]);
+    }
+    if (root.as) return "kept it as one step";
+    return droppedRoots()[target + "\u0000" + root.label] ? "dropped it" : "";
+  }
+  var DROPPED = null;
+  function droppedRoots() {
+    if (DROPPED) return DROPPED;
+    DROPPED = {};
+    String(R.checks || "").split("\n").forEach(function (l) {
+      var m = /^\s*Path\s+"(.*)" dropped .* \(step (\S+)\)\s*$/.exec(l);
+      if (m) DROPPED[m[1] + "\u0000" + m[2]] = true;
+    });
+    return DROPPED;
+  }
   function rootByLabel(ti, label) { return R.targets[ti].steps.filter(function (s) { return s.label === label; })[0] || null; }
   function counterpart(id, tj) {
     var n = NODES[id];
@@ -934,7 +957,10 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       var any = roots.filter(Boolean)[0];
       var marked = roots.some(function (r) { return r && (r.marker || r.children.some(function (c) { return c.marker; })); });
       var mk = roots.map(function (r) { return r && r.marker; }).filter(Boolean)[0] || (marked ? "marked" : "");
-      var asTxt = roots.map(function (r, ti) { return r && r.as ? '<span><span class="tname c' + Math.min(ti, 1) + '">' + esc(R.targets[ti].name) + "</span> ran it as " + esc(r.as) + "</span>" : ""; }).join("");
+      var asTxt = roots.map(function (r, ti) {
+        var path = r ? pathNote(r, R.targets[ti].name) : "";
+        return path ? '<span><span class="tname c' + Math.min(ti, 1) + '">' + esc(R.targets[ti].name) + "</span> " + esc(path) + "</span>" : "";
+      }).join("");
       g += '<div class="rband' + (marked ? " mark" : "") + '"><div class="rh"><b>' + (any.pseudo ? esc(any.title || "") : "[" + esc(lab) + "] ") + esc(shortCmd(any.cmd)) + "</b>" + asTxt +
         (mk ? '<span class="mk">◄ ' + esc(mk) + "</span>" : "") + "</div>" +
         (marked ? '<div class="facts">' + failFacts(["Failure"]) + "</div>" : "") + "</div>";
@@ -1150,8 +1176,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       "<h2>Summary</h2>" + list(X.summary).map(claim).join("") +
       "<h2>Hypotheses</h2>" + list(X.hypotheses).map(function (y) {
         y = y || {};
-        return '<div class="xhyp"><h3>Hypothesis ' + esc(y.rank) + " (" + esc(y.likelihood) + ")</h3><p>" + esc(y.claim) + "</p>" +
-          '<div class="xlbl">Evidence</div>' + cites(y.evidence) +
+        return '<div class="xhyp"><h3>Hypothesis ' + esc(y.rank) + " (" + esc(y.likelihood) + ")</h3><p>" + esc(y.claim) + cites(y.evidence) + "</p>" +
           '<div class="xlbl">Next steps</div><ul>' + list(y.next_steps).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ul></div>";
       }).join("") +
       "<h2>Talking points</h2>" + list(X.talking_points).map(claim).join("");
@@ -1170,9 +1195,9 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
     show("explanation");
 
     function list(x) { return Array.isArray(x) ? x : []; }
-    function claim(c) { c = c || {}; return '<div class="xitem"><p>' + esc(c.text) + "</p>" + cites(c.cites) + "</div>"; }
+    function claim(c) { c = c || {}; return '<div class="xitem"><p>' + esc(c.text) + cites(c.cites) + "</p></div>"; }
     function cites(ids) {
-      return '<div class="xcites">' + list(ids).map(function (id, i) {
+      return '<span class="xcites">' + list(ids).map(function (id, i) {
         id = String(id);
         var n = i + 1, src = /^source:/.test(id);
         if (src ? sourceOf(id) : IDS[id] && locate(id)) {
@@ -1181,7 +1206,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
         }
         var none = esc(id) + " (not in this page)";
         return '<span class="xcite xnone" title="' + none + '" aria-label="' + none + '" data-ref-none="' + esc(id) + '">' + n + "</span>";
-      }).join("") + "</div>";
+      }).join("") + "</span>";
     }
     function show(v) {
       if (v === cur) return;
@@ -1209,14 +1234,18 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       return hit.to <= lines.length ? { from: hit.from, to: hit.to, lines: lines } : null;
     }
     function toggleSource(b, id) {
-      var next = b.nextElementSibling;
-      if (next && next.classList.contains("xcode")) { next.parentNode.removeChild(next); b.setAttribute("aria-expanded", "false"); return; }
+      // The lines unfold as a block after the paragraph the marker ends, below any block already open there.
+      var para = b.closest("p"), at = para, n = b.textContent;
+      while (at.nextElementSibling && at.nextElementSibling.classList.contains("xcode")) {
+        at = at.nextElementSibling;
+        if (at.getAttribute("data-src-of") === id && at.getAttribute("data-src-n") === n) { at.parentNode.removeChild(at); b.setAttribute("aria-expanded", "false"); return; }
+      }
       var s = sourceOf(id), h = "";
       if (!s) return;
       for (var k = s.from; k <= s.to; k++) h += '<div class="xl"><span class="xn">' + k + '</span><span class="xt">' + esc(s.lines[k - 1].replace(/\r$/, "")) + "</span></div>";
       var blk = document.createElement("div");
-      blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.innerHTML = h;
-      b.parentNode.insertBefore(blk, b.nextSibling);
+      blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.setAttribute("data-src-n", n); blk.innerHTML = h;
+      at.parentNode.insertBefore(blk, at.nextSibling);
       b.setAttribute("aria-expanded", "true");
     }
 

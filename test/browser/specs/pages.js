@@ -19,7 +19,10 @@ const explained = files.find((f) => f.includes("check_failed"));
 const plain = files.find((f) => f.includes("bob"));
 
 // The page of a run with two targets, which has the Run view's linking checkbox.
-const paired = files.find((f) => f.includes("diverged"));
+const paired = files.find((f) => f.includes("PairModel"));
+
+// The page of a run whose targets ran roots as a kept entry, as leaves and not at all.
+const expanded = files.find((f) => f.includes("ExpandModel"));
 
 const url = (file) => pathToFileURL(path.join(dir, file)).href;
 
@@ -33,4 +36,4 @@ function watchErrors(page) {
   return errors;
 }
 
-module.exports = { dir, files, explained, plain, paired, url, watchErrors };
+module.exports = { dir, files, explained, plain, paired, expanded, url, watchErrors };

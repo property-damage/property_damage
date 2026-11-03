@@ -43,6 +43,32 @@ defmodule BrowserPages.Ping do
   end
 end
 
+defmodule BrowserPages.DepositFirst do
+  @moduledoc "Puts the first part of a split deposit into the account."
+  use PropertyDamage.Command
+  defstruct [:amount]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{amount: StreamData.integer(1..9)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule BrowserPages.DepositRest do
+  @moduledoc "Puts the rest of a split deposit into the account."
+  use PropertyDamage.Command
+  defstruct [:amount]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{amount: StreamData.integer(1..9)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
 defmodule BrowserPages.Steps do
   @moduledoc "Counts the commands of a sequence."
   @behaviour PropertyDamage.Model.Projection
@@ -53,6 +79,8 @@ defmodule BrowserPages.Steps do
   @impl true
   def apply(state, %BrowserPages.Deposit{}), do: %{state | count: state.count + 1}
   def apply(state, %BrowserPages.Ping{}), do: %{state | count: state.count + 1}
+  def apply(state, %BrowserPages.DepositFirst{}), do: %{state | count: state.count + 1}
+  def apply(state, %BrowserPages.DepositRest{}), do: %{state | count: state.count + 1}
   def apply(state, _other), do: state
 end
 
@@ -121,6 +149,14 @@ defmodule BrowserPages.Adapter do
   def execute(%BrowserPages.Deposit{amount: amount}, _ctx, _runtime),
     do: {:ok, [%BrowserPages.Deposited{amount: amount}]}
 
+  def execute(%{__struct__: part, amount: amount}, %{tenant: "dave"}, _runtime)
+      when part in [BrowserPages.DepositFirst, BrowserPages.DepositRest],
+      do: {:ok, [%BrowserPages.Deposited{amount: amount + 1}]}
+
+  def execute(%{__struct__: part, amount: amount}, _ctx, _runtime)
+      when part in [BrowserPages.DepositFirst, BrowserPages.DepositRest],
+      do: {:ok, [%BrowserPages.Deposited{amount: amount}]}
+
   def execute(%BrowserPages.Ping{n: 0}, _ctx, _runtime),
     do: {:ok, [%BrowserPages.Pinged{n: 0}]}
 
@@ -158,6 +194,44 @@ defmodule BrowserPages.PairModel do
   def check_projections, do: [BrowserPages.Total]
 end
 
+defmodule BrowserPages.ExpandModel do
+  @moduledoc """
+  Deposits whose route depends on the amount: a small one runs as itself under
+  a listed entry, a middle one splits into two parts, a large one is dropped.
+  """
+  use PropertyDamage.Model
+
+  alias BrowserPages.{Deposit, DepositFirst, DepositRest}
+
+  @impl true
+  def commands, do: [Deposit]
+
+  @impl true
+  def command_sequence_projection, do: BrowserPages.Steps
+
+  @impl true
+  def check_projections, do: [BrowserPages.Total]
+
+  @impl true
+  def expansions, do: [{Deposit, &route/2}]
+
+  def route(%Deposit{amount: amount} = deposit, _state) when amount <= 3,
+    do: [{[deposit], doc: "as is"}]
+
+  def route(%Deposit{amount: amount}, _state) when amount <= 6 do
+    first = div(amount, 2)
+
+    [
+      {[
+         {DepositFirst, overrides: %{amount: first}},
+         {DepositRest, overrides: %{amount: amount - first}}
+       ], doc: "in two parts"}
+    ]
+  end
+
+  def route(%Deposit{}, _state), do: [{[], doc: "not at all"}]
+end
+
 defmodule BrowserPages.Generate do
   @moduledoc false
 
@@ -171,6 +245,7 @@ defmodule BrowserPages.Generate do
     check_page = run!(BrowserPages.AccountModel, "alice", 11, dir)
     run!(BrowserPages.ServiceModel, "bob", 12, dir)
     run!(BrowserPages.PairModel, ["carol", "dave"], 13, dir)
+    run!(BrowserPages.ExpandModel, ["carol", "dave"], 20, dir, shrink: false)
 
     explain!(check_page, dir)
 
@@ -181,7 +256,7 @@ defmodule BrowserPages.Generate do
   def main(_args), do: Mix.raise("usage: mix run test/browser/generate_pages.exs DIR")
 
   # Runs the model until it fails and returns the page the run wrote.
-  defp run!(model, names, seed, dir) do
+  defp run!(model, names, seed, dir, extra \\ []) do
     before = File.ls!(dir)
 
     targets =
@@ -190,13 +265,15 @@ defmodule BrowserPages.Generate do
 
     result =
       PropertyDamage.run(
-        model: model,
-        targets: targets,
-        max_runs: 20,
-        max_commands: 6,
-        seed: seed,
-        replay_dir: false,
-        report_html: dir
+        [
+          model: model,
+          targets: targets,
+          max_runs: 20,
+          max_commands: 6,
+          seed: seed,
+          replay_dir: false,
+          report_html: dir
+        ] ++ extra
       )
 
     with {:error, %PropertyDamage.FailureReport{}} <- result,
