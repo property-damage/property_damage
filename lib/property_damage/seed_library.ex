@@ -290,13 +290,18 @@ defmodule PropertyDamage.SeedLibrary do
   The write is **atomic**: the JSON is written to a temporary file in the same
   directory and then renamed over the destination, so a concurrent reader never
   observes a partially-written file.
+
+  Creates the destination's directory when it is missing. Returns
+  `{:error, reason}` when the directory or the file cannot be written; it never
+  raises and never depends on a `verbose:` setting.
   """
   @spec save(t(), Path.t()) :: :ok | {:error, term()}
   def save(library, path \\ @default_file) do
     json = Jason.encode!(library, pretty: true)
     tmp = path <> ".tmp.#{System.unique_integer([:positive])}"
 
-    with :ok <- File.write(tmp, json),
+    with :ok <- path |> Path.dirname() |> File.mkdir_p(),
+         :ok <- File.write(tmp, json),
          :ok <- File.rename(tmp, path) do
       :ok
     else
