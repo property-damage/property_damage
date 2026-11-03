@@ -10,14 +10,19 @@ defmodule PropertyDamage.ReplayArtifact do
   # so a reader can follow it and an editor highlights it. It is read back as
   # data: the source is parsed with `Code.string_to_quoted/2` and a walker
   # accepts literals only. Nothing in the file is ever evaluated, and reading
-  # it neither creates an atom nor loads a module: an atom the running system
-  # does not know is refused. A struct literal in a command's own place (an
-  # element of `prefix`, a root's `command`, an element of a choice's
-  # `commands`) loads only when its module is already loaded and is a command
-  # module or one of the structs the format itself holds (`@format_structs`).
-  # Anywhere else, at any depth of a command's fields, a struct literal loads
-  # when its module is already loaded; any other struct is refused naming its
-  # module.
+  # it never creates an atom: an atom the running system does not know is
+  # refused. Before it resolves the atoms, the reader loads the modules that
+  # define the atoms an artifact names, so that a fresh VM knows them: the
+  # framework's failure and expansion modules, and, when the model the file
+  # names is loaded already, the commands and projections that model lists.
+  # The reader loads no other module the file names.
+  #
+  # A struct literal in a command's own place (an element of `prefix`, a
+  # root's `command`, an element of a choice's `commands`) loads only when its
+  # module is already loaded and is a command module or one of the structs the
+  # format itself holds (`@format_structs`). Anywhere else, at any depth of a
+  # command's fields, a struct literal loads when its module is already
+  # loaded; any other struct is refused naming its module.
   #
   # The term:
   #
@@ -47,6 +52,7 @@ defmodule PropertyDamage.ReplayArtifact do
     Failure,
     FailureReport,
     Generator,
+    Model,
     PlaceholderRegistry,
     RunTrace,
     Sequence
@@ -61,6 +67,9 @@ defmodule PropertyDamage.ReplayArtifact do
   # The framework's own structs an artifact holds: a placeholder minted for
   # an `external()` field and the positions inside it and in `aliases`.
   @format_structs [PropertyDamage.Placeholder, PropertyDamage.Sequence.Position]
+  # The framework modules that define the atoms an artifact names on its
+  # own: the failure kinds and the expansion modes.
+  @framework_modules [Failure, FailureReport, Expansion | @format_structs]
   # Every static atom of the source is parsed as `{@atom_tag, name}` and
   # resolved to an existing atom afterwards; the source cannot write this
   # pair itself, since its own atoms are parsed the same way.
@@ -504,6 +513,7 @@ defmodule PropertyDamage.ReplayArtifact do
            "#{line(second)}: an artifact holds one term"}
 
       {:ok, quoted} ->
+        load_atom_sources(quoted)
         {:ok, resolve_atoms(quoted)}
 
       {:error, {meta, "unsafe atom does not exist: " <> _, token}} ->
@@ -596,6 +606,51 @@ defmodule PropertyDamage.ReplayArtifact do
     do:
       "the replay artifact names #{name}, which this system does not know (no such atom), " <>
         "at line #{line}"
+
+  # Loads the modules whose atoms an artifact names, since a module's atoms
+  # exist only once it is loaded and a fresh VM loads modules lazily: the
+  # framework's own modules, then the modules a loaded model lists. The model
+  # must be loaded already (`PropertyDamage.run/1` loads the `model:` it is
+  # given), so a file naming a module cannot make the reader load it.
+  defp load_atom_sources(quoted) do
+    Enum.each(@framework_modules, &Code.ensure_loaded/1)
+
+    with {:ok, model} <- loaded_model(quoted) do
+      Enum.each(model_modules(model), &Code.ensure_loaded/1)
+    end
+  end
+
+  defp loaded_model({:%{}, _meta, pairs}) when is_list(pairs) do
+    Enum.find_value(pairs, :error, fn
+      {{:__block__, _key_meta, [{@atom_tag, "model"}]}, {:__aliases__, _meta, parts}} ->
+        with names when is_list(names) <- alias_names(parts),
+             {:ok, model} <- existing_atom("Elixir." <> Enum.join(names, ".")),
+             true <- :code.is_loaded(model) != false,
+             true <- function_exported?(model, :command_sequence_projection, 0) do
+          {:ok, model}
+        else
+          _not_a_loaded_model -> :error
+        end
+
+      _other ->
+        nil
+    end)
+  end
+
+  defp loaded_model(_quoted), do: :error
+
+  # The commands and projections `model` lists.
+  defp model_modules(model) do
+    commands =
+      for callback <- [:commands, :setup_each, :teardown_each],
+          function_exported?(model, callback, 0),
+          entry <- apply(model, callback, []),
+          module = Model.entry_module(entry),
+          not is_nil(module),
+          do: module
+
+    commands ++ Model.projection_modules(model)
+  end
 
   # Every tagged atom the running system knows becomes that atom; an alias
   # becomes its module when that module's name is an atom already. Anything
@@ -730,8 +785,9 @@ defmodule PropertyDamage.ReplayArtifact do
     end
   end
 
-  # A struct module an artifact may name: one loaded before the artifact is
-  # read (the loader never loads a module) that defines a struct.
+  # A struct module an artifact may name: one loaded before the atoms are
+  # resolved (the loader loads only the framework's modules and those a
+  # loaded model lists) that defines a struct.
   defp artifact_struct?(module),
     do: :code.is_loaded(module) != false and function_exported?(module, :__struct__, 1)
 
