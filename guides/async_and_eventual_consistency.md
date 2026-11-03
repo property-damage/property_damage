@@ -254,16 +254,33 @@ Commands declare their behavior via the `:execution` key of `command_spec/1`:
 ### The `settle:` map
 
 The per-command `settle:` map tunes the settle loop of a `:probe` or `:async`
-command. A `settle:` map you declare replaces the framework default as a whole,
-so it must carry all three keys. A map with a key missing (for example
-`%{timeout_ms: 1_000}`) fails the run with an `:adapter_error` holding a
-`KeyError` for the first missing key the loop reads, `:interval_ms`.
+command. The map merges per key over the framework defaults, so a key you omit
+keeps its default. `settle: %{timeout_ms: 1_000}` waits up to one second and
+keeps the default interval and backoff. A `settle:` set at call time in the
+model's command list merges the same way over one set in `use`.
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule MyApp.CheckStatus do
+  use PropertyDamage.Command, execution: :probe, settle: %{timeout_ms: 1_000}
+
+  defstruct [:id]
+
+  @impl true
+  def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 1})
+end
+
+%{timeout_ms: 1_000, interval_ms: 300, backoff: :linear} =
+  MyApp.CheckStatus.command_spec([]).settle
+```
+
+The full map spells out every key:
 
 ```elixir
 settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
 ```
 
-| Key | Value the framework applies when you declare no `settle:` map | Meaning |
+| Key | Default | Meaning |
 |-----|---------|---------|
 | `timeout_ms` | `2_000` | Longest the loop waits for the adapter call to stop answering `{:retry, reason}` |
 | `interval_ms` | `300` | Pause between attempts |
