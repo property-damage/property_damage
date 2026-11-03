@@ -16,6 +16,11 @@ defmodule RedisBench.Toxiproxy do
 
   @proxy "redis"
 
+  # Each measurement is the fastest of several pings. Runner slowness and
+  # scheduling spikes only add time, so the minimum tracks the real path cost
+  # and the comparison between two minimums holds on a slow machine.
+  @pings_per_measurement 5
+
   @doc "The proxy name this module manages."
   def proxy_name, do: @proxy
 
@@ -103,6 +108,22 @@ defmodule RedisBench.Toxiproxy do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @doc """
+  Fastest round-trip, in milliseconds, over several pings through the proxy.
+
+  Compare two of these values to judge a fault, instead of bounding a single
+  ping by a fixed number that a slow runner would exceed with no fault present.
+  Raises if any ping fails.
+  """
+  def fastest_ping_ms do
+    1..@pings_per_measurement
+    |> Enum.map(fn _ ->
+      {:ok, ms} = probe_ping_ms()
+      ms
+    end)
+    |> Enum.min()
   end
 
   # ---- HTTP helpers (Toxiproxy control API) --------------------------------

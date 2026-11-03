@@ -25,11 +25,6 @@ defmodule RedisBench.FaultInjectionTest do
   # so a toxic that was not removed (adding 300ms) still fails.
   @restore_margin_ms 150
 
-  # Each measurement is the fastest of several pings. Runner slowness and
-  # scheduling spikes only add time, so the minimum tracks the real path cost
-  # and the comparison between two minimums holds on a slow machine.
-  @pings_per_measurement 5
-
   setup do
     :ok = Toxiproxy.ensure_clean_proxy()
     on_exit(fn -> Toxiproxy.ensure_clean_proxy() end)
@@ -38,17 +33,17 @@ defmodule RedisBench.FaultInjectionTest do
 
   describe "the toxic is real (differential proof)" do
     test "a latency toxic measurably slows the round-trip" do
-      baseline_ms = fastest_ping_ms()
+      baseline_ms = Toxiproxy.fastest_ping_ms()
 
       {:ok, _} = Toxiproxy.add_toxic("lag", "latency", %{latency: @toxic_latency_ms})
-      laggy_ms = fastest_ping_ms()
+      laggy_ms = Toxiproxy.fastest_ping_ms()
 
       assert laggy_ms - baseline_ms >= @min_added_ms,
              "latency toxic should add at least #{@min_added_ms}ms " <>
                "(fastest ping #{laggy_ms}ms with it vs #{baseline_ms}ms without)"
 
       {:ok, _} = Toxiproxy.remove_toxic("lag")
-      restored_ms = fastest_ping_ms()
+      restored_ms = Toxiproxy.fastest_ping_ms()
 
       assert restored_ms - baseline_ms <= @restore_margin_ms,
              "removing the toxic should restore the baseline " <>
@@ -99,15 +94,6 @@ defmodule RedisBench.FaultInjectionTest do
       refute redis_unavailable_misreported_as_inconsistency?(report)
       assert redis_unavailable?(report)
     end
-  end
-
-  defp fastest_ping_ms do
-    1..@pings_per_measurement
-    |> Enum.map(fn _ ->
-      {:ok, ms} = Toxiproxy.probe_ping_ms()
-      ms
-    end)
-    |> Enum.min()
   end
 
   defp redis_unavailable?(report) do
