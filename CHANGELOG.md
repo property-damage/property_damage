@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A simulator and a per-command smoke check in the `pd-model-interview`
+  scaffold templates.** The model template gains a simulator built from each
+  command's events, so a command that needs existing state is generated. The
+  smoke run fails when a command the model lists never executes.
 - **`mix pd.explain PAGE --files` (DR-060).** The flag writes
   `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md` as the task
   does without an option, and never runs a command, even when
@@ -1290,6 +1294,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `pd-model-interview` verification ladder checks the model.** It runs
+  `mix pd.validate <Model> <Adapter> --strict` under `MIX_ENV=test`. Fixtures
+  become setup commands, invariants use `check` and `eventually`, generated
+  modules carry `@moduledoc` and `@doc`, and the first-run command sets
+  `report_html:`.
+- **The `pd-explain` skill runs `mix pd.explain PAGE --files`.** A project that
+  sets `explain_with` no longer runs its command when the skill explains a
+  page. The skill keeps `explanation.json` under `PAGE.explain/` and retries
+  only on errors an edited explanation can fix.
 - **`PropertyDamage.run/1` forwards the `external_markers:` option.** An atom
   marker such as `:__external__` is now treated as an `external()` value and
   resolved into later commands, instead of reaching them as the literal atom.
