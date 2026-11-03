@@ -307,7 +307,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
     var targets = [], T = null, root = null, step = null, entry = null, pendingCmd = null, captions = [], blanks = 0, adapterNote = null;
     function ensureT() { if (!T) { T = { name: null, role: "only", steps: [] }; targets.push(T); } return T; }
     function ensureStep() {
-      if (!step) { step = { label: "", depth: 0, cmd: "", marker: null, as: null, entries: [], children: [], pseudo: true, title: adapterNote }; adapterNote = null; ensureT().steps.push(step); root = step; }
+      if (!step) { step = { label: "", depth: 0, cmd: "", marker: null, note: null, entries: [], children: [], pseudo: true, title: adapterNote }; adapterNote = null; ensureT().steps.push(step); root = step; }
       return step;
     }
     lines.forEach(function (l) {
@@ -341,9 +341,10 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       if (sm && bi <= 6) {
         var rest = sm[4], mk = /\s+◄── (.+?)\s*$/.exec(rest);
         if (mk) rest = rest.slice(0, mk.index);
-        var as = /\s+as (\S+)\s*$/.exec(rest);
+        var as = /\s+(kept as one step|dropped: no step ran in its place)\s*$/.exec(rest);
+        if (!as) as = /\s+(split into steps? \S+(?:, \S+)*(?: and \S+)?)\s*$/.exec(rest);
         if (as) rest = rest.slice(0, as.index);
-        var s = { label: sm[3], depth: bi <= 2 ? 0 : 1, cmd: rest.trim(), marker: mk ? mk[1] : null, as: as ? as[1] : null, entries: [], children: [], arrow: !!sm[1] };
+        var s = { label: sm[3], depth: bi <= 2 ? 0 : 1, cmd: rest.trim(), marker: mk ? mk[1] : null, note: as ? as[1] : null, entries: [], children: [], arrow: !!sm[1] };
         if (s.depth === 0 || !root) { ensureT().steps.push(s); root = s; } else root.children.push(s);
         step = s; entry = null;
         pendingCmd = !s.cmd || !balanced(s.cmd) ? s : null;
@@ -529,7 +530,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
   }
 
   function build(text, name) {
-    R = parseReport(text); SRC = name; DROPPED = null;
+    R = parseReport(text); SRC = name;
     NODES = {}; TAGCOUNT = {}; TAGS = []; S.open = {}; S.sel = null; S.cmpOpen = {}; S.cmpFocus = null;
     var cmds = [], evs = [];
     function countE(e) {
@@ -573,26 +574,17 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
   // ---------- matching across targets ----------
   // What a target did with a root it ran under an expansion entry, in the words of the Path entry
   // of "What this checks": it split the root into leaves (steps labeled root.n under it), kept it
-  // as one step (the root line carries "as Entry"), or dropped it. A dropped root has no line
-  // note and no leaves, so only the Path lines of "What this checks" tell it from a root that recorded nothing.
-  function pathNote(root, target) {
+  // as one step, or dropped it. The listing says which on the root line ("kept as one step",
+  // "dropped: no step ran in its place"); the leaves are the steps labeled under the root.
+  function pathNote(root) {
     var leaves = root.children.filter(function (c) { return c.label.indexOf(root.label + ".") === 0 && /^\d+$/.test(c.label.slice(root.label.length + 1)); });
     if (leaves.length) {
       var names = leaves.map(function (c) { return shortMod(cmdModule(c), CMDPREFIX) + " (step " + c.label + ")"; });
       return "split it into " + (names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0]);
     }
-    if (root.as) return "kept it as one step";
-    return droppedRoots()[target + "\u0000" + root.label] ? "dropped it" : "";
-  }
-  var DROPPED = null;
-  function droppedRoots() {
-    if (DROPPED) return DROPPED;
-    DROPPED = {};
-    String(R.checks || "").split("\n").forEach(function (l) {
-      var m = /^\s*Path\s+"(.*)" dropped .* \(step (\S+)\)\s*$/.exec(l);
-      if (m) DROPPED[m[1] + "\u0000" + m[2]] = true;
-    });
-    return DROPPED;
+    if (root.note === "kept as one step") return "kept it as one step";
+    if (root.note && root.note.indexOf("dropped") === 0) return "dropped it";
+    return "";
   }
   function rootByLabel(ti, label) { return R.targets[ti].steps.filter(function (s) { return s.label === label; })[0] || null; }
   function counterpart(id, tj) {
@@ -958,7 +950,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; over
       var marked = roots.some(function (r) { return r && (r.marker || r.children.some(function (c) { return c.marker; })); });
       var mk = roots.map(function (r) { return r && r.marker; }).filter(Boolean)[0] || (marked ? "marked" : "");
       var asTxt = roots.map(function (r, ti) {
-        var path = r ? pathNote(r, R.targets[ti].name) : "";
+        var path = r ? pathNote(r) : "";
         return path ? '<span><span class="tname c' + Math.min(ti, 1) + '">' + esc(R.targets[ti].name) + "</span> " + esc(path) + "</span>" : "";
       }).join("");
       g += '<div class="rband' + (marked ? " mark" : "") + '"><div class="rh"><b>' + (any.pseudo ? esc(any.title || "") : "[" + esc(lab) + "] ") + esc(shortCmd(any.cmd)) + "</b>" + asTxt +

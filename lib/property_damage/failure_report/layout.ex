@@ -18,8 +18,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   #     command:, note:, ran_as:, outcome:}`; `outcome` is nil, or the word
   #     printed after the arrow on the failing step, which also carries the
   #     marker; `root` is the index of the root it belongs to, nil for a setup
-  #     or teardown command; `ran_as` is the part of `note` that names the expansion entry
-  #     a root ran as, nil for any other step
+  #     or teardown command; `ran_as` is the part of `note` that says what the root ran in
+  #     place of a listed entry, nil for any other step
   #   * `{:event, %{offset_ms:, source:, event:}}` - an event under its step
   #   * `{:log, %{offset_ms:, tags:, message:, file:, line:, attempt:}}` - a log
   #     line (DR-054) under its step or under an adapter note; `message` is
@@ -264,7 +264,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   # Walks the plan's roots beside the steps: a root that ran as itself is
   # its step; a root that ran as leaves is a line of its own, which names
-  # the entry, followed by one item per leaf.
+  # the steps it split into, followed by one item per leaf.
   defp root_items(nil, _steps, _choices), do: []
 
   defp root_items(%Sequence{} = plan, steps, choices),
@@ -276,17 +276,19 @@ defmodule PropertyDamage.FailureReport.Layout do
     case steps do
       [%Step{position: ^position} = step | more] ->
         item = step_item(:root, step, index)
-        ran_as = entry_note(choices, index)
+        ran_as = entry_note(choices, index, :kept)
         item = %{item | note: join_notes(ran_as, item.note), ran_as: ran_as}
         [item | walk_roots(rest, more, choices)]
 
       [%Step{position: %Position{section: {:leaf, id}}} | _] ->
         {leaves, more} = Enum.split_while(steps, &leaf_of?(&1, id))
-        root = root_item(position, index, command, entry_note(choices, index))
-        [root | Enum.map(leaves, &step_item(:leaf, &1, index))] ++ walk_roots(rest, more, choices)
+        items = Enum.map(leaves, &step_item(:leaf, &1, index))
+        root = root_item(position, index, command, entry_note(choices, index, {:split, items}))
+        [root | items] ++ walk_roots(rest, more, choices)
 
       _other ->
-        [root_item(position, index, command, nil) | walk_roots(rest, steps, choices)]
+        root = root_item(position, index, command, entry_note(choices, index, :dropped))
+        [root | walk_roots(rest, steps, choices)]
     end
   end
 
@@ -331,18 +333,32 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp choices(_trace, _name), do: nil
 
-  # The expansion entry a root ran as, as the root line names it: the entry
-  # of its leaves, or itself in place of an entry.
-  defp entry_note(choices, index) when is_list(choices) do
+  # What a target ran in place of a root, in the words of the Path item: the
+  # steps the root split into (named as the listing labels them), "kept as one
+  # step", or that no step ran. A root that ran as itself in place of an entry
+  # says so; a root with no recorded choice has no note.
+  defp entry_note(choices, index, outcome) when is_list(choices) do
     case Enum.find(choices, &(&1.root == index)) do
-      %{entry: entry} when is_binary(entry) -> "as " <> entry
+      %{entry: entry} when is_binary(entry) -> outcome_note(outcome)
       %{entry: :identity} -> "as itself (identity, by shrinking)"
       %{entry: :forced} -> "as itself (identity, forced)"
       _other -> nil
     end
   end
 
-  defp entry_note(_choices, _index), do: nil
+  defp entry_note(_choices, _index, _outcome), do: nil
+
+  defp outcome_note(:kept), do: "kept as one step"
+  defp outcome_note(:dropped), do: "dropped: no step ran in its place"
+
+  defp outcome_note({:split, leaves}) do
+    labels = Enum.map(leaves, &String.replace(&1.label, ["[", "]"], ""))
+    word = if match?([_], labels), do: "step ", else: "steps "
+    "split into " <> word <> join_and(labels)
+  end
+
+  defp join_and([one]), do: one
+  defp join_and(items), do: Enum.join(Enum.drop(items, -1), ", ") <> " and " <> List.last(items)
 
   defp join_notes(nil, note), do: note
   defp join_notes(note, nil), do: note

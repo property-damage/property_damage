@@ -39,7 +39,7 @@ defmodule PropertyDamage.FailureReport.LayoutLabelsTest do
 
   describe "an expanded root" do
     test "is [i] in both listings, with the variant's leaves [i.j] under it, never the generated root id" do
-      # The shrunk root index labels the root and its leaves; the root line names its entry.
+      # The shrunk root index labels the root and its leaves; the root line says which steps it split into.
       report = L.report(:diverged_expanded)
       root = report.failed_at_index
       generated = L.generated_root(report)
