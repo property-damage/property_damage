@@ -356,7 +356,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured failure vocabulary: `%PropertyDamage.Failure{}` (DR-041).** A run's
   `failure_reason` is now one nested, public type instead of a loose family of
   `{:tag, ...}` tuples. It carries a class struct under `type`
-  (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`) so illegal
+  (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`; `Failure.Assertion`
+  was later renamed `Failure.Check`, see below) so illegal
   class/kind combinations are unrepresentable, plus a `branch_id` on the envelope
   that absorbs the old `{:branch_failure, id, inner}` wrapper. Kinds are globally
   unique atoms; `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
@@ -400,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SUT.
 
 - **Mock third-party services are now reachable through `PropertyDamage.run/1`
-  (WP-C5).** A new `:mock_services` run option accepts a list of
+  (WP-C5).** A new `:mock_services` run option (later removed in favor of
+  `mocks:` on a `targets:` entry; see below) accepts a list of
   `PropertyDamage.MockServiceAdapter` modules (or `{module, config}` tuples). Per
   run the framework starts a `PropertyDamage.MockServiceRegistry`, registers and
   `setup/1`s each mock (passing `%{registry: pid, event_queue: pid}` merged with
@@ -498,8 +500,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `command_index` (instead of the ambient `nil`), persistently for the rest of
   the run; overlapping matchers resolve to the first-registered with a logged
   diagnostic. This is **pure correlation**: judgment over a command's correlated
-  set is expressed in projections (a `@poll_state` for liveness, a
-  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  set is expressed in projections (a `@eventually` for liveness, a
+  `@check`/`@invariant` for safety/cardinality; these attributes were `@poll_state`
+  and `@trigger` before a later rename, see below), reusing the existing assertion
   machinery rather than a separate await loop. This implements, on the correct
   (semantic) surface, the capability the removed `Adapter.register_handler/2`
   advertised.
@@ -915,7 +918,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `{:adapter_setup_failed, reason}` tuple are removed. `run/1` returns a report
     with `kind: :setup_failed`; `execute/2`, `Replay.start/2` and `shrink_further/2`
     return `{:error, %Failure{type: %Failure.Setup{}}}`; `mix pd.replay` prints it.
-    The `setup_once_failed` and `setup_each_failed` shapes are unchanged.
+    The `setup_once_failed` and `setup_each_failed` shapes were unchanged at this
+    step (later removed too; see below).
   - `Shrinker.failure_signature/1` (a 2-tuple) is replaced by
     `Shrinker.failure_signature/2`, which returns `{kind, name, variant_index}`.
     `equivalent_failures?/2` takes `{reason, variant_index}` pairs.
@@ -998,8 +1002,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `assertion_catalog/1` is `check_catalog/1` (report kinds `:synchronous`,
       `:lifecycle`, `:eventual`); `assertion_fires` is `check_fires`;
       `Projection.__assertions__/0` is `Projection.__checks__/0`; the LoadTest
-      failure metrics are now `check_failures` and `check_failure_rate`; the `Statistics` option
-      `assertions:` is `checks:`.
+      failure metrics are now `check_failures` and `check_failure_rate`; the `Statistics`
+      projection takes no `assertions:` or `checks:` option.
     - The projection attributes `@trigger` and `@poll_state` become `@check` and
       `@eventually`, with the same `every:`, `at:`, `after:`, `timeout:` and
       `interval:` options.
@@ -1022,11 +1026,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the formatter titles, and `FailureIntelligence` fingerprinting all key on the
   kind. Two renames of note: `:ref_resolution_error` → `:placeholder_resolution`
   (the old name referred to the long-deleted `%Ref{}` system), and the
-  trigger/check failures unify under `:assertion_failed` (so
-  `FailureReport.failure_type/1` returns `:assertion_failed`, not `:check_failed`,
+  trigger/check failures unify under one assertion kind (first named
+  `:assertion_failed`, later renamed `:check_failed`; see below), so
+  `FailureReport.failure_type/1` returns that kind, not a per-source kind,
   and linearization failures report `:linearization`, not `:linearization_failed`).
   The shrinker's failure-equivalence granularity is unchanged — the `{kind, name}`
-  signature keeps a `:poll_timeout` of `:x` distinct from an `:assertion_failed`
+  signature keeps a `:poll_timeout` of `:x` distinct from a check failure
   of `:x` (a class-based signature would have merged them).
 
 - **Persisted-file format bumps to version `7`; pre-v7 files are refused
@@ -1096,7 +1101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       surface (it never applied to the `:exunit`-only generated tests).
     - **`RunComparison.investigate/1` takes `capture:` as a sub-keyword.**
       `RunTrace.capture/1` options are now nested under `:capture` (e.g.
-      `investigate(runs: 5, capture: [model: M, adapter: A, seed: 3])`) rather
+      `investigate(runs: 5, capture: [model: M, targets: [A], seed: 3])`) rather
       than passed flat, so `RunTrace`'s option surface stays single-sourced.
     - **`Analysis.generate_test/2` now validates its options** (the previously
       orphaned `format`/`module_name` schema is wired in); the dead
@@ -1125,7 +1130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computed `Fingerprint.hash/1` for such reports, so similarity clustering should
   be recomputed rather than compared against values cached under the old bug.
 - **Persistence format 2 → 3.** `.pd` files now stamp format version `3`, which
-  tracks the `FailureReport` struct shape. Version 1 and 2 files still load. A
+  tracks the `FailureReport` struct shape. Files of version 1 and 2 loaded at that step; later format bumps refuse them (see the persisted-file entries below). A
   file written before the field removal below deserializes losslessly: the two
   removed keys are recognized (not reported as struct-shape drift), and the
   failing command/events remain recoverable via `failure_step/1`, recomputed from
@@ -1151,7 +1156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (read-only IS the `:prefer_remove` shrink hint; there is no separate boolean)
   - `def downstream_observables, do: [...]` → `use PropertyDamage.Command, observables: [...]`
   - `def idempotent?, do: false` → `use PropertyDamage.Command, idempotent: false`
-  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]`
+  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]` (this key was removed later; see `stutter:` `using:` below)
   The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
   `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
   they cannot live in a static map). `Command.build_spec_from_legacy/1`

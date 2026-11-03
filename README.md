@@ -303,6 +303,10 @@ artifact does not record it. Shrinking is off by default in a replay. A replay t
 returns `{:error, report}`. A replay that passes returns `{:ok, stats}` with
 `stats.replay` set to `:not_reproduced`.
 
+A failure that the `stutter:` option found does not reproduce this way, because the
+artifact records no stutter and the replay passes. To reproduce it, run the original
+call again with the same `seed:` and `stutter:` options.
+
 ### Interactive Shrinking
 
 If the initial shrinking didn't produce a minimal sequence:
@@ -647,11 +651,12 @@ It fails on:
 - A removed lifecycle hook, or a nemesis in `setup_each/0` or `teardown_each/0`
 
 It warns about:
-- Commands that declare no `:observables`
+- Commands that declare no `:observables` (the Quick Start's `CreateUser` does)
+- A model with a single command (the Quick Start model has one)
 - Events that no check projection handles
 - Two targets that share an adapter and an identical `config:`
 
-`--verbose` shows more detail and `--strict` turns warnings into errors. For a
+`--verbose` shows more detail and `--strict` turns warnings into errors. On the Quick Start model, `--strict` prints `FAILED: 2 warning(s) in strict mode`. For a
 model with `expansions/0`, `--seeds N` sets how many root sequences to sample
 (default 100) and `--seed S` samples the seeds S, S+1, and so on.
 
@@ -677,7 +682,8 @@ PropertyDamage.run(
   # directory (default false; the PD_REPORT_HTML environment variable replaces it)
   report_html: "failure_pages",
 
-  # Idempotency (see the idempotency guide)
+  # Idempotency (see the idempotency guide). On the Quick Start model this fails
+  # the run with an idempotency violation: its adapter mints a new id on every call.
   stutter: [probability: 0.1]
 )
 ```
@@ -963,13 +969,17 @@ end
 Network operations integrate with [Toxiproxy](https://github.com/Shopify/toxiproxy) when available:
 
 ```elixir
-# Configure in adapter context
-context = %{
-  toxiproxy: %{
-    proxy_name: "my_service",
-    api_url: "http://localhost:8474"
-  }
-}
+# Return the config from the adapter's setup/1, the only place the engine
+# reads it (a top-level :toxiproxy key in the nemesis context is not set by a run)
+def setup(_config) do
+  {:ok,
+   %{
+     toxiproxy: %{
+       proxy_name: "my_service",
+       api_url: "http://localhost:8474"
+     }
+   }}
+end
 
 # Nemesis operations will automatically use Toxiproxy
 # Falls back to simulated mode if not configured
@@ -1263,7 +1273,7 @@ end
 Generated LiveBook notebooks include:
 
 - **Setup section**: Installs dependencies (Req, Jason)
-- **State tracking**: Tracks refs and model state alongside execution
+- **State tracking**: Tracks placeholders and model state alongside execution
 - **Step-by-step commands**: Each command in its own cell with HTTP call
 - **Failure marker**: Highlights the command that caused the failure
 - **Exploration section**: Space to experiment with variations
@@ -1629,7 +1639,7 @@ PropertyDamage
 ├── Shrinking (Tier 2)
 │   ├── Shrinker     - Sequence minimization (supports branching)
 │   ├── Sequence.Validator - Sequence validation
-│   └── Graph        - Dependency analysis
+│   └── Shrinker.Graph - Dependency analysis
 │
 ├── Diagnostics
 │   ├── FailureReport - Structured failure + formatter
@@ -1655,7 +1665,7 @@ PropertyDamage
     ├── Persistence  - Save/load failures
     ├── SeedLibrary  - Seed management
     ├── Regression   - Automatic regression test management
-    └── Scaffold     - OpenAPI code generation
+    └── mix pd.scaffold - OpenAPI code generation (a Mix task, not a module)
 ```
 
 > The codebase also ships several modules that are **work in progress and not
