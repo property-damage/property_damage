@@ -179,7 +179,7 @@ ramp_up: {:linear, {30, :seconds}}
 ramp_up: {:step, 5, {10, :seconds}}  # 5 steps, 10 seconds each
 
 # Exponential - exponential growth curve
-ramp_up: {:exponential, {1, :minute}}
+ramp_up: {:exponential, {1, :minutes}}
 ```
 
 Example with ramp-up and ramp-down:
@@ -352,16 +352,22 @@ Faster commands mean workers become available sooner:
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 ~1 command. Check your model's `terminate_early?/3` implementation:
 
-```elixir
-# This terminates immediately - only 1 command per sequence
-def terminate_early?(_state, _history, _step), do: true
+`terminate_early?/3` receives the state after a command, the command that just
+ran, and the events that command produced. It does not receive a step count, so
+decide from the state:
 
-# This runs 5-10 commands per sequence
-def terminate_early?(_state, _history, step), do: step >= 8
+```elixir
+# This terminates immediately: only 1 command per sequence
+def terminate_early?(_state, _command, _events), do: true
+
+# This ends each sequence once it holds three accounts
+def terminate_early?(state, _command, _events), do: map_size(state.accounts) >= 3
 ```
 
-Longer sequences mean more commands per arrival, potentially improving
-overall throughput efficiency.
+A load test has no `max_commands:` option. Without a `terminate_early?/3` that
+returns `true`, each sequence runs up to the generator's default of 50
+commands. Longer sequences mean more commands per arrival, potentially
+improving overall throughput efficiency.
 
 ## Real-Time Monitoring
 
