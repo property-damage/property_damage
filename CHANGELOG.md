@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mix pd.scaffold --force` overwrites existing files.** Without it, the
+  task refuses, names the files that already exist and writes nothing.
+- **`PropertyDamage.shrink_further/2` takes `external_markers:`.** A failure
+  report does not record the run's atom markers, so a re-shrink of a run that
+  named them passes them again.
 - **A simulator and a per-command smoke check in the `pd-model-interview`
   scaffold templates.** The model template gains a simulator built from each
   command's events, so a command that needs existing state is generated. The
@@ -640,6 +645,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: the network fault event structs moved under their nemesis
+  module.** `NetworkPartitioned` and `NetworkPartitionHealed` moved under
+  `PropertyDamage.Nemesis.NetworkPartition`, `NetworkLatencyInjected` and
+  `NetworkLatencyRestored` under `PropertyDamage.Nemesis.NetworkLatency`, and
+  `PacketLossInjected` and `PacketLossRestored` under
+  `PropertyDamage.Nemesis.PacketLoss`. Each keeps its short name, so
+  `%NetworkPartitioned{}` becomes `%NetworkPartition.NetworkPartitioned{}`
+  after `alias PropertyDamage.Nemesis.NetworkPartition`. The library no
+  longer defines top-level modules. A projection that matches the old names
+  must update its patterns.
+- **`Mutation.run/1` returns `{:error, {:baseline_failed, command_module,
+  message}}` when the unmutated baseline run fails with an adapter error.**
+  Before, every mutation of that command failed the same way and counted as
+  killed by error. A caller that matched only `{:ok, _}` must handle the
+  error tuple.
+- **`mix pd.scaffold` refuses to overwrite existing files.** Run it again with
+  `--force` to regenerate.
 - **A mutation killed by an adapter error no longer counts toward the
   mutation score (DR-059).** A mutation whose run fails with an
   `:execution_failed` report, for example a status mutation that makes the
@@ -1294,6 +1316,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A replay artifact replays in a fresh VM.** `only: [replay: path]` raised
+  "which this system does not know" when nothing had loaded
+  `PropertyDamage.Failure` or the model's projections yet, for example a
+  regression test run alone with `mix test path:line`. Before it resolves
+  atoms, the artifact reader now loads the framework's failure modules and the
+  commands and projections of the model the caller passed. An atom that no
+  loaded module defines is still refused.
+- **Atom markers named in `external_markers:` resolve on every path a run
+  simulates again.** The teardown draw, the expansion walk, shrinking,
+  `only: [replay: path]` and `shrink_further/2` used to hand a consuming
+  command the marker atom, or a placeholder no registry knew, instead of the
+  id the system minted. The replay artifact does not record the markers, so a
+  replay through `only:` uses the `external_markers:` of the replaying run.
+  `PropertyDamage.Replay`, `mix pd.reshrink`, `Analysis` and `Export` do not
+  read them; their docs say so.
+- **A variant process that dies while its target comes up is reported as
+  such.** An untrappable kill or the crash of a linked process reported the
+  setup cause `:adapter_setup`; it now reports the cause `:variant` with the
+  exit reason as detail. The error text, the error origin, the replay hint and
+  the meaning of `:setup_failed` name it too.
+- **A per-command `settle:` map merges per key over the defaults.**
+  `settle: %{timeout_ms: 1_000}` used to fail the run with a `KeyError` for
+  `:interval_ms`; omitted keys now keep their defaults.
+- **`Coverage.record/2` raises a readable error for a passing result without
+  coverage data.** It raised a `KeyError` on `:sequence`; it now raises the
+  same `ArgumentError` as `PropertyDamage.coverage/2`, naming
+  `coverage: true`. The moduledoc says which results need the option.
+- **The coverage matrices show a transition from a state or command to
+  itself.** A diagonal cell printed `·` whatever its count; it now prints the
+  count, and keeps `·` at 0.
+- **The terminal mutation report uses the same totals as the Markdown
+  report.** Each row shows killed over total and its error kills. The JSON
+  output carries a `score_rule` string saying the score excludes mutations
+  killed by an adapter error.
+- **`Integration.generate_report/2` creates the report directory.** A report
+  path under a missing directory raised `File.Error`; the function now
+  creates the parent directory, as `mix pd.integration` already did.
+- **`SeedLibrary.save/2` creates its directory.** A missing directory made the
+  save fail; it now creates the directory and returns `{:error, reason}` if
+  the write still fails.
+- **A failed write on the regression path logs a warning.**
+  `regression: [seed_library: path]`, `save_failures:` and `generate_tests:`
+  reported a failed write only under `verbose: true`. Each now logs a warning
+  with the path and the reason, as the top-level `seed_library:` option does.
+- **The model `mix pd.scaffold` writes passes `mix pd.validate`.** Its
+  `command_sequence_projection/0` raised; the task now writes a starter
+  `Projections.State` that the model names, and each command lists the event
+  the task generates for it under `observables:`. The task's docs and the
+  moduledocs it generates name `simulator/0`, not a `simulate/2` callback, and
+  its moduledoc quotes the code the generators emit.
+- **The `mutations_per_command` docs say the cap applies per operator.**
 - **The `pd-model-interview` verification ladder checks the model.** It runs
   `mix pd.validate <Model> <Adapter> --strict` under `MIX_ENV=test`. Fixtures
   become setup commands, invariants use `check` and `eventually`, generated
