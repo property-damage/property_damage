@@ -16,7 +16,8 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
 
   - `:partition_type` - Type of partition (default: `:full`)
   - `:duration_ms` - How long the partition lasts (default: 5000ms)
-  - `:target` - Specific service/host to partition (default: `:all`)
+  - `:target` - A label copied into the emitted events (default: `:all`). It does
+    not change which traffic the partition blocks.
 
   ## Usage with Toxiproxy
 

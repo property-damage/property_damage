@@ -30,24 +30,49 @@ defmodule PropertyDamage.Nemesis do
 
         defstruct [:partition_type, :duration_ms]
 
+        defmodule PartitionStarted do
+          defstruct [:type, :started_at]
+        end
+
+        defmodule PartitionHealed do
+          defstruct [:type, :ended_at]
+        end
+
         @impl true
-        def inject(%__MODULE__{partition_type: type, duration_ms: duration}, ctx) do
+        def inject(%__MODULE__{partition_type: type}, ctx) do
           # The adapter's setup/1 return arrives under :adapter_context.
+          # MyTest.Proxy stands for your own client of the fault tool.
           proxy = ctx.adapter_context.proxy
-          :ok = Toxiproxy.partition(proxy, type)
+          :ok = MyTest.Proxy.partition(proxy, type)
 
           # Return events describing what happened
-          {:ok, [%NetworkPartitioned{type: type, started_at: System.monotonic_time()}]}
+          {:ok, [%PartitionStarted{type: type, started_at: System.monotonic_time()}]}
         end
 
         @impl true
         def restore(%__MODULE__{partition_type: type}, ctx) do
-          Toxiproxy.restore(ctx.adapter_context.proxy, type)
-          {:ok, [%NetworkRestored{type: type, ended_at: System.monotonic_time()}]}
+          MyTest.Proxy.restore(ctx.adapter_context.proxy, type)
+          {:ok, [%PartitionHealed{type: type, ended_at: System.monotonic_time()}]}
         end
 
         @impl true
         def precondition(_state), do: true
+
+        # Required once the nemesis is listed in the model's commands/0: the
+        # generator builds instances through new!/2, never through a command
+        # generator.
+        @impl true
+        def new!(_state, overrides \\\\ %{}) do
+          StreamData.bind(StreamData.member_of([:full, :asymmetric]), fn type ->
+            StreamData.constant(%__MODULE__{
+              partition_type: Map.get(overrides, :partition_type, type),
+              duration_ms: Map.get(overrides, :duration_ms, 1_000)
+            })
+          end)
+        end
+
+        @impl true
+        def duration_ms(%__MODULE__{duration_ms: duration}), do: duration
       end
 
   ## Events in Log
@@ -57,15 +82,18 @@ defmodule PropertyDamage.Nemesis do
       %PropertyDamage.EventLog.Entry{
         timestamp: 12345,
         command_index: 5,
-        event: %NetworkPartitioned{type: :full, started_at: 12345},
+        event: %MyTest.Nemesis.PartitionNetwork.PartitionStarted{type: :full, started_at: 12345},
         source: :nemesis,
         nemesis_module: MyTest.Nemesis.PartitionNetwork
       }
 
   ## Model Integration
 
-  Nemesis commands can be included in the model's command weights:
+  Nemesis commands can be included in the model's command weights. A nemesis
+  listed here must implement `new!/2`, or validation fails with "missing
+  required callback new!/2":
 
+      @impl true
       def commands do
         [
           {CreateOrder, weight: 5},       # Normal commands
@@ -99,13 +127,29 @@ defmodule PropertyDamage.Nemesis do
   > environment; if you need to fault an in-process collaborator, do it in your
   > own adapter/command code.
 
-  Check projections can adjust invariants during active faults:
+  Check projections can adjust invariants during active faults. A projection
+  tracks the fault from the nemesis events, and a `@check` function relaxes the
+  check while the fault is active:
 
-      def check(:latency_within_sla, state, ctx) do
-        if Map.get(state.active_faults, :network_partition) do
-          :ok  # Skip SLA check during partition
-        else
-          if state.last_latency_ms < 100, do: :ok, else: {:error, "SLA violation"}
+      defmodule MyTest.Projections.Latency do
+        use PropertyDamage.Model.Projection
+
+        alias MyTest.Events.Pong
+        alias MyTest.Nemesis.PartitionNetwork.{PartitionHealed, PartitionStarted}
+
+        @impl true
+        def init, do: %{partitioned?: false, last_latency_ms: 0}
+
+        @impl true
+        def apply(state, %PartitionStarted{}), do: %{state | partitioned?: true}
+        def apply(state, %PartitionHealed{}), do: %{state | partitioned?: false}
+        def apply(state, %Pong{latency_ms: ms}), do: %{state | last_latency_ms: ms}
+        def apply(state, _event), do: state
+
+        # Skip the SLA check during a partition.
+        @check every: Pong
+        def latency_within_sla(state, _event) do
+          state.partitioned? or state.last_latency_ms < 100
         end
       end
   """
@@ -161,10 +205,12 @@ defmodule PropertyDamage.Nemesis do
               {:ok, [struct()]} | {:error, term()}
 
   @doc """
-  (Optional) Generate a nemesis command struct from current state.
+  Generate a nemesis command struct from current state.
 
-  If implemented, returns a StreamData generator for producing command instances.
-  If not implemented, the command must be instantiated directly.
+  Returns a StreamData generator for producing command instances. The behaviour
+  marks it optional, but a nemesis listed in the model's `commands/0` must
+  implement it: validation rejects the model otherwise, and generation raises.
+  Without it, a nemesis can only run from a pre-built command sequence.
   """
   @callback new!(state :: map(), overrides :: map()) :: StreamData.t(struct())
 

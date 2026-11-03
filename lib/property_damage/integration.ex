@@ -9,7 +9,8 @@ defmodule PropertyDamage.Integration do
   - Database reset between runs
   - Report generation (terminal, markdown, JUnit XML)
   - Bug hunting mode (run until N unique bugs found)
-  - Chaos testing with Toxiproxy
+  - Fault injection through nemesis commands that the model lists in `commands/0`
+    (see `PropertyDamage.Nemesis`); this module has no Toxiproxy option of its own
 
   ## Usage
 

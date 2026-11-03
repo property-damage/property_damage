@@ -15,49 +15,54 @@ defmodule PropertyDamage.Diagram do
 
   ### From a Failure Report
 
-      report = PropertyDamage.run(...) |> elem(1)
+      {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
       diagram = PropertyDamage.Diagram.from_failure_report(report, :mermaid)
       IO.puts(diagram)
 
   ### From a Sequence and Event Log
 
-      diagram = PropertyDamage.Diagram.generate(
-        sequence,
-        event_log,
-        format: :plantuml,
-        title: "Account Creation Flow",
-        show_state: true
-      )
+  `generate/4` takes the format as the third, positional argument. Options
+  follow as a keyword list.
+
+      sequence = report.trace.plan
+      event_log = PropertyDamage.FailureReport.event_log(report)
+
+      diagram =
+        PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
+          title: "Ping Flow",
+          show_state: true
+        )
 
   ## Example Output (Mermaid)
 
+  A failing `Ping` command whose `Pong` reply broke a latency check:
+
       ```mermaid
       sequenceDiagram
+          title Failure: Invariant Violation: latency_within_sla (seed: 7)
           participant Test
           participant SUT
-          participant State
 
-          Test->>SUT: CreateAccount(name: "Alice")
-          SUT-->>Test: AccountCreated(id: "acc_123")
-          Test->>State: balance: 0
+          Note over Test,SUT: ❌ FAILURE at command 0
+          Test-xSUT: Ping()
+          SUT-->>Test: Pong(latency_ms: 500)
 
-          Test->>SUT: Deposit(amount: 100)
-          SUT-->>Test: DepositSucceeded(new_balance: 100)
-          Test->>State: balance: 100
-
-          Note over Test,SUT: ❌ FAILURE at command 2
-          Test-xSUT: Withdraw(amount: 200)
-          Note right of SUT: NonNegativeBalance violated
+          Note right of SUT: check `latency_within_sla` returned `...
       ```
 
   ## Options
 
-  - `:title` - Diagram title (default: "PropertyDamage Sequence")
-  - `:show_state` - Include state changes (default: false)
-  - `:show_timestamps` - Include timestamps (default: false)
+  - `:title` - Diagram title (default: "PropertyDamage Sequence"; for
+    `from_failure_report/3`, a title built from the failure type and seed)
+  - `:show_state` - Add a `State` participant to the Mermaid and PlantUML
+    diagrams (default: false). No state-change lines are drawn, and the
+    WebSequence format ignores it.
   - `:max_value_length` - Truncate long values (default: 50)
-  - `:highlight_failure` - Highlight failure point (default: true)
-  - `:show_branches` - Show branches (default: true)
+  - `:failed_at_index` - `generate/4` only: the flattened index of the failing
+    command, which marks that step as the failure. `from_failure_report/3`
+    sets the failure point from the report.
+  - `:show_timestamps`, `:highlight_failure`, `:show_branches` - Accepted and
+    currently ignored: no renderer reads them, so setting them changes nothing.
   """
 
   alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}

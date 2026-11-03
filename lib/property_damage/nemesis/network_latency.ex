@@ -10,7 +10,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   - `:latency_ms` - Base latency to add (default: 100ms)
   - `:jitter_ms` - Random jitter ± this value (default: 0)
   - `:duration_ms` - How long the latency persists (default: 5000ms)
-  - `:target` - What to affect: `:all`, `:upstream`, `:downstream`, or specific host
+  - `:target` - A label copied into the emitted events (default: `:all`). It does
+    not change which traffic the toxic affects.
 
   ## Usage with Toxiproxy
 

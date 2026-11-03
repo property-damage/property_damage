@@ -9,7 +9,8 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   - `:loss_percent` - Percentage of packets to drop (0-100, default: 10)
   - `:duration_ms` - How long packet loss persists (default: 5000ms)
-  - `:target` - Specific service/host to affect (default: `:all`)
+  - `:target` - A label copied into the emitted events (default: `:all`). It does
+    not change which traffic loses packets.
 
   ## Usage with Toxiproxy
 
