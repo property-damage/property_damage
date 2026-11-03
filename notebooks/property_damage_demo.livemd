@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:property_damage, "~> 0.3"},
+  {:property_damage, "~> 0.2"},
   {:stream_data, "~> 1.0"},
   {:kino, "~> 0.12"}
 ])

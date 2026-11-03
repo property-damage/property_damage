@@ -30,7 +30,7 @@ included) with this one:
 ```elixir
 defp deps do
   [
-    {:property_damage, "~> 0.3"}
+    {:property_damage, "~> 0.2"}
   ]
 end
 ```

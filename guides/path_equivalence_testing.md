@@ -54,7 +54,7 @@ Add the library to the `deps` in `mix.exs`, then fetch it:
 ```elixir
 defp deps do
   [
-    {:property_damage, "~> 0.3"}
+    {:property_damage, "~> 0.2"}
   ]
 end
 ```
