@@ -105,6 +105,10 @@ never happen. Start from the Phase 1 fear answer. For each invariant:
   settled final state. Its projection must accumulate evidence (a count, a
   maximum, a sticky flag), so ask what the system must remember about each
   occurrence for the check to see an overshoot that later healed.
+  When the invariant depends on an injected event, ask how long the
+  transport takes to deliver it: a delivery that lands after the last
+  drain misses the check (see the injector stub in
+  [scaffold_templates.md](scaffold_templates.md)).
 - Elicit severity: is a violation a bug or a catastrophe? (Goes in prose;
   informs how hard the model should hunt it.) Write the prose in the
   domain's words: the scaffold copies it into the check's `@doc`, and the

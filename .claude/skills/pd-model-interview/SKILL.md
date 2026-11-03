@@ -73,12 +73,14 @@ give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
 and `searchUser` share `UserCompleted`; any other operationId gives
 `<OperationId>Completed`. Run `--dry-run` first and turn each command and
 event module it lists into its file path. The dry run lists an event module
-for every operation, but the run writes an event file only for an operation
-whose success response has a schema. Leave out an operation if its command
-file already exists, or if its success response has a schema and its event
-file already exists (an event file that another operation shares counts).
-Ignore the event module of an operation without a schema: the run neither
-writes that file nor touches a file of that name.
+only for an operation with a 200, 201 or 202 response, and the run writes
+that event file only when the response has a JSON schema (`application/json`).
+The dry run does not show the schema, so look it up in the OpenAPI document.
+Leave out an operation if its command file already exists, or if its success
+response has a JSON schema and its event file already exists (an event file
+that another operation shares counts). Ignore the event module of an
+operation without a JSON schema: the run neither writes that file nor touches
+a file of that name.
 What it writes differs from the layout above: it writes `commands/`,
 `events/` (named as above), `adapter.ex` and `model.ex`, but no
 `projections/` and no `simulator.ex`; its `model.ex` raises in
