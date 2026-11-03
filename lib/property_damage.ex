@@ -25,8 +25,9 @@ defmodule PropertyDamage do
 
   PropertyDamage uses a two-phase execution model:
 
-  1. **Symbolic Phase**: Generate a sequence of commands with symbolic refs
-  2. **Concrete Phase**: Execute commands against the SUT, resolving refs to real values
+  1. **Symbolic Phase**: Generate a sequence of commands, with a placeholder
+     for each value the system will mint
+  2. **Concrete Phase**: Execute commands against the SUT, resolving placeholders to real values
 
   This separation enables powerful shrinking of failing test cases while maintaining
   the dependency relationships between commands.
@@ -337,7 +338,7 @@ defmodule PropertyDamage do
   more branches and a suffix, run on one target:
 
   - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of parallel branches (default: 3)
+  - `:max_branches` - Maximum number of branches (default: 3)
   - `:max_branch_length` - Maximum commands per branch (default: 5)
   - `:min_prefix_length` - Minimum commands before branching (default: 3)
 
@@ -699,9 +700,12 @@ defmodule PropertyDamage do
   # The artifact does not record the run's `external_markers:`: the replay
   # reads its commands with the markers this run passes.
   defp load_replay!(path, model, targets, markers) do
-    # The loader builds structs of loaded modules only and never loads one, so
-    # the modules `model:` names are loaded first: the model and the commands
-    # it lists. A leaf module no other command names must be loaded by the
+    # The loader builds structs of loaded modules only. Before it resolves the
+    # file's atoms it loads the framework's failure and expansion modules and,
+    # when the model the file names is loaded, the commands and projections
+    # that model lists. It loads no other module the file names, so the
+    # modules `model:` names are loaded first: the model and the commands it
+    # lists. A leaf module no other command names must be loaded by the
     # caller.
     load_model_modules(model)
 
@@ -2925,12 +2929,23 @@ defmodule PropertyDamage do
   For simple tests that only need command return values (no injector events),
   calling the adapter directly is simpler:
 
-      {:ok, adapter_ctx} = MyAdapter.setup(%{})
-      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx)
-      assert [%UserCreated{name: "alice"}] = events
-      MyAdapter.teardown(adapter_ctx)
+      {:ok, user_context} = MyAdapter.setup(%{})
 
-  Use `execute/2` when you need the full infrastructure: injector adapters,
+      runtime = %PropertyDamage.Runtime{
+        inject: fn _event -> :ok end,
+        start_poller: fn _opts -> raise "no pollers in a direct call" end
+      }
+
+      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, user_context, runtime)
+
+      assert [%UserCreated{name: "alice"}] = events
+      MyAdapter.teardown(user_context)
+
+  The adapter callback is `execute/3`: command, user context, runtime handle.
+  The stub handle above suits an adapter that neither injects events nor
+  starts pollers; the two functions are the required fields of the struct.
+
+  Use `PropertyDamage.execute/2` when you need the full infrastructure: injector adapters,
   event queue, external() value resolution across commands, etc.
   """
   @spec execute([struct()], keyword()) ::
@@ -3026,10 +3041,10 @@ defmodule PropertyDamage do
         import PropertyDamage, only: [external: 0]
 
         defstruct [
-          payment_id: external(),
-          transaction_ref: external(),
           :order_id,
-          :amount
+          :amount,
+          payment_id: external(),
+          transaction_id: external()
         ]
       end
 
@@ -3038,8 +3053,8 @@ defmodule PropertyDamage do
   Externals are supported in nested maps:
 
       defstruct [
-        ids: %{transaction: external(), confirmation: external()},
-        :amount
+        :amount,
+        ids: %{transaction: external(), confirmation: external()}
       ]
 
   ## Fixed-Length Lists
@@ -3047,8 +3062,8 @@ defmodule PropertyDamage do
   Externals are supported in fixed-length lists:
 
       defstruct [
-        item_ids: [external(), external(), external()],
-        :batch_name
+        :batch_name,
+        item_ids: [external(), external(), external()]
       ]
 
   ## How It Works

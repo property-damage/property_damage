@@ -32,7 +32,9 @@ defmodule PropertyDamage.Nemesis do
 
         @impl true
         def inject(%__MODULE__{partition_type: type, duration_ms: duration}, ctx) do
-          :ok = Toxiproxy.partition(ctx.proxy, type)
+          # The adapter's setup/1 return arrives under :adapter_context.
+          proxy = ctx.adapter_context.proxy
+          :ok = Toxiproxy.partition(proxy, type)
 
           # Return events describing what happened
           {:ok, [%NetworkPartitioned{type: type, started_at: System.monotonic_time()}]}
@@ -40,7 +42,7 @@ defmodule PropertyDamage.Nemesis do
 
         @impl true
         def restore(%__MODULE__{partition_type: type}, ctx) do
-          Toxiproxy.restore(ctx.proxy, type)
+          Toxiproxy.restore(ctx.adapter_context.proxy, type)
           {:ok, [%NetworkRestored{type: type, ended_at: System.monotonic_time()}]}
         end
 

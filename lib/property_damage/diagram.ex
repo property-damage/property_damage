@@ -57,7 +57,7 @@ defmodule PropertyDamage.Diagram do
   - `:show_timestamps` - Include timestamps (default: false)
   - `:max_value_length` - Truncate long values (default: 50)
   - `:highlight_failure` - Highlight failure point (default: true)
-  - `:show_branches` - Show parallel branches (default: true)
+  - `:show_branches` - Show branches (default: true)
   """
 
   alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}

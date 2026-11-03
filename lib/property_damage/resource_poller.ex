@@ -18,18 +18,22 @@ defmodule PropertyDamage.ResourcePoller do
           poll_fn: fn -> Req.get(client, url: "/authorizations/\#{id}") end,
           interval_ms: 500,
           timeout_ms: 30_000,
-          handler: fn response ->
-            case response.body["status"] do
-              "processing" -> :continue
-              "pending_review" -> {:inject, %AuthorizationPendingReview{id: id}}
-              "approved" -> {:done, %AuthorizationApproved{id: id}}
-              "declined" -> {:done, %AuthorizationDeclined{id: id}}
-            end
+          handler: fn
+            {:ok, %{body: %{"status" => "processing"}}} -> :continue
+            {:ok, %{body: %{"status" => "pending_review"}}} ->
+              {:inject, %AuthorizationPendingReview{id: id}}
+            {:ok, %{body: %{"status" => "approved"}}} -> {:done, %AuthorizationApproved{id: id}}
+            {:ok, %{body: %{"status" => "declined"}}} -> {:done, %AuthorizationDeclined{id: id}}
+            {:error, reason} -> {:error, reason}
           end
         )
 
         {:ok, [%AuthorizationCreated{id: id, status: :processing}]}
       end
+
+  The handler receives exactly what `poll_fn` returns. `Req.get/2` returns
+  `{:ok, response}` or `{:error, exception}`, so the handler above matches on
+  that tuple.
 
   ## Handler Return Values
 

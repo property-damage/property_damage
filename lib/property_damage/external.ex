@@ -52,10 +52,10 @@ defmodule PropertyDamage.External do
         import PropertyDamage, only: [external: 0]
 
         defstruct [
-          payment_id: external(),
-          transaction_ref: external(),
           :order_id,
-          :amount
+          :amount,
+          payment_id: external(),
+          transaction_id: external()
         ]
       end
 
@@ -67,9 +67,9 @@ defmodule PropertyDamage.External do
         import PropertyDamage, only: [external: 0]
 
         defstruct [
-          ids: %{transaction: external(), confirmation: external()},
           :amount,
-          :timestamp
+          :timestamp,
+          ids: %{transaction: external(), confirmation: external()}
         ]
       end
 
@@ -85,8 +85,8 @@ defmodule PropertyDamage.External do
 
         # 3 server-generated IDs (indices tracked: [:item_ids, 0], etc.)
         defstruct [
-          item_ids: [external(), external(), external()],
-          :batch_name
+          :batch_name,
+          item_ids: [external(), external(), external()]
         ]
       end
 
@@ -97,7 +97,7 @@ defmodule PropertyDamage.External do
 
       # In domain library (no PropertyDamage dependency)
       defmodule MyDomain.Events.OrderCreated do
-        defstruct [id: :__external__, :amount]
+        defstruct [:amount, id: :__external__]
       end
 
       # In test project

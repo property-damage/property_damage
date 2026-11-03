@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Pd.Audit do
       --max-commands N        Max commands per generated sequence.
       --branching             Exercise branching generation (not just linear).
       --branch-probability F  Branch-point probability (implies --branching).
-      --max-branches N        Maximum parallel branches (implies --branching).
+      --max-branches N        Maximum branches (implies --branching).
       --max-branch-length N   Maximum commands per branch (implies --branching).
 
   See `guides/deterministic_generation.md` for the deterministic patterns that
@@ -243,7 +243,7 @@ defmodule Mix.Tasks.Pd.Audit do
       --max-commands N        Max commands per generated sequence.
       --branching             Exercise branching generation.
       --branch-probability F  Branch-point probability (implies --branching).
-      --max-branches N        Maximum parallel branches (implies --branching).
+      --max-branches N        Maximum branches (implies --branching).
       --max-branch-length N   Maximum commands per branch (implies --branching).
 
     Examples:

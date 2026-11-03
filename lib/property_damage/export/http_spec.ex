@@ -18,7 +18,7 @@ defmodule PropertyDamage.Export.HTTPSpec do
         }
       end
 
-      def http_spec(%CreditAccount{account_ref: id, amount: amount}, _context) do
+      def http_spec(%CreditAccount{account_id: id, amount: amount}, _context) do
         %HTTPSpec{
           method: :post,
           path: "/api/accounts/:account_id/credit",

@@ -261,3 +261,18 @@ Three questions follow.
 - A mix task that runs an artifact.
 - Whether a failure in one non-reference target should retire only that
   target (the active-set rule, as in DR-048 and DR-049).
+
+## Amendment (2026-11-03)
+
+The loader now loads some modules before it resolves atoms. It loads the
+framework's failure and expansion modules and, when the model the file names
+is already loaded, the commands and projections that model lists. It loads no
+other module the file names, so a file still cannot make the reader load an
+arbitrary module.
+
+Why: a fresh VM loads modules lazily, so the atoms a module defines (field
+names, check names, struct names) do not exist until the module loads. The
+loader refuses an atom the running system does not know, so a replay in a
+fresh VM refused a file that the VM that wrote it could read. Loading the
+modules that define the atoms first makes the atoms exist, and the rule that
+reading never creates an atom stays intact.

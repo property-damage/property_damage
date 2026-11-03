@@ -135,11 +135,19 @@ The loader SHALL read the file as data: it SHALL parse the source with `Code.str
 - **WHEN** another failure of seed S under other `targets:` writes into `dir`
 - **THEN** it SHALL write `dir/Model_seedS_2.replay.exs`, leave the first file's bytes unchanged, and its report SHALL name the second path
 
-#### Scenario: The loader creates no atom and loads no module
+#### Scenario: The loader creates no atom and loads only the modules whose atoms it needs
 
 - **GIVEN** an artifact naming an atom the running system does not know, or a struct literal of a module on the code path that is not loaded (as a command or inside a command's field), or of a loaded module that is not a command (such as `%URI{}`) as a command
 - **WHEN** it is loaded
-- **THEN** the loader SHALL refuse it naming the atom or the module, no atom SHALL be created and the module SHALL stay unloaded
+- **THEN** the loader SHALL refuse it naming the atom or the module, no atom SHALL be created and a module the loader is not allowed to load SHALL stay unloaded
+- **AND** the modules the loader is allowed to load SHALL be the framework's failure and expansion modules and, when the model the file names is already loaded, the commands and projections that model lists
+
+#### Scenario: A replay in a fresh VM
+
+- **GIVEN** an artifact written by another VM, replayed in a fresh VM that has loaded the model but not yet its commands, projections or the framework's failure and expansion modules
+- **WHEN** `only: [replay: path]` loads it
+- **THEN** the loader SHALL load those modules before it resolves the file's atoms, so the atoms they define exist and the file loads
+- **AND** the loader SHALL NOT load any other module the file names
 
 #### Scenario: A command field holds a struct of a loaded module
 

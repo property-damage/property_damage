@@ -1,10 +1,10 @@
 defmodule PropertyDamage.Linearization do
   @moduledoc """
-  Linearization checking for parallel execution results.
+  Linearization checking for branching execution results.
 
-  When commands execute in parallel branches, the Linearization module verifies
-  that the observed results can be explained by some sequential (linear) ordering
-  of the commands.
+  Branches run one after another, and this module models their interleavings
+  afterward. It verifies that the observed results can be explained by some
+  sequential (linear) ordering of the commands.
 
   ## What is Linearizability?
 

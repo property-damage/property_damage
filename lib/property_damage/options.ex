@@ -511,13 +511,16 @@ defmodule PropertyDamage.Options do
       depending on PropertyDamage:
 
           # In domain library (no PropertyDamage dependency)
-          defstruct [id: :__external__, :amount]
+          defstruct [:amount, id: :__external__]
 
           # In test project
           PropertyDamage.run(model: M, targets: [A], external_markers: [:__external__])
 
-      This run option is the sole source of atom markers; there is no ambient
-      app-config channel (DR-032).
+      Every step of the run reads this option: sequence generation,
+      execution, the teardown draw, the expansion walk, shrinking, and
+      `only: [replay: path]`. `PropertyDamage.shrink_further/2` takes the same
+      `:external_markers` key. This run option is the sole source of atom
+      markers; there is no ambient app-config channel (DR-032).
       """
     ],
     shrinker_config: [
@@ -639,7 +642,7 @@ defmodule PropertyDamage.Options do
         max_branches: [
           type: :pos_integer,
           default: 3,
-          doc: "Maximum number of parallel branches."
+          doc: "Maximum number of branches in one sequence."
         ],
         max_branch_length: [
           type: :pos_integer,
@@ -1027,7 +1030,8 @@ defmodule PropertyDamage.Options do
     unknown ++ alone
   end
 
-  # Branching sequences run their branches in parallel inside one system; the
+  # Branching sequences run their branches one after another inside one
+  # system and model the interleavings afterward (DR-053); the
   # lockstep comparison steps every target one command at a time, so it has no
   # boundary to compare at inside a branch.
   defp reject_multi_target_branching!(opts) do
@@ -1582,7 +1586,8 @@ defmodule PropertyDamage.Options do
     mutations_per_command: [
       type: :pos_integer,
       default: 5,
-      doc: "Maximum mutations per command type."
+      doc:
+        "Maximum mutations per operator. A command gets up to this cap times the number of operators."
     ],
     max_runs: [
       type: :pos_integer,

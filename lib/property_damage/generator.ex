@@ -4,7 +4,9 @@ defmodule PropertyDamage.Generator do
 
   This module produces `PropertyDamage.Sequence` structs that can be either:
   - **Linear sequences**: Commands executed sequentially
-  - **Branching sequences**: Commands with parallel execution branches
+  - **Branching sequences**: Commands with branches that run one after another
+    from the same forked state (the framework models their interleavings
+    afterward)
 
   ## Linear Sequence Generation
 
@@ -17,18 +19,22 @@ defmodule PropertyDamage.Generator do
         max_commands: 20,
         branching: [
           branch_probability: 0.3,  # 30% chance to create branch point
-          max_branches: 3,          # Up to 3 parallel branches
+          max_branches: 3,          # Up to 3 branches
           max_branch_length: 5      # Each branch max 5 commands
         ]
       )
       # => StreamData producing %Sequence{prefix: [...], branches: [[...], [...]], suffix: [...]}
 
-  ## Ref Dependency Rules
+  ## Placeholder Dependency Rules
 
-  When generating branching sequences, the generator enforces ref isolation:
-  - Refs created in `prefix` can be used in any branch
-  - Refs created in one branch CANNOT be used in another branch
-  - Refs created in branches CAN be used in `suffix`
+  A value the system mints is a placeholder (see
+  `PropertyDamage.External`). When generating branching sequences, the
+  generator draws each branch from the same prefix state, so branches stay
+  isolated:
+  - Placeholders minted in `prefix` can be used in any branch
+  - Placeholders minted in one branch CANNOT be used in another branch
+  - Placeholders minted in branches CAN be used in `suffix`, because the
+    executor merges each branch's resolved values after the branches finish
 
   ## Setup and teardown commands
 
@@ -90,7 +96,7 @@ defmodule PropertyDamage.Generator do
   Pass `branching: [...]` to generate branching sequences:
 
   - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of parallel branches (default: 3)
+  - `:max_branches` - Maximum number of branches (default: 3)
   - `:max_branch_length` - Maximum commands per branch (default: 5)
   - `:min_prefix_length` - Minimum commands before branching (default: 3)
 
@@ -719,8 +725,8 @@ defmodule PropertyDamage.Generator do
 
   defp merge_branch_states(base_state, branches, projection, model) do
     # Apply all branch commands to get merged state
-    # Note: This is a simplification - real parallel execution would need
-    # linearization checking. For generation, we just need a plausible state.
+    # Note: This is a simplification - the executor models the interleavings
+    # of the branches afterward. For generation, we just need a plausible state.
     all_branch_commands = List.flatten(branches)
 
     Enum.reduce(all_branch_commands, base_state, fn command, state ->
