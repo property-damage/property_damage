@@ -150,9 +150,12 @@ The items below ship with this record.
    and ignored, like `when:` and `weight:`. This amends the entry option list of
    DR-049 decision 3.
 
-   The Path item reads `"<target>" ran <Root> as steps [i],[j]`, then the doc.
-   It names no entry key and no ordinal. A target prints a Path item for a root
-   it ran as a listed entry, including the listed identity (`as steps [0]`). A
+   The Path item reads `"<target>" split <Root> (step i) into <A> (step i.0)
+   and <B> (step i.1)`, then the doc. The step numbers are the labels the Run
+   view prints, and each leaf has its own name. It names no entry key and no
+   ordinal. A target prints a Path item for a root it ran as a listed entry,
+   including the listed identity (`"<target>" kept <Root> (step i) as one step`)
+   and an entry with no commands (`"<target>" dropped <Root> (step i)`). A
    target that ran the root as itself without a listed entry (`expansion:
    :identity`, a root absent from the list, or an identity that shrinking
    substituted) prints none.

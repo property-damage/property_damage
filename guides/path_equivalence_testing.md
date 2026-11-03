@@ -272,10 +272,10 @@ Compared     using ==, still differing after 101 ms (bound 100 ms)
   Projection    Counter.Projection
                 Folds the reported total and compares it across targets.
 
-  Path          "left" ran Add as steps [0]
+  Path          "left" kept Add (step 0) as one step
                 (no description: add doc: "..." to the first entry that Counter.Model.add_paths/2 returns for Add)
 
-  Path          "right" ran Add as steps [0.0],[0.1]
+  Path          "right" split Add (step 0) into Add (step 0.0) and Add (step 0.1)
                 (no description: add doc: "..." to the second entry that Counter.Model.add_paths/2 returns for Add)
 
   Command       Counter.Add
@@ -323,8 +323,8 @@ called the difference real.
 
 The "What this checks" section prints the docs of the model, the observation,
 its projection and the command. Its `Path` items say how each target ran the
-root (here `"left"` as step `[0]`, `"right"` as steps `[0.0],[0.1]`) and print
-the `doc:` of the entry that target ran. The `(no description: ...)` lines
+root (here `"left"` ran `Add` as itself and `"right"` split it into two `Add`
+steps) and print the `doc:` of the entry that target ran. The `(no description: ...)` lines
 here say to add that `doc:` to the entry.
 
 Minimal Reproduction lists both sides of the comparison, each under its own

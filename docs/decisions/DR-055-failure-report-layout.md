@@ -190,7 +190,7 @@ Also differed  MyApp.Balances.fees  "direct"  0  "split"  2
   Projection    MyApp.Balances
                 Keeps the balance of bob.
 
-  Path          "split" ran Transfer as steps [0.0],[0.1]
+  Path          "split" split Transfer (step 0) into Transfer (step 0.0) and Transfer (step 0.1)
                 send the amount in two halves
 
   Command       MyApp.Transfer

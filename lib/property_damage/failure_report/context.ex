@@ -308,7 +308,7 @@ defmodule PropertyDamage.FailureReport.Context do
 
   defp path_item(report, target, choice) do
     root = Expansion.short(choice.module)
-    name = ~s("#{target}" ran #{root} as steps #{Enum.join(leaf_labels(choice), ",")})
+    name = path_name(target, root, choice)
 
     case clean(Map.get(choice, :doc)) do
       "" ->
@@ -319,12 +319,27 @@ defmodule PropertyDamage.FailureReport.Context do
     end
   end
 
-  # The labels the listing prints for the leaves of the root, or the root's
-  # own label when it ran as itself under a listed key.
-  defp leaf_labels(%{root: root, leaves?: true, commands: commands}),
-    do: for(leaf <- 0..(length(commands) - 1)//1, do: "[#{root}.#{leaf}]")
+  # The Run view labels a root by its position ("0") and the leaves it ran as
+  # by position and leaf ("0.1"). The sentence uses those labels as step numbers.
+  defp path_name(target, root, %{root: step, leaves?: true, commands: []}),
+    do: ~s|"#{target}" dropped #{root} (step #{step})|
 
-  defp leaf_labels(%{root: root}), do: ["[#{root}]"]
+  defp path_name(target, root, %{root: step, leaves?: true, commands: commands}) do
+    leaves =
+      commands
+      |> Enum.with_index()
+      |> Enum.map(fn {leaf, index} ->
+        "#{Expansion.short(leaf.__struct__)} (step #{step}.#{index})"
+      end)
+
+    ~s|"#{target}" split #{root} (step #{step}) into #{join_and(leaves)}|
+  end
+
+  defp path_name(target, root, %{root: step}),
+    do: ~s|"#{target}" kept #{root} (step #{step}) as one step|
+
+  defp join_and([one]), do: one
+  defp join_and(items), do: Enum.join(Enum.drop(items, -1), ", ") <> " and " <> List.last(items)
 
   defp entry_gap(report, choice, root) do
     function =
