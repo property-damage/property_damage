@@ -115,7 +115,7 @@ defmodule PropertyDamage.ExpansionReportTest do
                report |> expansions("beta") |> Enum.at(report.failed_at_index)
     end
 
-    test "the terminal report names on the failing root's line the entry each side ran" do
+    test "the terminal report says on the failing root's line what each side ran in its place" do
       {report, _entries} = diverged_report()
       root = report.failed_at_index
       text = Formatter.format(report, :terminal, color: false)
@@ -128,9 +128,11 @@ defmodule PropertyDamage.ExpansionReportTest do
       [_, reference, variant] = String.split(text, ~r/^(Reference|Variant): target .*$/m)
       assert text =~ ~s(Reference: target "alpha") and text =~ ~s(Variant: target "beta")
 
-      # Each side's failing root line names the entry it ran; beta's leaves follow it.
-      assert reference =~ ~r/^► \[#{root}\] .*  as Refund\[0\]  ◄── diverged$/m
-      assert variant =~ ~r/^► \[#{root}\] .*  as Refund\[1\]  ◄── diverged$/m
+      # Each side's failing root line says what it ran; beta's leaves follow it.
+      assert reference =~ ~r/^► \[#{root}\] .*  kept as one step  ◄── diverged$/m
+
+      assert variant =~
+               ~r/^► \[#{root}\] .*  split into steps #{root}\.0 and #{root}\.1  ◄── diverged$/m
 
       # The command follows its label on the same line or, when too wide for one, the next.
       assert variant =~

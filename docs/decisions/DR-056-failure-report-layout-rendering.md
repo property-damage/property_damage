@@ -81,10 +81,13 @@ DR-055 also leaves these questions open:
    failure) prints no `►` and no `At` field. The word after `◄──` is
    `diverged`, `did not converge` or `failed`.
 
-4. **A root line names what the target ran there.** A root that ran as leaves
-   names its entry (`as Refund[1]`); a root that ran as itself in place of an
-   entry says `as itself (identity, by shrinking)` or
-   `as itself (identity, forced)`. A command's `label/2` text follows as
+4. **A root line says what the target ran there.** A root that ran as leaves
+   names the steps it split into (`split into steps 0.0 and 0.1`, or
+   `split into step 0.0` for one leaf); a root kept as itself under a listed
+   entry says `kept as one step`; a root whose entry has no commands says
+   `dropped: no step ran in its place`; a root that ran as itself in place of
+   an entry says `as itself (identity, by shrinking)` or
+   `as itself (identity, forced)`. The entry key does not print. A command's `label/2` text follows as
    `# label`. A command that prints over several lines starts on the line
    after its label, so the notes and the `◄──` mark end the label's line and
    never split the printed value.

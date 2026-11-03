@@ -284,11 +284,11 @@ Compared     using ==, still differing after 101 ms (bound 100 ms)
 ## Minimal Reproduction (1 root)
 
 Reference: target "left"
-► [0] %Counter.Add{amount: 0}  as Add[0]  ◄── diverged
+► [0] %Counter.Add{amount: 0}  kept as one step  ◄── diverged
         +0.00s event %Counter.Added{amount: 0, total: 0}
 
 Variant: target "right"
-► [0] %Counter.Add{amount: 0}  as Add[1]  ◄── diverged
+► [0] %Counter.Add{amount: 0}  split into steps 0.0 and 0.1  ◄── diverged
     [0.0] %Counter.Add{amount: 1}
         +0.00s event %Counter.Added{amount: 1, total: 2}
     [0.1] %Counter.Add{amount: -1}
@@ -329,8 +329,9 @@ here say to add that `doc:` to the entry.
 
 Minimal Reproduction lists both sides of the comparison, each under its own
 header, and marks the diverging root `►` in both. The reference ran the root
-itself (`as Add[0]`). The variant ran the second entry (`as Add[1]`), so its
-leaves `[0.0]` and `[0.1]` follow the root, each with the events it produced.
+itself (`kept as one step`). The variant ran the second entry (`split into
+steps 0.0 and 0.1`), so its leaves `[0.0]` and `[0.1]` follow the root, each
+with the events it produced.
 The shrinker cut ten roots down to one, kept the reference on the plain
 command, and could not move `"right"` onto it without losing the failure. The
 one difference left between the targets is the path: a path bug.
@@ -338,8 +339,9 @@ one difference left between the targets is the path: a path bug.
 In the HTML page the header of each root band says the same in plain words,
 for each target that ran the root under a listed entry: `right split it into
 Add (step 0.0) and Add (step 0.1)`, `left kept it as one step`, or, for an
-entry with no commands, `left dropped it`. The terminal listing keeps
-`as Add[1]`.
+entry with no commands, `left dropped it`. The terminal listing says the same
+on the root line, in words of its own: `split into steps 0.0 and 0.1`,
+`kept as one step` or `dropped: no step ran in its place`.
 
 The Projections section shows the same boundary: `total` is 0 for the
 reference and 1 for the variant. The leaves `Add 1` and `Add -1` should add up

@@ -36,8 +36,8 @@ defmodule PropertyDamage.FailureReport.Bundle do
   module as `inspect/1` prints it. A step is `{id, label, command, ran_as,
   failed, entries}`: `label` is the label the page prints (`[3]`, `[setup 0]`,
   `[branch 0.1]`), `command` the module of the command, `ran_as` the note
-  that names the expansion entry a root ran as (else `null`), and `failed`
-  marks the step the failure is reported at. An entry is `{id, n, event}`:
+  that says what a root ran in place of a listed entry (else `null`), and
+  `failed` marks the step the failure is reported at. An entry is `{id, n, event}`:
   `n` counts the events under the step from 1, in print order, after the log
   filter, and `event` is the module of the event struct (`null` for another
   term). Log lines are not entries.

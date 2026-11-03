@@ -1,5 +1,8 @@
+const fs = require("fs");
+const { pathToFileURL } = require("url");
 const { test, expect } = require("@playwright/test");
-const { explained, paired, expanded, url, watchErrors } = require("./pages");
+const { explained, paired, expanded, dir, url, watchErrors } = require("./pages");
+const path = require("path");
 
 // The header of a comparison band is the first line of its .rband.
 const header = (page, label) =>
@@ -31,6 +34,25 @@ test.describe("the band header of a root a target ran under an expansion entry",
 
     const text = await header(page, "5").innerText();
     for (const target of ["carol", "dave"]) expect(text).toContain(`${target} dropped it`);
+  });
+
+  test("the dropped header reads the listing, not the What this checks section", async ({ page }, testInfo) => {
+    // The same page with the "What this checks" section cut out of the embedded report text.
+    const html = fs.readFileSync(path.join(dir, expanded), "utf8");
+    const pattern = /(<script type="application\/json" id="pd-report">)(.*?)(<\/script>)/s;
+    const text = JSON.parse(html.match(pattern)[2]);
+    const cut = text.replace(/## What this checks\n[\s\S]*?(?=\n## )/, "");
+    expect(cut).not.toContain("What this checks");
+    const file = testInfo.outputPath("without-checks.html");
+    fs.writeFileSync(file, html.replace(pattern, (_m, a, _b, c) => a + JSON.stringify(cut).replace(/</g, "\\u003c") + c));
+
+    const errors = watchErrors(page);
+    await page.goto(pathToFileURL(file).href);
+
+    await expect(page.locator('[data-section="what-this-checks"]')).toHaveCount(0);
+    const text5 = await header(page, "5").innerText();
+    for (const target of ["carol", "dave"]) expect(text5).toContain(`${target} dropped it`);
+    expect(errors).toEqual([]);
   });
 
   test("a page whose roots ran as themselves names no path in any header", async ({ page }) => {

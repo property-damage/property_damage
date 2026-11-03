@@ -203,7 +203,7 @@ Reference: target "direct"
         +0.00s event %MyApp.Transferred{amount: 1, fee: 0}
 
 Variant: target "split"
-► [0] %MyApp.Transfer{amount: 1}  as Transfer[1]  ◄── diverged
+► [0] %MyApp.Transfer{amount: 1}  split into steps 0.0 and 0.1  ◄── diverged
     [0.0] %MyApp.Part{amount: 0, last: false}
         +0.00s event %MyApp.Transferred{amount: 0, fee: 1}
     [0.1] %MyApp.Part{amount: 1, last: true}

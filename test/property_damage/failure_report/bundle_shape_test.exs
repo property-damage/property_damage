@@ -240,7 +240,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
         report
         |> B.page_text()
         |> String.split("\n")
-        |> Enum.find(&(String.contains?(&1, "[0]") and String.contains?(&1, "as Refund")))
+        |> Enum.find(&(String.contains?(&1, "[0]") and String.contains?(&1, "split into steps")))
 
       assert line, "the page prints no note on the variant's root"
       assert String.contains?(line, root["ran_as"])

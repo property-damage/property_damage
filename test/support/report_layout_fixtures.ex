@@ -1393,7 +1393,8 @@ defmodule PropertyDamage.Test.ReportLayout do
   @doc false
   # The failing expanded root is [root] and marked in both listings; in
   # the variant's, its `leaves` leaves follow it as [root.j], unmarked, and
-  # its line names `entry`; no label carries the generated root id.
+  # its line says which steps it split into and does not name `entry`; no
+  # label carries the generated root id.
   def assert_expanded_root(text, root, leaves, entry, generated) do
     listings = text |> section("Minimal Reproduction") |> listings()
     assert length(listings) == 2, "two listings expected"
@@ -1411,7 +1412,10 @@ defmodule PropertyDamage.Test.ReportLayout do
     assert Enum.map(following, & &1.label) == labels
     assert Enum.map(following, & &1.marked?) == [true | List.duplicate(false, leaves)]
     assert Enum.count(variant_steps, & &1.marked?) == 1
-    assert hd(following).line =~ entry, "the root line does not name its entry #{entry}"
+    names = for j <- 0..(leaves - 1)//1, do: "#{root}.#{j}"
+    note = "split into steps #{Enum.join(Enum.drop(names, -1), ", ")} and #{List.last(names)}"
+    assert hd(following).line =~ note, "the root line does not say what the root split into"
+    refute hd(following).line =~ entry, "the root line names its entry #{entry}"
 
     refute text =~ "[#{generated}.", "a label carries the generated root id #{generated}"
     assert field_value(text, "At") =~ ~r/^\[#{root}\] /
