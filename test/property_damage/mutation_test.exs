@@ -687,6 +687,46 @@ defmodule PropertyDamage.MutationTest do
       assert json["killed_by_error"] == 4
     end
 
+    test "terminal totals match the markdown totals and each row shows its error kills",
+         %{report: report} do
+      report = %{
+        report
+        | killed: 3,
+          killed_by_error: 7,
+          survived: 0,
+          total: 10,
+          mutation_score: 1.0,
+          by_command: %{
+            TestEvent => %{killed: 3, killed_by_error: 7, survived: 0, total: 10, score: 1.0}
+          },
+          by_operator: %{
+            value: %{killed: 3, killed_by_error: 0, survived: 0, total: 3, score: 1.0},
+            status: %{killed: 0, killed_by_error: 7, survived: 0, total: 7, score: 0.0}
+          }
+      }
+
+      terminal = Formatter.format(report, :terminal)
+      markdown = Formatter.format(report, :markdown)
+
+      assert markdown =~ "| Total | 10 |"
+      assert markdown =~ "| TestEvent | 100.0% | 3 | 7 | 0 | 10 |"
+
+      assert terminal =~ "(3/10 killed, 7 by adapter error)"
+      assert terminal =~ ~r/TestEvent\s+\S+\s+100\.0?%\s+\(3\/10, 7 by error\)/
+      assert terminal =~ ~r/:value\s+\S+\s+100\.0?%\s+\(3\/3, 0 by error\)/
+      assert terminal =~ ~r/:status\s+\S+\s+0\.0?%\s+\(0\/7, 7 by error\)/
+      refute terminal =~ "3/3 killed"
+    end
+
+    test "json says the score excludes mutations killed by an adapter error", %{report: report} do
+      report = %{report | killed_by_error: 4, total: 24}
+      json = Jason.decode!(Formatter.format(report, :json))
+
+      assert json["score_rule"] =~ "killed / (total - killed_by_error)"
+      assert json["score_rule"] =~ "excludes"
+      assert json["killed_by_error"] == 4
+    end
+
     test "formats json output", %{report: report} do
       output = Formatter.format(report, :json)
       decoded = Jason.decode!(output)
