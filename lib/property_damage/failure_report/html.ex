@@ -134,12 +134,16 @@ defmodule PropertyDamage.FailureReport.HTML do
     [
       report.model && inspect(report.model),
       target(report),
-      report.kind && to_string(report.kind),
+      kind_label(report),
       report.seed && "seed #{report.seed}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
   end
+
+  # The failure kind the report states, in the title and the file name.
+  defp kind_label(%FailureReport{kind: nil}), do: nil
+  defp kind_label(%FailureReport{} = report), do: to_string(FailureReport.failure_type(report))
 
   # The failing target's name, after its adapter when the name does not say
   # it: two suites can run one model under one target name against different
@@ -162,7 +166,7 @@ defmodule PropertyDamage.FailureReport.HTML do
       [
         report.model && inspect(report.model),
         target(report),
-        report.kind && to_string(FailureReport.failure_type(report)),
+        kind_label(report),
         report.seed && "seed#{report.seed}"
       ]
       |> Enum.reject(&is_nil/1)
