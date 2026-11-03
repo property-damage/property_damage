@@ -285,7 +285,8 @@ an HTML page there, with an `index.html` that browses them. See
 Every failing run writes a replay artifact into the `replay_dir:` directory
 (default `property_damage_replays`; `replay_dir: false` writes none). The file is
 named `<model>_seed<seed>.replay.exs`, where `<model>` is the last segment of the
-model's module name. The printed report ends with the call that runs it again
+model's module name. If that name already holds a different failure or other
+targets, the file gets a `_<k>` suffix (`<model>_seed<seed>_2.replay.exs`). The printed report ends with the call that runs it again
 without generating anything:
 
 ```elixir
@@ -345,9 +346,12 @@ alias PropertyDamage.Replay
 {:ok, session} = Replay.start(failure)
 {:ok, session, step1} = Replay.step(session)
 IO.inspect(Replay.current_state(session))
-{:ok, session, step2} = Replay.step(session)
-# ... continue stepping
-Replay.stop(session)
+
+# A failure that shrinks to one command has no second step: `{:done, session}`
+case Replay.step(session) do
+  {:ok, session, _step2} -> Replay.stop(session)  # ... continue stepping
+  {:done, session} -> Replay.stop(session)
+end
 ```
 
 ### Visual Debugging Tools
@@ -474,15 +478,14 @@ Track how thoroughly your model is being exercised:
 ```elixir
 alias PropertyDamage.Coverage
 
-# Single run coverage
-result = PropertyDamage.run(model: M, targets: [A])
-coverage = PropertyDamage.coverage(result, M)
+# Single run coverage: `coverage: true` attaches the tracker to the success stats
+{:ok, stats} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+coverage = stats.coverage
 IO.puts(Coverage.format(coverage))
 
-# Track across multiple runs
-tracker = Coverage.new(M)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
+# Track across multiple runs: merge the trackers
+{:ok, stats2} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+tracker = Coverage.merge(stats.coverage, stats2.coverage)
 
 # Check thresholds in CI
 unless Coverage.meets_threshold?(tracker, command: 80, transition: 50) do
@@ -685,7 +688,7 @@ PropertyDamage.run(
   max_runs: 100,
   branching: [
     branch_probability: 0.3,   # Probability of creating branch points
-    max_branches: 3,           # Max parallel branches
+    max_branches: 3,           # Max branches per branch point
     max_branch_length: 5,      # Max commands per branch
     min_prefix_length: 3       # Min commands before branching
   ]
@@ -853,14 +856,15 @@ defmodule MyTest.Nemesis.PartitionNetwork do
 
   @impl true
   def inject(%__MODULE__{partition_type: type}, ctx) do
-    :ok = Toxiproxy.partition(ctx.proxy, type)
-    {:ok, [%NetworkPartitioned{type: type}]}
+    # ctx.adapter_context is what the adapter's setup/1 returned
+    :ok = Toxiproxy.partition(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionStarted{type: type}]}
   end
 
   @impl true
   def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.proxy, type)
-    {:ok, [%NetworkRestored{type: type}]}
+    Toxiproxy.restore(ctx.adapter_context.proxy, type)
+    {:ok, [%PartitionEnded{type: type}]}
   end
 
   # Auto-restore after duration
@@ -907,7 +911,7 @@ alias PropertyDamage.Nemesis.NetworkLatency
 def commands do
   [
     {CreateOrder, weight: 5},
-    {NetworkLatency, weight: 1}  # Uses defaults: 100ms latency, 5s duration
+    {NetworkLatency, weight: 1}  # Drawn per command: 50-500ms latency, 0-50ms jitter, 1-10s duration
   ]
 end
 
@@ -1124,6 +1128,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 
 # Generate ExUnit regression test
 test_code = PropertyDamage.Export.to_exunit(failure)
+File.mkdir_p!("test/regressions")
 File.write!("test/regressions/seed_#{failure.seed}_test.exs", test_code)
 
 # Generate standalone scripts
@@ -1365,6 +1370,7 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 | `:seed_library` | Path to seed library JSON file |
 | `:generate_tests` | Directory for ExUnit test files |
 | `:tags` | Tags for seed library entries (default: `[:auto_detected]`) |
+| `:description` | Description for the seed library entries |
 | `:dedup` | Enable deduplication (default: false) |
 | `:dedup_threshold` | Similarity threshold (default: 0.90) |
 | `:verbose` | Print actions taken (default: false) |
@@ -1621,7 +1627,7 @@ PropertyDamage
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
 > docs front page: invariant suggestions, failure intelligence
-> (clustering/verification), production forensics, and Livebook visualization.
+> (clustering/verification), and production forensics.
 > They compile and have moduledocs, but have not been validated against a real
 > SUT yet. Use them at your own risk.
 
