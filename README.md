@@ -349,7 +349,7 @@ IO.inspect(Replay.current_state(session))
 
 # A failure that shrinks to one command has no second step: `{:done, session}`
 case Replay.step(session) do
-  {:ok, session, _step2} -> Replay.stop(session)  # ... continue stepping
+  {:ok, session, _step2} -> Replay.stop(session)  # or keep calling Replay.step/1 here
   {:done, session} -> Replay.stop(session)
 end
 ```
@@ -547,10 +547,12 @@ classifier = fn state ->
   end
 end
 
-# Create tracker with classifier
+# Create tracker with classifier and record failing runs' reports
 tracker = Coverage.new(MyModel, state_classifier: classifier)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
+{:error, report1} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: 1)
+{:error, report2} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: 2)
+tracker = Coverage.record(tracker, {:error, report1})
+tracker = Coverage.record(tracker, {:error, report2})
 
 # View state class distribution
 counts = Coverage.state_class_counts(tracker)
@@ -566,6 +568,8 @@ state_matrix = Coverage.state_class_matrix(tracker)
 # Format with state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
+
+`Coverage.record/2` takes a failing run's `{:error, report}`. It does not accept a passing `run/1` result; for a passing run, use `coverage: true` and `stats.coverage`, as shown above.
 
 State class coverage helps answer: "Have we tested all interesting state configurations?"
 
@@ -1370,7 +1374,6 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 | `:seed_library` | Path to seed library JSON file |
 | `:generate_tests` | Directory for ExUnit test files |
 | `:tags` | Tags for seed library entries (default: `[:auto_detected]`) |
-| `:description` | Description for the seed library entries |
 | `:dedup` | Enable deduplication (default: false) |
 | `:dedup_threshold` | Similarity threshold (default: 0.90) |
 | `:verbose` | Print actions taken (default: false) |
