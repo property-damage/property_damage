@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-03
+
+This release makes a failure easier to read and to explain, and unifies how
+PropertyDamage runs one target or several. It breaks the 0.2 API in many places;
+every BREAKING entry under Changed and Removed names its replacement.
+
+- One runner, `PropertyDamage.run/1`, runs one or more targets in lockstep and
+  compares them through `@compare` observations (DR-043 to DR-047, DR-051).
+- Setup and teardown commands replace the model's lifecycle hooks, and
+  `expansions/0` lets one root run as several commands (DR-048 to DR-050).
+- A run's failure is a `%PropertyDamage.Failure{}` with a kind, and the report
+  carries the log lines of each step (DR-041, DR-054 to DR-056).
+- The failure report renders as an HTML page, and `mix pd.explain` attaches an
+  explanation to it (DR-057, DR-058).
+- Persisted files move to format version 15; older files are refused.
+
 ### Added
 
 - **A bundle in every HTML failure page (DR-058).** Each page carries a
@@ -2032,5 +2048,7 @@ end, and trimmed the documented surface to what has been validated.
 - Interactive Livebook demo notebook
 - ExDoc configuration with module groups
 
+[Unreleased]: https://github.com/property-damage/property_damage/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/property-damage/property_damage/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/property-damage/property_damage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/property-damage/property_damage/releases/tag/v0.1.0
