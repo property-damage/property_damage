@@ -1039,13 +1039,14 @@ The shrinker tries the root alone first, so the report shows the smallest
 expansion that still fails. Phase 4 then simplifies the arguments of the roots
 and of the leaves that remain.
 
-Each candidate is only accepted if it reproduces the **same failure** — same failure
-type and same check name. If removing a command causes a different failure, it's
+Each candidate is only accepted if it reproduces the **same failure**: same failure
+type, same check name, and same target index. A candidate that fails at a later
+root than the original is rejected too. If removing a command causes a different failure, it's
 rejected. This ensures the minimal sequence demonstrates the original bug, not a
 different one. For a divergence between targets (or a failure to converge), the name is the
 `@compare` key `{Projection, function}`: a candidate that diverges on another
 observation, or in another target, is a different failure and is rejected too.
-When a run has several failures (in every run, retirement or not), only the primary one (the first by root, then by
+When a run has several failures (for example, when a target leaves the run after its adapter fails and the others go on), only the primary one (the first by root, then by
 target order) is shrunk, and `report.other_failures` lists the rest.
 
 ### Shrinking and References
