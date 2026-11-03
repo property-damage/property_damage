@@ -811,6 +811,25 @@ defmodule PropertyDamage.MutationTest do
     end
   end
 
+  describe "run/1 killed mutation message" do
+    test "a killed mutation carries the failure message of the report" do
+      {:ok, report} =
+        Mutation.run(
+          model: FixtureModel,
+          targets: [PropertyDamage.Test.TestAdapter],
+          operators: [:value],
+          mutations_per_command: 1,
+          max_runs: 1
+        )
+
+      assert report.killed > 0
+
+      for %{failure_message: message} <- report.killed_mutations do
+        assert message =~ "mutation progress fixture: always fails"
+      end
+    end
+  end
+
   # ============================================================================
   # Progress projection (DR-022)
   # ============================================================================

@@ -2,7 +2,7 @@ defmodule PropertyDamage.Mutation.Runner do
   @moduledoc false
 
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
-  alias PropertyDamage.{Options, Telemetry}
+  alias PropertyDamage.{FailureReport, Options, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate, Reporter}
 
@@ -254,9 +254,13 @@ defmodule PropertyDamage.Mutation.Runner do
     end
   end
 
-  defp failure_message(%{failure_message: msg}) when is_binary(msg), do: msg
-  defp failure_message(%{failure_type: type}), do: to_string(type)
-  defp failure_message(_), do: "Unknown failure"
+  # A failed run returns a failure report; its message names the failing check.
+  # Anything else gets a readable rendering so the update is never blank.
+  defp failure_message(%FailureReport{} = report) do
+    FailureReport.failure_message(report) || inspect(report.failure_reason)
+  end
+
+  defp failure_message(other), do: inspect(other)
 
   # Emit a per-mutation update (DR-022). `result` is the raw result map recorded
   # in the report; the projection wraps the relevant fields in a MutationUpdate.
