@@ -229,11 +229,32 @@ A page with an explanation opens on an Explanation tab, next to the Run tab. The
 
 Every claim lists the evidence it cites. Click a citation to switch to the Run view, where the page unfolds the cited step, event or section, scrolls to it and highlights it. A `source:` citation names lines of a module's source file: click it to unfold those lines under the citation, and click again to fold them. If the page cannot find a cited id, the citation shows as `(not in this page)` and does nothing when clicked.
 
-The explanation is only as private as the page. The bundle in the page holds the full source of the model, the projections, the commands, the events and the adapters.
+## Sharing a failure page
 
-PropertyDamage masks secret-shaped literals in only some of that source. It scans each source file that holds an adapter (a sub-adapter too), and any model or command defined in the same file. On a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. A name counts when its last `_`-separated part is one of those words, so `api_key` and `admin_password` count and `keys` does not. When such a line ends in a comma or an opening bracket, the next line is masked too. The page records the count of masked literals and the rule.
+A failure page is as private as the people you send it to. It carries the report in full, and the bundle that an explanation cites holds the full source of the model, the projections, the commands, the events and the adapters. If the system under test uses real credentials, share the page only with people who may see them.
 
-The rule reads one line at a time and has gaps. It does not scan a source file that holds no adapter. In the files it scans, it does not mask other literals, such as an internal host name, a bare query string like `"?token=abc"`, a heredoc, a sigil or a comment. It also masks harmless strings on a line that names a secret. Read the page before you share it.
+### What the page redacts
+
+Only one thing: secret-shaped string literals in the source of an adapter file. PropertyDamage scans each source file that holds an adapter (a sub-adapter too), and any model or command defined in the same file. On a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. A name counts when its last `_`-separated part is one of those words, so `@api_key`, `password:` and `"admin_token" =>` count and `keys` does not. When such a line ends in a comma or an opening bracket, the next line is masked too, and no line after it unless that line names a secret itself. The page records the count of masked literals and the rule.
+
+### What the page does not redact
+
+The rule reads one line at a time, and the page redacts nothing else.
+
+- **Logged values.** The page prints a line from `PropertyDamage.log/2` exactly as the adapter gave it. A `log:` filter only hides lines from one reader. Redact in the code that logs, as the [log lines guide](log_lines.md#a-filter-is-not-redaction) shows.
+- **The target config.** The Reproduction section prints each target's `config:` as written, so `config: %{password: "hunter2"}` appears in the page as `targets: [{MyApp.Adapter, config: %{password: "hunter2"}}]`.
+- **Events and command arguments.** The page prints them in full.
+- **A source file that holds no adapter.** The page does not scan it.
+- **A value on the line after its key.** When a formatter wraps `password:` and puts the string on the next line, the key line ends in `:` and masks nothing. The string stays.
+- **A secret deep in a multi-line map or call.** The reach past a secret-named line is one line. In `%{token: "..."`, `user: "..."`, `host: "..."`, `login: "..."` on four lines, the page masks the `token` and `user` strings and leaves `host` and `login`, because neither line names a secret word.
+- **A name that is not an identifier.** A key such as `"x-api-key"` has hyphens, so it does not count as a secret name.
+- **A secret in a bare string, a comment, a heredoc, a sigil or a charlist.** `"https://host.test/?token=abc"`, `# password is "hunter2"` and `~s(password: "hunter2")` pass unchanged.
+
+The rule also masks harmless strings on a line that names a secret. Read the page before you share it.
+
+### Keep credentials out of the source
+
+To keep a credential off the page, never write it as a literal in the adapter file or the target config. Read it from the environment when the run starts, for example `System.fetch_env!("MYAPP_PASSWORD")` in the adapter's `setup/1`. The page then holds the call, not the value. A target config can name the variable, not its content.
 
 ## The Failure Report
 
