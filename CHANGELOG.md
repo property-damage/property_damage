@@ -1342,6 +1342,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A resource poller that throws or exits no longer crashes a run in `:log` check mode.**
+  The log formatter called `Exception.message/1` on a `{kind, reason}` pair.
+  It now logs `poll_fn threw: ...` or `poll_fn exited: ...`, and the same for
+  the handler and `on_timeout`.
 - **`mix pd.reshrink` runs again.** The task never started the `:telemetry`
   application, so every re-shrink stopped with "re-shrink could not run" and
   exit 1. It now starts the project's applications after compiling, as

@@ -759,12 +759,27 @@ defmodule PropertyDamage.Executor.Finalization do
 
   # Format resource poller errors for logging
   # Uses Exception.message/1 for exceptions, inspect for other terms
+  defp format_resource_poller_error({:poll_fn_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "poll_fn #{escape_verb(kind)}: #{inspect(reason)}"
+  end
+
   defp format_resource_poller_error({:poll_fn_error, exception, _stacktrace}) do
     "poll_fn raised: #{Exception.message(exception)}"
   end
 
+  defp format_resource_poller_error({:handler_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "handler #{escape_verb(kind)}: #{inspect(reason)}"
+  end
+
   defp format_resource_poller_error({:handler_error, exception, _stacktrace}) do
     "handler raised: #{Exception.message(exception)}"
+  end
+
+  defp format_resource_poller_error({:on_timeout_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "on_timeout #{escape_verb(kind)}: #{inspect(reason)}"
   end
 
   defp format_resource_poller_error({:on_timeout_error, exception, _stacktrace}) do
@@ -782,6 +797,9 @@ defmodule PropertyDamage.Executor.Finalization do
   defp format_resource_poller_error(reason) do
     inspect(reason)
   end
+
+  defp escape_verb(:exit), do: "exited"
+  defp escape_verb(:throw), do: "threw"
 
   defp timeout_to_failure({:timeout, _id, info}) do
     %{

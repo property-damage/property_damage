@@ -348,4 +348,53 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
            ),
            "the resource-poller error must preempt the teardown check"
   end
+
+  # ===========================================================================
+  # A resource poller whose poll_fn throws is captured as a
+  # {:poll_fn_error, {kind, reason}, stacktrace} tuple. In :log check mode the
+  # finalizer formats it for the log line and the run completes.
+  # ===========================================================================
+  defmodule ThrowingPollerAdapter do
+    use PropertyDamage.Adapter
+    @impl true
+    def setup(config), do: {:ok, config}
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%Trigger{}, _ctx, runtime) do
+      runtime.start_poller.(
+        poll_fn: fn -> throw(:poll_thrown) end,
+        handler: fn _ -> :ok end,
+        interval_ms: 10,
+        timeout_ms: 1000
+      )
+
+      {:ok, [%Started{}]}
+    end
+  end
+
+  test "a throwing poll_fn in :log check mode completes the run and logs the error" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, queue} = EventQueue.start_link()
+
+        result =
+          try do
+            Executor.run(
+              Sequence.linear([%Trigger{}]),
+              ResourceVsTeardownModel,
+              ThrowingPollerAdapter,
+              event_queue: queue,
+              check_mode: :log
+            )
+          after
+            EventQueue.stop(queue)
+          end
+
+        assert {:ok, %{success: true}} = result
+      end)
+
+    assert log =~ "poll_fn threw: :poll_thrown"
+  end
 end
