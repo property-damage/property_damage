@@ -222,10 +222,11 @@ The system SHALL generate visual sequence diagrams from test executions in Merma
 - **WHEN** `Diagram.from_failure_report(report, format)` is called
 - **THEN** the diagram SHALL show the command execution flow, events returned from the SUT, and the failure point
 
-#### Scenario: State changes in diagrams
+#### Scenario: State participant in diagrams
 
 - **WHEN** the `:show_state` option is `true`
-- **THEN** the diagram SHALL include state changes after each command
+- **THEN** the Mermaid and PlantUML diagrams SHALL declare a `State` participant
+- **AND** the diagram SHALL draw no state-change lines, and the WebSequence format SHALL ignore the option
 
 #### Scenario: Failure highlighting
 

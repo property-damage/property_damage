@@ -385,10 +385,14 @@ defmodule PropertyDamage.DiagramTest do
             nil
         end)
 
-      assert :title in option_keys
+      assert Enum.sort(option_keys) == [:failed_at_index, :max_value_length, :show_state, :title]
       assert Enum.filter(removed, &(&1 in option_keys)) == []
 
       {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(Diagram)
+
+      for key <- option_keys do
+        assert moduledoc =~ "`#{inspect(key)}`"
+      end
 
       for key <- removed do
         refute moduledoc =~ inspect(key)
