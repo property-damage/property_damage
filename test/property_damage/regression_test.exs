@@ -202,6 +202,36 @@ defmodule PropertyDamage.RegressionTest do
       {:ok, ^path} = handler.(failure)
       assert File.exists?(path)
     end
+
+    @tag :tmp_dir
+    test "leaves an unreadable library file untouched and returns an error",
+         %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "seeds.json")
+      garbage = "not a seed library {"
+      File.write!(path, garbage)
+      handler = Regression.add_to_library(path)
+
+      assert {:error, {:seed_library_unreadable, ^path, _reason}} =
+               handler.(make_failure(12_345))
+
+      assert File.read!(path) == garbage
+    end
+
+    @tag :tmp_dir
+    test "handle_failure warns that an unreadable library was left unchanged",
+         %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "seeds.json")
+      File.write!(path, "not a seed library {")
+
+      log =
+        capture_log(fn ->
+          result = Regression.handle_failure(make_failure(12_345), seed_library: path)
+          assert {:error, {:seed_library_unreadable, ^path, _}} = result.added_to_library
+        end)
+
+      assert log =~ "exists but could not be read"
+      assert log =~ "left unchanged"
+    end
   end
 
   describe "Regression.generate_test/2" do

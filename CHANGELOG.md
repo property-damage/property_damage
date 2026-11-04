@@ -1400,6 +1400,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **The regression handler never overwrites a seed library it cannot read.**
+  A `:seed_library` file that existed but did not load (corrupt, or written by
+  another version) was replaced by a new library holding only the new seed.
+  The handler now leaves the file unchanged, returns
+  `{:error, {:seed_library_unreadable, path, reason}}` and logs a warning.
 - **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
   an integer field, the candidate values repeated (an original of 1 tried 0
   three times), so `changes` carried duplicate entries. The candidates are now
