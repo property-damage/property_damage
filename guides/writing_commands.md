@@ -1215,7 +1215,7 @@ applies settle/retry logic — re-executing the probe until it succeeds or times
 
 Key behaviors:
 - Retried automatically according to settle configuration
-- Prioritized for removal during shrinking (read-only commands rarely contribute to bugs)
+- Not prioritized for removal during shrinking by default: the shrinker orders by the `:shrink` key alone, which defaults to `:neutral`. Set `shrink: :prefer_remove` (as above) to remove probes first
 - Do not mutate SUT state — safe to retry
 - Use for verifying eventual consistency (e.g., "does the order appear in search results?")
 
