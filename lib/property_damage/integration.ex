@@ -53,7 +53,9 @@ defmodule PropertyDamage.Integration do
         }
       )
 
-  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`
+  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`. The `:json`
+  format writes the run counts and, for each failure, its seed, check and error
+  message.
   """
 
   alias PropertyDamage.FailureIntelligence
@@ -231,7 +233,8 @@ defmodule PropertyDamage.Integration do
   - `:terminal` - Print to console
   - `:markdown` - Generate markdown file
   - `:junit` - Generate JUnit XML for CI
-  - `:json` - Generate JSON report
+  - `:json` - Generate a JSON file with the run counts and, per failure, its
+    seed, check and error message
 
   ## Options
 
@@ -261,7 +264,7 @@ defmodule PropertyDamage.Integration do
   end
 
   def generate_report(result, %{format: :json, path: path}) do
-    content = Jason.encode!(result, pretty: true)
+    content = result |> json_report() |> Jason.encode!(pretty: true)
     write_report!(path, content)
     IO.puts("JSON report saved to: #{path}")
   end
@@ -713,6 +716,29 @@ defmodule PropertyDamage.Integration do
 
     #{failure_entries}
     """
+  end
+
+  # The JSON report holds the data the Markdown report shows, as plain values:
+  # a failure report is a struct with no JSON encoding.
+  defp json_report(result) do
+    %{
+      success: result.success,
+      model: inspect(result.model),
+      adapter: inspect(result.adapter),
+      duration_ms: result.duration_ms,
+      total_runs: result.total_runs,
+      passed: result.passed,
+      failed: result.failed,
+      failures: Enum.map(result.failures, &json_failure/1)
+    }
+  end
+
+  defp json_failure(failure) do
+    %{
+      seed: failure.seed,
+      check: inspect(PropertyDamage.FailureReport.check_name(failure)),
+      error: PropertyDamage.FailureReport.failure_message(failure)
+    }
   end
 
   defp format_junit_report(result) do
