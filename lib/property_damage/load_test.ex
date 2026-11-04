@@ -63,7 +63,8 @@ defmodule PropertyDamage.LoadTest do
   Each worker generates a sequence from the model's `commands/0` and runs the
   prefix and suffix commands of that sequence. It does not run the model's
   `setup_each/0` or `teardown_each/0` commands, and it does not apply the
-  model's `expansions/0`. If the model needs fixtures, create them in the
+  model's `expansions/0`. A root is a command entry of the model's
+  `commands/0`, as `PropertyDamage.Model` uses the word. If the model needs fixtures, create them in the
   adapter's `setup/1` or seed the system before the test starts. The generator
   still draws the roots against the state the setup commands would leave, so a
   root that uses a value a setup command creates fails in a load test.
