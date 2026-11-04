@@ -7,11 +7,16 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   ## Configuration
 
-  - `:latency_ms` - Base latency to add (default: 100ms)
-  - `:jitter_ms` - Random jitter ± this value (default: 0)
-  - `:duration_ms` - How long the latency persists (default: 5000ms)
+  - `:latency_ms` - Base latency to add (struct default: 100ms)
+  - `:jitter_ms` - Random jitter ± this value (struct default: 0)
+  - `:duration_ms` - How long the latency persists (struct default: 5000ms)
   - `:target` - A label copied into the emitted events (default: `:all`). It does
     not change which traffic the toxic affects.
+
+  The defaults above apply to a hand-built struct. When a model lists this
+  nemesis in `commands/0`, `new!/2` draws the values instead: `:latency_ms` in
+  50..500, `:jitter_ms` in 0..50 and `:duration_ms` in 1000..10_000. A key in
+  the command's `overrides:` replaces its draw.
 
   ## Usage with Toxiproxy
 

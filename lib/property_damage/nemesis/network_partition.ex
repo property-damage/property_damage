@@ -14,10 +14,15 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
 
   ## Configuration
 
-  - `:partition_type` - Type of partition (default: `:full`)
-  - `:duration_ms` - How long the partition lasts (default: 5000ms)
+  - `:partition_type` - Type of partition (struct default: `:full`)
+  - `:duration_ms` - How long the partition lasts (struct default: 5000ms)
   - `:target` - A label copied into the emitted events (default: `:all`). It does
     not change which traffic the partition blocks.
+
+  The defaults above apply to a hand-built struct. When a model lists this
+  nemesis in `commands/0`, `new!/2` draws the values instead: `:partition_type`
+  from `:full`, `:upstream` and `:downstream`, and `:duration_ms` in
+  1000..15_000. A key in the command's `overrides:` replaces its draw.
 
   ## Usage with Toxiproxy
 

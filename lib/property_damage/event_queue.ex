@@ -16,10 +16,22 @@ defmodule PropertyDamage.EventQueue do
 
   ## Event Entries
 
-  Each entry in the queue contains:
+  An entry is a map. Its keys depend on how the event arrived.
+
+  An entry pushed by `push/3` (an injector adapter) contains:
 
   - `event` - The event struct
   - `adapter_module` - The injector adapter that received it
+  - `timestamp` - Monotonic time when the event was pushed
+
+  An entry pushed by `push_from_poller/5` (a resource poller) has no
+  `adapter_module`. It contains:
+
+  - `event` - The event struct
+  - `source` - Always `:resource_poller`
+  - `poller_id` - Reference identifying the poller instance
+  - `command_index` - Index of the command that started the poller
+  - `branch_id` - The branch identifier, or `nil`
   - `timestamp` - Monotonic time when the event was pushed
 
   ## Example
@@ -39,6 +51,9 @@ defmodule PropertyDamage.EventQueue do
 
   @typedoc """
   Event entry with metadata.
+
+  This type describes the entry `push/3` builds. An entry from
+  `push_from_poller/5` has the keys listed under "Event Entries" instead.
   """
   @type entry :: %{
           event: struct(),
@@ -158,14 +173,21 @@ defmodule PropertyDamage.EventQueue do
 
   ## Returns
 
-  List of event entries, each containing `:event`, `:adapter_module`,
-  and `:timestamp`.
+  List of event entries. Every entry has `:event` and `:timestamp`. An entry
+  from `push/3` also has `:adapter_module`; an entry from `push_from_poller/5`
+  has `:source`, `:poller_id`, `:command_index` and `:branch_id` instead (see
+  "Event Entries").
 
   ## Example
 
       entries = EventQueue.drain(queue)
-      Enum.each(entries, fn %{event: event, adapter_module: adapter} ->
-        IO.puts("Event from \#{adapter}: \#{inspect(event)}")
+
+      Enum.each(entries, fn
+        %{adapter_module: adapter, event: event} ->
+          IO.puts("Event from \#{adapter}: \#{inspect(event)}")
+
+        %{source: :resource_poller, poller_id: poller, event: event} ->
+          IO.puts("Event from poller \#{inspect(poller)}: \#{inspect(event)}")
       end)
   """
   @spec drain(pid()) :: [entry()]

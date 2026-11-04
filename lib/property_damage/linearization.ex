@@ -15,8 +15,11 @@ defmodule PropertyDamage.Linearization do
   2. Each command's observed events are consistent with what the model predicts
      for the state at that command's position in the ordering
 
-  If no such ordering exists, the system has exhibited non-linearizable behavior,
-  which typically indicates a race condition or consistency bug.
+  If no such ordering exists, the observed results are non-linearizable: no
+  sequential order of the branch commands explains them against the model. The
+  branches run one after another, so this path detects no race (DR-053). A
+  refutation points at a disagreement between the model and the system, such
+  as a lost update or a check that fails in every order.
 
   ## Algorithm
 
@@ -72,15 +75,21 @@ defmodule PropertyDamage.Linearization do
   (see `linearization_count/1`). `check/5` examines at most `:max_candidates`
   interleavings (default 1000); if none is consistent but the candidate space
   was not exhausted, it returns `{:indeterminate, checked}` instead of
-  claiming a race.
+  claiming a refutation.
 
   ## Usage
 
       case Linearization.check(branches, branch_events, projections, model,
              start_index: 3) do
-        {:ok, linearization} -> # consistent ordering found
-        :no_linearization    -> # exhaustively refuted: race condition
-        {:indeterminate, n}  -> # cannot verify (no simulator / cap reached)
+        {:ok, linearization} ->
+          # a consistent ordering was found
+        {:no_linearization, refutation} ->
+          # every ordering was refuted. `refutation` is nil when each ordering
+          # failed on event incompatibility alone, or a map
+          # `%{branch_id:, position:, command:, check_name:, reason:}` for the
+          # check that failed in the furthest-progressing ordering
+        {:indeterminate, n} ->
+          # cannot verify (no simulator / cap reached)
       end
   """
 
@@ -121,7 +130,7 @@ defmodule PropertyDamage.Linearization do
   - `{:ok, linearization}` - A consistent sequential ordering (tagged commands)
   - `{:no_linearization, refutation}` - All interleavings examined and refuted.
     `refutation` is `nil` when every ordering failed purely on event
-    incompatibility (a classic race, e.g. a lost update), or a map
+    incompatibility (e.g. a lost update), or a map
     `%{branch_id:, position:, command:, check_name:, reason:}` describing the
     synchronous check that failed in the furthest-progressing ordering, so
     the executor can report it with the same precision as a linear failure.
@@ -268,7 +277,7 @@ defmodule PropertyDamage.Linearization do
         end
       else
         # No ordering can reproduce this command's observed events from the
-        # state THIS ordering reached: an event-level race (e.g. a lost
+        # state THIS ordering reached: an event-level disagreement (e.g. a lost
         # update). Refuted with no check detail.
         {:halt, {:refuted, depth, nil}}
       end

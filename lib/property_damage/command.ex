@@ -367,7 +367,9 @@ defmodule PropertyDamage.Command do
       #   settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
       #   when: fn _ -> true end,
       #   overrides: %{},
-      #   weight: 1
+      #   weight: 1,
+      #   observables: [],
+      #   idempotent: true
       # }
   """
   defmacro __using__(opts \\ []) do

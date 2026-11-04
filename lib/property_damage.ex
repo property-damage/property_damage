@@ -98,8 +98,11 @@ defmodule PropertyDamage do
 
   ## Coverage Metrics
 
-  Track how thoroughly your model is being exercised:
+  Track how thoroughly your model is being exercised. `coverage: true` attaches
+  the tracker to the success stats as `:coverage`; a passing result without it
+  raises `ArgumentError`:
 
+      result = PropertyDamage.run(model: MyModel, targets: [MyAdapter], coverage: true)
       coverage = PropertyDamage.coverage(result, MyModel)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 
@@ -218,7 +221,25 @@ defmodule PropertyDamage do
   - `:max_commands` - Maximum commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility (default: random)
-  - `:shrink` - Whether to shrink failing sequences (default: true)
+  - `:shrink` - Whether to shrink failing sequences (default: true; `false`
+    under `only: [replay: path]`)
+  - `:run_nonce` - A 64-bit integer that seeds the values the client mints for
+    a run (default: strong random entropy). Hold the seed and vary the nonce to
+    run the same plan with fresh minted values on a shared system
+  - `:only` - Run part of a campaign: `[run: n, variants: names,
+    with_reference: boolean]` runs run `n` of the seed alone, and
+    `[replay: path]` runs a replay artifact (default: the whole campaign)
+  - `:replay_dir` - The directory a failing run writes its replay artifact
+    into, created when missing (default: `"property_damage_replays"`); `false`
+    writes none
+  - `:coverage` - Accumulate the command, transition and state coverage of the
+    whole run and attach the tracker to the success stats as `:coverage`
+    (default: false)
+  - `:external_markers` - Extra atoms to treat as `external()` markers, for
+    domain libraries that mark server-generated fields without depending on
+    PropertyDamage (default: `[]`)
+  - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` updates
+    during the run and a final result (default: nil)
   - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
     disabled), `true` (default file), or a path. Previously-failing seeds are
     replayed before exploration; a still-failing replay halts the run.
@@ -405,6 +426,9 @@ defmodule PropertyDamage do
     is handed to the adapter on the `PropertyDamage.Runtime` handle
     (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
     the "Mocking Third-Party Services" guide.
+  - `:expansion` - How this target chooses among a root's expansions:
+    `:random` (default), `:identity` or `:reference`. See
+    `PropertyDamage.Target`.
 
   ## Examples
 

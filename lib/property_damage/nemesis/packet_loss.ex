@@ -7,10 +7,15 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   ## Configuration
 
-  - `:loss_percent` - Percentage of packets to drop (0-100, default: 10)
-  - `:duration_ms` - How long packet loss persists (default: 5000ms)
+  - `:loss_percent` - Percentage of packets to drop (0-100, struct default: 10)
+  - `:duration_ms` - How long packet loss persists (struct default: 5000ms)
   - `:target` - A label copied into the emitted events (default: `:all`). It does
     not change which traffic loses packets.
+
+  The defaults above apply to a hand-built struct. When a model lists this
+  nemesis in `commands/0`, `new!/2` draws the values instead: `:loss_percent`
+  in 5..50 and `:duration_ms` in 1000..10_000. A key in the command's
+  `overrides:` replaces its draw.
 
   ## Usage with Toxiproxy
 

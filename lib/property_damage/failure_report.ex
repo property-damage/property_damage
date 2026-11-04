@@ -198,7 +198,10 @@ defmodule PropertyDamage.FailureReport do
   campaign's runs before the failing one plus the run the report describes;
   `run_check_fires` holds that run's own share, so a further shrink can
   replace it with its reproduction's. Convenience accessors
-  derive the common views: `failure_type/1` (the kind), `check_name/1`,
+  derive the common views: `failure_type/1` (the fine-grained
+  `PropertyDamage.Failure.kind/1` of `failure_reason`, not the report `kind`
+  above: an idempotency violation gives `:idempotency_violation` where the
+  report `kind` is `:check_failed`), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
 

@@ -21,7 +21,8 @@ defmodule PropertyDamage.Nemesis do
 
   1. **Injection**: The Nemesis command is generated and executed
   2. **Active Period**: The fault is active for some duration
-  3. **Restoration**: The fault is removed (automatically or explicitly)
+  3. **Restoration**: The framework removes the fault only if the nemesis's
+     `auto_restore?/0` returns true. Otherwise the adapter or the test restores it.
 
   ## Example: Network Partition
 
@@ -186,10 +187,14 @@ defmodule PropertyDamage.Nemesis do
   @doc """
   Restore normal operation after a fault.
 
-  Called automatically when:
-  - The fault's duration expires
-  - A RestoreFault command is executed
-  - Test sequence ends (cleanup)
+  The framework calls it only for a fault whose nemesis returns true from
+  `auto_restore?/0`, and only when:
+  - The fault's duration has expired (checked after each command)
+  - The test sequence ends (cleanup)
+
+  A fault whose nemesis returns false from `auto_restore?/0` is never restored
+  by the framework, not even at the end of the sequence. The adapter or the test
+  must restore it.
 
   ## Parameters
 
@@ -217,9 +222,10 @@ defmodule PropertyDamage.Nemesis do
   @doc """
   (Optional) Returns whether this nemesis command auto-restores after a duration.
 
-  If true, the framework will automatically call `restore/2` after the command's
-  duration expires. If false, restoration must be triggered by an explicit
-  RestoreFault command.
+  If true, the framework calls `restore/2` once the command's duration has
+  expired, or at the end of the sequence if the fault is still active. If
+  false, the framework never calls `restore/2` for this command: the adapter or
+  the test must restore the fault.
 
   Default: true (faults auto-restore)
   """
