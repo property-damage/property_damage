@@ -647,7 +647,7 @@ A rerun that would touch an existing file exits 1, names the files and writes no
 
 The task writes:
 - One command module per operation, with struct fields from the request body schema, type hints, placeholder generators and adapter execution hints
-- One event module per response
+- One event module per operation whose 200, 201 or 202 response has a JSON schema (operations that share an event name share one module)
 - An adapter, a model and a state projection (skipped with `--commands-only`)
 
 Pass `--namespace` so the module names come out clean, for example `MyAppTest.Commands.CreateUser`. Without it, the task infers the namespace from `--output`. The [scaffolding guide](guides/scaffolding.md) walks through the generated files.
