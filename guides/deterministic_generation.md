@@ -3,7 +3,9 @@
 PropertyDamage generates a command sequence as a **pure function of the seed**.
 Reproducing a failure with the `seed: N` run option (not ExUnit's
 `mix test --seed`), and comparing two runs of the same plan, both depend on
-that purity. This guide states the contract, shows the
+that purity. To pin the seed under `mix test` without editing code, set
+`PD_SEED` in the environment (for example `PD_SEED=123 mix test`); an explicit
+`seed:` option wins over the variable. This guide states the contract, shows the
 four blessed ways to model nondeterministic needs without breaking it, and
 points at the audit that enforces it.
 
@@ -133,7 +135,7 @@ def generator(_overrides) do
 end
 
 # The adapter (a module with `use PropertyDamage.Adapter`) performs the ONE
-wall-clock read, in its `execute/3` callback at execution time:
+# wall-clock read, in its `execute/3` callback at execution time:
 def execute(%IssueToken{exp: {:relative_seconds, off}}, _ctx, _runtime) do
   exp = DateTime.add(DateTime.utc_now(), off, :second)
   # ... send `exp` to the SUT ...
@@ -172,7 +174,10 @@ end
 
 The result is unique per run yet byte-reproducible when the nonce and epoch are
 pinned. Hold `(seed, run_number)` and vary the nonce to re-run the identical
-plan with fresh minted values on a shared SUT.
+plan with fresh minted values on a shared SUT. The `run_nonce:` option sets the
+nonce; `mix test` cannot forward custom flags, so set `PD_RUN_NONCE` in the
+environment instead (for example `PD_RUN_NONCE=42 mix test`). An explicit
+option wins over the variable.
 
 ### 3. Server-assigned output: `external/0`
 

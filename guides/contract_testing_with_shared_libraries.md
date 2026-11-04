@@ -246,32 +246,29 @@ end
 `generate_test/2` returns the test source as a string and writes nothing, so the
 loop writes each string to a file itself.
 
-### Strategy 4: Shared Seed Library
+### Strategy 4: Local Seed Library
 
-Use a seed library to track known-interesting seeds:
+The seed library is an ephemeral, self-pruning working set of recently failing
+seeds. It is a local replay aid, not something to share or commit across teams:
+a seed reproduces its sequence only while the model's generators are
+byte-stable, so it is a fragile, version-local pointer.
+
+Enable it with the `seed_library:` option of `PropertyDamage.run/1`. The run
+replays the library's seeds before random exploration and appends the seed of
+any new failure:
 
 ```elixir
-# load/1 returns {:error, :enoent} when the file does not exist yet, so start a
-# fresh library on the first run:
-library =
-  case PropertyDamage.SeedLibrary.load("seeds.json") do
-    {:ok, lib} -> lib
-    {:error, :enoent} -> PropertyDamage.SeedLibrary.new()
-  end
+# Default file `property_damage_seeds.json`:
+PropertyDamage.run(model: OrderModel, targets: [adapter], seed_library: true)
 
-# Add a new failure (captures dependency versions automatically)
-{:ok, library} = PropertyDamage.SeedLibrary.add(library, failure,
-  tags: [:currency_bug],
-  description: "Mismatch when capturing with different currency"
-)
-
-PropertyDamage.SeedLibrary.save(library, "seeds.json")
+# Or an explicit file:
+PropertyDamage.run(model: OrderModel, targets: [adapter], seed_library: "seeds.json")
 ```
 
-`save/2` creates the directory of the file if it is missing. It returns `:ok`, or
-`{:error, reason}` if the write still fails.
-
-The seed library tracks `dependency_versions` for each entry, helping identify which seeds may need re-validation after upgrades.
+Each entry is pruned after it passes enough consecutive replays (the
+`seed_library_prune_after` option sets the threshold). To keep a regression,
+export the failure to an ExUnit test (Strategy 3): the exported test freezes the
+concrete shrunk sequence and survives generator changes.
 
 ## Complete Example
 
