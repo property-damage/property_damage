@@ -173,7 +173,7 @@ That is your first visible result: a complete test scaffold on disk, already
 | `--output` | Output directory (default `lib/generated/`). |
 | `--namespace` | Module prefix; inferred from `--output` if omitted. |
 | `--operations` | Comma-separated `operationId`s to generate a subset. |
-| `--commands-only` | Emit only command modules, no adapter/model. |
+| `--commands-only` | Write only the command and event modules, with no adapter, model or projection. It refuses to overwrite existing command or event files, like a full run. |
 | `--base-url` | Override the spec's `servers` URL. |
 | `--dry-run` | Print the plan without writing files. |
 | `--force` | Overwrite files that already exist. Without it, the task refuses and names them. |
