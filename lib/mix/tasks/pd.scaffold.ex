@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # Only specific operations
       mix pd.scaffold --from openapi.json --operations createUser,updateUser
 
-      # Generate only commands (skip adapter/model)
+      # Generate only command and event modules (skip adapter, model, projection)
       mix pd.scaffold --from openapi.json --commands-only
 
       # Preview without writing files
@@ -36,7 +36,9 @@ defmodule Mix.Tasks.Pd.Scaffold do
   - `--output` - Output directory for generated files (default: lib/generated/)
   - `--operations` - Comma-separated list of operationIds to generate
   - `--namespace` - Module namespace prefix (e.g., MyAppTest)
-  - `--commands-only` - Only generate command modules
+  - `--commands-only` - Write only the command and event modules, with no adapter,
+    model or projection. It refuses to overwrite existing command or event files,
+    like a full run
   - `--dry-run` - Print what would be generated without writing files
   - `--base-url` - Base URL for the API (overrides spec's servers)
   - `--force` - Overwrite files that already exist (default: refuse, naming the

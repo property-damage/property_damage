@@ -36,21 +36,27 @@ defmodule PropertyDamage.IEx do
 
       iex> PropertyDamage.IEx.explain(MyApp.Model)
 
-      ═══════════════════════════════════════════════════════════════
-                            MyApp.Model
-      ═══════════════════════════════════════════════════════════════
+      ═════════════════════════════════════════════════════════════════
+                                 MyApp.Model
+      ═════════════════════════════════════════════════════════════════
 
-      COMMANDS (6 total)
+      COMMANDS (4 total)
       ─────────────────────────────────────────────────────────────────
         Weight │ Command                    │ Semantics
       ─────────────────────────────────────────────────────────────────
-           5   │ CreateAccount              │ sync
-           3   │ Credit                     │ sync
-           3   │ Debit                      │ sync
-           2   │ CreateAuthorization        │ probe
-           2   │ CreateCapture              │ sync
-           1   │ CloseAccount               │ sync
-      ...
+            5   │ CreateAccount              │ sync
+            3   │ Credit                     │ sync
+            3   │ Debit                      │ sync
+            1   │ GetBalance                 │ sync
+
+      PROJECTIONS
+      ─────────────────────────────────────────────────────────────────
+        State:      MyApp.Projection
+        Extra:      (none)
+
+      HINTS
+      ─────────────────────────────────────────────────────────────────
+        Consider adding probe (read-only) commands for better test coverage
 
   """
   @spec explain(module()) :: :ok
@@ -248,19 +254,19 @@ defmodule PropertyDamage.IEx do
 
   ## Examples
 
-      iex> PropertyDamage.IEx.dry_run(MyModel, commands: 5)
+      iex> PropertyDamage.IEx.dry_run(MyApp.Model, commands: 5, seed: 7)
 
       Generated sequence (5 commands):
       ─────────────────────────────────────────────────────────────────
       [0] CreateAccount{currency: "EUR"}
-      [1] Debit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
-      [2] GetBalance{account_id: <Placeholder:account_id@pre0/evt0>}
-      [3] Credit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
-      [4] Debit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
+      [1] Debit{amount: 91, account_id: <Placeholder:account_id@pr...}
+      [2] Debit{amount: 359, account_id: <Placeholder:account_id@p...}
+      [3] Debit{amount: 34, account_id: <Placeholder:account_id@pr...}
+      [4] Credit{amount: 128, account_id: <Placeholder:account_id@p...}
 
       Seed: 7 (use this to reproduce)
 
-      iex> PropertyDamage.IEx.dry_run(MyModel, commands: 5, seed: 7)
+      iex> PropertyDamage.IEx.dry_run(MyApp.Model, commands: 5, seed: 7)
       # Same sequence as above
 
   """
@@ -400,14 +406,18 @@ defmodule PropertyDamage.IEx do
 
   ## Examples
 
+  The output below comes from a real run. Event fields print in map order and
+  the time varies. In the second call, the adapter answers `Credit` with
+  `{:error, :account_not_found}`.
+
       iex> PropertyDamage.IEx.debug_command(
       ...>   %CreateAccount{currency: "USD"},
       ...>   MyAdapter
       ...> )
 
-      ═══════════════════════════════════════════════════════════════
-                           COMMAND EXECUTION
-      ═══════════════════════════════════════════════════════════════
+      ═════════════════════════════════════════════════════════════════
+                             COMMAND EXECUTION
+      ═════════════════════════════════════════════════════════════════
 
       COMMAND
       ─────────────────────────────────────────────────────────────────
@@ -417,19 +427,35 @@ defmodule PropertyDamage.IEx do
       EXECUTION
       ─────────────────────────────────────────────────────────────────
       Status: OK
-      Time: 15ms
+      Time: 0ms
 
       RESULT EVENT
       ─────────────────────────────────────────────────────────────────
       AccountCreated
-        account_id: "acc_abc123"
-        currency: "USD"
         balance: 0
+        currency: "USD"
+        account_id: "acc_abc123"
 
       iex> PropertyDamage.IEx.debug_command(
       ...>   %Credit{account_id: "acc_abc123", amount: 500},
       ...>   MyAdapter
       ...> )
+
+      ═════════════════════════════════════════════════════════════════
+                             COMMAND EXECUTION
+      ═════════════════════════════════════════════════════════════════
+
+      COMMAND
+      ─────────────────────────────────────────────────────────────────
+      Credit
+        account_id: "acc_abc123"
+        amount: 500
+
+      EXECUTION
+      ─────────────────────────────────────────────────────────────────
+      Status: ERROR
+      Time: 0ms
+      Reason: :account_not_found
 
   """
   @spec debug_command(struct(), module(), keyword()) :: :ok | {:error, term()}
@@ -575,11 +601,7 @@ defmodule PropertyDamage.IEx do
 
       STATE AFTER 2 EVENTS
       ─────────────────────────────────────────────────────────────────
-      %{
-        accounts: %{
-          "acc_1" => %{currency: "USD", balance: 500}
-        }
-      }
+      %{accounts: %{"acc_1" => %{balance: 500, currency: "USD"}}}
 
   """
   @spec inspect_state([struct()], module()) :: :ok
@@ -616,12 +638,14 @@ defmodule PropertyDamage.IEx do
 
       PRECONDITION CHECK
       ─────────────────────────────────────────────────────────────────
-        Command                    │ Precondition │ Reason
+        Command                    │ Precondition │ Weight
       ─────────────────────────────────────────────────────────────────
-        CreateAccount              │ ✓ VALID      │ -
-        Credit                     │ ✗ INVALID    │ No accounts exist
-        Debit                      │ ✗ INVALID    │ No accounts exist
-        GetBalance                 │ ✗ INVALID    │ No accounts exist
+        CreateAccount              │ ✓ VALID      │ 5
+        Credit                     │ ✗ INVALID    │ 3
+        Debit                      │ ✗ INVALID    │ 3
+        GetBalance                 │ ✗ INVALID    │ 1
+      ─────────────────────────────────────────────────────────────────
+        1/4 commands valid in current state
 
   """
   @spec check_preconditions(map(), module()) :: :ok

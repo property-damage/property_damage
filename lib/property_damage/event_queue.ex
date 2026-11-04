@@ -52,12 +52,25 @@ defmodule PropertyDamage.EventQueue do
   @typedoc """
   Event entry with metadata.
 
-  This type describes the entry `push/3` builds. An entry from
-  `push_from_poller/5` has the keys listed under "Event Entries" instead.
+  `push/3` builds the injector shape and `push_from_poller/5` builds the
+  poller shape. See "Event Entries" for each key.
   """
-  @type entry :: %{
+  @type entry :: injector_entry() | poller_entry()
+
+  @typedoc "An entry pushed by an injector adapter through `push/3`."
+  @type injector_entry :: %{
           event: struct(),
           adapter_module: module(),
+          timestamp: integer()
+        }
+
+  @typedoc "An entry pushed by a resource poller through `push_from_poller/5`."
+  @type poller_entry :: %{
+          event: struct(),
+          source: :resource_poller,
+          poller_id: reference(),
+          command_index: non_neg_integer(),
+          branch_id: non_neg_integer() | nil,
           timestamp: integer()
         }
 

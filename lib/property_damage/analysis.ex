@@ -64,20 +64,46 @@ defmodule PropertyDamage.Analysis do
   - Which command triggers the failure
   - Why each other command must be present
 
+  Each entry in `:commands` carries the command struct under `:command`, its
+  module's short name under `:command_name`, and any `%Placeholder{}` fields
+  under `:placeholders` (field name to a label).
+
   ## Example
 
       PropertyDamage.Analysis.explain(failure)
-      # Returns:
+      # Returns a map like this one, from a model where `Use` consumes an id
+      # that `Create` produced and a check fails after `Use`:
       # %{
+      #   summary: "Shrunk to 2 commands.\nFailure triggered by: Use at index 1\n" <>
+      #     "Dependencies: 1 command(s) required to set up state\n" <>
+      #     "Failure type: Invariant Violation: no_use_allowed",
       #   commands: [
-      #     %{index: 0, command: "CreateAccount", role: :dependency,
-      #       reason: "Creates account used by command 2"},
-      #     %{index: 1, command: "CreateAuthorization", role: :dependency,
-      #       reason: "Creates pending hold affecting available balance"},
-      #     %{index: 2, command: "CreditAccount", role: :trigger,
-      #       reason: "Causes currency_consistency check to fail"}
+      #     %{
+      #       index: 0,
+      #       command_name: "Create",
+      #       command: %Create{label: ""},
+      #       role: :dependency,
+      #       reason: "Provides state or values required by the failing command",
+      #       placeholders: %{}
+      #     },
+      #     %{
+      #       index: 1,
+      #       command_name: "Use",
+      #       command: %Use{target: <Placeholder:id@pre0/evt0>},
+      #       role: :trigger,
+      #       reason: "Triggers no_use_allowed failure",
+      #       placeholders: %{
+      #         target: "placeholder:id@%PropertyDamage.Sequence.Position{section: :prefix, offset: 0}"
+      #       }
+      #     }
       #   ],
-      #   failure: %{type: :check_failed, check: :currency_consistency, ...}
+      #   failure: %{
+      #     type: :check_failed,
+      #     check: :no_use_allowed,
+      #     message: "a Use command ran",
+      #     command_index: 1
+      #   },
+      #   dependency_chain: ["[0] Create", "[1] Use"]
       # }
   """
   @spec explain(FailureReport.t()) :: map()
@@ -361,20 +387,29 @@ defmodule PropertyDamage.Analysis do
   blame, `:missing_model_or_target` when the report records no model or no
   target. The map contains:
   - `:trigger_command` - The command that triggers the failure
+  - `:trigger_index` - Its flattened index in the shrunk sequence
   - `:changes` - List of changes that eliminate the failure
   - `:likely_cause` - Inferred cause based on the changes
 
   ## Example
 
       PropertyDamage.Analysis.isolate_trigger(failure)
-      # %{
-      #   trigger_command: %CreditAccount{...},
-      #   changes: [
-      #     %{field: :currency, original: "EUR", fixed: "USD",
-      #       description: "Changing currency from EUR to USD eliminates failure"}
-      #   ],
-      #   likely_cause: "Currency mismatch: account currency (USD) differs from operation currency (EUR)"
-      # }
+      # Returns this for a model where a check fails once a deposit total
+      # reaches 3 and the shrunk sequence is one `Deposit{amount: 4}`:
+      # {:ok,
+      #  %{
+      #    trigger_command: %Deposit{amount: 4},
+      #    trigger_index: 0,
+      #    changes: [
+      #      %{field: :amount, original: 4, fixed: 0,
+      #        description: "Changing amount from 4 to 0 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 1,
+      #        description: "Changing amount from 4 to 1 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 2,
+      #        description: "Changing amount from 4 to 2 eliminates failure"}
+      #    ],
+      #    likely_cause: "Amount-related issue: original amount 4 causes failure"
+      #  }}
   """
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
