@@ -16,7 +16,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   The defaults above apply to a hand-built struct. When a model lists this
   nemesis in `commands/0`, `new!/2` draws the values instead: `:latency_ms` in
   50..500, `:jitter_ms` in 0..50 and `:duration_ms` in 1000..10_000. A key in
-  the command's `overrides:` replaces its draw.
+  the command's `overrides:` replaces its draw with the value as given; pass a
+  plain value, not a generator.
 
   ## Usage with Toxiproxy
 

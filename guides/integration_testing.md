@@ -423,11 +423,13 @@ Because the exit code is a regression signal, `mix pd.replay` drops straight int
 a CI gate or a `git bisect`.
 
 For custom adapter config (e.g. a different base URL), replay
-programmatically:
+programmatically. `targets:` replaces the recorded target config whole, so
+carry over every recorded key the failure depends on (here `bug: true`), or
+the replay runs against a different system and may pass:
 
 ```elixir
 {:ok, failure} = PropertyDamage.load_failure("failures/20261104T002751-check_failed-read_consistent-seed920551348.pd")
-PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
+PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}])
 ```
 
 Replay does not apply stutter. To re-shrink a failure that stutter found, use

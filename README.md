@@ -1391,6 +1391,8 @@ PropertyDamage.run(
     fn report -> Logger.warning("Failure found: #{report.seed}") end
   ])
 )
+# The handler module needs `require Logger`; a handler that raises is rescued
+# and its failure is not logged.
 ```
 
 ### Batch Processing
@@ -1610,9 +1612,12 @@ instead of copying it (see [Explaining a failure page](#explaining-a-failure-pag
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use the other `pd-*` skills in your application, copy them from
-the git tag matching your installed version, `v0.3.0` or later (earlier tags carry no `pd-*` skill). Skills track the API of their release, so skills from a newer
-tag may reference APIs your version does not have:
+To use the other `pd-*` skills in your application, copy them from the git
+tag of the release you installed (the skills first shipped with the 0.3.0
+release; a tag before it carries no `pd-*` skill). Skills track the API of
+their release, so skills from a newer tag may reference APIs your version
+does not have, and skill fixes listed under Unreleased in the CHANGELOG are
+only on `main`:
 
 ```bash
 git clone --depth 1 --branch v0.3.0 https://github.com/property-damage/property_damage /tmp/pd

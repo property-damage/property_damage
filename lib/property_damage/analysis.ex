@@ -93,6 +93,8 @@ defmodule PropertyDamage.Analysis do
       #       role: :trigger,
       #       reason: "Triggers no_use_allowed failure",
       #       placeholders: %{
+      #         # The position is the producer's place in the generated sequence
+      #         # before shrinking, so it can differ from the producer's index above.
       #         target: "placeholder:id@%PropertyDamage.Sequence.Position{section: :prefix, offset: 0}"
       #       }
       #     }
