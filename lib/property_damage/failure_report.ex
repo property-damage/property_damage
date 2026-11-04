@@ -89,6 +89,13 @@ defmodule PropertyDamage.FailureReport do
   `PropertyDamage.shrink_further/2` re-shrinks under them; `PropertyDamage.Replay`
   replays under the report's `check_mode` too.
 
+  `external_markers` records the run's `external_markers:` option, the atoms
+  the run treated as `external()` markers (`[]` by default). Every path that
+  simulates the report's commands again reads them: `PropertyDamage.Replay`,
+  `PropertyDamage.shrink_further/2`, `PropertyDamage.Analysis` and
+  `PropertyDamage.Export`. An `external_markers:` option given to one of them
+  replaces the recorded list.
+
   `campaign` records the campaign a `:latency_exceeded` report judged its
   budget over, `%{seed: seed, max_runs: n}` (the run's `seed:` and
   `max_runs:`), and is `nil` for every other kind: a latency budget is
@@ -284,6 +291,7 @@ defmodule PropertyDamage.FailureReport do
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
           check_mode: :halt | :record | :log | :disabled,
+          external_markers: [atom()],
           campaign: %{seed: integer(), max_runs: pos_integer()} | nil,
           latency: false | true | keyword(),
           metrics: %{String.t() => map()} | nil,
@@ -424,6 +432,7 @@ defmodule PropertyDamage.FailureReport do
             stutter: nil,
             max_commands: nil,
             check_mode: :halt,
+            external_markers: [],
             campaign: nil,
             latency: false,
             metrics: nil,
@@ -510,6 +519,7 @@ defmodule PropertyDamage.FailureReport do
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
   - `:check_mode` - The run's `check_mode:` (default `:halt`)
+  - `:external_markers` - The run's `external_markers:` (default `[]`)
   - `:campaign` - The campaign of a latency budget, `%{seed:, max_runs:}`
     (default `nil`)
   - `:original_failed_at_index` - The failing index in the run that found the
@@ -611,6 +621,7 @@ defmodule PropertyDamage.FailureReport do
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      external_markers: Keyword.get(opts, :external_markers, []),
       campaign: Keyword.get(opts, :campaign),
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),

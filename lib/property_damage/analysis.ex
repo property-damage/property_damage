@@ -377,10 +377,8 @@ defmodule PropertyDamage.Analysis do
     `config:`); see
     `PropertyDamage.Target`
 
-  The report does not record the atom markers a run named through
-  `external_markers:`, and this function has no option for them. For a model
-  with expansions that relied on them, a re-executed command that consumes such
-  a value gets a placeholder no registry knows.
+  The re-execution simulates the report's commands with the atom markers the
+  run named through `external_markers:`, which the report records.
 
   ## Returns
 

@@ -6,7 +6,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.{Docs, Failure, FailureReport, Persistence}
-  alias PropertyDamage.FailureReport.{Formatter, HTML}
+  alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Test.BundleSupport, as: B
   alias PropertyDamage.Test.ContextSection
   alias PropertyDamage.Test.ReportLayout, as: RL
@@ -471,26 +471,18 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
     end
   end
 
-  describe "a report loaded from a file saved before the bundle existed" do
+  describe "a file saved before the bundle existed" do
+    # The files were written at format version 15. Version 16 refuses every
+    # older file (DR-061), so no report of theirs reaches a bundle.
     for file <- ~w(
           v15_check_failed_without_projection.pd
           v15_poll_timeout_without_projection.pd
           v15_expansion_without_doc.pd
         ) do
-      test "builds a bundle with every key, and the page embeds it (#{file})" do
-        report = load(Path.join(@persistence, unquote(file)))
-        bundle = B.build(report)
-
-        assert_top_level(bundle)
-        assert_key_sets(bundle)
-        assert B.page_bundle(HTML.render(report)) == bundle
+      test "is refused as format version 15 (#{file})" do
+        assert Persistence.load(Path.join(@persistence, unquote(file))) ==
+                 {:error, {:unsupported_format_version, 15, 16}}
       end
-    end
-
-    test "describes the listing its page prints" do
-      report = load(Path.join(@persistence, "v15_check_failed_without_projection.pd"))
-
-      assert_listing(B.build(report), report)
     end
   end
 
@@ -502,13 +494,6 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
 
       assert %Failure{} = report.failure_reason
       assert B.build(report)["failure"]["kind"] in ["poll_error", "poll error"]
-    end
-  end
-
-  defp load(path) do
-    case Persistence.load(path) do
-      {:ok, report} -> report
-      {:ok, report, _warnings} -> report
     end
   end
 

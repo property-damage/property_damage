@@ -64,7 +64,6 @@ The framework SHALL compare the targets of a run only through the boundary obser
 - **WHEN** a boundary observation diverges at the convergence bound
 - **THEN** the `:diverged` failure (`PropertyDamage.Failure.Divergence`) SHALL carry the observation's `using:` term as written (`{PropertyDamage.Equivalence, :within, [0.01]}`), `nil` when the values were compared under `==`
 - **AND** the failure report SHALL print the term on its `Compared` line, under the two values (DR-056)
-- **AND** the persistence format version SHALL stay 15 while 15 is unreleased
 
 #### Scenario: A raise is a check failure
 

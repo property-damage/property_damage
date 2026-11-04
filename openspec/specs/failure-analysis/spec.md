@@ -652,7 +652,7 @@ The `:json` format SHALL gain a top-level `logs` key built from the same layout 
 
 #### Scenario: A saved report holds no filter
 - **WHEN** a report built with `log: [only: [:http]]` is saved and loaded again
-- **THEN** the loaded report SHALL have `log_filter: nil` and the file SHALL be version 15
+- **THEN** the loaded report SHALL have `log_filter: nil` and the file SHALL hold no filter
 
 ### Requirement: HTML Failure Report (DR-057)
 

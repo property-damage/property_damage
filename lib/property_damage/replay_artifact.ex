@@ -27,10 +27,11 @@ defmodule PropertyDamage.ReplayArtifact do
   # The term:
   #
   #   %{
-  #     format: 1,
+  #     format: 2,
   #     model: module,
   #     seed: the seed the run generated from,
   #     run: 1,
+  #     external_markers: [atom],                        the run's atom markers
   #     targets: [%{name: name, expansion: mode}],      the reference first
   #     failure: %{kind:, name:, variant_index:, root_index:},
   #     prefix: [setup command],
@@ -60,10 +61,21 @@ defmodule PropertyDamage.ReplayArtifact do
 
   alias PropertyDamage.Sequence.Position
 
-  @format 1
+  @format 2
   @header "# PropertyDamage replay artifact, format #{@format}"
   @header_prefix "# PropertyDamage replay artifact, format "
-  @keys [:choices, :failure, :format, :model, :prefix, :roots, :run, :seed, :targets]
+  @keys [
+    :choices,
+    :external_markers,
+    :failure,
+    :format,
+    :model,
+    :prefix,
+    :roots,
+    :run,
+    :seed,
+    :targets
+  ]
   # The framework's own structs an artifact holds: a placeholder minted for
   # an `external()` field and the positions inside it and in `aliases`.
   @format_structs [PropertyDamage.Placeholder, PropertyDamage.Sequence.Position]
@@ -82,6 +94,7 @@ defmodule PropertyDamage.ReplayArtifact do
           model: module(),
           seed: integer(),
           run: pos_integer(),
+          external_markers: [atom()],
           targets: [%{name: String.t(), expansion: atom()}],
           failure: map(),
           prefix: [struct()],
@@ -135,6 +148,7 @@ defmodule PropertyDamage.ReplayArtifact do
         model: report.model,
         seed: report.seed,
         run: 1,
+        external_markers: report.external_markers,
         targets: targets,
         failure: %{
           kind: report.kind,
@@ -574,6 +588,9 @@ defmodule PropertyDamage.ReplayArtifact do
          "the replay artifact's targets: must be a non-empty list of " <>
            "%{name: name, expansion: mode} maps naming each target of choices: once"}
 
+      not valid_markers?(term.external_markers) ->
+        {:error, "the replay artifact's external_markers: must be a list of atoms"}
+
       true ->
         {:ok, term}
     end
@@ -588,6 +605,9 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   defp valid_targets?(_term), do: false
+
+  defp valid_markers?(markers),
+    do: is_list(markers) and Enum.all?(markers, &(is_atom(&1) and not is_nil(&1)))
 
   defp valid_choices?(choices) when is_list(choices),
     do: Enum.all?(choices, &(is_map(&1) and Enum.sort(Map.keys(&1)) == Enum.sort(@choice_keys)))
@@ -848,11 +868,12 @@ defmodule PropertyDamage.ReplayArtifact do
   # every placeholder the recorded commands hold resolves; then the teardown
   # commands generated from the seed against the state the roots leave.
   #
-  # The term does not record the run's `external_markers:`. Options:
-  # `:external_markers`, the atom markers the re-execution passes, read where
-  # the commands are simulated again (see `PropertyDamage.External`).
+  # Options: `:external_markers`, the atom markers the re-execution passes,
+  # read where the commands are simulated again (see
+  # `PropertyDamage.External`); default: the markers the term records.
   @spec sequence(t(), keyword()) :: Sequence.t()
   def sequence(term, opts \\ []) do
+    opts = recorded_markers(opts, term.external_markers)
     roots = Enum.map(term.roots, & &1.command)
     registry = registry(term.model, term.prefix, term.roots, opts)
     sequence = %{Sequence.linear(roots) | setup: term.prefix, registry: registry}
@@ -860,6 +881,9 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   defp markers(opts), do: [external_markers: Keyword.get(opts, :external_markers, [])]
+
+  # `opts` with `:external_markers` set to `recorded` unless the caller gave it.
+  defp recorded_markers(opts, recorded), do: Keyword.put_new(opts, :external_markers, recorded)
 
   @doc false
   # The placeholder ids that `commands` hold and that the registry an
@@ -918,6 +942,7 @@ defmodule PropertyDamage.ReplayArtifact do
   # as for `sequence/2`.
   @spec expansion(t(), Sequence.t(), [String.t()] | nil, keyword()) :: Expansion.t()
   def expansion(term, %Sequence{} = sequence, names \\ nil, opts \\ []) do
+    opts = recorded_markers(opts, term.external_markers)
     recorded = if names, do: Map.take(term.choices, names), else: term.choices
 
     if Expansion.defines?(term.model) do
@@ -953,10 +978,13 @@ defmodule PropertyDamage.ReplayArtifact do
   # for a value no file can hold, say) falls back to the choices its trace
   # records. Raises `ArgumentError` naming `path` when the report records
   # neither a `replay` term nor `expansions`, or does not record what one of
-  # `names` ran. Options: `:external_markers`, as for `sequence/2`.
+  # `names` ran. Options: `:external_markers`, as for `sequence/2`;
+  # default: the report's `external_markers`.
   @spec reexecution(FailureReport.t(), [String.t()], String.t(), keyword()) ::
           {Sequence.t(), %{String.t() => map()} | nil}
   def reexecution(%FailureReport{model: model} = report, names, path, opts \\ []) do
+    opts = recorded_markers(opts, report.external_markers)
+
     cond do
       not Expansion.defines?(model) ->
         {FailureReport.shrunk_sequence(report), nil}

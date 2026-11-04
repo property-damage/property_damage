@@ -310,27 +310,15 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
       end
     end
 
-    # The two files were written at commit 83628d3, before a failure carried
-    # its projection.
-    for {kind, file, check} <- [
-          {:check_failed, "v15_check_failed_without_projection.pd", :settled_amount},
-          {:poll_timeout, "v15_poll_timeout_without_projection.pd", :payment_eventually_confirmed}
+    # The two files were written at format version 15, before a failure
+    # carried its projection. Version 16 refuses every older file (DR-061).
+    for {kind, file} <- [
+          {:check_failed, "v15_check_failed_without_projection.pd"},
+          {:poll_timeout, "v15_poll_timeout_without_projection.pd"}
         ] do
-      test "written before the field existed loads with a nil projection (#{kind})" do
-        report = load(Path.join(@persistence, unquote(file)))
-
-        assert %Failure{type: %Failure.Check{kind: unquote(kind), name: unquote(check)} = check} =
-                 report.failure_reason
-
-        assert Map.has_key?(check, :projection)
-        assert R.field(check, :projection) == nil
-      end
-
-      test "written before the field existed renders without a Projection line (#{kind})" do
-        report = load(Path.join(@persistence, unquote(file)))
-
-        assert L.fields_labeled(L.plain(report), "Check") != []
-        assert L.fields_labeled(L.plain(report), "Projection") == []
+      test "written before the field existed is refused as format version 15 (#{kind})" do
+        assert Persistence.load(Path.join(@persistence, unquote(file))) ==
+                 {:error, {:unsupported_format_version, 15, 16}}
       end
     end
 

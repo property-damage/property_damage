@@ -58,7 +58,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 15
+  @version 16
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -503,6 +503,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V16 format: a report records the run's `external_markers`, which every
+  # path that simulates its commands again reads. A v16 report lacking it is
+  # refused.
   # V15 format: a report records the run's `check_mode`, the `campaign` a
   # latency budget was judged over (`%{seed:, max_runs:}`, nil for every other
   # kind), the `original_failed_at_index` of the run that found the
@@ -555,7 +558,10 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v15 files (format versions 1-14) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v16 files (format versions 1-15) are refused (DR-041, following DR-039/DR-040).
+  # A v15 report does not record the run's `external_markers`, so a replay or
+  # re-shrink of a run that named atom markers cannot simulate its commands
+  # again (DR-061).
   # A v14 report records neither the `check_mode` a reproduction reuses, nor
   # the `campaign` of a latency budget, nor the `original_failed_at_index`.
   # A v13 report records neither the `run`, nor the replay artifact
@@ -587,9 +593,9 @@ defmodule PropertyDamage.Persistence do
 
   # A report must carry the fields the paths that execute a loaded report
   # read: the replay artifact term (nil when it has none), its path, the
-  # campaign run and the check mode. A report lacking one is refused, never
-  # loaded with a drift warning.
-  @required_fields [:replay, :run, :replay_path, :check_mode]
+  # campaign run, the check mode and the external markers. A report lacking
+  # one is refused, never loaded with a drift warning.
+  @required_fields [:replay, :run, :replay_path, :check_mode, :external_markers]
 
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do

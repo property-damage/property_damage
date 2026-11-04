@@ -1,10 +1,11 @@
 defmodule PropertyDamage.PersistenceReferenceFieldsTest do
   # A saved report keeps the reference trace, the reference state at the
-  # failing boundary and the shrink stop, and a version-15 file saved before
-  # those fields existed still loads, with each of them nil (DR-055).
+  # failing boundary and the shrink stop (DR-055). A version-15 file saved
+  # before those fields existed is refused, as every file older than version
+  # 16 is (DR-061).
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Failure, FailureReport, Persistence, RunTrace}
+  alias PropertyDamage.{FailureReport, Persistence, RunTrace}
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.ReferenceReport, as: R
   alias PropertyDamage.Test.TmpPath
@@ -90,31 +91,9 @@ defmodule PropertyDamage.PersistenceReferenceFieldsTest do
     end
   end
 
-  test "a version-15 file saved before the fields existed loads with each of them nil" do
-    # A pre-field file loads without drift; a version warning is fine.
+  test "a version-15 file saved before the fields existed is refused" do
     assert <<"PD", 15, _rest::binary>> = File.read!(@fixture)
 
-    {report, warnings} = load(@fixture)
-    refute drift?(warnings), "unexpected drift: #{inspect(warnings)}"
-
-    for field <- @new_fields do
-      assert Map.has_key?(report, field), "the loaded report lacks #{inspect(field)}"
-      assert Map.fetch!(report, field) == nil
-    end
-
-    assert report.kind == :diverged
-    assert report.variant == %{index: 1, name: "b"}
-    assert %RunTrace{} = report.trace
-  end
-
-  test "a version-15 divergence saved before the wait fields loads with each of them nil" do
-    # The divergence in the file predates waited_ms and within_ms.
-    {report, _warnings} = load(@fixture)
-    assert %Failure.Divergence{} = divergence = report.failure_reason.type
-
-    for field <- [:waited_ms, :within_ms] do
-      assert Map.has_key?(divergence, field), "the loaded divergence lacks #{inspect(field)}"
-      assert Map.fetch!(divergence, field) == nil
-    end
+    assert Persistence.load(@fixture) == {:error, {:unsupported_format_version, 15, 16}}
   end
 end

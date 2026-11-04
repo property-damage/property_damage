@@ -17,9 +17,8 @@ defmodule Mix.Tasks.Pd.Reshrink do
   `--model` / `--adapter` flags are needed. Those modules must be compiled and
   loadable in the current project, otherwise the file cannot be decoded. The
   task starts the project's applications before it re-shrinks, as `mix run`
-  does. The file does not record the atom markers a run named through `external_markers:`,
-  and this task has no flag for them. To re-shrink such a run, call
-  `PropertyDamage.shrink_further/2` with `external_markers:`. The
+  does. The re-shrink uses the atom markers the run named through
+  `external_markers:`, which the file records. The
   re-shrink runs every target the failure records, with the failure's
   `concurrency`, and keeps the failure's kind and failing target.
 

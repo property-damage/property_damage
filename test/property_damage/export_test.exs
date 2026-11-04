@@ -675,6 +675,13 @@ defmodule PropertyDamage.ExportTest do
       assert test_code =~ "NonNegativeBalance"
     end
 
+    test "re-runs the seed with the atom markers the report records" do
+      failure = %{create_test_failure_report() | external_markers: [:__external__]}
+
+      assert Export.to_exunit(failure) =~ "external_markers: [:__external__]"
+      refute Export.to_exunit(create_test_failure_report()) =~ "external_markers:"
+    end
+
     test "includes command sequence" do
       failure = create_test_failure_report()
 

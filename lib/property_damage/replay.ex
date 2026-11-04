@@ -84,16 +84,10 @@ defmodule PropertyDamage.Replay do
     option to apply them, so it runs each command once.
     `PropertyDamage.shrink_further/2` does re-apply the report's
     `stutter:` option.
-  - **Atom markers are not replayable here.** A marker written with
-    `external()` in an event struct definition replays, because the
-    definition lives in the code. An atom marker that a run named through
-    `external_markers:` is not recorded in the failure report or the replay
-    artifact, and `start/2` rejects the option. A model that relies on such
-    markers cannot replay those values here: when the model defines
-    `c:PropertyDamage.Model.expansions/0`, a later command that consumes one
-    gets a placeholder no registry knows. Replay the run through
-    `PropertyDamage.run/1` with `only: [replay: path]` and the same
-    `external_markers:` instead.
+
+  A replay simulates the report's commands with the atom markers the run
+  named through `external_markers:`, which the report records, so a model
+  that relies on such markers replays its `external()` values here.
   """
 
   alias PropertyDamage.{
@@ -287,7 +281,7 @@ defmodule PropertyDamage.Replay do
           Stepping.init_state(model,
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
-            external_markers: opts[:external_markers] || [],
+            external_markers: failure.external_markers,
             # The run's check mode: a `:record` failure replays under
             # `:record`, recording a failing check and going on.
             check_mode: replay_check_mode(failure),
