@@ -10,11 +10,14 @@ end
 defmodule PropertyDamage.Test.ReplayConstants.Mark do
   @moduledoc false
   use PropertyDamage.Command
+
+  alias PropertyDamage.Test.ReplayConstants
+
   defstruct [:status]
 
   @impl true
   def generator(overrides \\ %{}) do
-    %{status: StreamData.member_of(PropertyDamage.Test.ReplayConstants.statuses())}
+    %{status: StreamData.member_of(ReplayConstants.statuses())}
     |> PropertyDamage.Generator.merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
