@@ -1,7 +1,7 @@
 defmodule PropertyDamage.LoadTest.Report do
   @moduledoc false
 
-  @type report :: %{metrics: map(), config: map()}
+  @type report :: %{metrics: map(), pool_stats: map(), config: map()}
   @type format :: :terminal | :markdown | :json
 
   @doc """

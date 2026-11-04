@@ -15,8 +15,10 @@ defmodule PropertyDamage.Mutation do
   `killed / (total - killed_by_error)`. The report shows the count next to
   killed and survived (see DR-059).
 
-  Before it mutates a command, `run/1` runs that command's model once with the
-  unmodified adapter to collect sample events. If that baseline run fails with
+  Before it mutates each command, `run/1` runs the whole model once with the
+  unmodified adapter, up to 10 commands (`max_commands: 10`) and a fresh random
+  seed, and takes every event of that run as the sample events to mutate. A
+  model with three commands in `commands/0` runs three baselines. If a baseline run fails with
   an adapter error, `run/1` stops and returns
   `{:error, {:baseline_failed, command_module, message}}`. Without this guard
   every mutation would fail with the same error and be reported as killed by

@@ -134,12 +134,15 @@ PropertyDamage.run(
 )
 ```
 
-### Priority
+### What Marks a Field as External
 
-External marker recognition follows this priority:
-1. `%PropertyDamage.External{}` struct (always recognized)
-2. Protocol implementations
-3. Explicit `:external_markers` option
+The three sources do not rank. Each one decides a different kind of value, and a
+field is external when any one of them says so:
+
+- A `%PropertyDamage.External{}` struct is always a marker.
+- An atom is a marker when it is in the `external_markers:` list.
+- Any other value is a marker when its `PropertyDamage.ExternalMarker`
+  implementation returns `true`.
 
 ## Saved Test Case Compatibility
 
@@ -181,6 +184,14 @@ case PropertyDamage.Persistence.load("failures/bug-123.pd") do
 end
 ```
 
+`PropertyDamage.Replay.run/2` takes no `external_markers:` option. A model that
+names atom markers through `external_markers:` and also defines `expansions/0`
+therefore cannot replay those values through `Replay`. Replay it with
+`PropertyDamage.run/1`, passing `only: [replay: path]` and the same
+`external_markers:`. An exported test carries no `external_markers:` either, so
+add the option to it by hand. The model in this guide defines no
+`expansions/0`, so this limit does not apply to it.
+
 ### Strict Loading
 
 For CI environments where version mismatches should fail:
@@ -219,7 +230,7 @@ matrix:
 ### Strategy 3: Regenerate on Upgrade
 
 When upgrading dependencies that change struct definitions, regenerate ExUnit
-tests from the saved failures with the current struct versions:
+tests from the saved failures:
 
 ```elixir
 File.mkdir_p!("test/regressions")
@@ -246,6 +257,21 @@ end
 `generate_test/2` returns the test source as a string and writes nothing, so the
 loop writes each string to a file itself.
 
+Regenerating rewrites the test text only. When the report has a replay artifact,
+the generated test names that file by path, and regenerating does not refresh
+the structs inside it. If an upgrade removes or renames a field of a command or
+event struct, the artifact no longer loads: `only: [replay: path]` raises
+`ArgumentError` with "cannot hold its fields". The artifact is not migrated.
+Run the property again until it fails under the new structs, which writes a new
+artifact, then export that failure again.
+
+A `.pd` file has its own check. After a PropertyDamage upgrade that changes the
+persistence version, `Persistence.load/1` refuses a file from an older version
+with `{:error, {:unsupported_format_version, file_version, current}}` and a file
+from a newer version with `{:error, {:incompatible_version, file_version,
+current}}`. The loop above then fails on its `{:ok, report}` match. Capture the
+failure again under the current version.
+
 ### Strategy 4: Local Seed Library
 
 The seed library is an ephemeral, self-pruning working set of recently failing
@@ -267,8 +293,11 @@ PropertyDamage.run(model: OrderModel, targets: [adapter], seed_library: "seeds.j
 
 Each entry is pruned after it passes enough consecutive replays (the
 `seed_library_prune_after` option sets the threshold). To keep a regression,
-export the failure to an ExUnit test (Strategy 3): the exported test freezes the
-concrete shrunk sequence and survives generator changes.
+export the failure to an ExUnit test (Strategy 3). If the report has a replay
+artifact, the exported test replays that file by path. It runs the commands the
+file records, so a generator change does not alter them, as long as you keep the
+file. Without an artifact, the test re-runs the report's seed, and a generator
+change can send that seed down a different sequence.
 
 ## Complete Example
 
@@ -514,8 +543,8 @@ end
 
 3. **Version your domain library**: Follow semantic versioning. Bump the version when struct definitions change.
 
-4. **Regenerate tests after struct changes**: When you change event/command struct fields, regenerate affected saved tests.
+4. **Regenerate tests after struct changes, then refresh the artifacts**: When you change event or command struct fields, regenerate the affected tests. Regenerating rewrites the test text only; if a changed struct makes a replay artifact refuse to load, run the property to a fresh failure and export again.
 
 5. **Use load! in CI**: Strict loading catches version mismatches early in the CI pipeline.
 
-6. **Export durable regressions, don't commit seed libraries**: The seed library is an ephemeral, self-pruning replay working set (seeds only reproduce while generators are byte-stable). To keep a regression, export the failure to an ExUnit test, which freezes the concrete shrunk sequence and survives generator changes.
+6. **Export durable regressions, don't commit seed libraries**: The seed library is an ephemeral, self-pruning replay working set (seeds only reproduce while generators are byte-stable). To keep a regression, export the failure to an ExUnit test. With a replay artifact, the test replays the recorded commands by file path, so keep that file; without one, it re-runs the seed, which a generator change can send down a different sequence.

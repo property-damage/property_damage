@@ -303,7 +303,11 @@ defmodule PropertyDamage.MockServiceAdapter do
       @doc """
       Returns the list of event types this mock can emit.
 
-      Used by the framework for validation and coverage checking.
+      The list is the `@emits` attribute of this module. The framework does not
+      call this function for a mock: `PropertyDamage.Validation` reads
+      `__emits__/0` only from the adapters listed in `injectors:`, which use
+      `PropertyDamage.Adapter.Injector`. Call it from your own tooling if you
+      need the list.
       """
       @spec __emits__() :: [module()]
       def __emits__, do: unquote(emits)
