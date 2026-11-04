@@ -44,7 +44,7 @@ tightly enough.
 > applied, so the report counts it as survived. Do not read those survivors as
 > weak checks.
 
-Before it mutates a command, `run/1` runs that command once with the unmodified
+Before it mutates a command, `run/1` runs one baseline property run with the unmodified
 adapter. If that baseline run fails with an adapter error, every mutation of
 the command would fail the same way and count as killed by error, which hides
 that the adapter is broken. So `run/1` stops and returns

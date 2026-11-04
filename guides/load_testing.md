@@ -73,7 +73,8 @@ IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
 
 Like `PropertyDamage.run/1` for correctness testing, `run/1` takes a keyword
 list and returns a single result: `{:ok, report}` on completion or
-`{:error, reason}` if the runner fails to start. The difference is what happens
+`{:error, reason}` if the runner fails to start. Invalid options raise
+`NimbleOptions.ValidationError` instead. The difference is what happens
 between those points. `PropertyDamage.run/1` explores many short sequences
 hunting for bugs and returns run statistics (or a failure report);
 `LoadTest.run/1` sustains concurrent arrivals for the configured `duration` and
@@ -103,7 +104,8 @@ arrivals never share or clobber each other's ids.
 Load-test workers skip the model's `setup_each/0` and `teardown_each/0`
 commands. Each worker generates a sequence and runs only its prefix and suffix.
 If your model needs fixtures, create them in the adapter's `setup/1` or seed
-the system before the test starts.
+the system before the test starts. Workers run the roots of `commands/0` as
+themselves and do not apply the model's `expansions/0`.
 
 ## Invariants under sustained load
 

@@ -436,7 +436,8 @@ defmodule OrderTest do
   use ExUnit.Case
 
   test "orders maintain valid state" do
-    # A failure appends its seed to the seed library file. The run creates the
+    # The run replays the seeds in the seed library file before it explores,
+    # and appends the seed of a new failure to that file. The run creates the
     # seeds/ directory if it is missing. If the write still fails, the run logs
     # a warning with the path and the reason, whatever verbose: says.
     result = PropertyDamage.run(
@@ -445,10 +446,8 @@ defmodule OrderTest do
       external_markers: [:__external__],
       max_runs: 100,
       max_commands: 20,
-      regression: [
-        save_failures: "failures/",
-        seed_library: "seeds/order_seeds.json"
-      ]
+      seed_library: "seeds/order_seeds.json",
+      regression: [save_failures: "failures/"]
     )
 
     assert match?({:ok, _}, result)
