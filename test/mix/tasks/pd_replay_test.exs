@@ -67,6 +67,20 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
   end
 
+  defmodule RaisingSetupAdapter do
+    @moduledoc false
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: raise("setup blew up")
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
+  end
+
   defmodule FixedAdapter do
     @moduledoc false
     use PropertyDamage.Adapter
@@ -227,6 +241,23 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       assert status == :indeterminate
       assert output =~ "parallel/branching execution"
+    end
+
+    test "an adapter whose setup/1 raises returns :indeterminate", %{dir: dir} do
+      path = save_failure(dir, FailingModel, RaisingSetupAdapter)
+
+      {status, output} = with_output(fn -> Replay.exec([path]) end)
+
+      assert status == :indeterminate
+      assert output =~ "setup blew up"
+    end
+
+    test "PropertyDamage.replay/1 returns the setup error instead of raising", %{dir: dir} do
+      path = save_failure(dir, FailingModel, RaisingSetupAdapter)
+      {:ok, failure} = PropertyDamage.load_failure(path)
+
+      assert {:error, %Failure{type: %Failure.Setup{cause: :adapter_setup}}} =
+               PropertyDamage.replay(failure)
     end
 
     test "a failure that records no model returns :indeterminate", %{dir: dir} do

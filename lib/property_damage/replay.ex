@@ -276,7 +276,10 @@ defmodule PropertyDamage.Replay do
 
     # The adapter's setup/1 runs in a scope of its own; a stepping session
     # builds no failure report, so its log lines are dropped (DR-054).
-    {set_up, _lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+    # A raise, exit or throw from setup/1 is a setup failure, not a crash: it
+    # must reach the caller as an error so `mix pd.replay` reports it as
+    # indeterminate (exit 125) instead of dying with exit 1.
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> contained_setup(adapter, config) end)
 
     case set_up do
       {:ok, adapter_context} ->
@@ -327,6 +330,14 @@ defmodule PropertyDamage.Replay do
         EventQueue.stop(event_queue)
         {:error, Failure.setup_failed(reason)}
     end
+  end
+
+  defp contained_setup(adapter, config) do
+    adapter.setup(config)
+  rescue
+    exception -> {:error, Exception.format(:error, exception, __STACKTRACE__)}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   @doc """
