@@ -253,14 +253,17 @@ defmodule PropertyDamage.SeedLibrary do
   @doc """
   Load a seed library from a JSON file.
 
-  Tolerates libraries written by older versions: missing fields (including the
-  pre-DR-023 `status`/`run_count`/`fail_count` tri-state) are dropped and a
-  fresh `consecutive_passes` streak of 0 is assumed.
+  Returns `{:error, {:invalid_library, reason}}` for valid JSON that is not a
+  library of the current version: an object without an `entries` list, or one
+  whose `version` is not #{@library_version}. An entry that lacks an optional
+  field gets its default, and a `consecutive_passes` streak of 0 when it has
+  none.
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, term()}
   def load(path \\ @default_file) do
     with {:ok, content} <- File.read(path),
-         {:ok, data} <- Jason.decode(content, keys: :atoms) do
+         {:ok, data} <- Jason.decode(content, keys: :atoms),
+         :ok <- validate_library(data) do
       entries = Enum.map(data.entries, &load_entry/1)
       {:ok, %{version: @library_version, entries: entries}}
     else
@@ -271,6 +274,14 @@ defmodule PropertyDamage.SeedLibrary do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_library(%{version: @library_version, entries: entries}) when is_list(entries),
+    do: :ok
+
+  defp validate_library(%{entries: entries} = data) when is_list(entries),
+    do: {:error, {:invalid_library, {:unsupported_version, Map.get(data, :version)}}}
+
+  defp validate_library(_data), do: {:error, {:invalid_library, :missing_entries}}
 
   defp load_entry(entry) do
     %{

@@ -218,6 +218,22 @@ defmodule PropertyDamage.RegressionTest do
     end
 
     @tag :tmp_dir
+    test "leaves a library without entries or of another version untouched",
+         %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "seeds.json")
+      handler = Regression.add_to_library(path)
+
+      for content <- ["{}", ~s({"version": 999, "entries": []})] do
+        File.write!(path, content)
+
+        assert {:error, {:seed_library_unreadable, ^path, {:invalid_library, _}}} =
+                 handler.(make_failure(12_345))
+
+        assert File.read!(path) == content
+      end
+    end
+
+    @tag :tmp_dir
     test "handle_failure warns that an unreadable library was left unchanged",
          %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "seeds.json")

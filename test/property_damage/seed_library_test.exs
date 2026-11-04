@@ -32,7 +32,23 @@ defmodule PropertyDamage.SeedLibraryTest do
       assert hd(loaded.entries).consecutive_passes == 0
     end
 
-    test "tolerates a pre-DR-023 file with the old status/run_count fields" do
+    test "returns an error for valid JSON without entries" do
+      path = tmp_path("no_entries")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, "{}")
+
+      assert {:error, {:invalid_library, _reason}} = SeedLibrary.load(path)
+    end
+
+    test "returns an error for a library of another version" do
+      path = tmp_path("other_version")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, ~s({"version": 999, "entries": []}))
+
+      assert {:error, {:invalid_library, _reason}} = SeedLibrary.load(path)
+    end
+
+    test "returns an error for a version-1 library with the old status/run_count fields" do
       path = tmp_path("legacy")
       on_exit(fn -> File.rm(path) end)
 
@@ -57,13 +73,7 @@ defmodule PropertyDamage.SeedLibraryTest do
 
       File.write!(path, Jason.encode!(legacy))
 
-      assert {:ok, loaded} = SeedLibrary.load(path)
-      entry = hd(loaded.entries)
-      assert entry.seed == 999
-      assert entry.consecutive_passes == 0
-      assert entry.failure_type == :check_failed
-      assert entry.check_name == :balance
-      refute Map.has_key?(entry, :status)
+      assert {:error, {:invalid_library, {:unsupported_version, 1}}} = SeedLibrary.load(path)
     end
   end
 
