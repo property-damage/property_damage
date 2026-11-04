@@ -1404,6 +1404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **Every injected fault is lifted at the end of the run.** A fault whose
+  nemesis returns false from `auto_restore?/0` was never recorded as active,
+  so `restore/2` never ran for it, not even at sequence end. The run now
+  restores every still-active fault when the sequence ends; such a fault is
+  still never lifted on a timer.
 - **The regression handler never overwrites a seed library it cannot read.**
   A `:seed_library` file that existed but did not load (corrupt, or written by
   another version) was replaced by a new library holding only the new seed.

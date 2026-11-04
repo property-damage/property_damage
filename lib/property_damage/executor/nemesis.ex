@@ -142,21 +142,21 @@ defmodule PropertyDamage.Executor.Nemesis do
         Map.get(state, :await_matchers, [])
       )
 
-    # Track active fault if auto-restoring
-    active_faults = Map.get(state, :active_faults, %{})
+    # Track every injected fault so the sequence-end restore lifts it. A fault
+    # that does not auto-restore has no duration, so the per-command elapsed
+    # sweep keeps it until the end of the sequence.
+    duration_ms = if Nemesis.auto_restores?(command), do: Nemesis.get_duration_ms(command)
 
     active_faults =
-      if Nemesis.auto_restores?(command) do
-        Map.put(active_faults, {nemesis_module, index}, %{
-          command: command,
-          # The restore's log lines go under the injecting command (DR-054).
-          position: state.current_position,
-          started_at: System.monotonic_time(:millisecond),
-          duration_ms: Nemesis.get_duration_ms(command)
-        })
-      else
-        active_faults
-      end
+      state
+      |> Map.get(:active_faults, %{})
+      |> Map.put({nemesis_module, index}, %{
+        command: command,
+        # The restore's log lines go under the injecting command (DR-054).
+        position: state.current_position,
+        started_at: System.monotonic_time(:millisecond),
+        duration_ms: duration_ms
+      })
 
     # DR-025: assert @check every: on the nemesis + injector events folded
     # above, incrementally, before the command's own checks.
