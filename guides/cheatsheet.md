@@ -458,11 +458,14 @@ PropertyDamage.run(
   setup_log: lines,          # lines of PropertyDamage.Log.capture/1, printed once as Setup
   log: [only: [:http], except: [:body], keep_attempts: 3], # tag filter and retry cap
 
+  # Seed library (replayed before exploration; see PropertyDamage.SeedLibrary)
+  seed_library: true,        # default: false; true uses property_damage_seeds.json, or give a path
+  seed_library_prune_after: 3, # default: 3; passing replays after which a seed leaves the library
+
   # Regression
   regression: [
     save_failures: "failures/",
     seed_library: "seeds.json",
-    seed_library_prune_after: 3, # default: 3; passing replays after which a seed leaves the library
     generate_tests: "test/generated/",
     tags: [:auto_detected],
     dedup: false
