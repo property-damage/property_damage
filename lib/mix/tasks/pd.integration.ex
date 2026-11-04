@@ -187,7 +187,7 @@ defmodule Mix.Tasks.Pd.Integration do
       # A hunt is unbounded unless --runs caps it.
       hunt_opts =
         integration_opts
-        |> Keyword.take([:model, :targets, :verbose, :health_check])
+        |> Keyword.take([:model, :targets, :max_commands, :verbose, :health_check])
         |> Keyword.merge(stop_after: opts[:hunt], max_runs: opts[:runs] || :unlimited)
 
       # Only set :save_to when a directory was given; the schema rejects nil.

@@ -5,7 +5,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
   # and never copies a printed line.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Docs, Failure, FailureReport, Persistence}
+  alias PropertyDamage.{Docs, Failure, FailureReport}
   alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Test.BundleSupport, as: B
   alias PropertyDamage.Test.ContextSection
@@ -26,8 +26,6 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
   # observation, a setup check, a poll timeout, three targets and an event
   # that belongs to no command.
   @kinds RL.kinds() ++ [:also_differed, :setup_check, :poll_timeout, :three_targets, :hand_built]
-
-  @persistence Path.expand("../../support/fixtures/persistence", __DIR__)
 
   # Loading a saved report decodes only atoms that exist, so every module is
   # loaded first.
@@ -467,21 +465,6 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       for section <- bundle["sections"],
           value <- B.strings(Map.take(section, ["title"])) do
         assert String.contains?(text, "## " <> value)
-      end
-    end
-  end
-
-  describe "a file saved before the bundle existed" do
-    # The files were written at format version 15. Version 16 refuses every
-    # older file (DR-061), so no report of theirs reaches a bundle.
-    for file <- ~w(
-          v15_check_failed_without_projection.pd
-          v15_poll_timeout_without_projection.pd
-          v15_expansion_without_doc.pd
-        ) do
-      test "is refused as format version 15 (#{file})" do
-        assert Persistence.load(Path.join(@persistence, unquote(file))) ==
-                 {:error, {:unsupported_format_version, 15, 16}}
       end
     end
   end

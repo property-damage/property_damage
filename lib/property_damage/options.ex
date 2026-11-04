@@ -1906,6 +1906,11 @@ defmodule PropertyDamage.Options do
       default: :unlimited,
       doc: "Maximum runs before giving up, or `:unlimited`."
     ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Maximum commands per run."
+    ],
     save_to: [
       type: :string,
       doc: "Directory to save discovered bugs."

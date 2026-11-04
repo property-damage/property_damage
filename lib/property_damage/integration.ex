@@ -158,6 +158,7 @@ defmodule PropertyDamage.Integration do
     `{AdapterModule, config:, injectors:, mocks:}`; see `PropertyDamage.Target`
   - `:stop_after` - Stop after finding this many unique bugs (default: 10)
   - `:max_runs` - Maximum runs before giving up (default: :unlimited)
+  - `:max_commands` - Max commands per run (default: 50)
   - `:save_to` - Directory to save discovered bugs (optional)
   - `:health_check` - Health check configuration, checked before the hunt as
     `run/1` does (optional)
@@ -174,6 +175,7 @@ defmodule PropertyDamage.Integration do
     [target] = Keyword.fetch!(opts, :targets)
     stop_after = Keyword.get(opts, :stop_after, 10)
     max_runs = Keyword.get(opts, :max_runs, :unlimited)
+    max_commands = Keyword.get(opts, :max_commands, 50)
     save_to = Keyword.get(opts, :save_to)
     verbose = Keyword.get(opts, :verbose, true)
 
@@ -198,6 +200,7 @@ defmodule PropertyDamage.Integration do
       target: target,
       stop_after: stop_after,
       max_runs: max_runs,
+      max_commands: max_commands,
       save_to: save_to,
       verbose: verbose,
       bugs: [],
@@ -576,7 +579,7 @@ defmodule PropertyDamage.Integration do
           PropertyDamage.run(
             model: opts[:model],
             targets: [PropertyDamage.Target.to_entry(opts[:target])],
-            max_commands: 50,
+            max_commands: opts[:max_commands],
             max_runs: 1
           )
 

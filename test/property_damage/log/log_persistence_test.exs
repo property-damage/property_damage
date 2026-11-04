@@ -1,7 +1,6 @@
 defmodule PropertyDamage.Log.PersistenceTest do
   # Log lines live only in memory (DR-054 decision 9): a saved report or
-  # trace drops them and loads with `logs: %{}`, a version-15 file saved
-  # before the field existed is refused, and no replay artifact or `:compact` output carries a line (the
+  # trace drops them and loads with `logs: %{}`, and no replay artifact or `:compact` output carries a line (the
   # `:json` output prints them under `logs`, in memory only). Every run here
   # logs a sentinel that its config holds only in parts, so a file holding the
   # whole sentinel got it from a line.
@@ -11,13 +10,6 @@ defmodule PropertyDamage.Log.PersistenceTest do
   alias PropertyDamage.Persistence
   alias PropertyDamage.Test.LogFixtures, as: F
   alias PropertyDamage.Test.TmpPath
-
-  # Saved by the format-15 code before reports kept the reference trace,
-  # from a run of two PayAdapter targets compared on this projection.
-  @fixture Path.expand(
-             "../../support/fixtures/persistence/v15_without_reference_fields.pd",
-             __DIR__
-           )
 
   setup do
     dir = TmpPath.unique("pd_log_persistence")
@@ -93,9 +85,64 @@ defmodule PropertyDamage.Log.PersistenceTest do
     assert F.field(loaded, :logs) == %{}
   end
 
-  test "a version-15 file saved before the field existed is refused" do
-    # Version 16 refuses every older file (DR-061).
-    assert Persistence.load(@fixture) == {:error, {:unsupported_format_version, 15, 16}}
+  # Rewrites the payload of a saved file in the file's own envelope: the "PD"
+  # magic, the version byte, the checksum of the term, and the term encoded as
+  # save/3 encodes it.
+  defp rewrite_payload!(path, fun) do
+    <<"PD", version::8, _checksum::32, term::binary>> = File.read!(path)
+    term = :erlang.binary_to_term(term) |> fun.() |> :erlang.term_to_binary([:compressed])
+    File.write!(path, <<"PD", version::8, :erlang.crc32(term)::32, term::binary>>)
+  end
+
+  # The lines a trace holds, in the order of its execution points.
+  defp some_lines(trace), do: trace |> F.field(:logs) |> Map.values() |> List.flatten()
+
+  test "a current-version report file that holds lines loads without them", %{dir: dir} do
+    # A file a hand or another tool wrote with lines in it must not return
+    # them through a load (DR-054 decision 9).
+    report = diverged_report()
+    lines = some_lines(report.trace)
+    assert lines != [], "control: the trace holds lines"
+
+    assert {:ok, path} = Persistence.save(report, dir)
+
+    rewrite_payload!(path, fn payload ->
+      held =
+        report
+        |> Map.put(:setup_log, lines)
+        |> Map.put(:log_filter, only: [:sentinel])
+
+      %{payload | report: held}
+    end)
+
+    assert {_bytes, decoded} = saved(path)
+    assert decoded =~ F.sentinel(), "control: the rewritten file holds the sentinel"
+
+    loaded = loaded!(path)
+    assert F.field(loaded, :setup_log) == []
+    assert F.field(loaded, :log_filter) == nil
+    assert F.field(loaded.trace, :logs) == %{}
+    assert F.field(loaded.reference_trace, :logs) == %{}
+  end
+
+  test "a current-version trace file that holds lines loads without them", %{dir: dir} do
+    report = diverged_report()
+    assert some_lines(report.trace) != [], "control: the trace holds lines"
+
+    assert {:ok, path} = Persistence.save_trace(report.trace, dir)
+    rewrite_payload!(path, fn payload -> %{payload | trace: report.trace} end)
+
+    assert {_bytes, decoded} = saved(path)
+    assert decoded =~ F.sentinel(), "control: the rewritten file holds the sentinel"
+
+    loaded =
+      case Persistence.load_trace(path) do
+        {:ok, trace} -> trace
+        {:ok, trace, _warnings} -> trace
+        other -> flunk("load_trace failed: #{inspect(other)}")
+      end
+
+    assert F.field(loaded, :logs) == %{}
   end
 
   test "a replay artifact and the compact output carry no line, the JSON only under logs", %{

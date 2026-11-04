@@ -145,6 +145,26 @@ defmodule PropertyDamage.PersistenceTest do
     end
   end
 
+  describe "format version refusal" do
+    # The smallest file the loader reads: the magic, a version byte and a
+    # checksum, with no payload. The version byte alone decides the refusal.
+    @tag :tmp_dir
+    test "a file of version 15 or above 16 is refused for a report and a trace", %{
+      tmp_dir: dir
+    } do
+      for {version, error} <- [
+            {15, {:unsupported_format_version, 15, 16}},
+            {17, {:incompatible_version, 17, 16}}
+          ] do
+        path = Path.join(dir, "v#{version}.pd")
+        File.write!(path, <<"PD", version::8, 0::32>>)
+
+        assert Persistence.load(path) == {:error, error}
+        assert Persistence.load_trace(path) == {:error, error}
+      end
+    end
+  end
+
   describe "pre-v8 format refusal (DR-041)" do
     @tag :tmp_dir
     test "a v7 file is refused with a clear unsupported-version error", %{tmp_dir: dir} do

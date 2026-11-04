@@ -69,7 +69,8 @@ defmodule PropertyDamage.Diagram do
   @type options :: [
           title: String.t(),
           show_state: boolean(),
-          max_value_length: pos_integer()
+          max_value_length: pos_integer(),
+          failed_at_index: non_neg_integer()
         ]
 
   @default_options [

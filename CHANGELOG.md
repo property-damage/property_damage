@@ -650,6 +650,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.Mutation.run/1` stops when a baseline run fails
+  a check.** A model whose property fails against the unmodified adapter, for
+  example through a check, an invariant or a poll timeout, now gets
+  `{:error, {:baseline_failed, command_module, message}}` instead of a report.
+  Such a report counted every mutation as killed, so its score measured
+  nothing.
 - **Breaking: the failure report and the replay artifact record the run's
   `external_markers:` (DR-061).** Replay, re-shrink, trigger isolation, the
   exports, `mix pd.replay` and `mix pd.reshrink` use the recorded markers, so a
@@ -1400,6 +1406,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mix pd.integration --hunt` honors `--commands`.** A hunt ran every
+  sequence with up to 50 commands, whatever `--commands` said.
+  `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by
+  default), and the task passes `--commands` to it.
+- **`PropertyDamage.SeedLibrary.load/1` returns an error for a file that is not
+  a seed library.** Valid JSON without an `entries` list raised a
+  `KeyError`, and a file of an unknown version loaded. Both now return
+  `{:error, {:invalid_library, reason}}`, so the regression handler reports
+  the file as unreadable and leaves it unchanged. A version-1 library still
+  loads.
 - **The bundle of a failure page names source files by their path from the
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside

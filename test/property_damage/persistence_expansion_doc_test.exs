@@ -1,7 +1,5 @@
 defmodule PropertyDamage.PersistenceExpansionDocTest do
-  # A saved report keeps the doc of each realized choice. A version-15 report
-  # or trace saved before an entry could carry a doc is refused, as every file
-  # older than version 16 is (DR-061).
+  # A saved report keeps the doc of each realized choice.
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport, only: [start_recorder: 0]
@@ -10,12 +8,6 @@ defmodule PropertyDamage.PersistenceExpansionDocTest do
   alias PropertyDamage.Test.Expansion, as: X
   alias PropertyDamage.Test.Expansion.{Authorize, Capture, Pay}
   alias PropertyDamage.Test.TmpPath
-
-  # The files were written at format version 15, before an entry could carry
-  # a doc.
-  @fixtures Path.expand("../support/fixtures/persistence", __DIR__)
-  @report Path.join(@fixtures, "v15_expansion_without_doc.pd")
-  @trace Path.join(@fixtures, "v15_expansion_trace_without_doc.pdtrace")
 
   @two_steps "authorize, then capture"
 
@@ -27,21 +19,6 @@ defmodule PropertyDamage.PersistenceExpansionDocTest do
 
   defp loaded({:ok, value}), do: {value, []}
   defp loaded({:ok, value, warnings}), do: {value, warnings}
-
-  describe "a version-15 file saved before the field" do
-    test "is refused for a report" do
-      assert <<"PD", 15, _rest::binary>> = File.read!(@report)
-
-      assert Persistence.load(@report) == {:error, {:unsupported_format_version, 15, 16}}
-    end
-
-    test "is refused for a trace" do
-      assert <<"PD", 15, _rest::binary>> = File.read!(@trace)
-
-      assert Persistence.load_trace(@trace) ==
-               {:error, {:unsupported_format_version, 15, 16}}
-    end
-  end
 
   test "a report of a model with documented entries saves and loads with its docs" do
     model =

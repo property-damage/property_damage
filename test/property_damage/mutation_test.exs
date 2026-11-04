@@ -71,11 +71,8 @@ defmodule PropertyDamage.MutationTest do
     def describe_mutation(_mutation), do: "counting"
   end
 
-  # A projection whose check always fails, used by the progress-projection
-  # tests below. Mutation testing harvests sample events from a baseline run via
-  # RunTrace.capture/1, which carries the full event log regardless of outcome,
-  # so a passing model yields mutable events just as well (see the passing-model
-  # regression test in "run/1 end-to-end").
+  # A projection whose check always fails. A model that uses it fails its
+  # baseline run, so `run/1` returns the baseline error.
   defmodule AlwaysFailCheck do
     use PropertyDamage.Model.Projection
 
@@ -87,7 +84,45 @@ defmodule PropertyDamage.MutationTest do
 
     @check every: PropertyDamage.Test.Commands.CreateItem
     def assert_always_fails(_state, _cmd_or_event) do
-      PropertyDamage.fail!("mutation progress fixture: always fails")
+      PropertyDamage.fail!("mutation fixture: always fails")
+    end
+  end
+
+  # A projection whose check fails only on a mutated event. The test adapter
+  # answers every CreateItem with an item_ref of the form "item_N" and echoes
+  # the generated name (non-empty) and quantity (positive), so the baseline run
+  # passes. The first value mutation of any field (an empty string or a zero)
+  # breaks one of these rules, so a mutation is what the check catches.
+  # Mutation testing harvests sample events from the baseline run via
+  # RunTrace.capture/1. Used by the end-to-end and progress tests below.
+  defmodule WellFormedItemCheck do
+    use PropertyDamage.Model.Projection
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def init, do: %{malformed: []}
+
+    @impl true
+    def apply(state, %ItemCreated{item_ref: ref} = event) when is_binary(ref) do
+      if well_formed?(event),
+        do: state,
+        else: %{state | malformed: [event | state.malformed]}
+    end
+
+    def apply(state, _), do: state
+
+    defp well_formed?(%ItemCreated{item_ref: ref, name: name, quantity: quantity}) do
+      ref =~ ~r/\Aitem_\d+\z/ and is_binary(name) and name != "" and
+        is_integer(quantity) and quantity > 0
+    end
+
+    @check every: PropertyDamage.Test.Commands.CreateItem
+    def assert_items_well_formed(state, _cmd_or_event) do
+      state.malformed == [] or
+        PropertyDamage.fail!("mutation fixture: malformed ItemCreated",
+          events: state.malformed
+        )
     end
   end
 
@@ -106,7 +141,7 @@ defmodule PropertyDamage.MutationTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def check_projections, do: [AlwaysFailCheck]
+    def check_projections, do: [WellFormedItemCheck]
 
     @impl true
     def simulator, do: __MODULE__
@@ -923,7 +958,7 @@ defmodule PropertyDamage.MutationTest do
       assert report.killed > 0
 
       for %{failure_message: message} <- report.killed_mutations do
-        assert message =~ "mutation progress fixture: always fails"
+        assert message =~ "mutation fixture: malformed ItemCreated"
       end
     end
   end
@@ -977,6 +1012,33 @@ defmodule PropertyDamage.MutationTest do
     def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
+  # A model whose check fails every run, mutated or not: its baseline fails.
+  defmodule AlwaysFailModel do
+    @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
+
+    alias PropertyDamage.Test.Commands.CreateItem
+    alias PropertyDamage.Test.Events.ItemCreated
+    alias PropertyDamage.Test.Projections.ModelState
+
+    @impl true
+    def commands, do: [CreateItem]
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+
+    @impl true
+    def check_projections, do: [AlwaysFailCheck]
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+      [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
   describe "run/1 baseline guard" do
     @opts [
       model: PassingModel,
@@ -1005,6 +1067,16 @@ defmodule PropertyDamage.MutationTest do
                Mutation.run([targets: [SetupFailsAdapter]] ++ @opts)
 
       assert message =~ "backend_unreachable"
+    end
+
+    test "a baseline that fails a check returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run(
+                 Keyword.put(@opts, :model, AlwaysFailModel) ++
+                   [targets: [PropertyDamage.Test.TestAdapter]]
+               )
+
+      assert message =~ "always fails"
     end
 
     test "a healthy adapter still yields a report (control)" do

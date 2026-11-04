@@ -123,8 +123,11 @@ defmodule PropertyDamage.ExpansionDocShrinkTest do
     end
   end
 
+  # Each sample is drawn with its own fixed seed (1001 to 1030) at the size the
+  # i-th element of an unseeded `Enum.take/2` would have, so the count is the
+  # same on every run: 21 of these 30 samples fail.
   test "the generator gives failing runs often enough for the property to mean something" do
-    samples = Enum.take(case_gen(), 30)
+    samples = for i <- 1..30, do: case_gen() |> StreamData.seeded(1000 + i) |> Enum.at(i - 1)
     failing = Enum.count(samples, &failing_report/1)
 
     assert failing >= 10

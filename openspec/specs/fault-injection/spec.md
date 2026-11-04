@@ -18,7 +18,7 @@ The Nemesis behaviour SHALL define three required callbacks: `inject/2`, `restor
 
 #### Scenario: Restoring after a fault
 
-- **WHEN** a fault's duration expires, a RestoreFault command is executed, or the test sequence ends
+- **WHEN** an auto-restoring fault's duration expires, or the test sequence ends while the fault is still active
 - **THEN** the framework SHALL call `restore/2` with the original command struct and execution context
 - **AND** `restore/2` SHALL return `{:ok, events}` describing the restoration or `{:error, reason}` on failure
 

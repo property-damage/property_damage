@@ -170,8 +170,8 @@ With `--hunt N`, the task runs the health check, then hunts until it finds N
 unique bugs. `--runs` caps the hunt: it stops after that many runs even with
 fewer than N bugs. Without `--runs` the hunt has no run limit
 (`PROPERTYDAMAGE_RUNS` does not apply), so if the service has fewer than N bugs
-it runs until you stop it with Ctrl+C. `--commands`, `--report` and
-`--stop-on-fail` do not apply to a hunt.
+it runs until you stop it with Ctrl+C. `--commands` caps each run of the hunt
+as it caps a test run. `--report` and `--stop-on-fail` do not apply to a hunt.
 
 ### Running the task against the bench
 
