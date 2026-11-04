@@ -648,6 +648,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.IEx.debug_command/3` no longer accepts
+  `refs:`.** The option substituted symbolic-ref atoms that no current model
+  produces. Pass a command whose fields hold concrete values. Any option
+  other than `adapter_opts:` now raises `ArgumentError`.
+- **Breaking: `PropertyDamage.explain/1` names placeholder fields
+  `:placeholders`.** Each command map carries `:placeholders` instead of
+  `:refs`, and the formatted explanation prints `Placeholders:` instead of
+  `Refs:`.
+- **Exported Livebook notebooks and scripts call bound step values produced
+  values.** The notebook's exploration cell says the `state` variable holds
+  the values that previous steps produced and prints
+  `Available produced values:`.
 - **Breaking: the ExUnit export file name ends in `_test.exs`.**
   `PropertyDamage.Export.save/4` with `:exunit` writes
   `reproduce_<seed>_<signature>_test.exs` instead of
@@ -1330,6 +1342,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mix pd.reshrink` runs again.** The task never started the `:telemetry`
+  application, so every re-shrink stopped with "re-shrink could not run" and
+  exit 1. It now starts the project's applications after compiling, as
+  `mix pd.integration` does.
+- **`PropertyDamage.Integration.generate_report/2` writes JSON for a failed
+  run.** The `:json` format raised `Protocol.UndefinedError` whenever a run
+  failed. The report is now a plain map: the run counts, the model and the
+  adapter, and for each failure its seed, check and error message. Model and
+  adapter names now read `MyApp.Model` instead of `Elixir.MyApp.Model`.
+- **`PropertyDamage.Analysis.isolate_trigger/2` names the account's currency
+  in a currency mismatch again.** The lookup read a field of a struct the
+  library no longer has, so a trigger that reads its account through a
+  placeholder always got the generic message. It now follows the placeholder
+  to the command that produced it. Isolation over leaves keeps the generic
+  message.
 - **`Export.save_all/3` keeps the ExUnit test.** The ExUnit test and the
   Elixir script got the same `reproduce_<seed>_<signature>.exs` path, so the
   script overwrote the test and the returned `exunit:` path held the script.
