@@ -178,6 +178,7 @@ case PropertyDamage.Persistence.load("failures/bug-123.pd") do
     # {:property_damage_version_mismatch, "0.2.0", "0.2.1"}
     # {:dependency_version_mismatch, :company_domain, "2.1.0", "2.2.0"}
     # {:dependency_missing, :old_domain, "1.0.0"}
+    # {:struct_shape_drift, [:missing_field], [:unexpected_field]}
 
   {:error, reason} ->
     IO.puts("Failed to load: #{inspect(reason)}")
@@ -236,7 +237,14 @@ tests from the saved failures:
 File.mkdir_p!("test/regressions")
 
 for path <- Path.wildcard("failures/*.pd") do
-  {:ok, report} = PropertyDamage.load_failure(path)
+  report =
+    case PropertyDamage.load_failure(path) do
+      {:ok, report} -> report
+      {:ok, report, warnings} ->
+        IO.warn("#{path}: #{inspect(warnings)}")
+        report
+    end
+
   name = Path.basename(path, ".pd")
 
   # A file name such as `bug-123` or a name `save_failure/2` writes has
@@ -245,17 +253,18 @@ for path <- Path.wildcard("failures/*.pd") do
   module_part = name |> String.replace(~r/[^A-Za-z0-9]/, "_") |> Macro.camelize()
 
   source =
-    PropertyDamage.generate_test(report,
-      format: :exunit,
-      module_name: "Regression#{module_part}Test"
+    PropertyDamage.Export.to_exunit(report,
+      module_name: Module.concat(["Regression#{module_part}Test"])
     )
 
   File.write!(Path.join("test/regressions", "#{name}_test.exs"), source)
 end
 ```
 
-`generate_test/2` returns the test source as a string and writes nothing, so the
-loop writes each string to a file itself.
+`Export.to_exunit/2` returns the test source as a string and writes nothing, so
+the loop writes each string to a file itself. A file that loads with version
+warnings is still exported; the loop prints the warnings so you can decide
+whether to keep that test.
 
 Regenerating rewrites the test text only. When the report has a replay artifact,
 the generated test names that file by path, and regenerating does not refresh
@@ -269,8 +278,8 @@ A `.pd` file has its own check. After a PropertyDamage upgrade that changes the
 persistence version, `Persistence.load/1` refuses a file from an older version
 with `{:error, {:unsupported_format_version, file_version, current}}` and a file
 from a newer version with `{:error, {:incompatible_version, file_version,
-current}}`. The loop above then fails on its `{:ok, report}` match. Capture the
-failure again under the current version.
+current}}`. The loop above then raises `CaseClauseError` on that `{:error, _}`
+return. Capture the failure again under the current version.
 
 ### Strategy 4: Local Seed Library
 
