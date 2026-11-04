@@ -2551,12 +2551,18 @@ defmodule PropertyDamage do
   @doc """
   Load a previously saved failure report.
 
+  Returns `{:ok, report}`, or `{:ok, report, warnings}` when the file was saved
+  by a different version and may not reproduce, or `{:error, reason}`.
+
   ## Examples
 
       {:ok, failure} = PropertyDamage.load_failure("failures/currency-bug.pd")
       PropertyDamage.replay(failure)
   """
-  @spec load_failure(Path.t()) :: {:ok, FailureReport.t()} | {:error, term()}
+  @spec load_failure(Path.t()) ::
+          {:ok, FailureReport.t()}
+          | {:ok, FailureReport.t(), [PropertyDamage.Persistence.warning()]}
+          | {:error, term()}
   defdelegate load_failure(path), to: PropertyDamage.Persistence, as: :load
 
   @doc """

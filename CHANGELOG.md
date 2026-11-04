@@ -1342,6 +1342,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `PropertyDamage.load_failure/1` spec lists the warnings tuple.** The
+  function returns `{:ok, report, warnings}` for a file saved by another
+  version; the spec and doc now say so.
 - **A resource poller that throws or exits no longer crashes a run in `:log` check mode.**
   The log formatter called `Exception.message/1` on a `{kind, reason}` pair.
   It now logs `poll_fn threw: ...` or `poll_fn exited: ...`, and the same for
