@@ -393,7 +393,7 @@ shrinker reduces it to the minimal reproduction:
 PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 ```
 
-produces a result like this (the keys and values vary with the seed):
+produces a result like this (the keys and values vary with the seed; the `Failure.Check` struct also has `context` and `projection` fields, left out here):
 
 ```elixir
 [

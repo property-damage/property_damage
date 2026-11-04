@@ -154,7 +154,7 @@ end
 ## Step 4: Define Invariants
 
 Invariants are checks that should always hold. Define them in check
-projections using `@check` and `assert_*` functions:
+projections using `@check` functions. By convention their names start with `assert_`, but any name works:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -175,7 +175,7 @@ defmodule MyApp.Projections.UserInvariants do
   def apply(state, _), do: state
 
   # Checks use @check to specify when to run
-  # and assert_* naming convention
+  # (the assert_ prefix is a convention, not a requirement)
   @doc "No two users share an email address."
   @check every: 1
   def assert_emails_unique(_state, _cmd_or_event) do
