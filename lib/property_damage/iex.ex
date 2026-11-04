@@ -252,15 +252,15 @@ defmodule PropertyDamage.IEx do
 
       Generated sequence (5 commands):
       ─────────────────────────────────────────────────────────────────
-      [0] CreateAccount{currency: "USD"}
-      [1] Credit{account_ref: :ref0, amount: 500}
-      [2] CreateAuthorization{account_ref: :ref0, amount: 200}
-      [3] Debit{account_ref: :ref0, amount: 100}
-      [4] GetBalance{account_ref: :ref0}
+      [0] CreateAccount{currency: "EUR"}
+      [1] Debit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
+      [2] GetBalance{account_id: <Placeholder:account_id@pre0/evt0>}
+      [3] Credit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
+      [4] Debit{account_id: <Placeholder:account_id@pre0/evt0>, am...}
 
-      Seed: 12345 (use this to reproduce)
+      Seed: 7 (use this to reproduce)
 
-      iex> PropertyDamage.IEx.dry_run(MyModel, seed: 12345)
+      iex> PropertyDamage.IEx.dry_run(MyModel, commands: 5, seed: 7)
       # Same sequence as above
 
   """
