@@ -71,12 +71,12 @@ defmodule PropertyDamage.OptionsF7Test do
       assert opts[:max_runs] == :unlimited
     end
 
-    test "rejects an unknown option (e.g. run/1's health_check leaking in)" do
-      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:health_check\]/, fn ->
+    test "rejects an unknown option (e.g. run/1's stop_on_failure leaking in)" do
+      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:stop_on_failure\]/, fn ->
         Options.validate_integration_hunt_bugs!(
           model: M,
           targets: [{A, config: %{}}],
-          health_check: %{}
+          stop_on_failure: true
         )
       end
     end

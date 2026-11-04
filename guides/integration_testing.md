@@ -157,8 +157,8 @@ run count when `--runs` is absent.
 
 ### About the health check
 
-Without `--hunt`, `mix pd.integration` performs a health check before the first
-run and has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
+`mix pd.integration` performs a health check before the first run, with or
+without `--hunt`, and has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
 until it answers with a `2xx` status. Point `--health` at any endpoint your
 service answers with `2xx`. If your service has no health route, use the
 programmatic `PropertyDamage.Integration.run/1` shown above instead: there the
@@ -166,10 +166,12 @@ programmatic `PropertyDamage.Integration.run/1` shown above instead: there the
 
 ### Bug hunt mode
 
-With `--hunt N`, the task runs no health check. It also ignores `--runs`, so the
-hunt does not stop until it finds N unique bugs. If the service has fewer than
-N bugs, the hunt runs until you stop it with Ctrl+C. `--commands`, `--report`
-and `--stop-on-fail` do not apply to a hunt either.
+With `--hunt N`, the task runs the health check, then hunts until it finds N
+unique bugs. `--runs` caps the hunt: it stops after that many runs even with
+fewer than N bugs. Without `--runs` the hunt has no run limit
+(`PROPERTYDAMAGE_RUNS` does not apply), so if the service has fewer than N bugs
+it runs until you stop it with Ctrl+C. `--commands`, `--report` and
+`--stop-on-fail` do not apply to a hunt.
 
 ### Running the task against the bench
 

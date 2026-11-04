@@ -1865,6 +1865,10 @@ defmodule PropertyDamage.Options do
       type: :string,
       doc: "Directory to save discovered bugs."
     ],
+    health_check: [
+      type: :any,
+      doc: "Health check configuration (keyword list or map); see `health_check/1`."
+    ],
     verbose: [
       type: :boolean,
       default: true,

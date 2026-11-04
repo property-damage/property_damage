@@ -1404,6 +1404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **`mix pd.integration --hunt` honors `--runs` and runs the health check.**
+  The hunt ignored `--runs` and skipped the health check, so a hunt against a
+  service with fewer bugs than asked for never ended. `--runs` now caps the
+  hunt, and `PropertyDamage.Integration.hunt_bugs/1` takes `:health_check`
+  and checks it before the hunt, as `run/1` does.
 - **Every injected fault is lifted at the end of the run.** A fault whose
   nemesis returns false from `auto_restore?/0` was never recorded as active,
   so `restore/2` never ran for it, not even at sequence end. The run now
