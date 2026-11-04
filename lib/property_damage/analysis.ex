@@ -428,7 +428,8 @@ defmodule PropertyDamage.Analysis do
     }
 
     changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
-    trigger_result(report, trigger_cmd, commands, failed_at, changes)
+    producers = plan_producers(sequence)
+    trigger_result(trigger_cmd, commands, failed_at, changes, producers)
   end
 
   # The trigger among the reference's concrete commands: the command where
@@ -461,17 +462,19 @@ defmodule PropertyDamage.Analysis do
         }
 
         changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
-        trigger_result(report, step.command, commands, step.flattened_index, changes)
+        # No producer map: the registry positions name roots, not the leaves
+        # in `commands`.
+        trigger_result(step.command, commands, step.flattened_index, changes, nil)
     end
   end
 
-  defp trigger_result(report, trigger_cmd, commands, failed_at, changes) do
+  defp trigger_result(trigger_cmd, commands, failed_at, changes, producers) do
     {:ok,
      %{
        trigger_command: trigger_cmd,
        trigger_index: failed_at,
        changes: changes,
-       likely_cause: infer_cause(changes, trigger_cmd, commands, report)
+       likely_cause: infer_cause(changes, trigger_cmd, commands, producers)
      }}
   end
 
@@ -613,12 +616,12 @@ defmodule PropertyDamage.Analysis do
     []
   end
 
-  defp infer_cause(changes, trigger_cmd, commands, _report) do
+  defp infer_cause(changes, trigger_cmd, commands, producers) do
     cond do
       # Currency mismatch pattern
       currency_change = Enum.find(changes, &(&1.field == :currency)) ->
         # Find what the account's currency is
-        account_currency = find_account_currency(trigger_cmd, commands)
+        account_currency = find_account_currency(trigger_cmd, commands, producers)
 
         if account_currency do
           "Currency mismatch: operation uses #{inspect(currency_change.original)} but account uses #{inspect(account_currency)}"
@@ -642,23 +645,19 @@ defmodule PropertyDamage.Analysis do
     end
   end
 
-  defp find_account_currency(trigger_cmd, commands) do
-    account_ref = Map.get(trigger_cmd, :account_ref)
-
-    if account_ref do
-      # Find the CreateAccount command that creates this ref
-      Enum.find_value(commands, fn cmd ->
-        cmd_module = cmd.__struct__
-        name = cmd_module |> Module.split() |> List.last()
-
-        if name == "CreateAccount" do
-          cmd_ref = Map.get(cmd, :account_ref)
-
-          if cmd_ref && cmd_ref.ref == account_ref.ref do
-            Map.get(cmd, :currency)
-          end
-        end
-      end)
+  # The currency of the CreateAccount command whose event minted the
+  # placeholder the trigger reads in `account_ref`. `producers` maps each
+  # placeholder id to the index of the command that produces it (see
+  # `plan_producers/1`); nil when no such map applies.
+  defp find_account_currency(trigger_cmd, commands, producers) do
+    with %Placeholder{id: id} <- Map.get(trigger_cmd, :account_ref),
+         true <- is_map(producers),
+         {:ok, index} <- Map.fetch(producers, {:placeholder, id}),
+         %{__struct__: module} = producer <- Enum.at(commands, index),
+         "CreateAccount" <- module |> Module.split() |> List.last() do
+      Map.get(producer, :currency)
+    else
+      _ -> nil
     end
   end
 
