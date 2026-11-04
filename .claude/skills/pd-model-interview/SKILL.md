@@ -98,6 +98,14 @@ class header lines from
 afterwards, then write the simulator and `@moduledoc` text from the spec as
 for any model.
 
+Every command file the scaffold writes ends with a stub `events/3` that
+returns `[]`, and the scaffolded adapter builds each `{:ok, events}` result
+through it. Left as is, every command returns no events and the smoke run
+proves little. After the scaffold, fill each command's `events/3` from the
+spec's `events:` list: one clause per status, including the deliberate
+rejections, each returning the event structs for that response. Report any
+command you leave stubbed in the handover.
+
 ## Workflow spine
 
 1. **Recon** (above), then a shallow whole-system overview - entities and

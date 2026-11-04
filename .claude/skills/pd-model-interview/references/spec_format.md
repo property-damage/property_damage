@@ -127,7 +127,10 @@ prints.
 For an `async` command, add `completion:` with how the user learns the work
 finished: `poll` (a probe command reads the result; name it) or `injected`
 (the system pushes a webhook or callback; the event it carries is marked
-`source: injected` in the Events section).
+`source: injected` in the Events section). In code, `poll` becomes a probe
+command (`execution: :probe`) plus an `@eventually` check, and `injected`
+becomes an injector plus `awaits/2` on the async command plus an
+`@eventually` check.
 
 ### 3. Setup and teardown
 
@@ -233,8 +236,11 @@ expansions:
 ```
 
 The scaffold turns `compare:` into `@compare` functions in a check
-projection, and `expansions:` into the model's `expansions/0`. A model with
-`expansions:` must also compare at the end of the run.
+projection, and `expansions:` into the model's `expansions/0`. Each entry's
+`as:` becomes the `doc:` of its expansion (`{[Authorize, Capture], doc:
+"authorize, then capture"}`), which the failure report prints as the
+description of the route. A model with `expansions:` must also compare at the
+end of the run.
 
 ### 8. Known failure modes
 
