@@ -253,11 +253,11 @@ defmodule PropertyDamage.SeedLibrary do
   @doc """
   Load a seed library from a JSON file.
 
-  Returns `{:error, {:invalid_library, reason}}` for valid JSON that is not a
-  library of the current version: an object without an `entries` list, or one
-  whose `version` is not #{@library_version}. An entry that lacks an optional
-  field gets its default, and a `consecutive_passes` streak of 0 when it has
-  none.
+  Loads a library of version 1 or #{@library_version}. A version-1 entry keeps
+  its seed and descriptive fields: the pre-DR-023 `status`, `run_count` and
+  `fail_count` fields are dropped, and its `consecutive_passes` streak starts
+  at 0. Returns `{:error, {:invalid_library, reason}}` for valid JSON without
+  an `entries` list, or with a `version` that is neither.
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, term()}
   def load(path \\ @default_file) do
@@ -275,8 +275,9 @@ defmodule PropertyDamage.SeedLibrary do
     end
   end
 
-  defp validate_library(%{version: @library_version, entries: entries}) when is_list(entries),
-    do: :ok
+  defp validate_library(%{version: version, entries: entries})
+       when version in [1, @library_version] and is_list(entries),
+       do: :ok
 
   defp validate_library(%{entries: entries} = data) when is_list(entries),
     do: {:error, {:invalid_library, {:unsupported_version, Map.get(data, :version)}}}

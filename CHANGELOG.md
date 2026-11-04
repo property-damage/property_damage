@@ -1411,11 +1411,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by
   default), and the task passes `--commands` to it.
 - **`PropertyDamage.SeedLibrary.load/1` returns an error for a file that is not
-  a current library.** Valid JSON without an `entries` list raised a
-  `KeyError`, and a file of another version loaded. Both now return
+  a seed library.** Valid JSON without an `entries` list raised a
+  `KeyError`, and a file of an unknown version loaded. Both now return
   `{:error, {:invalid_library, reason}}`, so the regression handler reports
-  the file as unreadable and leaves it unchanged. A version-1 library, which
-  loaded before, is refused the same way.
+  the file as unreadable and leaves it unchanged. A version-1 library still
+  loads.
 - **The bundle of a failure page names source files by their path from the
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside

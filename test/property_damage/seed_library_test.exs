@@ -48,7 +48,7 @@ defmodule PropertyDamage.SeedLibraryTest do
       assert {:error, {:invalid_library, _reason}} = SeedLibrary.load(path)
     end
 
-    test "returns an error for a version-1 library with the old status/run_count fields" do
+    test "tolerates a pre-DR-023 file with the old status/run_count fields" do
       path = tmp_path("legacy")
       on_exit(fn -> File.rm(path) end)
 
@@ -73,7 +73,22 @@ defmodule PropertyDamage.SeedLibraryTest do
 
       File.write!(path, Jason.encode!(legacy))
 
-      assert {:error, {:invalid_library, {:unsupported_version, 1}}} = SeedLibrary.load(path)
+      assert {:ok, loaded} = SeedLibrary.load(path)
+      entry = hd(loaded.entries)
+      assert entry.seed == 999
+      assert entry.consecutive_passes == 0
+      assert entry.failure_type == :check_failed
+      assert entry.check_name == :balance
+      refute Map.has_key?(entry, :status)
+    end
+
+    test "loads a version-1 library's entries as a current library" do
+      path = tmp_path("version_1")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, ~s({"version": 1, "entries": [{"seed": 7}, {"seed": 8}]}))
+
+      assert {:ok, %{version: 2, entries: entries}} = SeedLibrary.load(path)
+      assert Enum.map(entries, & &1.seed) == [7, 8]
     end
   end
 
