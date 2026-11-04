@@ -353,6 +353,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an Elixir expression. It warns when two targets use the same adapter with an
   identical `config:`, because such targets share state; give each target its
   own `config:` (for example a tenant).
+- **The `pd-model-interview` skill.** `.claude/skills/pd-model-interview`
+  interviews you about the system, writes `model_spec.md`, and scaffolds events,
+  commands, projections, invariants and an adapter skeleton from it.
 - **Structured failure vocabulary: `%PropertyDamage.Failure{}` (DR-041).** A run's
   `failure_reason` is now one nested, public type instead of a loose family of
   `{:tag, ...}` tuples. It carries a class struct under `type`
@@ -474,7 +477,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for branch failures); `failure_step/1` is `nil` for non-localized failures.
   This is additive: the materialized `command_at_failure` / `events_at_failure`
   fields and the ~20 existing callers are unchanged (their migration is Phase B).
-- **Core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
+- **Breaking: core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
   `PropertyDamage.run/1` is now bounded by `adapter.timeout/1` (default 30s, per-command
   override), not just in load-test workers. A wedged `execute/3` now fails with
   `PropertyDamage.CommandTimeoutError` instead of hanging the run. Enforcing a hard
@@ -679,15 +682,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after `alias PropertyDamage.Nemesis.NetworkPartition`. The library no
   longer defines top-level modules. A projection that matches the old names
   must update its patterns.
-- **`Mutation.run/1` returns `{:error, {:baseline_failed, command_module,
+- **Breaking: `Mutation.run/1` returns `{:error, {:baseline_failed, command_module,
   message}}` when the unmutated baseline run fails with an adapter error.**
   Before, every mutation of that command failed the same way and counted as
   killed by error. A caller that matched only `{:ok, _}` must handle the
   error tuple.
 - **`mix pd.scaffold` refuses to overwrite existing files.** Run it again with
   `--force` to regenerate.
-- **A mutation killed by an adapter error no longer counts toward the
-  mutation score (DR-059).** A mutation whose run fails with an
+- **Breaking: a mutation killed by an adapter error no longer counts toward
+  the mutation score (DR-059).** A mutation whose run fails with an
   `:execution_failed` report, for example a status mutation that makes the
   adapter return an error, gets the outcome `:killed_by_error`. No check
   caught it, so `mutation_score` is `killed / (total - killed_by_error)`, and
@@ -806,7 +809,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gone from the poll-timeout info. Rewrite a predicate that raised before the
     state caught up as a total one (`get_in/2`, `match?/2`, a `case` with a
     fallback).
-- **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
+- **Breaking: `latency:` and a non-default `check_mode:` are refused beside
+  `branching:`.**
   A branching run executes one branch at a time on one target through the
   linear engine: it records no latency samples (`latency:` returned
   `%{error: :no_data}`) and halts at the first failing check whatever
@@ -837,10 +841,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{:error, {:unknown_struct_module, module}}` from the loader, an
   `ArgumentError` naming the module from `only: [replay: path]`. A replay loads the model and the commands it lists
   first; a leaf module no listed command names must be loaded by the caller.
-- **`Analysis.isolate_trigger/2` returns `{:error, :not_applicable}` for a
-  `:diverged` or `:did_not_converge` report.** Every variation runs one target
+- **Breaking: `Analysis.isolate_trigger/2` returns `{:error, :not_applicable}`
+  for a `:diverged` or `:did_not_converge` report.** Every variation runs one target
   alone, so none could show a comparison failing; the analysis was vacuous.
-- **A replay artifact never replaces another failure's file.** When
+- **Breaking: a replay artifact never replaces another failure's file.** When
   `<Model>_seed<n>.replay.exs` holds another failure or other targets, the run
   writes `<Model>_seed<n>_2.replay.exs` (the smallest free suffix from 2) and the
   report's `replay_path` and footer name it. A re-shrink of the same failure
@@ -851,19 +855,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns `{:error, {:variant_not_in_targets, name}}` and runs nothing, where it
   returned the report unchanged. An unchanged report now means only that no
   smaller sequence reproduced the failure.
-- **A shrunk report's counts describe its reproduction.** `compare_counts` are
+- **Breaking: a shrunk report's counts describe its reproduction.** `compare_counts` are
   the counts of the reproduction of the shrunk sequence, from `run/1` and from
   `shrink_further/2`, not the failing run's. From `run/1`, `check_fires` count
   the runs before the failing one plus the reproduction, and the new
   `run_check_fires` field holds the reproduction's share; `shrink_further/2`
   replaces the incoming `run_check_fires` share of `check_fires` with its own
   reproduction's, where it dropped `check_fires`.
-- **An entry whose one leaf equals its root runs the root itself.** A run
+- **Breaking: an entry whose one leaf equals its root runs the root itself.** A run
   records it as `:identity` (no leaves, no alias, at the root's own position),
   as a replay of the artifact runs it; `expansion_counts` count it under
   `:identity`, and `mix pd.validate --seeds` prints it as identity, not under
   the entry's key.
-- **Shrinking budget and candidate validity.** `max_iterations: 0` tries no
+- **Breaking: shrinking budget and candidate validity.** `max_iterations: 0` tries no
   candidate and reports 0 iterations (the check of the sequence cut after the
   failing root counted 1). A branching candidate the model rejects is never
   run, as on the linear path. A candidate whose expansions cannot be realized
@@ -1098,7 +1102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       regression test), use the new `Position.prefix/1`, `Position.branch/2`, and
       `Position.suffix/1` constructors instead of raw tuples.
 
-- **`PropertyDamage.Validator` renamed to `Sequence.Validator`.**
+- **Breaking: `PropertyDamage.Validator` renamed to `Sequence.Validator`.**
   The sequence-data validity check (`valid_sequence?/2`, run by the shrinker and
   by `Analysis`) now lives under the `Sequence` namespace, next to
   `Sequence.Position`, resolving the collision with `Validation`
@@ -1128,13 +1132,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       orphaned `format`/`module_name` schema is wired in); the dead
       `:include_setup` option was removed.
 
-- **`NetworkPartition` `:full` now cuts both directions (DR-038).** A full
+- **Breaking: `NetworkPartition` `:full` now cuts both directions (DR-038).** A full
   partition installs two `bandwidth` toxics at rate `0` (`pd_partition_up` on the
   upstream, `pd_partition_down` on the downstream); restore removes both.
   Previously it sent one unqualified `bandwidth` toxic, which Toxiproxy defaults
   to downstream only, so requests still flowed and only responses were blocked.
 
-- **Structural failure-query interface (Phase B): callers migrated.** Every
+- **Breaking: structural failure-query interface (Phase B), callers
+  migrated.** Every
   renderer, exporter, and forensic analyzer that previously re-walked
   `shrunk_sequence` / `event_log` / `failed_at_index` to reconstruct "the command
   and events at the failure" now goes through `FailureReport.steps/1` /
@@ -1261,6 +1266,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command with more than one field draws different values for a given seed than
   before. Code that used the result as a map (`Map.put/3`, `Map.merge/2`, a `%{}`
   pattern) must change; piping it into `StreamData.fixed_map/1` works as before.
+- **Breaking: a per-command `settle:` map merges per key over the defaults.**
+  `settle: %{timeout_ms: 1_000}` used to fail the run with a `KeyError` for
+  `:interval_ms`; omitted keys now keep their defaults.
+- **Breaking: a check that exits or throws, or a projection with a malformed
+  `__checks__/0` entry, is no longer reported as an adapter setup failure.** A
+  check body that exits or throws now fails that check, as a raise does. Other
+  model code that faults while a target comes up is a setup failure with the
+  new cause `:model`, and its message names the faulty code. The cause
+  `:adapter_setup` now means only that the adapter's `setup/1` failed.
+- **Breaking: an injector's `setup/1` receives its target's `config:`, and its
+  `teardown/1` receives its setup context.** `setup/1` was called with only
+  `%{event_queue: queue}` and `teardown/1` with `%{}`, so the documented
+  examples (reading `config[:port]`, matching `teardown(%{server: server})`)
+  could not run and an injector on two targets of one adapter could not tell
+  which system it served. `setup/1` now gets the target's `config:` merged with
+  `:event_queue` (the framework key wins) and `teardown/1` the context
+  `setup/1` returned, on every path: `run/1` with one target or several, its
+  shrink attempts and `execute/2`. A `setup/1` that returns `{:error, reason}`
+  now fails the target's setup as `:setup_failed` after tearing down the
+  injectors already set up (it used to be ignored); any return other than
+  `{:ok, map}` or `{:error, _}` fails with
+  `{:invalid_injector_setup_return, module, returned}`.
+- **Breaking: `PropertyDamage.Model.Projection.Statistics` drops `init/1` with
+  options, the `checks:` option and `evaluate_checks/1`, and works when listed
+  in `check_projections/0`.** It crashed the run, because its check entry
+  predated the current projection shape. The module now uses
+  `PropertyDamage.Model.Projection`, has `init/0` and declares no check; `new/1`
+  takes the `window_size` option. Write a threshold as a `@check` in your own
+  projection that calls `compute_metrics/1`. The moduledoc shows the recipe.
 
 ### Removed
 
@@ -1307,6 +1341,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and its implementation were both exactly `:downstream` — duplicate vocabulary
   for one behavior. Models overriding `partition_type: :asymmetric` must switch
   to `:downstream`.
+
+- **Breaking: `PropertyDamage.Diff` is removed; use `RunTrace` and
+  `RunComparison` (DR-033 to DR-036).** The module was broken by construction:
+  it aligned commands by index and never checked that the runs were comparable.
+  `RunTrace.capture/1` records one run, `RunComparison.compare/2` and
+  `investigate/1` localize where runs of one plan differ, and
+  `PropertyDamage.mint_per_run/1` mints client-side unique values from the run
+  nonce.
 
 - **BREAKING (DR-041):** `FailureReport` no longer carries the six denormalized
   failure fields `failure_type`, `check_name`, `failure_message`,
@@ -1403,9 +1445,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setup cause `:adapter_setup`; it now reports the cause `:variant` with the
   exit reason as detail. The error text, the error origin, the replay hint and
   the meaning of `:setup_failed` name it too.
-- **A per-command `settle:` map merges per key over the defaults.**
-  `settle: %{timeout_ms: 1_000}` used to fail the run with a `KeyError` for
-  `:interval_ms`; omitted keys now keep their defaults.
 - **`Coverage.record/2` raises a readable error for a passing result without
   coverage data.** It raised a `KeyError` on `:sequence`; it now raises the
   same `ArgumentError` as `PropertyDamage.coverage/2`, naming
@@ -1446,28 +1485,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PropertyDamage.run/1` forwards the `external_markers:` option.** An atom
   marker such as `:__external__` is now treated as an `external()` value and
   resolved into later commands, instead of reaching them as the literal atom.
-- **A check that exits or throws, or a projection with a malformed
-  `__checks__/0` entry, is no longer reported as an adapter setup failure.** A
-  check body that exits or throws now fails that check, as a raise does. Other
-  model code that faults while a target comes up is a setup failure with the
-  new cause `:model`, and its message names the faulty code. The cause
-  `:adapter_setup` now means only that the adapter's `setup/1` failed.
 - **A killed mutation reports why it was killed.** Every killed mutation said
   "Unknown failure". Its `failure_message` is now the message of the failure
   report the run returned.
-- **`PropertyDamage.Model.Projection.Statistics` works when listed in
-  `check_projections/0`.** It crashed the run, because its check entry
-  predated the current projection shape. The module now uses
-  `PropertyDamage.Model.Projection`, has `init/0` and declares no check;
-  `new/1` takes the `window_size` option. The `checks:` option and
-  `evaluate_checks/1` are gone: write a threshold as a `@check` in your own
-  projection that calls `compute_metrics/1`. The moduledoc shows the recipe.
 
 - **The `PropertyDamage.Replay` docs list the options the schema accepts.**
   They listed `:stutter_config` and `:external_markers`, which `run/2` and
   `start/2` reject. The docs now list `:targets`, `:stop_on_failure`,
   `:include_projections` and `:log`, and the Limitations note says replay
   does not apply stutter.
+
+- **Four ranges no longer count down when empty.** `RunTrace` lists no leaf
+  for an expansion entry with no commands, a JUnit report with no passing run
+  writes no passing testcase, and `verify_fix` draws no variation seeds when its
+  budget or range is empty.
 
 - **`Settle.settle/2` takes a `:sleep` option, and the backoff tests use it.**
   The linear-backoff test measured wall-clock gaps against a floor and failed
@@ -1572,19 +1603,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself, on every path that realizes leaves: a run, a shrink and a replay of
   recorded leaves. Execution is unchanged: each target still resolves the id
   from its own leaf's real events.
-- **An injector's `setup/1` receives its target's `config:`, and its
-  `teardown/1` receives its setup context.** `setup/1` was called with only
-  `%{event_queue: queue}` and `teardown/1` with `%{}`, so the documented
-  examples (reading `config[:port]`, matching `teardown(%{server: server})`)
-  could not run and an injector on two targets of one adapter could not tell
-  which system it served. `setup/1` now gets the target's `config:` merged with
-  `:event_queue` (the framework key wins) and `teardown/1` the context
-  `setup/1` returned, on every path: `run/1` with one target or several, its
-  shrink attempts and `execute/2`. A `setup/1` that returns `{:error, reason}`
-  now fails the target's setup as `:setup_failed` after tearing down the
-  injectors already set up (it used to be ignored); any return other than
-  `{:ok, map}` or `{:error, _}` fails with
-  `{:invalid_injector_setup_return, module, returned}`.
 - **A check recorded under `check_mode: :record` no longer skips the final
   boundary.** A target that recorded a failing check at an earlier root kept the
   final boundary from being compared, so a divergence there went unreported; it
@@ -1685,6 +1703,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   telemetry while a branching one emitted the found run's number. Both now emit
   the found run's number; shrink attempts keep `0`. The telemetry docs also
   state that a root command's `index` counts across the whole run.
+
+- **`mix pd.bisect` reads the verdict of newer git.** It reported "did not
+  identify a first bad commit" when git printed the verdict as `<sha> is the
+  first 'bad' commit`. Both spellings now parse.
+- **A Nemesis module in `commands/0` passes validation.** Validation demanded
+  `generator/1` and raised before generation ran. It now requires `new!/2` for
+  nemesis modules and `generator/1` for every other command.
+- **`mix pd.audit`, `pd.bisect`, `pd.replay` and `pd.reshrink` print no ANSI
+  codes when color is off.** The generated model template emits the canonical
+  `{Command, weight: n}` entry.
+- **Branching runs fix five defects.** The branching shrink remaps the
+  placeholder registry after a removal, branch fold ordinals no longer collide
+  and the fold counter sums them, an async assertion failure is attributed to
+  the offending command, a poller left by a sibling branch is stopped when
+  another branch fails, and a multi-byte binary value now shrinks.
+- **Replay, reproduction and re-shrink survive setup faults.** A setup failure
+  in `Executor.run` is reported on those paths instead of crashing, an
+  `EventQueue` no longer leaks when injector setup raises, and a failing
+  `init_state` or `on_timeout` callback cannot crash its process.
+- **Validation and scaffold gaps closed.** `validate!` enforces `generator/1`
+  on every command, `mix pd.scaffold` dedupes colliding event fields and keeps
+  operations with no `operationId`, and generated regression tests receive the
+  full export option set.
+- **Output defects fixed.** The plain formatter and `mix pd.validate` emit no
+  ANSI codes when color is off, `explain/1` handles a model with no commands,
+  the report names the real execution mode, and a non-map payload is refused
+  instead of crashing the decoder.
+- **Pattern descriptions name the failure kind, and the telemetry `Collector`
+  detaches its handler.** Cluster descriptions no longer degrade to a generic
+  failure, and a terminated collector no longer leaks its handler.
+- **An exit or throw in user code no longer crashes the run.** An adapter or
+  projection that exits or throws is reported as an adapter error or projection
+  violation, an adapter teardown that does so stays best-effort, poller
+  predicates and mock callbacks are contained, and a misconfigured command spec
+  raises a configuration error instead of becoming an empty map.
+- **A load test survives a crashing adapter or worker.** A raising adapter
+  becomes an error result, a crashing worker no longer takes the pool down, a
+  crashed arrival no longer wedges the drain, and singular time units such
+  as `1 second` are accepted.
+- **Exported scripts keep query parameters and expand variables.** Every
+  exporter now emits a step's query parameters, curl bodies are double-quoted so
+  a placeholder `$var` expands, and path parameters are replaced on token
+  boundaries, so `:id` no longer corrupts `:id_tx`.
+- **Mutation testing applies mutations as documented.** Value mutations carry
+  the targeted event index, a `success_to_error` mutation flows through as the
+  command's error output, and `apply_once` injects a mutation at most once per
+  run.
+- **`PropertyDamage.explain/1` works on a shrunk sequence with placeholders.**
+  It built its dependency graph from stale placeholder positions and crashed. It
+  now reads the registry's current positions, and a failure with no failing
+  command no longer crashes the dependency chain.
+- **`mix pd.replay` and `mix pd.reshrink` load a locally saved failure file.**
+  Both tasks now load the project's modules before decoding, so the safe decode
+  no longer refuses the failure's own structs. `Integration.hunt_bugs/1` with
+  `save_to:` no longer crashes on a position key.
+- **Several quality fixes.** `mix pd.scaffold` emits `http_spec/2` from
+  generated adapters. The run-level `regression:` option accepts `:adapter`.
+  `PropertyDamage.coverage/2` returns the merged tracker of a multi-run result
+  that ran with `coverage: true`, and raises an `ArgumentError` naming that
+  option otherwise. `Mutation.run/1` harvests its baseline events through
+  `RunTrace.capture/1` and reads command specs as `{module, opts}`, so a passing
+  model yields mutations and no mutant is reported killed by a crash.
+- **`FailureIntelligence.verify_cluster/3` re-runs every seeded member of a
+  cluster.** It used to map each member to `:unknown` and report `fixed: 0`. A
+  fingerprint now carries the `:seed`, and the result is `:fully_fixed`,
+  `:partially_fixed`, `:not_fixed` or `:unknown`. Forensics also collects each
+  violation into `success_result.violations` when `stop_on_first_failure` is
+  `false`; before, they were dropped.
+- **`mix pd.scaffold` writes event structs that compile.** A generated event
+  with an `id: external()` field and other fields put the keyword entry before
+  the bare fields, which is a syntax error. Bare fields now come first.
+- **Exports resolve a placeholder nested in a body collection.** A placeholder
+  inside a list or map of a command body now becomes a variable reference in the
+  curl, Python, Elixir and Livebook exports. Before, the curl export raised and
+  the Elixir and Livebook exports printed the raw struct.
 
 - **A flaky failure that does not reproduce no longer reports a blank "Unknown
   Failure".** After finding a failing run, `PropertyDamage.run/1` re-executes the
@@ -2228,5 +2321,6 @@ end, and trimmed the documented surface to what has been validated.
 - Interactive Livebook demo notebook
 - ExDoc configuration with module groups
 
+[Unreleased]: https://github.com/property-damage/property_damage/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/property-damage/property_damage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/property-damage/property_damage/releases/tag/v0.1.0
