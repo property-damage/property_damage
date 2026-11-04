@@ -158,7 +158,7 @@ Run with: python #{Common.generate_filename(report, :python)}
     if map_size(params) == 0 do
       inspect(path)
     else
-      # Build path with f-string interpolation for refs
+      # Build path with f-string interpolation for produced values
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
           replacement = "{#{generate_value_interpolation(value)}}"

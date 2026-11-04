@@ -211,7 +211,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   end
 
   # Render the resolved body into a Jason-encodable structure, turning each
-  # variable ref into a marker string (recursing through collections) so a
+  # produced value into a marker string (recursing through collections) so a
   # placeholder nested in a list/map wires up like a top-level one.
   defp mark_refs(%StepPlan.Var{name: name}), do: "__PH_#{name}__"
   defp mark_refs(value) when is_atom(value), do: to_string(value)

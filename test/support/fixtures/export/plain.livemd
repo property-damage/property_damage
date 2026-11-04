@@ -67,10 +67,10 @@ Use this section to experiment with variations and understand the bug better.
 
 ```elixir
 # Try different values or additional commands here
-# The `state` variable contains refs bound from previous steps
+# The `state` variable holds the values that previous steps produced
 # The `base_url` is available for making HTTP calls
 
-IO.puts("Available refs: #{inspect(Map.keys(state.refs))}")
+IO.puts("Available produced values: #{inspect(Map.keys(state.refs))}")
 
 # Example: Try a different operation
 # Req.post!(base_url <> "/api/...", json: %{...})

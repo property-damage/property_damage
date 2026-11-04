@@ -162,7 +162,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
     if map_size(params) == 0 do
       inspect(path)
     else
-      # Build path with interpolation for refs
+      # Build path with interpolation for produced values
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
           replacement = "\#{#{generate_value_interpolation(value)}}"
@@ -234,9 +234,9 @@ defmodule PropertyDamage.Export.Script.Elixir do
     "%{#{fields}}"
   end
 
-  # A variable ref renders as a `refs[...]` lookup. Collections that contain a
-  # ref are rendered element-by-element so nested placeholders resolve; those
-  # without a ref fall through to `inspect/1`, preserving prior output exactly.
+  # A produced value renders as a `refs[...]` lookup. Collections that carry a
+  # produced value render element by element so nested placeholders resolve;
+  # others fall through to `inspect/1`, preserving prior output exactly.
   defp format_body_value(%StepPlan.Var{name: name}), do: "refs[#{inspect(name)}]"
 
   defp format_body_value(value) when is_list(value) do
