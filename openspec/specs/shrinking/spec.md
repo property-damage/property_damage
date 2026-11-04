@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
+Defines the shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
 Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
 
@@ -39,22 +39,22 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 - **WHEN** a candidate shrunk sequence produces the equivalent failure
 - **THEN** the failure SHALL occur at the same or an earlier command index than in the original sequence
 
-### Requirement: Two-Phase Shrinking
+### Requirement: Sequence Shrinking Then Argument Simplification
 
-The system SHALL shrink in two phases: Phase 1 removes unnecessary commands from the sequence, and Phase 2 simplifies argument values in the remaining commands. For a model with `expansions/0` the shrinker also collapses each target's expansion choices between the two, and it runs these steps as a cycle that repeats until a whole cycle accepts no candidate or the budget is spent, as the requirement "Expansions Under Shrinking" states (DR-050). For a model without `expansions/0` the collapse steps accept nothing.
+The system SHALL shrink in two stages: sequence shrinking removes unnecessary commands from the sequence, and argument simplification simplifies argument values in the remaining commands. For a model with `expansions/0` the shrinker also collapses each target's expansion choices between the two, and it runs these steps as a cycle that repeats until a whole cycle accepts no candidate or the budget is spent, as the requirement "Expansions Under Shrinking" states (DR-050). For a model without `expansions/0` the collapse steps accept nothing.
 
-#### Scenario: Phase 1 then Phase 2
+#### Scenario: Sequence shrinking then argument simplification
 - **WHEN** shrinking begins on a failing sequence
-- **THEN** the shrinker SHALL first attempt to remove commands (Phase 1)
-- **AND** then attempt to simplify arguments in remaining commands (Phase 2)
+- **THEN** the shrinker SHALL first attempt to remove commands (sequence shrinking)
+- **AND** then attempt to simplify arguments in remaining commands (argument simplification)
 
-#### Scenario: Phase 2 optional
+#### Scenario: Argument simplification optional
 - **WHEN** shrinking configuration disables argument shrinking
-- **THEN** only Phase 1 (sequence shrinking) SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
+- **THEN** only sequence shrinking SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
 
-### Requirement: Phase 1 Sequence Shrinking Steps
+### Requirement: Sequence Shrinking Steps
 
-Phase 1 SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
+Sequence shrinking SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
 
 #### Scenario: Drop unexecuted commands
 - **WHEN** a sequence failed at command index N
@@ -106,7 +106,7 @@ Probe (read-only) commands SHALL be prioritized for removal during shrinking, si
 
 ### Requirement: Argument Shrinking
 
-In Phase 2, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Symbolic references SHALL never be shrunk.
+In argument simplification, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Placeholders SHALL never be shrunk.
 
 #### Scenario: Integer shrinks toward zero
 - **WHEN** a command contains an integer argument
@@ -152,7 +152,7 @@ Given the same seed and the same initial failure, shrinking SHALL produce the sa
 
 ### Requirement: Shrinking Configuration
 
-The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether Phase 2 runs.
+The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether argument simplification runs.
 
 #### Scenario: Granularity threshold controls strategy
 - **WHEN** the remaining sequence length is below the granularity threshold

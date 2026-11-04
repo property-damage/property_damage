@@ -23,7 +23,8 @@ The system SHALL provide a central entry point for converting failure reports to
 #### Scenario: Export all formats
 
 - **WHEN** `Export.save_all(failure, directory, opts)` is called
-- **THEN** the system SHALL generate and save all supported formats and return `{:ok, paths}` with paths to each file
+- **THEN** the system SHALL generate and save all supported formats and return `{:ok, paths}` with the path of each file
+- **AND** every format SHALL be written to its own distinct path, so no export overwrites another (the ExUnit export ends in `_test.exs`, the Elixir script in `.exs`)
 
 #### Scenario: Command labels emitted as comments (DR-028 amendment, P7)
 

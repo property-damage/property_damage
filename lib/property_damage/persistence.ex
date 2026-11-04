@@ -161,6 +161,9 @@ defmodule PropertyDamage.Persistence do
   - `{:property_damage_version_mismatch, saved_version, current_version}`
   - `{:dependency_version_mismatch, app, saved_version, current_version}`
   - `{:dependency_missing, app, saved_version}`
+  - `{:struct_shape_drift, missing, unexpected}`: the saved `FailureReport` has
+    different fields than the struct of the running PropertyDamage (`missing`
+    and `unexpected` are field names)
 
   ## Examples
 

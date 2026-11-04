@@ -188,7 +188,6 @@ defmodule PropertyDamage do
           seed: integer(),
           run_number: non_neg_integer(),
           original_sequence: Sequence.t(),
-          shrunk_sequence: Sequence.t(),
           failed_at_index: non_neg_integer(),
           failure_reason: term(),
           shrink_iterations: non_neg_integer(),
@@ -2232,7 +2231,10 @@ defmodule PropertyDamage do
         strategy: :exhaustive
       )
 
-      IO.puts("Reduced from \#{length(original)} to \#{length(smaller)} commands")
+      alias PropertyDamage.{FailureReport, Sequence}
+      before = failure |> FailureReport.shrunk_sequence() |> Sequence.command_count()
+      after_count = smaller |> FailureReport.shrunk_sequence() |> Sequence.command_count()
+      IO.puts("Reduced from \#{before} to \#{after_count} commands")
   """
   @spec shrink_further(FailureReport.t(), keyword()) ::
           {:ok, FailureReport.t()} | {:error, term()}
@@ -2632,10 +2634,13 @@ defmodule PropertyDamage do
   @doc """
   Load a seed library from disk.
 
-  Returns an empty library if the file doesn't exist.
+  With no argument it reads `property_damage_seeds.json` and returns an empty
+  library if that file doesn't exist. A path you pass that doesn't exist
+  returns `{:error, :enoent}`.
 
   ## Example
 
+      {:ok, library} = PropertyDamage.load_seed_library()
       {:ok, library} = PropertyDamage.load_seed_library("seeds.json")
   """
   @spec load_seed_library(Path.t()) :: {:ok, PropertyDamage.SeedLibrary.t()} | {:error, term()}

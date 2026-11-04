@@ -75,6 +75,16 @@ defmodule PropertyDamage.Mutation do
   - `:target_score` - Target mutation score (default: 0.80)
   - `:timeout_ms` - Timeout per mutation test (default: 30000)
   - `:verbose` - Print progress (default: false)
+  - `:on_progress` - A 1-arity function called with a `%PropertyDamage.Progress{}`
+    per mutation (`data: %PropertyDamage.Progress.MutationUpdate{}`) and once at
+    the end with the terminal report (`data: %PropertyDamage.Progress.MutationResult{}`)
+
+  ## Outcomes
+
+  Each mutation ends as `:killed`, `:killed_by_error`, `:survived` or
+  `:timeout`. A mutation is `:timeout` when its test runs longer than
+  `:timeout_ms`; the report counts it in `timeout` and in the score's
+  denominator, so it counts against the score like a survivor.
   """
 
   alias PropertyDamage.Mutation.{Analysis, Formatter, Report, Runner}

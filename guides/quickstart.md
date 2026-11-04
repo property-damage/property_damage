@@ -153,16 +153,22 @@ Run it:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-PropertyDamage.run(
-  model: AccountModel,
-  targets: [AccountAdapter],
-  max_commands: 20,
-  max_runs: 50
-)
+case PropertyDamage.run(
+       model: AccountModel,
+       targets: [AccountAdapter],
+       max_commands: 20,
+       max_runs: 50
+     ) do
+  {:ok, stats} ->
+    IO.puts("#{stats.runs} runs passed (seed #{stats.seed})")
+
+  {:error, report} ->
+    IO.inspect(report, pretty: true)
+end
 ```
 
-A failing run returns `{:error, report}`; `IO.inspect(report, pretty: true)`
-shows it. To read the failure as an HTML page instead, pass
+A passing run returns `{:ok, stats}` and a failing run returns `{:error, report}`;
+the snippet prints either one. To read the failure as an HTML page instead, pass
 `report_html: "_build/pd_reports"` to the run, or set the environment variable
 `PD_REPORT_HTML` to a directory; each failing run then writes a page there (see
 [Debugging Failures](debugging_failures.md#the-report-in-a-browser)). To add your own lines to that report, call `PropertyDamage.log/2`

@@ -309,7 +309,7 @@ an HTML page there, with an `index.html` that browses them. See
 ### Replay the shrunk failure
 
 Every failing run writes a replay artifact into the `replay_dir:` directory
-(default `property_damage_replays`; `replay_dir: false` writes none). The file is
+(default `property_damage_replays`; `replay_dir: false` writes none). The directory is an ephemeral working set that prunes itself, so add it to your `.gitignore`. The file is
 named `<model>_seed<seed>.replay.exs`, where `<model>` is the last segment of the
 model's module name. If that name already holds a different failure or other
 targets, the file gets a `_<k>` suffix (`<model>_seed<seed>_2.replay.exs`). The printed report ends with the call that runs it again
@@ -446,7 +446,7 @@ The skill drives `mix pd.explain`, which reads one page and loads no project cod
 
 - `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation for the page's bundle at the current prompt version. An explanation made for an older prompt version does not count, so the task writes the files again.
 - `mix pd.explain PAGE --files` does the same as the first bullet and never runs a command. A project may set `config :property_damage, explain_with: CMD` so that `mix pd.explain PAGE` runs `CMD`; `--files` ignores that config, so a caller that writes the explanation itself still gets the files.
-- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice. On a first run Mix prints its compile messages before the prompt, so run `mix compile` first, or set `MIX_QUIET=1`, when you pipe the output.
+- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice. Mix can print compile messages and, for a path dependency, `==> dep` banners before the prompt, so set `MIX_QUIET=1` when you pipe the output.
 - `mix pd.explain PAGE --apply FILE` (or `--apply -` for standard input) checks an explanation written as JSON and, if it passes, embeds it in the page. If it fails, it prints every problem and leaves the page untouched.
 
 The JSON shape of an explanation is described in the generated `PAGE.explain/instructions.md`. You can write the file by hand from that description and pass it to `--apply`, with no agent involved.
@@ -686,7 +686,7 @@ It warns about:
 - Events that no check projection handles
 - Two targets that share an adapter and an identical `config:`
 
-The task prints a summary of `Model:`, one line per target, `Commands:` (the number of commands the model lists) and `Extra:` (the number of check projections from `check_projections/0`).
+The task prints a summary of `Model:`, the adapter (one `Adapter:` line for a single adapter, or a `Targets:` list with one line per target), `Commands:` (the number of commands the model lists) and `Extra:` (the number of check projections from `check_projections/0`).
 
 `--verbose` shows more detail and `--strict` turns warnings into errors. On the Quick Start model, `--strict` prints `FAILED: 2 warning(s) in strict mode`. For a
 model with `expansions/0`, `--seeds N` sets how many root sequences to sample
@@ -1330,31 +1330,57 @@ notebook = PropertyDamage.Export.to_livebook(failure,
 #!/bin/bash
 # Failure Reproduction Script
 # Generated: 2025-12-26T14:30:00Z
-# Failure: NonNegativeBalance check failed
+# Failure: check_failed
 # Seed: 512902757
+#
+# Prerequisites: curl, jq
+# Run with: bash reproduce_512902757_1a2b3c4d.sh
 
-set -e
+set -e  # Exit on error
+
 BASE_URL="${BASE_URL:-http://localhost:4000}"
 
+
+echo ""
 echo "=== Step 1: CreateAccount ==="
-RESP1=$(curl -s -X POST "$BASE_URL/api/accounts" \
+# Command: %CreateAccount{currency: "USD"}
+RESP1=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts" \
   -H "Content-Type: application/json" \
   -d '{"currency": "USD"}')
 echo "$RESP1"
-REF_account_0=$(echo "$RESP1" | jq -r '.data.id // .id // empty')
+accountcreated_id_0=$(echo "$RESP1" | jq -r '.id // empty')
+if [ -n "$accountcreated_id_0" ]; then
+  echo "  -> bound accountcreated_id_0: $accountcreated_id_0"
+fi
 
+echo ""
 echo "=== Step 2: CreditAccount ==="
-RESP2=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/credit" \
+# Command: %CreditAccount{account_id: external(AccountCreated.id), amount: 100}
+RESP2=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts/$accountcreated_id_0/credit" \
   -H "Content-Type: application/json" \
   -d '{"amount": 100}')
 echo "$RESP2"
 
+echo ""
 echo "=== Step 3: DebitAccount (FAILURE POINT) ==="
-RESP3=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/debit" \
+# Command: %DebitAccount{account_id: external(AccountCreated.id), amount: 200}
+RESP3=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts/$accountcreated_id_0/debit" \
   -H "Content-Type: application/json" \
   -d '{"amount": 200}')
 echo "$RESP3"
+
+echo ""
+echo "=== Reproduction Complete ==="
+echo "Seed: 512902757"
 ```
+
+The exporter names each variable after the event and field the value came from (`accountcreated_id_0`), and later steps use it in their URLs and bodies.
 
 ## Automatic Regression Management
 
@@ -1656,7 +1682,7 @@ mkdir -p your_app/.claude/skills
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 
-If you already have a checkout (a path dependency), copy from it instead of cloning. From your project root:
+If you already have a checkout (a path dependency), copy from it instead of cloning. The path in the `cp` command below assumes the checkout sits next to your project, so adapt it to where your checkout lives. From your project root:
 
 ```bash
 mkdir -p .claude/skills

@@ -32,8 +32,10 @@ defmodule PropertyDamage.Adapter.Injector do
   @emits [PaymentConfirmed, PaymentDeclined]
   ```
 
-  `mix pd.validate` and run validation report an `injectable_events/0` entry
-  that no injector lists in `@emits`.
+  `mix pd.validate`, and `PropertyDamage.run/1` before it generates anything
+  (`validate: true`, the default), check every event the model lists in
+  `injectable_events/0` against the `@emits` of the target's injectors. An
+  event that no injector lists makes validation fail with an `ArgumentError`.
 
   ## Example
 
