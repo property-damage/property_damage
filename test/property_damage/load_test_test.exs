@@ -1364,8 +1364,12 @@ defmodule PropertyDamage.LoadTestTest do
         assert arrivals < 250,
                "Expected fewer than 250 arrivals, got #{arrivals} - possible parallel arrival chain bug"
 
-        # Additional sanity check: arrival rate should be reasonable
-        test_duration_sec = report.metrics.duration_ms / 1000
+        # Additional sanity check: arrival rate should be reasonable. The rate
+        # is taken over the configured duration, not the measured
+        # `duration_ms`: the measured time also covers draining the last
+        # arrivals, which stretches under full-suite load and pushed a
+        # correct run below the lower bound.
+        test_duration_sec = 1.0
         actual_rate = arrivals / test_duration_sec
         # With linear ramp, effective average rate is ~75% of target (0-100 over 50%, 100 for 50%)
         # So we expect roughly 75/sec average, allow 40-150 range
