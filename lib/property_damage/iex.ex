@@ -388,10 +388,15 @@ defmodule PropertyDamage.IEx do
   Shows the command, request/response details, and resulting events.
   Useful for testing individual commands before running full sequences.
 
+  The adapter receives the command exactly as given, so pass a struct whose
+  fields hold concrete values, such as an account id your system returned
+  earlier.
+
   ## Options
 
   - `:adapter_opts` - Options passed to adapter.setup/1 (default: [])
-  - `:refs` - Map of ref atoms to resolved values (default: %{})
+
+  Any other option raises `ArgumentError`.
 
   ## Examples
 
@@ -422,16 +427,14 @@ defmodule PropertyDamage.IEx do
         balance: 0
 
       iex> PropertyDamage.IEx.debug_command(
-      ...>   %Credit{account_ref: :ref0, amount: 500},
-      ...>   MyAdapter,
-      ...>   refs: %{ref0: "acc_abc123"}
+      ...>   %Credit{account_id: "acc_abc123", amount: 500},
+      ...>   MyAdapter
       ...> )
 
   """
   @spec debug_command(struct(), module(), keyword()) :: :ok | {:error, term()}
   def debug_command(command, adapter, opts \\ []) do
-    adapter_opts = Keyword.get(opts, :adapter_opts, [])
-    refs = Keyword.get(opts, :refs, %{})
+    adapter_opts = opts |> Keyword.validate!(adapter_opts: []) |> Keyword.fetch!(:adapter_opts)
 
     IO.puts("")
     IO.puts(String.duplicate("═", 65))
@@ -440,24 +443,21 @@ defmodule PropertyDamage.IEx do
     IO.puts("")
 
     # Print command
-    print_command_detail(command, refs)
+    print_command_detail(command)
 
     # The adapter's setup/1, execute/3 and teardown/1 run in one scope; this
     # helper builds no failure report, so their log lines are dropped (DR-054).
     {result, _lines} =
-      PropertyDamage.Log.inline(fn -> run_debug_command(command, adapter, adapter_opts, refs) end)
+      PropertyDamage.Log.inline(fn -> run_debug_command(command, adapter, adapter_opts) end)
 
     result
   end
 
-  defp run_debug_command(command, adapter, adapter_opts, refs) do
+  defp run_debug_command(command, adapter, adapter_opts) do
     # Setup adapter
     case adapter.setup(adapter_opts) do
       {:ok, context} ->
         try do
-          # Resolve refs in command
-          resolved_command = resolve_refs(command, refs)
-
           # Execute. This single-command debug runner has no projection or
           # injection window, so the Runtime's inject/start_poller raise if used
           # (DR-027); user_context is the adapter's setup/1 return.
@@ -474,7 +474,7 @@ defmodule PropertyDamage.IEx do
           }
 
           start_time = System.monotonic_time(:millisecond)
-          result = adapter.execute(resolved_command, context, runtime)
+          result = adapter.execute(command, context, runtime)
           elapsed = System.monotonic_time(:millisecond) - start_time
 
           # Print result
@@ -494,7 +494,7 @@ defmodule PropertyDamage.IEx do
     end
   end
 
-  defp print_command_detail(command, refs) do
+  defp print_command_detail(command) do
     cmd_name = command.__struct__ |> Module.split() |> List.last()
     fields = Map.from_struct(command)
 
@@ -503,14 +503,7 @@ defmodule PropertyDamage.IEx do
     IO.puts(cmd_name)
 
     for {key, value} <- fields do
-      resolved_note =
-        if is_atom(value) and Map.has_key?(refs, value) do
-          " → #{inspect(refs[value])}"
-        else
-          ""
-        end
-
-      IO.puts("  #{key}: #{inspect(value)}#{resolved_note}")
+      IO.puts("  #{key}: #{inspect(value)}")
     end
 
     IO.puts("")
@@ -561,24 +554,6 @@ defmodule PropertyDamage.IEx do
     end
 
     IO.puts("")
-  end
-
-  defp resolve_refs(command, refs) do
-    fields = Map.from_struct(command)
-
-    resolved_fields =
-      Map.new(fields, fn {key, value} ->
-        resolved_value =
-          if is_atom(value) and Map.has_key?(refs, value) do
-            refs[value]
-          else
-            value
-          end
-
-        {key, resolved_value}
-      end)
-
-    struct!(command.__struct__, resolved_fields)
   end
 
   # ============================================================================
