@@ -19,12 +19,12 @@ defmodule PropertyDamage.Mutation do
   unmodified adapter, up to 10 commands (`max_commands: 10`) and a fresh random
   seed, and takes every event of that run as the sample events to mutate. A
   model with three commands in `commands/0` runs three baselines. If a baseline run fails with
-  an adapter error, `run/1` stops and returns
+  an adapter error, or its setup fails, `run/1` stops and returns
   `{:error, {:baseline_failed, command_module, message}}`. Without this guard
-  every mutation would fail with the same error and be reported as killed by
-  error, which hides that the adapter is broken. The message is the failure
-  message of the baseline run. A baseline that fails a check is not an
-  adapter error and is not guarded.
+  every mutation would fail the same way: an adapter error is reported as
+  killed by error, and a failed setup yields no events and an empty report,
+  which hides that the adapter is broken. The message is the failure message
+  of the baseline run. A baseline that fails a check is not guarded.
 
   ## Usage
 
@@ -94,7 +94,7 @@ defmodule PropertyDamage.Mutation do
 
   Returns `{:ok, report}` with mutation testing results, or
   `{:error, {:baseline_failed, command_module, message}}` when the baseline run
-  for `command_module` fails with an adapter error.
+  for `command_module` fails with an adapter error or a failed setup.
 
   ## Examples
 

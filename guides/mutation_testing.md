@@ -46,8 +46,9 @@ tightly enough.
 
 Before it mutates a command, `run/1` runs one baseline property run with the unmodified
 adapter. If that baseline run fails with an adapter error, every mutation of
-the command would fail the same way and count as killed by error, which hides
-that the adapter is broken. So `run/1` stops and returns
+the command would fail the same way and count as killed by error. If the
+adapter's setup fails, the baseline yields no events to mutate and the report
+comes back empty. Both hide that the adapter is broken. So `run/1` stops and returns
 `{:error, {:baseline_failed, command_module, message}}`, where `message` is the
 failure message of the baseline run (for example `":backend_down"`). Fix the
 adapter or its setup and run again. A baseline run that fails a check is not an

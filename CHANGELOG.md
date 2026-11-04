@@ -1404,6 +1404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **`Mutation.run/1` stops when the baseline's adapter setup fails.** The
+  baseline produced no events to mutate, so the run returned an empty report
+  that read as a result. It now returns
+  `{:error, {:baseline_failed, command_module, message}}`, as it does for an
+  adapter error.
 - **The built-in network nemeses validate their overrides at generation.**
   `NetworkPartition.new!/2` copied any `partition_type:` override into the
   command, so an invalid type crashed with `FunctionClauseError` only at

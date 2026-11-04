@@ -30,7 +30,8 @@ defmodule PropertyDamage.Mutation.Runner do
 
   `{:ok, report}`, or `{:error, {:baseline_failed, command_module, message}}`
   when the unmutated baseline run for `command_module` fails with an adapter
-  error (report kind `:execution_failed`). See `PropertyDamage.Mutation`.
+  error or a failed setup (report kind `:execution_failed` or
+  `:setup_failed`). See `PropertyDamage.Mutation`.
   """
   @spec run(keyword()) ::
           {:ok, Report.t()}
@@ -128,8 +129,8 @@ defmodule PropertyDamage.Mutation.Runner do
 
   defp test_command_mutations(command, operators, config, report) do
     # First, run a baseline test to get sample events. A baseline that fails
-    # with an adapter error stops the run: every mutation would fail the same
-    # way and be reported as killed by error.
+    # with an adapter error or a failed setup stops the run: every mutation
+    # would fail the same way.
     with {:ok, sample_events} <- get_sample_events(command, config) do
       # Generate mutations from each operator. Each operator yields up to
       # `mutations_per_command` mutations, and the command keeps up to that cap
@@ -177,7 +178,9 @@ defmodule PropertyDamage.Mutation.Runner do
 
     case trace.outcome do
       {:fail, %Failure{} = failure} ->
-        if FailureReport.kind_of(failure) == :execution_failed do
+        # An adapter error or a failed setup breaks every mutant run the same
+        # way, so neither leaves anything to measure.
+        if FailureReport.kind_of(failure) in [:execution_failed, :setup_failed] do
           {:error, FailureReport.failure_message(failure) || inspect(failure)}
         else
           {:ok, sample_events(trace)}
