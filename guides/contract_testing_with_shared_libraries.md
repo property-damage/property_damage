@@ -228,10 +228,15 @@ for path <- Path.wildcard("failures/*.pd") do
   {:ok, report} = PropertyDamage.load_failure(path)
   name = Path.basename(path, ".pd")
 
+  # A file name such as `bug-123` or a name `save_failure/2` writes has
+  # hyphens, which a module name cannot hold. Replace every character that is
+  # not a letter or digit before camelizing.
+  module_part = name |> String.replace(~r/[^A-Za-z0-9]/, "_") |> Macro.camelize()
+
   source =
     PropertyDamage.generate_test(report,
       format: :exunit,
-      module_name: "Regression#{Macro.camelize(name)}Test"
+      module_name: "Regression#{module_part}Test"
     )
 
   File.write!(Path.join("test/regressions", "#{name}_test.exs"), source)
