@@ -1612,15 +1612,14 @@ instead of copying it (see [Explaining a failure page](#explaining-a-failure-pag
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use the other `pd-*` skills in your application, copy them from the git
-tag of the release you installed (the skills first shipped with the 0.3.0
-release; a tag before it carries no `pd-*` skill). Skills track the API of
-their release, so skills from a newer tag may reference APIs your version
-does not have, and skill fixes listed under Unreleased in the CHANGELOG are
-only on `main`:
+To use the other `pd-*` skills in your application, copy them from this
+repository. No published release carries them yet, so copy from `main`; once
+a release ships them, copy from that release's tag instead. Skills track the
+API of the commit you copy them from, so skills from `main` may reference
+APIs a released version does not have:
 
 ```bash
-git clone --depth 1 --branch v0.3.0 https://github.com/property-damage/property_damage /tmp/pd
+git clone --depth 1 https://github.com/property-damage/property_damage /tmp/pd
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 
