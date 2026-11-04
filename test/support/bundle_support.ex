@@ -366,12 +366,14 @@ defmodule PropertyDamage.Test.BundleSupport do
   line and the `end` at the same indentation, and leaves out a function
   whose name no `def`-like line one level inside that block names.
   """
-  def source_ids(%{"module" => name} = entry) do
+  def source_ids(%{"module" => name}) do
     module = Module.concat([name])
 
     case Docs.fetch(module) do
-      {:ok, %{functions: functions}} ->
-        defined? = defined_in(entry["file"], module)
+      # The bundle names a file outside the project by its base name, so the
+      # file is read from the path the docs record.
+      {:ok, %{functions: functions, file: file}} ->
+        defined? = defined_in(file, module)
 
         for {{function, arity}, _doc} <- functions,
             defined?.(function),

@@ -247,6 +247,7 @@ The rule reads one line at a time, and the page redacts nothing else.
 - **The target config.** The Reproduction section prints each target's `config:` as written, so `config: %{password: "hunter2"}` appears in the page as `targets: [{MyApp.Adapter, config: %{password: "hunter2"}}]`.
 - **Events and command arguments.** The page prints them in full.
 - **A source file that holds no adapter.** The page does not scan it.
+- **Source paths.** The bundle names each source file by its path from the project root, such as `lib/my_app/adapter.ex`, so the page shows your project's directory and file names but no directory above the project. A file outside the project shows its base name only.
 - **A value on the line after its key.** When a formatter wraps `password:` and puts the string on the next line, the key line ends in `:` and masks nothing. The string stays.
 - **A secret deep in a multi-line map or call.** The reach past a secret-named line is one line. In `%{token: "..."`, `user: "..."`, `host: "..."`, `login: "..."` on four lines, the page masks the `token` and `user` strings and leaves `host` and `login`, because neither line names a secret word.
 - **A name that is not an identifier.** A key such as `"x-api-key"` has hyphens, so it does not count as a secret name.

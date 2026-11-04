@@ -395,6 +395,26 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       end
     end
 
+    test "name each file under the project by its path from the project root" do
+      bundle = B.build(RL.report(:check_failed))
+      files = for entry <- bundle["modules"], is_binary(entry["file"]), do: entry["file"]
+
+      assert files != [], "the fixture names no source file, so the check would pass vacuously"
+
+      paths =
+        files ++
+          bundle["missing_sources"] ++
+          for(%{"source" => %{"missing" => path}} <- bundle["modules"], do: path)
+
+      for path <- paths do
+        refute String.starts_with?(path, "/"), "the bundle names the absolute path #{path}"
+      end
+
+      for file <- files do
+        assert File.regular?(Path.join(File.cwd!(), file)), "#{file} is not under the project"
+      end
+    end
+
     test "resolve a module through its captured docs, its beam or neither" do
       for entry <- B.build(RL.report(:check_failed))["modules"] do
         module = Module.concat([entry["module"]])

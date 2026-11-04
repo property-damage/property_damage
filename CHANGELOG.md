@@ -1390,6 +1390,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The bundle of a failure page names source files by their path from the
+  project root.** It embedded the absolute local path of each bundled file, so
+  a shared page showed the directory names above the project. A file outside
+  the project is now named by its base name.
 - **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
   an integer field, the candidate values repeated (an original of 1 tried 0
   three times), so `changes` carried duplicate entries. The candidates are now

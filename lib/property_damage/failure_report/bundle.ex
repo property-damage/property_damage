@@ -74,6 +74,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   redactions}`:
 
     * `role` is `model`, `projection`, `command`, `event` or `adapter`;
+    * `file` is the path of the source file relative to the project root
+      (the current directory), so a shared page reveals no directory above
+      the project; a file outside the project is named by its base name.
+      `missing_sources` and a missing `source` use the same form;
     * `resolution` is `captured` when `PropertyDamage.Docs.fetch/1` read the
       docs from `__pd_docs__/0`, `beam` when it read the beam's docs chunk,
       and `unavailable` when it found no docs or the module has no source
@@ -485,7 +489,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
     entry =
       Map.merge(base, %{
         "moduledoc" => docs.moduledoc,
-        "file" => file,
+        "file" => shown_path(file),
         "lines" => text && line_count(text),
         "source" => source,
         "resolution" => resolution(module, file),
@@ -501,12 +505,26 @@ defmodule PropertyDamage.FailureReport.Bundle do
   defp read(file) do
     case File.read(file) do
       {:ok, text} -> {text, []}
-      {:error, _reason} -> {nil, [file]}
+      {:error, _reason} -> {nil, [shown_path(file)]}
     end
   end
 
+  # The path a page shows for a source file: relative to the project root
+  # (the current directory), so a shared page does not reveal the local
+  # directory names; a file outside the project shows its base name only.
+  defp shown_path(nil), do: nil
+
+  defp shown_path(file) do
+    root = File.cwd!()
+    path = Path.expand(file)
+
+    if String.starts_with?(path, root <> "/"),
+      do: Path.relative_to(path, root),
+      else: Path.basename(path)
+  end
+
   defp source_of(nil, nil, _adapter_files), do: {nil, 0}
-  defp source_of(nil, file, _adapter_files), do: {%{"missing" => file}, 0}
+  defp source_of(nil, file, _adapter_files), do: {%{"missing" => shown_path(file)}, 0}
 
   defp source_of(text, file, adapter_files) do
     if MapSet.member?(adapter_files, file), do: Redaction.redact(text), else: {text, 0}
