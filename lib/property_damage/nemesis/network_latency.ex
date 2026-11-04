@@ -17,7 +17,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   nemesis in `commands/0`, `new!/2` draws the values instead: `:latency_ms` in
   50..500, `:jitter_ms` in 0..50 and `:duration_ms` in 1000..10_000. A key in
   the command's `overrides:` replaces its draw with the value as given; pass a
-  plain value, not a generator.
+  plain value, not a generator. A `:latency_ms`, `:jitter_ms` or `:duration_ms`
+  override that is not a non-negative integer raises `ArgumentError`.
 
   ## Usage with Toxiproxy
 
@@ -56,6 +57,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   @behaviour PropertyDamage.Nemesis
 
+  alias PropertyDamage.Nemesis
   alias PropertyDamage.Nemesis.Toxiproxy
 
   defstruct latency_ms: 100,
@@ -127,6 +129,18 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
+
+    for key <- [:latency_ms, :jitter_ms] do
+      Nemesis.check_override!(
+        __MODULE__,
+        overrides,
+        key,
+        "a non-negative integer",
+        &Nemesis.non_neg_integer?/1
+      )
+    end
+
+    Nemesis.check_duration_override!(__MODULE__, overrides)
 
     bind(integer(50..500), fn latency ->
       bind(integer(0..50), fn jitter ->

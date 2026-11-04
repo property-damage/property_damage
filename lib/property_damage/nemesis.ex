@@ -307,6 +307,44 @@ defmodule PropertyDamage.Nemesis do
     Map.get(event, :simulated, false) == true
   end
 
+  @doc false
+  # Raises `ArgumentError` when `overrides` holds `key` with a value `valid?`
+  # rejects, so a bad `overrides:` value fails at generation rather than as a
+  # crash at inject time. `allowed` describes the valid values for the message.
+  @spec check_override!(module(), map(), atom(), String.t(), (term() -> boolean())) :: :ok
+  def check_override!(module, overrides, key, allowed, valid?) do
+    case Map.fetch(overrides, key) do
+      {:ok, value} ->
+        if valid?.(value) do
+          :ok
+        else
+          raise ArgumentError,
+                "#{inspect(module)} override #{inspect(key)} must be #{allowed}, " <>
+                  "got: #{inspect(value)}"
+        end
+
+      :error ->
+        :ok
+    end
+  end
+
+  @doc false
+  # The override check for a duration, shared by the built-in nemeses.
+  @spec check_duration_override!(module(), map()) :: :ok
+  def check_duration_override!(module, overrides) do
+    check_override!(
+      module,
+      overrides,
+      :duration_ms,
+      "a non-negative integer",
+      &non_neg_integer?/1
+    )
+  end
+
+  @doc false
+  @spec non_neg_integer?(term()) :: boolean()
+  def non_neg_integer?(value), do: is_integer(value) and value >= 0
+
   @doc """
   Get the duration for a nemesis command.
   """

@@ -1404,6 +1404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **The built-in network nemeses validate their overrides at generation.**
+  `NetworkPartition.new!/2` copied any `partition_type:` override into the
+  command, so an invalid type crashed with `FunctionClauseError` only at
+  inject time. `NetworkPartition`, `NetworkLatency` and `PacketLoss` now raise
+  `ArgumentError` naming the allowed values when an override is invalid.
 - **`Export.save/4` and `save_all/3` validate their options.** Both passed
   options to the generators unchecked, so a misspelled option was ignored and
   the file was written anyway. `save/4` now validates with the schema of the
