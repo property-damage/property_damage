@@ -317,8 +317,9 @@ Use probes for **read-only queries** that may need to wait for eventual consiste
 
 ```elixir
 defmodule MyTest.Commands.GetOrder do
-  # Probe semantics enables settle/retry logic; read-only commands are
-  # prioritized for removal during shrinking; settle tunes retry behavior.
+  # Probe semantics enables settle/retry logic; `shrink: :prefer_remove`
+  # makes the shrinker try removing this command first; settle tunes retry
+  # behavior.
   use PropertyDamage.Command,
     execution: :probe,
     shrink: :prefer_remove,
