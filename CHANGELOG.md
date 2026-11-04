@@ -1298,6 +1298,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`PropertyDamage.Analysis.isolate_trigger/2` no longer special-cases a
+  `CreateAccount` command.** The analysis named a currency mismatch when the
+  trigger read `account_ref` from a command named `CreateAccount` with a
+  `currency` field, a domain rule no framework can know. A currency change
+  now gets the generic message that names the field and both values.
+
 - **BREAKING: `PropertyDamage.Model.Projection.Liveness` is removed.** It
   could not run: listed bare in `check_projections/0` it crashed the engine,
   and listed with options it raised `FunctionClauseError`. To check that an

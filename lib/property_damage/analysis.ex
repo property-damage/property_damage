@@ -465,8 +465,7 @@ defmodule PropertyDamage.Analysis do
     }
 
     changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
-    producers = plan_producers(sequence)
-    trigger_result(trigger_cmd, commands, failed_at, changes, producers)
+    trigger_result(trigger_cmd, failed_at, changes)
   end
 
   # The trigger among the reference's concrete commands: the command where
@@ -499,19 +498,17 @@ defmodule PropertyDamage.Analysis do
         }
 
         changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
-        # No producer map: the registry positions name roots, not the leaves
-        # in `commands`.
-        trigger_result(step.command, commands, step.flattened_index, changes, nil)
+        trigger_result(step.command, step.flattened_index, changes)
     end
   end
 
-  defp trigger_result(trigger_cmd, commands, failed_at, changes, producers) do
+  defp trigger_result(trigger_cmd, failed_at, changes) do
     {:ok,
      %{
        trigger_command: trigger_cmd,
        trigger_index: failed_at,
        changes: changes,
-       likely_cause: infer_cause(changes, trigger_cmd, commands, producers)
+       likely_cause: infer_cause(changes)
      }}
   end
 
@@ -653,19 +650,8 @@ defmodule PropertyDamage.Analysis do
     []
   end
 
-  defp infer_cause(changes, trigger_cmd, commands, producers) do
+  defp infer_cause(changes) do
     cond do
-      # Currency mismatch pattern
-      currency_change = Enum.find(changes, &(&1.field == :currency)) ->
-        # Find what the account's currency is
-        account_currency = find_account_currency(trigger_cmd, commands, producers)
-
-        if account_currency do
-          "Currency mismatch: operation uses #{inspect(currency_change.original)} but account uses #{inspect(account_currency)}"
-        else
-          "Currency mismatch detected - changing currency eliminates failure"
-        end
-
       # Amount-related pattern
       amount_change = Enum.find(changes, &(&1.field == :amount)) ->
         "Amount-related issue: original amount #{amount_change.original} causes failure"
@@ -679,22 +665,6 @@ defmodule PropertyDamage.Analysis do
         change = hd(changes)
 
         "Changing #{change.field} from #{inspect(change.original)} to #{inspect(change.fixed)} eliminates failure"
-    end
-  end
-
-  # The currency of the CreateAccount command whose event minted the
-  # placeholder the trigger reads in `account_ref`. `producers` maps each
-  # placeholder id to the index of the command that produces it (see
-  # `plan_producers/1`); nil when no such map applies.
-  defp find_account_currency(trigger_cmd, commands, producers) do
-    with %Placeholder{id: id} <- Map.get(trigger_cmd, :account_ref),
-         true <- is_map(producers),
-         {:ok, index} <- Map.fetch(producers, {:placeholder, id}),
-         %{__struct__: module} = producer <- Enum.at(commands, index),
-         "CreateAccount" <- module |> Module.split() |> List.last() do
-      Map.get(producer, :currency)
-    else
-      _ -> nil
     end
   end
 
