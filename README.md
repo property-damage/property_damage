@@ -1094,8 +1094,6 @@ sequenceDiagram
 - `:failed_at_index` - `generate/4` only: the flattened index of the failing
   command, which marks that step as the failure (`from_failure_report/3` takes
   the failure point from the report)
-- `:highlight_failure`, `:show_timestamps`, `:show_branches` - Accepted and
-  currently ignored: no renderer reads them
 
 ## Run Comparison
 

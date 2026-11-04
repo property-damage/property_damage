@@ -1310,6 +1310,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `currency` field, a domain rule no framework can know. A currency change
   now gets the generic message that names the field and both values.
 
+- **BREAKING: `PropertyDamage.Diagram` drops `:show_timestamps`,
+  `:highlight_failure` and `:show_branches`.** No renderer read them, so
+  setting them changed nothing. They are gone from the docs, the `options`
+  type and the defaults; the failure step is always highlighted.
 - **BREAKING: `PropertyDamage.Model.Projection.Liveness` is removed.** It
   could not run: listed bare in `check_projections/0` it crashed the engine,
   and listed with options it raised `FunctionClauseError`. To check that an

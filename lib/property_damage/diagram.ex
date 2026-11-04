@@ -61,8 +61,6 @@ defmodule PropertyDamage.Diagram do
   - `:failed_at_index` - `generate/4` only: the flattened index of the failing
     command, which marks that step as the failure. `from_failure_report/3`
     sets the failure point from the report.
-  - `:show_timestamps`, `:highlight_failure`, `:show_branches` - Accepted and
-    currently ignored: no renderer reads them, so setting them changes nothing.
   """
 
   alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
@@ -71,19 +69,13 @@ defmodule PropertyDamage.Diagram do
   @type options :: [
           title: String.t(),
           show_state: boolean(),
-          show_timestamps: boolean(),
-          max_value_length: pos_integer(),
-          highlight_failure: boolean(),
-          show_branches: boolean()
+          max_value_length: pos_integer()
         ]
 
   @default_options [
     title: nil,
     show_state: false,
-    show_timestamps: false,
-    max_value_length: 50,
-    highlight_failure: true,
-    show_branches: true
+    max_value_length: 50
   ]
 
   @default_title "PropertyDamage Sequence"
