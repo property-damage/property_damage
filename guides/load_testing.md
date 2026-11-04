@@ -158,6 +158,11 @@ write.
 | `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
 
+Every time value written as `{n, unit}` takes a positive integer `n` and one of
+these units: `:milliseconds`, `:seconds`, `:minutes` or `:hours`. This covers
+`duration`, `metrics_interval`, the time in `arrival_rate`, and the durations
+in the ramp strategies.
+
 ### Arrival Rate Formats
 
 ```elixir
