@@ -298,9 +298,14 @@ PropertyDamage.run(
 ```
 
 Pass the same `targets:` the report printed, and no `seed:` (the artifact records
-it). Shrinking is off by default in a replay. A replay that fails the same way
+it). If the run named `external_markers:`, pass the same option too, because the
+artifact does not record it. Shrinking is off by default in a replay. A replay that fails the same way
 returns `{:error, report}`. A replay that passes returns `{:ok, stats}` with
 `stats.replay` set to `:not_reproduced`.
+
+A failure that the `stutter:` option found does not reproduce this way, because the
+artifact records no stutter and the replay passes. To reproduce it, run the original
+call again with the same `seed:` and `stutter:` options.
 
 ### Interactive Shrinking
 
@@ -313,6 +318,9 @@ If the initial shrinking didn't produce a minimal sequence:
   max_time_ms: 120_000
 )
 ```
+
+If the run named `external_markers:`, pass the same option to `shrink_further/2`:
+the failure report does not record it.
 
 Strategies:
 - `:quick` - Fast, may miss some reductions
@@ -549,26 +557,28 @@ classifier = fn state ->
   end
 end
 
-# Record the failing runs of several seeds
+# Record the failing runs of several seeds (shrink: false keeps the state of the
+# first failure, so the failing states differ from seed to seed)
 tracker = Coverage.new(MyModel, state_classifier: classifier)
 
 tracker =
   Enum.reduce(1..6, tracker, fn seed, tracker ->
-    {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter], seed: seed)
+    opts = [model: MyModel, targets: [MyAdapter], seed: seed, shrink: false]
+    {:error, report} = PropertyDamage.run(opts)
     Coverage.record(tracker, {:error, report})
   end)
 
 # Failing-state classes seen, and how often (one possible outcome; the
 # classes and counts depend on the model and the seeds)
 Coverage.state_class_counts(tracker)
-# => %{deeply_overdrawn: 1, slightly_overdrawn: 5}
+# => %{deeply_overdrawn: 4, slightly_overdrawn: 2}
 
 # Class of one recorded failure followed by the class of the next
 Coverage.state_class_transitions(tracker)
 # => %{
-#      {:deeply_overdrawn, :slightly_overdrawn} => 1,
+#      {:deeply_overdrawn, :deeply_overdrawn} => 3,
 #      {:slightly_overdrawn, :deeply_overdrawn} => 1,
-#      {:slightly_overdrawn, :slightly_overdrawn} => 3
+#      {:slightly_overdrawn, :slightly_overdrawn} => 1
 #    }
 
 # The same transitions as a nested map, for visualization
@@ -576,7 +586,18 @@ Coverage.state_class_matrix(tracker)
 
 # Format with the state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
+# State Class Transition Matrix
+# ────────────────────────────────────────────────────────────
+#                     → deeply_overdrawn    slightly_overdrawn
+# deeply_overdrawn    3
+# slightly_overdrawn  ░░░░                1
+#
+# State class counts:
+#   deeply_overdrawn: 4x
+#   slightly_overdrawn: 2x
 ```
+
+A cell off the diagonal shows a bar (`░░░░` for 1 to 4 transitions, `▓▓▓▓` for 5 to 9, `████` for 10 or more). A diagonal cell, a transition from a class to itself, shows its count, or `·` when there is none.
 
 The transitions pair consecutive recorded results, so six recorded failures give five transitions. The section answers two questions: which classes of final failing state were seen, and how often one followed another across the recorded failures.
 
@@ -596,7 +617,12 @@ mix pd.scaffold --from openapi.json --operations createUser,updateUser
 
 # Preview without writing
 mix pd.scaffold --from openapi.json --dry-run
+
+# Regenerate over existing files (overwrites them)
+mix pd.scaffold --from openapi.json --output lib/my_app_test/commands/ --force
 ```
+
+A rerun that would touch an existing file exits 1, names the files and writes nothing unless you pass `--force`. `--force` overwrites every file the run generates, so it discards your edits to them.
 
 Generated commands include:
 - Struct fields from request body schemas
@@ -625,11 +651,12 @@ It fails on:
 - A removed lifecycle hook, or a nemesis in `setup_each/0` or `teardown_each/0`
 
 It warns about:
-- Commands that declare no `:observables`
+- Commands that declare no `:observables` (the Quick Start's `CreateUser` does)
+- A model with a single command (the Quick Start model has one)
 - Events that no check projection handles
 - Two targets that share an adapter and an identical `config:`
 
-`--verbose` shows more detail and `--strict` turns warnings into errors. For a
+`--verbose` shows more detail and `--strict` turns warnings into errors. On the Quick Start model, `--strict` prints `FAILED: 2 warning(s) in strict mode`. For a
 model with `expansions/0`, `--seeds N` sets how many root sequences to sample
 (default 100) and `--seed S` samples the seeds S, S+1, and so on.
 
@@ -655,7 +682,8 @@ PropertyDamage.run(
   # directory (default false; the PD_REPORT_HTML environment variable replaces it)
   report_html: "failure_pages",
 
-  # Idempotency (see the idempotency guide)
+  # Idempotency (see the idempotency guide). On the Quick Start model this fails
+  # the run with an idempotency violation: its adapter mints a new id on every call.
   stutter: [probability: 0.1]
 )
 ```
@@ -941,13 +969,17 @@ end
 Network operations integrate with [Toxiproxy](https://github.com/Shopify/toxiproxy) when available:
 
 ```elixir
-# Configure in adapter context
-context = %{
-  toxiproxy: %{
-    proxy_name: "my_service",
-    api_url: "http://localhost:8474"
-  }
-}
+# Return the config from the adapter's setup/1, the only place the engine
+# reads it (a top-level :toxiproxy key in the nemesis context is not set by a run)
+def setup(_config) do
+  {:ok,
+   %{
+     toxiproxy: %{
+       proxy_name: "my_service",
+       api_url: "http://localhost:8474"
+     }
+   }}
+end
 
 # Nemesis operations will automatically use Toxiproxy
 # Falls back to simulated mode if not configured
@@ -997,7 +1029,7 @@ IO.puts(diagram)
 # From sequence and event log
 diagram = PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
   title: "Account Creation Flow",
-  highlight_failure: true
+  failed_at_index: 2
 )
 
 # Save to file
@@ -1029,7 +1061,11 @@ sequenceDiagram
 - `:title` - Custom diagram title
 - `:show_state` - Include state participant
 - `:max_value_length` - Truncate long values (default: 50)
-- `:highlight_failure` - Visual failure markers (default: true)
+- `:failed_at_index` - `generate/4` only: the flattened index of the failing
+  command, which marks that step as the failure (`from_failure_report/3` takes
+  the failure point from the report)
+- `:highlight_failure`, `:show_timestamps`, `:show_branches` - Accepted and
+  currently ignored: no renderer reads them
 
 ## Run Comparison
 
@@ -1070,7 +1106,8 @@ fingerprint or model).
 ### Reading the Ranking
 
 Each ranked entry is a `%RunComparison.Field{}` with a `location`
-(`{:command, position, path}` or `{:event, ...}`), a `classification`, a
+(`{:command, position, path}`, `{:event, ...}`, or
+`{:state, position, module, path}` for projection state), a `classification`, a
 `provenance`, and `values` (a `%{trace_index => value}` map):
 
 | Classification | Meaning |
@@ -1170,13 +1207,13 @@ notebook = PropertyDamage.Export.to_livebook(failure,
 ```elixir
 # Save single format
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", :exunit)
-# => {:ok, "exports/reproduce_512902757.exs"}
+# => {:ok, "exports/reproduce_512902757_02e399f6_test.exs"}
 
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", {:script, :curl},
   base_url: "http://localhost:4000",
   adapter: MyHTTPAdapter
 )
-# => {:ok, "exports/reproduce_512902757.sh"}
+# => {:ok, "exports/reproduce_512902757_02e399f6.sh"}
 
 # Save all formats at once
 {:ok, paths} = PropertyDamage.Export.save_all(failure, "exports/",
@@ -1185,11 +1222,11 @@ notebook = PropertyDamage.Export.to_livebook(failure,
   script_languages: [:elixir, :curl, :python]
 )
 # => {:ok, %{
-#   exunit: "exports/reproduce_512902757.exs",
-#   livebook: "exports/reproduce_512902757.livemd",
-#   script_elixir: "exports/reproduce_512902757.exs",
-#   script_curl: "exports/reproduce_512902757.sh",
-#   script_python: "exports/reproduce_512902757.py"
+#   exunit: "exports/reproduce_512902757_02e399f6_test.exs",
+#   livebook: "exports/reproduce_512902757_02e399f6.livemd",
+#   script_elixir: "exports/reproduce_512902757_02e399f6.exs",
+#   script_curl: "exports/reproduce_512902757_02e399f6.sh",
+#   script_python: "exports/reproduce_512902757_02e399f6.py"
 # }}
 ```
 
@@ -1241,7 +1278,7 @@ end
 Generated LiveBook notebooks include:
 
 - **Setup section**: Installs dependencies (Req, Jason)
-- **State tracking**: Tracks refs and model state alongside execution
+- **State tracking**: Tracks placeholders and model state alongside execution
 - **Step-by-step commands**: Each command in its own cell with HTTP call
 - **Failure marker**: Highlights the command that caused the failure
 - **Exploration section**: Space to experiment with variations
@@ -1354,6 +1391,8 @@ PropertyDamage.run(
     fn report -> Logger.warning("Failure found: #{report.seed}") end
   ])
 )
+# The handler module needs `require Logger`; a handler that raises is rescued
+# and its failure is not logged.
 ```
 
 ### Batch Processing
@@ -1573,16 +1612,18 @@ instead of copying it (see [Explaining a failure page](#explaining-a-failure-pag
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use the other `pd-*` skills in your application, copy them from
-the git tag matching your installed version. Skills track the API of their release, so skills from a newer
-tag may reference APIs your version does not have:
+To use the other `pd-*` skills in your application, copy them from this
+repository. No published release carries them yet, so copy from `main`; once
+a release ships them, copy from that release's tag instead. Skills track the
+API of the commit you copy them from, so skills from `main` may reference
+APIs a released version does not have:
 
 ```bash
-git clone --depth 1 --branch v0.2.0 https://github.com/property-damage/property_damage /tmp/pd
+git clone --depth 1 https://github.com/property-damage/property_damage /tmp/pd
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 
-Skills are not part of the hex package; this repository is the distribution channel.
+The Hex package ships only `pd-explain` (under `priv/claude/skills`). Every other skill, including `pd-model-interview`, comes from this repository, which is its distribution channel.
 
 ## Architecture
 
@@ -1607,7 +1648,7 @@ PropertyDamage
 ├── Shrinking (Tier 2)
 │   ├── Shrinker     - Sequence minimization (supports branching)
 │   ├── Sequence.Validator - Sequence validation
-│   └── Graph        - Dependency analysis
+│   └── Shrinker.Graph - Dependency analysis
 │
 ├── Diagnostics
 │   ├── FailureReport - Structured failure + formatter
@@ -1633,7 +1674,7 @@ PropertyDamage
     ├── Persistence  - Save/load failures
     ├── SeedLibrary  - Seed management
     ├── Regression   - Automatic regression test management
-    └── Scaffold     - OpenAPI code generation
+    └── mix pd.scaffold - OpenAPI code generation (a Mix task, not a module)
 ```
 
 > The codebase also ships several modules that are **work in progress and not

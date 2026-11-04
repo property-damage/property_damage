@@ -1,10 +1,10 @@
 defmodule PropertyDamage.Linearization do
   @moduledoc """
-  Linearization checking for parallel execution results.
+  Linearization checking for branching execution results.
 
-  When commands execute in parallel branches, the Linearization module verifies
-  that the observed results can be explained by some sequential (linear) ordering
-  of the commands.
+  Branches run one after another, and this module models their interleavings
+  afterward. It verifies that the observed results can be explained by some
+  sequential (linear) ordering of the commands.
 
   ## What is Linearizability?
 
@@ -15,8 +15,11 @@ defmodule PropertyDamage.Linearization do
   2. Each command's observed events are consistent with what the model predicts
      for the state at that command's position in the ordering
 
-  If no such ordering exists, the system has exhibited non-linearizable behavior,
-  which typically indicates a race condition or consistency bug.
+  If no such ordering exists, the observed results are non-linearizable: no
+  sequential order of the branch commands explains them against the model. The
+  branches run one after another, so this path detects no race (DR-053). A
+  refutation points at a disagreement between the model and the system, such
+  as a lost update or a check that fails in every order.
 
   ## Algorithm
 
@@ -60,7 +63,7 @@ defmodule PropertyDamage.Linearization do
   ## Verification strength
 
   The check is exactly as strong as the model's simulator: predicted event
-  fields that are `nil`, unresolved refs, or external markers are treated as
+  fields that are `nil`, unresolved placeholders, or external markers are treated as
   wildcards, and commands the simulator does not predict (returns `[]`) are
   unconstrained. A model without a `simulator/0` cannot be verified at all;
   `check/5` then returns `{:indeterminate, 0}` rather than fabricating a
@@ -72,15 +75,21 @@ defmodule PropertyDamage.Linearization do
   (see `linearization_count/1`). `check/5` examines at most `:max_candidates`
   interleavings (default 1000); if none is consistent but the candidate space
   was not exhausted, it returns `{:indeterminate, checked}` instead of
-  claiming a race.
+  claiming a refutation.
 
   ## Usage
 
       case Linearization.check(branches, branch_events, projections, model,
              start_index: 3) do
-        {:ok, linearization} -> # consistent ordering found
-        :no_linearization    -> # exhaustively refuted: race condition
-        {:indeterminate, n}  -> # cannot verify (no simulator / cap reached)
+        {:ok, linearization} ->
+          # a consistent ordering was found
+        {:no_linearization, refutation} ->
+          # every ordering was refuted. `refutation` is nil when each ordering
+          # failed on event incompatibility alone, or a map
+          # `%{branch_id:, position:, command:, check_name:, reason:}` for the
+          # check that failed in the furthest-progressing ordering
+        {:indeterminate, n} ->
+          # cannot verify (no simulator / cap reached)
       end
   """
 
@@ -100,7 +109,7 @@ defmodule PropertyDamage.Linearization do
   ## Parameters
 
   - `branch_commands` - List of command lists, one per branch (commands should
-    have refs resolved so simulator predictions see concrete values)
+    have placeholders resolved so simulator predictions see concrete values)
   - `branch_events` - Map of branch_id to CHRONOLOGICAL event log entries
   - `projections` - Initial projection states (from prefix execution),
     as a `%{projection_module => state}` map
@@ -121,7 +130,7 @@ defmodule PropertyDamage.Linearization do
   - `{:ok, linearization}` - A consistent sequential ordering (tagged commands)
   - `{:no_linearization, refutation}` - All interleavings examined and refuted.
     `refutation` is `nil` when every ordering failed purely on event
-    incompatibility (a classic race, e.g. a lost update), or a map
+    incompatibility (e.g. a lost update), or a map
     `%{branch_id:, position:, command:, check_name:, reason:}` describing the
     synchronous check that failed in the furthest-progressing ordering, so
     the executor can report it with the same precision as a linear failure.
@@ -268,7 +277,7 @@ defmodule PropertyDamage.Linearization do
         end
       else
         # No ordering can reproduce this command's observed events from the
-        # state THIS ordering reached: an event-level race (e.g. a lost
+        # state THIS ordering reached: an event-level disagreement (e.g. a lost
         # update). Refuted with no check detail.
         {:halt, {:refuted, depth, nil}}
       end
@@ -476,7 +485,7 @@ defmodule PropertyDamage.Linearization do
 
   # Expected events are compatible with observed events when every expected
   # event has a matching observed event (order-preserving, leftover observed
-  # events allowed). Predicted fields that are nil, refs, unresolved, or
+  # events allowed). Predicted fields that are nil, unresolved placeholders, or
   # external markers act as wildcards.
   defp events_compatible?(expected, observed) do
     Enum.reduce_while(expected, observed, fn exp, remaining ->

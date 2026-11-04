@@ -525,7 +525,8 @@ alias PropertyDamage.Nemesis.NetworkLatency
 ```
 
 To wire a nemesis into a run, add it to the model's `commands/0` with a low weight.
-Its injected/restored events (`NetworkLatencyInjected` / `NetworkLatencyRestored`)
+Its injected/restored events (`PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected` and
+`PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyRestored`)
 flow through your projection like any other, so you can count active faults. The
 balance invariant must still hold under (simulated) latency, so the run passes.
 
@@ -534,6 +535,7 @@ defmodule Demo.ChaosBank do
   use PropertyDamage.Model.Projection
 
   alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
+  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
 
   @impl true
   def init, do: %{accounts: %{}, faults: 0}

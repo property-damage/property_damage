@@ -5,6 +5,8 @@ defmodule PropertyDamage.Mutation.Formatter do
 
   @bar_width 20
 
+  @score_rule "mutation_score is killed / (total - killed_by_error): it excludes mutations killed by an adapter error, because no check caught them"
+
   @doc """
   Formats a mutation report for the specified output format.
   """
@@ -43,6 +45,7 @@ defmodule PropertyDamage.Mutation.Formatter do
       survived: report.survived,
       timeout: report.timeout,
       total: report.total,
+      score_rule: @score_rule,
       passes_target: Report.passes?(report),
       target_score: report.target_score,
       by_command:
@@ -82,7 +85,7 @@ defmodule PropertyDamage.Mutation.Formatter do
     status = if Report.passes?(report), do: "✓ PASS", else: "✗ FAIL"
 
     """
-    Mutation Score: #{score_pct}% (#{report.killed}/#{scored(report)} killed)  #{status} (target: #{target_pct}%)
+    Mutation Score: #{score_pct}% (#{report.killed}/#{report.total} killed#{summary_error_part(report)})  #{status} (target: #{target_pct}%)
     #{error_kill_note(report)}
     """
   end
@@ -102,7 +105,7 @@ defmodule PropertyDamage.Mutation.Formatter do
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
-          "│ #{String.pad_trailing(cmd_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats_scored(stats)}) │"
+          "│ #{String.pad_trailing(cmd_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}, #{Map.get(stats, :killed_by_error, 0)} by error) │"
         end)
 
       "\n#{header}\n#{rows}\n#{footer}"
@@ -124,7 +127,7 @@ defmodule PropertyDamage.Mutation.Formatter do
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
-          "│ #{String.pad_trailing(op_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats_scored(stats)}) │"
+          "│ #{String.pad_trailing(op_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}, #{Map.get(stats, :killed_by_error, 0)} by error) │"
         end)
 
       "\n#{header}\n#{rows}\n#{footer}"
@@ -162,9 +165,12 @@ defmodule PropertyDamage.Mutation.Formatter do
   # Mutations killed by an adapter error leave the score's denominator.
   defp error_kills(report), do: report.killed_by_error || 0
 
-  defp scored(report), do: report.total - error_kills(report)
-
-  defp stats_scored(stats), do: stats.total - Map.get(stats, :killed_by_error, 0)
+  defp summary_error_part(report) do
+    case error_kills(report) do
+      0 -> ""
+      count -> ", #{count} by adapter error"
+    end
+  end
 
   defp error_kill_note(report) do
     case error_kills(report) do

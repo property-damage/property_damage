@@ -41,9 +41,9 @@ MIX_ENV=test mix deps.compile
 MIX_ENV=test mix deps
 ```
 
-`deps.compile` compiles the dependencies, not the project, and does nothing
-when they are already built. Run it first: a dependency that was fetched but
-not built prints no version.
+`deps.compile` compiles the dependencies, not the project, and is quick when
+they are already built. Run it first: a dependency that was fetched but not
+built prints no version.
 
 Find the `property_damage` entry. Its first line holds the installed version
 and the kind of dependency:
@@ -54,13 +54,15 @@ and the kind of dependency:
   `locked at 704af9a (branch: main)`. Set `pd_source` to that commit
   (`704af9a`). `mix.lock` holds the full commit.
 - Path dependency: `* property_damage 0.2.0 (<path>) (mix)`. If `<path>` is a
-  git checkout, set `pd_source` to the output of `git -C <path> rev-parse
-  HEAD`, and add `+dirty` (`<commit>+dirty`) when `git -C <path> status
-  --porcelain` prints anything: uncommitted changes are invisible to the
-  commit. If `<path>` is not a git repository, set `pd_source` to
-  `sha256:` and the hash from `sha256sum <path>/CHANGELOG.md`. This sees
-  edits to the changelog only, so it is the best signal available, not a
-  guarantee.
+  git checkout of the library, set `pd_source` to the output of `git -C <path>
+  rev-parse HEAD`, and add `+dirty` (`<commit>+dirty`) when `git -C <path>
+  status --porcelain` prints anything: uncommitted changes are invisible to
+  the commit. `<path>` is a checkout of the library when `git -C <path>
+  rev-parse --show-toplevel` prints the directory `<path>` names, and not a
+  parent directory, such as the host project's own repository. In every other
+  case, set `pd_source` to `sha256:` and the hash from `sha256sum
+  <path>/CHANGELOG.md`. This sees edits to the changelog only, so it is the
+  best signal available, not a guarantee.
 
 If the entry has no version and says `could not find an app file` or `the
 dependency build is outdated`, the dependency is not built yet or is stale:
@@ -203,6 +205,11 @@ interval: 100ms
 A safety invariant ("this never happens too much") is `kind: check` with
 `at: teardown`. Its projection must accumulate evidence (a count, a maximum,
 a sticky flag), because the check reads only the final state.
+
+The check runs after the last drain of the injector's event queue, which does
+not wait for a transport that has not delivered yet. If the invariant depends
+on an injected event, see the injector stub in
+[scaffold_templates.md](scaffold_templates.md).
 
 Prose: the check in domain language, and the severity of a violation. The
 scaffold copies it into the `@doc` of the check function, and the failure

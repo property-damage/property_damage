@@ -61,7 +61,10 @@ defmodule PropertyDamage.FailureReport do
     or linearization violation.
   - `:diverged` - a target's boundary observation (a `@compare` function)
     still differed from the reference's when the convergence bound expired.
-  - `:setup_failed` - a target's adapter `setup/1` returned an error or raised.
+  - `:setup_failed` - a target could not be brought up: its adapter `setup/1`
+    returned an error or raised, model code or the variant failed while it came
+    up, a setup command failed, a check failed on a setup command's event, or
+    a setup command left an `external()` value unresolved.
   - `:execution_failed` - a command could not be executed: an adapter raise,
     a command the framework could not run, and, in a one-target run, an
     adapter `{:error, _}` answer.
@@ -195,7 +198,10 @@ defmodule PropertyDamage.FailureReport do
   campaign's runs before the failing one plus the run the report describes;
   `run_check_fires` holds that run's own share, so a further shrink can
   replace it with its reproduction's. Convenience accessors
-  derive the common views: `failure_type/1` (the kind), `check_name/1`,
+  derive the common views: `failure_type/1` (the fine-grained
+  `PropertyDamage.Failure.kind/1` of `failure_reason`, not the report `kind`
+  above: an idempotency violation gives `:idempotency_violation` where the
+  report `kind` is `:check_failed`), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
 
@@ -1523,6 +1529,11 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :model, detail: detail}}),
     do: "Model code failed while the variant came up (cause: model): " <> extract_message(detail)
+
+  defp message_for(%Failure{type: %Failure.Setup{cause: :variant, detail: detail}}),
+    do:
+      "The variant process exited while the target came up (cause: variant): " <>
+        extract_message(detail)
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
     "Setup failed (cause: unresolved_placeholder) at setup command #{setup.setup_index} " <>

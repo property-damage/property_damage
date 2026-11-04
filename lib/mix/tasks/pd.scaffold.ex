@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   - Event structs from response schemas
   - HTTP adapter with execute clauses
   - Model module with command weights
+  - A command sequence projection (`Projections.State`) the model names
   - Authentication support
 
   ## Usage
@@ -23,7 +24,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # Only specific operations
       mix pd.scaffold --from openapi.json --operations createUser,updateUser
 
-      # Generate only commands (skip adapter/model)
+      # Generate only command and event modules (skip adapter, model, projection)
       mix pd.scaffold --from openapi.json --commands-only
 
       # Preview without writing files
@@ -35,9 +36,13 @@ defmodule Mix.Tasks.Pd.Scaffold do
   - `--output` - Output directory for generated files (default: lib/generated/)
   - `--operations` - Comma-separated list of operationIds to generate
   - `--namespace` - Module namespace prefix (e.g., MyAppTest)
-  - `--commands-only` - Only generate command modules
+  - `--commands-only` - Write only the command and event modules, with no adapter,
+    model or projection. It refuses to overwrite existing command or event files,
+    like a full run
   - `--dry-run` - Print what would be generated without writing files
   - `--base-url` - Base URL for the API (overrides spec's servers)
+  - `--force` - Overwrite files that already exist (default: refuse, naming the
+    existing files, before writing anything)
 
   ## What Gets Generated
 
@@ -45,7 +50,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Commands.CreateUser do
-    @behaviour PropertyDamage.Command
+    use PropertyDamage.Command, observables: [MyAppTest.Events.UserCreated]
     import PropertyDamage.Generator, only: [merge_overrides: 2]
     defstruct [:name, :email, :role]
 
@@ -60,9 +65,17 @@ defmodule Mix.Tasks.Pd.Scaffold do
       |> StreamData.fixed_map()
     end
 
-    # Fill in to map an HTTP response to events (status-aware):
-    def events(_command, 201, body), do: [%MyAppTest.Events.UserCreated{id: body["id"]}]
-    def events(_command, _status, _body), do: []
+    # Fill in to map an HTTP response to events. The generated stub returns [];
+    # key on the status, for example:
+    #   def events(_command, 201, body), do: [%MyAppTest.Events.UserCreated{id: body["id"]}]
+    def events(command, status, response) do
+      _ = {command, status, response}
+      []
+    end
+
+    # HTTP info the adapter reads
+    def __http_method__, do: :post
+    def __http_path__, do: "/users"
   end
   ```
 
@@ -71,7 +84,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   ```elixir
   defmodule MyAppTest.Events.UserCreated do
     import PropertyDamage, only: [external: 0]
-    defstruct [id: external(), name: nil, email: nil, role: nil, created_at: nil]
+    defstruct [:name, :email, :role, :created_at, id: external()]
   end
   ```
 
@@ -99,16 +112,23 @@ defmodule Mix.Tasks.Pd.Scaffold do
   defmodule MyAppTest.Model do
     use PropertyDamage.Model
 
+    alias MyAppTest.Commands
+    alias MyAppTest.Projections
+
+    @impl true
     def commands do
       [
-        {Commands.CreateUser, weight: 5},
-        {Commands.GetUser, weight: 3},
+        {Commands.GetUser, weight: 5},
+        {Commands.CreateUser, weight: 3},
         # ...
       ]
     end
 
-    def command_sequence_projection, do: MyAppTest.Projections.State
-    def check_projections, do: [MyAppTest.Projections.UniqueUsers]
+    @impl true
+    def command_sequence_projection, do: Projections.State
+
+    @impl true
+    def check_projections, do: []
   end
   ```
 
@@ -123,7 +143,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   1. Review and customize generators in command `generator/1` callbacks
   2. Define events/3 (command, status, response) to map responses to your event structs
   3. Add preconditions (when:) and overrides (overrides:) in the Model's commands()
-  4. Implement simulate/2 in the Model for expected events
+  4. Add a simulator module with simulate/2 and name it in the Model's simulator/0
   5. Configure authentication in the adapter
   6. Add invariants/projections to the model
   """
@@ -212,7 +232,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
           namespace: :string,
           dry_run: :boolean,
           commands_only: :boolean,
-          base_url: :string
+          base_url: :string,
+          force: :boolean
         ]
       )
 
@@ -222,6 +243,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     dry_run = Keyword.get(opts, :dry_run, false)
     commands_only = Keyword.get(opts, :commands_only, false)
     base_url_override = Keyword.get(opts, :base_url)
+    force = Keyword.get(opts, :force, false)
 
     operations_filter =
       case Keyword.get(opts, :operations) do
@@ -256,7 +278,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
     if dry_run do
       print_dry_run(operations, namespace, commands_only, auth_schemes)
     else
-      generate_files(operations, namespace, output, commands_only, api_info, auth_schemes)
+      generate_files(
+        operations,
+        namespace,
+        output,
+        commands_only,
+        api_info,
+        auth_schemes,
+        force
+      )
     end
   end
 
@@ -541,56 +571,54 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       Mix.shell().info("\nModel:")
       Mix.shell().info("  - #{namespace}.Model")
+
+      Mix.shell().info("\nProjection:")
+      Mix.shell().info("  - #{namespace}.Projections.State")
     end
   end
 
-  defp generate_files(operations, namespace, output, commands_only, api_info, auth_schemes) do
-    # Create directory structure
+  defp generate_files(operations, namespace, output, commands_only, api_info, auth_schemes, force) do
     commands_dir = Path.join(output, "commands")
     events_dir = Path.join(output, "events")
+
+    command_files =
+      for op <- operations do
+        {Path.join(commands_dir, Macro.underscore(op.module_name) <> ".ex"),
+         generate_command(op, namespace)}
+      end
+
+    event_files =
+      for event <- collect_events_data(operations) do
+        {Path.join(events_dir, Macro.underscore(event.name) <> ".ex"),
+         generate_event(event, namespace)}
+      end
+
+    suite_files =
+      if commands_only do
+        []
+      else
+        [
+          {Path.join(output, "adapter.ex"),
+           generate_adapter(operations, namespace, api_info, auth_schemes)},
+          {Path.join(output, "model.ex"), generate_model(operations, namespace)},
+          {Path.join([output, "projections", "state.ex"]), generate_state_projection(namespace)}
+        ]
+      end
+
+    refuse_to_overwrite!(command_files ++ event_files ++ suite_files, force)
+
     File.mkdir_p!(commands_dir)
     File.mkdir_p!(events_dir)
 
-    # Generate commands
-    Mix.shell().info("\nGenerating commands...")
-
-    for op <- operations do
-      content = generate_command(op, namespace)
-      filename = Macro.underscore(op.module_name) <> ".ex"
-      path = Path.join(commands_dir, filename)
-      Mix.shell().info("  #{path}")
-      File.write!(path, content)
-    end
-
-    # Generate events
-    events_data = collect_events_data(operations)
-
-    if events_data != [] do
-      Mix.shell().info("\nGenerating events...")
-
-      for event <- events_data do
-        content = generate_event(event, namespace)
-        filename = Macro.underscore(event.name) <> ".ex"
-        path = Path.join(events_dir, filename)
-        Mix.shell().info("  #{path}")
-        File.write!(path, content)
-      end
-    end
+    write_group("commands", command_files)
+    write_group("events", event_files)
 
     unless commands_only do
-      # Generate adapter
-      Mix.shell().info("\nGenerating adapter...")
-      adapter_content = generate_adapter(operations, namespace, api_info, auth_schemes)
-      adapter_path = Path.join(output, "adapter.ex")
-      Mix.shell().info("  #{adapter_path}")
-      File.write!(adapter_path, adapter_content)
-
-      # Generate model
-      Mix.shell().info("\nGenerating model...")
-      model_content = generate_model(operations, namespace)
-      model_path = Path.join(output, "model.ex")
-      Mix.shell().info("  #{model_path}")
-      File.write!(model_path, model_content)
+      File.mkdir_p!(Path.join(output, "projections"))
+      [adapter, model, projection] = suite_files
+      write_group("adapter", [adapter])
+      write_group("model", [model])
+      write_group("projection", [projection])
     end
 
     Mix.shell().info("\n✓ Generated #{length(operations)} commands in #{output}")
@@ -603,8 +631,41 @@ defmodule Mix.Tasks.Pd.Scaffold do
     )
 
     Mix.shell().info("  3. Add when:/overrides: options in Model's commands() for preconditions")
-    Mix.shell().info("  4. Implement simulate/2 in Model for expected events")
+
+    Mix.shell().info(
+      "  4. Add a simulator module with simulate/2 and name it in the Model's simulator/0"
+    )
+
     Mix.shell().info("  5. Configure authentication in adapter")
+  end
+
+  # Refuses before writing anything, so a refused run never leaves a mix of
+  # old and new files.
+  defp refuse_to_overwrite!(_files, true), do: :ok
+
+  defp refuse_to_overwrite!(files, _force) do
+    existing = for {path, _content} <- files, File.exists?(path), do: path
+
+    if existing != [] do
+      Mix.raise("""
+      Refusing to overwrite existing files:
+
+      #{Enum.map_join(existing, "\n", &"  #{&1}")}
+
+      Pass --force to overwrite them.\
+      """)
+    end
+  end
+
+  defp write_group(_label, []), do: :ok
+
+  defp write_group(label, files) do
+    Mix.shell().info("\nGenerating #{label}...")
+
+    for {path, content} <- files do
+      Mix.shell().info("  #{path}")
+      File.write!(path, content)
+    end
   end
 
   # ============================================================================
@@ -630,11 +691,11 @@ defmodule Mix.Tasks.Pd.Scaffold do
       Generated from OpenAPI operationId: #{op.operation_id}
 
       Note: Preconditions and state-dependent overrides should be defined in the Model's
-      commands/0 using `when:` and `overrides:` options. Simulate logic belongs in the Model's
-      `simulate/2` callback.
+      commands/0 using `when:` and `overrides:` options. Simulate logic belongs in a
+      simulator module that the Model names in `simulator/0`.
       \"\"\"
 
-      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "use PropertyDamage.Command, shrink: :prefer_remove", else: "use PropertyDamage.Command"}
+      #{command_use_line(op, namespace)}
       import PropertyDamage.Generator, only: [merge_overrides: 2]
 
       defstruct #{inspect(field_atoms)}
@@ -671,6 +732,25 @@ defmodule Mix.Tasks.Pd.Scaffold do
     """
 
     format_code(code)
+  end
+
+  # The `use` line carries `observables:` (the event modules this command can
+  # produce, the ones generate_event/2 writes) and, for reads, the shrink hint.
+  defp command_use_line(op, namespace) do
+    opts =
+      [
+        if(op.method in ["GET", "HEAD", "OPTIONS"], do: "shrink: :prefer_remove"),
+        case event_names_for(op) do
+          [] -> nil
+          names -> "observables: [#{Enum.map_join(names, ", ", &"#{namespace}.Events.#{&1}")}]"
+        end
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    case opts do
+      [] -> "use PropertyDamage.Command"
+      _ -> "use PropertyDamage.Command, " <> Enum.join(opts, ", ")
+    end
   end
 
   # Run generated source through the formatter so the emitted tree is
@@ -932,13 +1012,20 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> Enum.sort()
   end
 
+  # Names of the events generated for one operation, using the same rule as
+  # collect_events_data/1 (a 2xx response that carries a schema).
+  defp event_names_for(op) do
+    if Enum.any?(op.responses, &event_response?/1), do: [infer_event_name(op)], else: []
+  end
+
+  defp event_response?({status, resp}),
+    do: Enum.member?(["200", "201", "202"], status) and resp.schema != nil
+
   defp collect_events_data(operations) do
     operations
     |> Enum.flat_map(fn op ->
       op.responses
-      |> Enum.filter(fn {status, resp} ->
-        Enum.member?(["200", "201", "202"], status) and resp.schema != nil
-      end)
+      |> Enum.filter(&event_response?/1)
       |> Enum.map(fn {_status, resp} ->
         fields = extract_schema_fields(resp.schema)
 
@@ -1369,7 +1456,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       alias #{namespace}.Commands
       # alias #{namespace}.Events
-      # alias #{namespace}.Projections
+      alias #{namespace}.Projections
 
       @impl true
       def commands do
@@ -1379,11 +1466,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       @impl true
-      def command_sequence_projection do
-        # TODO: Add state tracking projection
-        # Example: Projections.ResourceState
-        raise "command_sequence_projection/0 not implemented - add your state projection module"
-      end
+      def command_sequence_projection, do: Projections.State
 
       @impl true
       def check_projections do
@@ -1391,6 +1474,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
         # Example: [Projections.ResourceExists, Projections.ValidState]
         []
       end
+
+      # Optional simulator/0: a module with simulate/2 that predicts each
+      # command's events during the symbolic phase. Needed for state-dependent
+      # when: and overrides:, for example:
+      # @impl true
+      # def simulator, do: #{namespace}.Simulator
 
       # Optional setup and teardown commands (setup_each/0, teardown_each/0).
       # Setup commands run before every run in every target, and before every
@@ -1407,6 +1496,38 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # done; list the root itself first, for example:
       # @impl true
       # def expansions, do: [{Commands.Deposit, &deposit_expansions/2}]
+    end
+    """
+    |> format_code()
+  end
+
+  @spec generate_state_projection(String.t()) :: String.t()
+  @doc false
+  def generate_state_projection(namespace) do
+    """
+    defmodule #{namespace}.Projections.State do
+      @moduledoc \"\"\"
+      Command sequence projection: the model state that when: and overrides:
+      read while the sequence is generated.
+
+      Starts empty and ignores every event. Track state in apply/2, for
+      example the ids the API has created, and add @check functions to assert
+      invariants.
+      \"\"\"
+
+      use PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{}
+
+      # Example:
+      # @impl true
+      # def apply(state, %#{namespace}.Events.WidgetCreated{id: id}) do
+      #   Map.put(state, id, :created)
+      # end
+
+      @impl true
+      def apply(state, _event), do: state
     end
     """
     |> format_code()

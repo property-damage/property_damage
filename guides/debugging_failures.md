@@ -403,7 +403,8 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "propert
 
 Every target executes the commands the file records, so the replay needs the
 same `targets:` the report printed. `shrink:` defaults to false under
-`only: [replay: path]`. A replay that reproduces the failure returns
+`only: [replay: path]`. The artifact does not record `external_markers:`, so a run
+that named it passes the same option to the replaying `run/1` call. A replay that reproduces the failure returns
 `{:error, report}`, the same shape as a failing run. A replay that does not
 fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
 `:not_reproduced`. The bank's replay file is
@@ -564,7 +565,8 @@ Replay the sequence step by step to observe state changes:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 # replay/2 returns {:ok, [step]}; each step is
-# %{index, command, command_name, events, projections, projections_before, result}
+# %{command, index, events, result, command_name, projections,
+#   projections_before, leaf_index}
 {:ok, steps} = PropertyDamage.replay(failure)
 
 Enum.each(steps, fn step ->
@@ -578,6 +580,8 @@ end)
 
 `step.projections` is the projection state after the command; `projections_before`
 is the state just before it, so you can diff the two around the failing step.
+`leaf_index` is `nil` for a root that ran as itself. For a root that ran as
+leaves, it is the leaf's position within that root's expansion.
 
 #### Step results
 
@@ -620,7 +624,8 @@ It prints each step and exits non-zero while the bug still reproduces (zero once
 it is fixed), so the same command doubles as a regression check. Concretely it
 exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
 replay could not run at all (the project does not compile, the file fails to
-load, it records no model/adapter, or the sequence is branching). That third
+load, it records no model/adapter, the sequence is branching, or the target's setup or
+a setup command fails). That third
 case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
 needs to treat as "skip".
 
@@ -658,7 +663,11 @@ Find the specific field/value that causes the failure:
 {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
 
 IO.puts("Trigger: #{inspect(trigger)}")
-# => %{trigger_index: 0, trigger_command: %Withdraw{...}, likely_cause: "...", changes: [%{field: ..., original: ..., fixed: ...}]}
+# => %{trigger_index: 1,
+#      trigger_command: %MyApp.Withdraw{account: "alice", amount: 5},
+#      likely_cause: "Amount-related issue: original amount 5 causes failure",
+#      changes: [%{description: "Changing amount from 5 to 0 eliminates failure",
+#                  field: :amount, original: 5, fixed: 0}, ...]}
 ```
 
 ## Step 6: Visual Debugging
@@ -963,9 +972,16 @@ Enable verbose output to see how a run progresses:
     )
 
 Verbose mode prints progress and configuration, nothing per step:
-- A header with the model, each target (index, name, adapter), the run and
-  command limits, and the seed if you gave one
-- One line per run: the run number, the command count and the branch count
+- A "PropertyDamage Configuration Summary" block per target, first: the model
+  and the adapter, each command with its weight, the state projection, the
+  check projections with their check counts, and the validation warnings
+  (printed under `validate: true`, the default)
+- A "Runtime Warnings" block if an option such as `max_runs:` or
+  `max_commands:` is set very low
+- A "PropertyDamage Test Run" header with the model, each target (index, name,
+  adapter), the run and command limits, and the seed if you gave one
+- One line per run: the run number, the command count and, for a branching
+  sequence, the branch count
 - A final summary: the run totals and seed on success, or the failure summary
   on failure
 
@@ -1049,14 +1065,23 @@ observation, or in another target, is a different failure and is rejected too.
 A run can hold several failures. Only the primary one is shrunk: the first by
 root, then by target order. Here "reference" means the first target in
 `targets:`. A failure in the reference ends the run. A target other than the
-reference leaves the run after its adapter fails, and the others go on. That
-retirement case needs three or more targets: with two, a failure in the second
-target ends the run, because no target other than the reference is left.
+reference leaves the run if its adapter fails at a root or its setup fails, and
+the others go on. With two targets, a failure in the second one ends the run,
+because no target other than the reference is left.
 
-By default, `report.other_failures` holds the other failures of the shrunk
-reproduction, which can differ from the original run's. A failure past the
-last root of the shrunk sequence drops out. With `shrink: false`, it keeps the
-other failures of the original run.
+Several failures need no extra target. A check can fail while a target
+finalizes its run (an `@eventually` timeout, a `:teardown` check), a check can
+be recorded under `check_mode: :record`, and a comparison can fail at the same
+root as a check.
+
+When a run fails, it executes the reported sequence once more, and
+`report.other_failures` lists the other failures of that execution. By default
+the reported sequence is the shrunk one, so a failure past its last root drops
+out and the list can differ from the original run's. With `shrink: false`, the
+reported sequence is the original one. If the execution does not reproduce the
+primary failure (for example, a nondeterministic system), the report keeps the
+original run's `other_failures`. A failed target setup is reported as found,
+without shrinking.
 
 ### Shrinking and References
 
@@ -1102,7 +1127,8 @@ mix pd.reshrink failures/the-failure.pd --strategy exhaustive
 It prints the before/after command counts and, by default, writes nothing. Pass
 `--output PATH` to save the smaller report, or `--overwrite` to replace the input
 file in place. Re-shrinking re-runs the engine, so against a live SUT it exercises
-the service repeatedly.
+the service repeatedly. The file does not record `external_markers:`. To re-shrink a
+run that named it, call `shrink_further/2` with the same `external_markers:` option.
 
 ### Understanding Shrink Stats
 
@@ -1133,8 +1159,14 @@ failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 
 summary = PropertyDamage.RunComparison.outcome_summary(comparison)
 
-if summary.passing > 0 and summary.failing > 0 do
-  IO.puts("Flaky: #{summary.passing} passed / #{summary.failing} failed")
+# A seed is flaky when runs disagree on pass or fail, or when the failing
+# runs disagree on why they failed.
+if (summary.passing > 0 and summary.failing > 0) or length(summary.failure_signatures) > 1 do
+  IO.puts(
+    "Flaky: #{summary.passing} passed / #{summary.failing} failed, " <>
+      "#{length(summary.failure_signatures)} failure signature(s)"
+  )
+
   IO.inspect(comparison.ranking, label: "most discriminating fields")
 else
   IO.puts("Reproduces consistently (#{summary.failing}/#{comparison.traces |> length} failed)")
@@ -1154,7 +1186,8 @@ verdicts, bounded memory).
 
 ### 2. Shrunk Sequence Too Long
 
-- Add more command preconditions
+- Add `when:` options to the model's command specs, so the model stops
+  generating commands in states where they make no sense
 - Use `shrink_further/2` with `:exhaustive` strategy
 - Check for hidden dependencies between commands
 

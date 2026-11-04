@@ -64,20 +64,48 @@ defmodule PropertyDamage.Analysis do
   - Which command triggers the failure
   - Why each other command must be present
 
+  Each entry in `:commands` carries the command struct under `:command`, its
+  module's short name under `:command_name`, and any `%Placeholder{}` fields
+  under `:placeholders` (field name to a label).
+
   ## Example
 
       PropertyDamage.Analysis.explain(failure)
-      # Returns:
+      # Returns a map like this one, from a model where `Use` consumes an id
+      # that `Create` produced and a check fails after `Use`:
       # %{
+      #   summary: "Shrunk to 2 commands.\nFailure triggered by: Use at index 1\n" <>
+      #     "Dependencies: 1 command(s) required to set up state\n" <>
+      #     "Failure type: Invariant Violation: no_use_allowed",
       #   commands: [
-      #     %{index: 0, command: "CreateAccount", role: :dependency,
-      #       reason: "Creates account used by command 2"},
-      #     %{index: 1, command: "CreateAuthorization", role: :dependency,
-      #       reason: "Creates pending hold affecting available balance"},
-      #     %{index: 2, command: "CreditAccount", role: :trigger,
-      #       reason: "Causes currency_consistency check to fail"}
+      #     %{
+      #       index: 0,
+      #       command_name: "Create",
+      #       command: %Create{label: ""},
+      #       role: :dependency,
+      #       reason: "Provides state or values required by the failing command",
+      #       placeholders: %{}
+      #     },
+      #     %{
+      #       index: 1,
+      #       command_name: "Use",
+      #       command: %Use{target: <Placeholder:id@pre0/evt0>},
+      #       role: :trigger,
+      #       reason: "Triggers no_use_allowed failure",
+      #       placeholders: %{
+      #         # The position is the producer's place in the generated sequence
+      #         # before shrinking, so it can differ from the producer's index above.
+      #         target: "placeholder:id@%PropertyDamage.Sequence.Position{section: :prefix, offset: 0}"
+      #       }
+      #     }
       #   ],
-      #   failure: %{type: :check_failed, check: :currency_consistency, ...}
+      #   failure: %{
+      #     type: :check_failed,
+      #     check: :no_use_allowed,
+      #     message: "a Use command ran",
+      #     command_index: 1
+      #   },
+      #   dependency_chain: ["[0] Create", "[1] Use"]
       # }
   """
   @spec explain(FailureReport.t()) :: map()
@@ -158,7 +186,7 @@ defmodule PropertyDamage.Analysis do
         [
           "[#{cmd.index}] #{cmd.command_name} #{role_marker}",
           "    #{cmd.reason}",
-          format_refs(cmd.refs),
+          format_placeholders(cmd.placeholders),
           ""
         ]
         |> Enum.reject(&is_nil/1)
@@ -209,7 +237,7 @@ defmodule PropertyDamage.Analysis do
            "Kept by shrinking: removing it lost the failure; it may set up state the failing command reads"}
       end
 
-    refs = extract_refs(cmd)
+    placeholders = extract_placeholders(cmd)
 
     %{
       index: idx,
@@ -217,11 +245,11 @@ defmodule PropertyDamage.Analysis do
       command: cmd,
       role: role,
       reason: reason,
-      refs: refs
+      placeholders: placeholders
     }
   end
 
-  defp extract_refs(cmd) do
+  defp extract_placeholders(cmd) do
     cmd
     |> Map.from_struct()
     |> Enum.filter(fn {_k, v} -> match?(%Placeholder{}, v) end)
@@ -234,11 +262,11 @@ defmodule PropertyDamage.Analysis do
     "placeholder:#{path_str}@#{inspect(position)}"
   end
 
-  defp format_refs(refs) when map_size(refs) == 0, do: nil
+  defp format_placeholders(placeholders) when map_size(placeholders) == 0, do: nil
 
-  defp format_refs(refs) do
-    ref_strs = Enum.map(refs, fn {k, v} -> "#{k}=#{v}" end)
-    "    Refs: #{Enum.join(ref_strs, ", ")}"
+  defp format_placeholders(placeholders) do
+    labels = Enum.map(placeholders, fn {k, v} -> "#{k}=#{v}" end)
+    "    Placeholders: #{Enum.join(labels, ", ")}"
   end
 
   defp build_summary(command_explanations, report) do
@@ -349,6 +377,11 @@ defmodule PropertyDamage.Analysis do
     `config:`); see
     `PropertyDamage.Target`
 
+  The report does not record the atom markers a run named through
+  `external_markers:`, and this function has no option for them. For a model
+  with expansions that relied on them, a re-executed command that consumes such
+  a value gets a placeholder no registry knows.
+
   ## Returns
 
   `{:ok, map}`, or `{:error, reason}`: `:not_applicable` for a divergence or
@@ -356,20 +389,29 @@ defmodule PropertyDamage.Analysis do
   blame, `:missing_model_or_target` when the report records no model or no
   target. The map contains:
   - `:trigger_command` - The command that triggers the failure
+  - `:trigger_index` - Its flattened index in the shrunk sequence
   - `:changes` - List of changes that eliminate the failure
   - `:likely_cause` - Inferred cause based on the changes
 
   ## Example
 
       PropertyDamage.Analysis.isolate_trigger(failure)
-      # %{
-      #   trigger_command: %CreditAccount{...},
-      #   changes: [
-      #     %{field: :currency, original: "EUR", fixed: "USD",
-      #       description: "Changing currency from EUR to USD eliminates failure"}
-      #   ],
-      #   likely_cause: "Currency mismatch: account currency (USD) differs from operation currency (EUR)"
-      # }
+      # Returns this for a model where a check fails once a deposit total
+      # reaches 3 and the shrunk sequence is one `Deposit{amount: 4}`:
+      # {:ok,
+      #  %{
+      #    trigger_command: %Deposit{amount: 4},
+      #    trigger_index: 0,
+      #    changes: [
+      #      %{field: :amount, original: 4, fixed: 0,
+      #        description: "Changing amount from 4 to 0 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 1,
+      #        description: "Changing amount from 4 to 1 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 2,
+      #        description: "Changing amount from 4 to 2 eliminates failure"}
+      #    ],
+      #    likely_cause: "Amount-related issue: original amount 4 causes failure"
+      #  }}
   """
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
@@ -423,7 +465,8 @@ defmodule PropertyDamage.Analysis do
     }
 
     changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
-    trigger_result(report, trigger_cmd, commands, failed_at, changes)
+    producers = plan_producers(sequence)
+    trigger_result(trigger_cmd, commands, failed_at, changes, producers)
   end
 
   # The trigger among the reference's concrete commands: the command where
@@ -456,17 +499,19 @@ defmodule PropertyDamage.Analysis do
         }
 
         changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
-        trigger_result(report, step.command, commands, step.flattened_index, changes)
+        # No producer map: the registry positions name roots, not the leaves
+        # in `commands`.
+        trigger_result(step.command, commands, step.flattened_index, changes, nil)
     end
   end
 
-  defp trigger_result(report, trigger_cmd, commands, failed_at, changes) do
+  defp trigger_result(trigger_cmd, commands, failed_at, changes, producers) do
     {:ok,
      %{
        trigger_command: trigger_cmd,
        trigger_index: failed_at,
        changes: changes,
-       likely_cause: infer_cause(changes, trigger_cmd, commands, report)
+       likely_cause: infer_cause(changes, trigger_cmd, commands, producers)
      }}
   end
 
@@ -608,12 +653,12 @@ defmodule PropertyDamage.Analysis do
     []
   end
 
-  defp infer_cause(changes, trigger_cmd, commands, _report) do
+  defp infer_cause(changes, trigger_cmd, commands, producers) do
     cond do
       # Currency mismatch pattern
       currency_change = Enum.find(changes, &(&1.field == :currency)) ->
         # Find what the account's currency is
-        account_currency = find_account_currency(trigger_cmd, commands)
+        account_currency = find_account_currency(trigger_cmd, commands, producers)
 
         if account_currency do
           "Currency mismatch: operation uses #{inspect(currency_change.original)} but account uses #{inspect(account_currency)}"
@@ -637,23 +682,19 @@ defmodule PropertyDamage.Analysis do
     end
   end
 
-  defp find_account_currency(trigger_cmd, commands) do
-    account_ref = Map.get(trigger_cmd, :account_ref)
-
-    if account_ref do
-      # Find the CreateAccount command that creates this ref
-      Enum.find_value(commands, fn cmd ->
-        cmd_module = cmd.__struct__
-        name = cmd_module |> Module.split() |> List.last()
-
-        if name == "CreateAccount" do
-          cmd_ref = Map.get(cmd, :account_ref)
-
-          if cmd_ref && cmd_ref.ref == account_ref.ref do
-            Map.get(cmd, :currency)
-          end
-        end
-      end)
+  # The currency of the CreateAccount command whose event minted the
+  # placeholder the trigger reads in `account_ref`. `producers` maps each
+  # placeholder id to the index of the command that produces it (see
+  # `plan_producers/1`); nil when no such map applies.
+  defp find_account_currency(trigger_cmd, commands, producers) do
+    with %Placeholder{id: id} <- Map.get(trigger_cmd, :account_ref),
+         true <- is_map(producers),
+         {:ok, index} <- Map.fetch(producers, {:placeholder, id}),
+         %{__struct__: module} = producer <- Enum.at(commands, index),
+         "CreateAccount" <- module |> Module.split() |> List.last() do
+      Map.get(producer, :currency)
+    else
+      _ -> nil
     end
   end
 

@@ -7,9 +7,10 @@ defmodule PropertyDamage.Replay do
   exactly how the system reached the failure state.
 
   Replay is a thin **stepping shell over the Executor**: every command runs
-  through the exact same engine path as a real run (ref/placeholder resolution,
+  through the exact same engine path as a real run (placeholder resolution,
   settle for probe/async commands, nemesis injection, injector and mock events,
-  projection updates, `@check` checks, and stutter). This is what makes a
+  projection updates, and `@check` checks; stutter is the one exception, see
+  Limitations). This is what makes a
   recorded failure replay to the identical step sequence and state.
 
   ## Usage Modes
@@ -65,7 +66,6 @@ defmodule PropertyDamage.Replay do
   - `events` - Events produced by this command (in chronological order)
   - `projections` - Projection states after this command
   - `projections_before` - Projection states before this command
-  - `refs` - Ref resolution map
   - `result` - `:ok`, `{:check_failed, name, exception}`, or `{:error, reason}`
 
   ## Limitations
@@ -78,14 +78,22 @@ defmodule PropertyDamage.Replay do
     through `PropertyDamage.Executor.run/4`.
   - **Replay does not apply stutter.** The `FailureReport` records the run's
     normalized `stutter:` option, but no replay option re-applies it, and
-    `start/2` and `run/2` reject a `stutter_config:` option. Stutter is not
-    seed-deterministic (its decisions consume the process `:rand` stream at
-    execution time), so a replay could not reproduce which commands
-    stuttered. `PropertyDamage.shrink_further/2` does re-apply the report's
+    `start/2` and `run/2` reject a `stutter_config:` option. A run derives its
+    stutter decisions for a command from the run seed and the command's index,
+    not from the process `:rand` stream (DR-029), but a replay has no stutter
+    option to apply them, so it runs each command once.
+    `PropertyDamage.shrink_further/2` does re-apply the report's
     `stutter:` option.
-  - **`external()` markers are not a replay option.** Replay rejects an
-    `external_markers:` option, and external paths come from the event struct
-    definitions, which are reachable from the persisted model.
+  - **Atom markers are not replayable here.** A marker written with
+    `external()` in an event struct definition replays, because the
+    definition lives in the code. An atom marker that a run named through
+    `external_markers:` is not recorded in the failure report or the replay
+    artifact, and `start/2` rejects the option. A model that relies on such
+    markers cannot replay those values here: when the model defines
+    `c:PropertyDamage.Model.expansions/0`, a later command that consumes one
+    gets a placeholder no registry knows. Replay the run through
+    `PropertyDamage.run/1` with `only: [replay: path]` and the same
+    `external_markers:` instead.
   """
 
   alias PropertyDamage.{

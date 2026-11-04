@@ -812,7 +812,7 @@ defmodule PropertyDamage.ExportTest do
       {:ok, path} = Export.save(failure, tmp_dir, :exunit)
 
       assert File.exists?(path)
-      assert path =~ ~r/reproduce_512902757_[0-9a-f]+\.exs$/
+      assert path =~ ~r/reproduce_512902757_[0-9a-f]+_test\.exs$/
 
       content = File.read!(path)
       assert content =~ "defmodule"
@@ -837,9 +837,50 @@ defmodule PropertyDamage.ExportTest do
       assert curl_path =~ ".sh"
       assert python_path =~ ".py"
     end
+
+    @tag :tmp_dir
+    test "every format saves under its own file name", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+      opts = [base_url: "http://localhost:4000", adapter: TestHTTPAdapter]
+
+      formats = [
+        :exunit,
+        :livebook,
+        {:script, :elixir},
+        {:script, :curl},
+        {:script, :python}
+      ]
+
+      paths =
+        for format <- formats do
+          {:ok, path} = Export.save(failure, tmp_dir, format, opts)
+          path
+        end
+
+      assert length(Enum.uniq(paths)) == length(formats),
+             "two formats share a file name: #{inspect(paths)}"
+    end
   end
 
   describe "save_all/3" do
+    @tag :tmp_dir
+    test "keeps the ExUnit test and the Elixir script apart", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      {:ok, paths} =
+        Export.save_all(failure, tmp_dir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter,
+          script_languages: [:elixir, :curl, :python]
+        )
+
+      assert paths.exunit != paths.script_elixir
+      assert length(Enum.uniq(Map.values(paths))) == map_size(paths)
+
+      assert File.read!(paths.exunit) =~ "use ExUnit.Case"
+      assert File.read!(paths.script_elixir) =~ "Mix.install"
+    end
+
     @tag :tmp_dir
     test "saves all formats", %{tmp_dir: tmp_dir} do
       failure = create_test_failure_report()
@@ -883,13 +924,17 @@ defmodule PropertyDamage.ExportTest do
       failure = create_test_failure_report()
 
       assert Common.generate_filename(failure, :exunit) =~
-               ~r/^reproduce_512902757_[0-9a-f]+\.exs$/
+               ~r/^reproduce_512902757_[0-9a-f]+_test\.exs$/
 
       assert Common.generate_filename(failure, :curl) =~ ~r/^reproduce_512902757_[0-9a-f]+\.sh$/
       assert Common.generate_filename(failure, :python) =~ ~r/^reproduce_512902757_[0-9a-f]+\.py$/
 
       assert Common.generate_filename(failure, :livebook) =~
                ~r/^reproduce_512902757_[0-9a-f]+\.livemd$/
+
+      # the Elixir script is not a test file, so `mix test` never collects it
+      assert Common.generate_filename(failure, :elixir) =~
+               ~r/^reproduce_512902757_[0-9a-f]+\.exs$/
 
       # stable for the same failure, distinct for a different one
       assert Common.generate_filename(failure, :exunit) ==

@@ -2,7 +2,7 @@
 
 This guide covers advanced patterns for building reusable, composable test libraries with PropertyDamage. These patterns enable:
 
-- Domain libraries that define commands/events without depending on PropertyDamage
+- Domain libraries that define events and other plain structs without depending on PropertyDamage
 - Model libraries that compose domain concepts into testable specifications
 - Version tracking for reproducible test failures
 
@@ -33,7 +33,7 @@ A mature PropertyDamage setup typically has three layers:
 │  ┌────────┴───────────────────┴────────┐                    │
 │  │ Pure Elixir structs                  │                    │
 │  │ - Events: PaymentAuthorized, etc.    │                    │
-│  │ - Commands: none, model libraries    │                    │
+│  │ - Commands: none (in the models)     │                    │
 │  │ - NO PropertyDamage dependency       │                    │
 │  └──────────────────────────────────────┘                    │
 └─────────────────────────────────────────────────────────────┘
@@ -222,11 +222,29 @@ When upgrading dependencies that change struct definitions, regenerate ExUnit
 tests from the saved failures with the current struct versions:
 
 ```elixir
+File.mkdir_p!("test/regressions")
+
 for path <- Path.wildcard("failures/*.pd") do
   {:ok, report} = PropertyDamage.load_failure(path)
-  PropertyDamage.generate_test(report, format: :exunit)
+  name = Path.basename(path, ".pd")
+
+  # A file name such as `bug-123` or a name `save_failure/2` writes has
+  # hyphens, which a module name cannot hold. Replace every character that is
+  # not a letter or digit before camelizing.
+  module_part = name |> String.replace(~r/[^A-Za-z0-9]/, "_") |> Macro.camelize()
+
+  source =
+    PropertyDamage.generate_test(report,
+      format: :exunit,
+      module_name: "Regression#{module_part}Test"
+    )
+
+  File.write!(Path.join("test/regressions", "#{name}_test.exs"), source)
 end
 ```
+
+`generate_test/2` returns the test source as a string and writes nothing, so the
+loop writes each string to a file itself.
 
 ### Strategy 4: Shared Seed Library
 
@@ -249,6 +267,9 @@ library =
 
 PropertyDamage.SeedLibrary.save(library, "seeds.json")
 ```
+
+`save/2` creates the directory of the file if it is missing. It returns `:ok`, or
+`{:error, reason}` if the write still fails.
 
 The seed library tracks `dependency_versions` for each entry, helping identify which seeds may need re-validation after upgrades.
 
@@ -280,8 +301,7 @@ end
 The domain library holds events only. Commands are PropertyDamage behaviours
 (`use PropertyDamage.Command`), so they belong to the model library, which owns
 the only `CreateOrder` and `ShipOrder` structs. The adapter matches on those.
-The command and projection modules live in `order_model` and implement the
-PropertyDamage behaviours. The **shared contract surface is the event struct**
+The **shared contract surface is the event struct**
 (`CompanyDomain.Events.OrderCreated`): it flows through the projection and the
 adapter without either side depending on PropertyDamage.
 
@@ -419,10 +439,9 @@ defmodule OrderTest do
   use ExUnit.Case
 
   test "orders maintain valid state" do
-    # The seed library file is written on a failure, but its directory is not
-    # created for you, and a missing directory is only reported with verbose: true.
-    File.mkdir_p!("seeds")
-
+    # A failure appends its seed to the seed library file. The run creates the
+    # seeds/ directory if it is missing. If the write still fails, the run logs
+    # a warning with the path and the reason, whatever verbose: says.
     result = PropertyDamage.run(
       model: OrderModel,
       targets: [OrderHttpAdapter],

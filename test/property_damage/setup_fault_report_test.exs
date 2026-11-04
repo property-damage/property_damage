@@ -58,6 +58,27 @@ defmodule PropertyDamage.SetupFaultReportTest do
     def __checks__, do: [%{name: :old_shape, trigger: :always}]
   end
 
+  defmodule RecordingAdapter do
+    use PropertyDamage.Adapter
+    def setup(config), do: {:ok, config}
+    def teardown(%{test_pid: pid}), do: send(pid, :adapter_torn_down)
+    def execute(%Bump{}, _, _), do: {:ok, [%Bumped{}]}
+  end
+
+  defmodule KillProj do
+    use PropertyDamage.Model.Projection
+    def init, do: %{}
+    def apply(state, _), do: state
+    @check at: :startup
+    def startup_probe(_state, _phase), do: Process.exit(self(), :kill)
+  end
+
+  defmodule KillModel do
+    use PropertyDamage.Model
+    def commands, do: [Bump]
+    def command_sequence_projection, do: KillProj
+  end
+
   defmodule ExitModel do
     use PropertyDamage.Model
     def commands, do: [Bump]
@@ -140,5 +161,29 @@ defmodule PropertyDamage.SetupFaultReportTest do
     assert report.kind == :setup_failed
     assert %Failure{type: %Failure.Setup{cause: :adapter_setup}} = report.failure_reason
     assert FailureReport.failure_message(report) =~ "Adapter setup failed"
+  end
+
+  test "the adapter's teardown/1 runs after model code faults while the variant comes up" do
+    assert {:error, %FailureReport{} = report} =
+             PropertyDamage.run(
+               model: OldShapeModel,
+               targets: [{RecordingAdapter, config: %{test_pid: self()}}],
+               max_runs: 1,
+               max_commands: 2,
+               shrink: false
+             )
+
+    assert %Failure{type: %Failure.Setup{cause: :model}} = report.failure_reason
+    assert_received :adapter_torn_down
+  end
+
+  test "a variant process that dies while it comes up is reported as a variant crash" do
+    report = run(KillModel)
+
+    assert report.kind == :setup_failed
+    assert %Failure{type: %Failure.Setup{cause: :variant}} = report.failure_reason
+    message = FailureReport.failure_message(report)
+    assert message =~ "variant"
+    refute message =~ "Adapter setup failed"
   end
 end

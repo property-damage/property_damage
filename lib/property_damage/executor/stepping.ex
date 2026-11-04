@@ -43,7 +43,7 @@ defmodule PropertyDamage.Executor.Stepping do
 
   ## Guarantees
 
-  `step/4` runs **the single per-command engine path**: ref/placeholder
+  `step/4` runs **the single per-command engine path**: placeholder
   resolution, settle, nemesis, injector/mock events, projections, checks,
   stutter, and pollers all run exactly as they do inside a full run. It is the
   same engine primitive the full-run loop uses, so stepping cannot diverge from

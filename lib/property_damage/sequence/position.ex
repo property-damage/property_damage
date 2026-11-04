@@ -4,7 +4,7 @@ defmodule PropertyDamage.Sequence.Position do
 
   A position names *which section* of the sequence a command lives in and its
   *offset within that section*. This gives every command a canonical identity
-  that is unambiguous across parallel branches: two commands in different
+  that is unambiguous across branches: two commands in different
   branches can share an executor `command_index`, but never a position.
 
       %Sequence.Position{section: :prefix, offset: 0}
@@ -39,7 +39,7 @@ defmodule PropertyDamage.Sequence.Position do
 
   @typedoc """
   Which section of a sequence a command lives in: the `:prefix`, the `:suffix`,
-  a specific parallel branch identified by its `branch_id`, or the setup or
+  a specific branch identified by its `branch_id`, or the setup or
   teardown commands.
   """
   @type section ::

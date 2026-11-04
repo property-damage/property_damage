@@ -16,10 +16,22 @@ defmodule PropertyDamage.EventQueue do
 
   ## Event Entries
 
-  Each entry in the queue contains:
+  An entry is a map. Its keys depend on how the event arrived.
+
+  An entry pushed by `push/3` (an injector adapter) contains:
 
   - `event` - The event struct
   - `adapter_module` - The injector adapter that received it
+  - `timestamp` - Monotonic time when the event was pushed
+
+  An entry pushed by `push_from_poller/5` (a resource poller) has no
+  `adapter_module`. It contains:
+
+  - `event` - The event struct
+  - `source` - Always `:resource_poller`
+  - `poller_id` - Reference identifying the poller instance
+  - `command_index` - Index of the command that started the poller
+  - `branch_id` - The branch identifier, or `nil`
   - `timestamp` - Monotonic time when the event was pushed
 
   ## Example
@@ -39,10 +51,26 @@ defmodule PropertyDamage.EventQueue do
 
   @typedoc """
   Event entry with metadata.
+
+  `push/3` builds the injector shape and `push_from_poller/5` builds the
+  poller shape. See "Event Entries" for each key.
   """
-  @type entry :: %{
+  @type entry :: injector_entry() | poller_entry()
+
+  @typedoc "An entry pushed by an injector adapter through `push/3`."
+  @type injector_entry :: %{
           event: struct(),
           adapter_module: module(),
+          timestamp: integer()
+        }
+
+  @typedoc "An entry pushed by a resource poller through `push_from_poller/5`."
+  @type poller_entry :: %{
+          event: struct(),
+          source: :resource_poller,
+          poller_id: reference(),
+          command_index: non_neg_integer(),
+          branch_id: non_neg_integer() | nil,
           timestamp: integer()
         }
 
@@ -104,7 +132,7 @@ defmodule PropertyDamage.EventQueue do
 
   ## Example
 
-      EventQueue.push(queue, MyInjectorAdapter, %PaymentConfirmed{order_id: "123"})
+      EventQueue.push(queue, MyApp.PaymentInjector, %PaymentConfirmed{order_id: "123"})
   """
   @spec push(pid(), module(), struct()) :: :ok
   def push(queue, adapter_module, event) do
@@ -158,14 +186,21 @@ defmodule PropertyDamage.EventQueue do
 
   ## Returns
 
-  List of event entries, each containing `:event`, `:adapter_module`,
-  and `:timestamp`.
+  List of event entries. Every entry has `:event` and `:timestamp`. An entry
+  from `push/3` also has `:adapter_module`; an entry from `push_from_poller/5`
+  has `:source`, `:poller_id`, `:command_index` and `:branch_id` instead (see
+  "Event Entries").
 
   ## Example
 
       entries = EventQueue.drain(queue)
-      Enum.each(entries, fn %{event: event, adapter_module: adapter} ->
-        IO.puts("Event from \#{adapter}: \#{inspect(event)}")
+
+      Enum.each(entries, fn
+        %{adapter_module: adapter, event: event} ->
+          IO.puts("Event from \#{adapter}: \#{inspect(event)}")
+
+        %{source: :resource_poller, poller_id: poller, event: event} ->
+          IO.puts("Event from poller \#{inspect(poller)}: \#{inspect(event)}")
       end)
   """
   @spec drain(pid()) :: [entry()]

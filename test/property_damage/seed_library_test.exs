@@ -133,5 +133,29 @@ defmodule PropertyDamage.SeedLibraryTest do
     end
   end
 
+  describe "save/2 (directory)" do
+    test "creates a missing directory and saves the seed" do
+      dir = TmpPath.unique("pd_seeds_dir")
+      path = Path.join([dir, "nested", "seeds.json"])
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 42, model: "M")
+
+      assert :ok = SeedLibrary.save(lib, path)
+      assert {:ok, loaded} = SeedLibrary.load(path)
+      assert Enum.map(loaded.entries, & &1.seed) == [42]
+    end
+
+    test "returns an error when the directory cannot be created" do
+      blocker = tmp_path("blocker")
+      File.write!(blocker, "not a directory")
+      on_exit(fn -> File.rm(blocker) end)
+
+      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 42, model: "M")
+
+      assert {:error, _reason} = SeedLibrary.save(lib, Path.join(blocker, "seeds.json"))
+    end
+  end
+
   defp seed_entry(library, seed), do: Enum.find(library.entries, &(&1.seed == seed))
 end

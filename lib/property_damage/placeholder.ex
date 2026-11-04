@@ -20,7 +20,7 @@ defmodule PropertyDamage.Placeholder do
   Structured position of the producing command in a sequence.
 
   A `%PropertyDamage.Sequence.Position{}` (DR-039); branching-aware so two
-  parallel branches producing the same event module do not collide (DR-021).
+  branches producing the same event module do not collide (DR-021).
   """
   @type position :: Position.t()
 

@@ -17,16 +17,22 @@ defmodule PropertyDamage.Coverage do
       {:ok, stats} = PropertyDamage.run(model: M, targets: [A], coverage: true)
       IO.puts(PropertyDamage.Coverage.format(stats.coverage))
 
-      # Or derive a tracker from any single result (no `coverage: true` needed)
-      result = PropertyDamage.run(model: M, targets: [A])
-      coverage = PropertyDamage.Coverage.from_result(result, M)
+      # Or derive a tracker from a failing run. A failure needs no
+      # `coverage: true`; a passing result without it raises ArgumentError.
+      {:error, report} = PropertyDamage.run(model: M, targets: [A])
+      coverage = PropertyDamage.Coverage.from_result({:error, report}, M)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 
-      # Or track across multiple runs
+      # Or track the failures of several runs in one tracker
       tracker = Coverage.new(M)
-      tracker = Coverage.record(tracker, result1)
-      tracker = Coverage.record(tracker, result2)
+      tracker = Coverage.record(tracker, {:error, report1})
+      tracker = Coverage.record(tracker, {:error, report2})
       IO.puts(Coverage.format(tracker))
+
+  A passing `PropertyDamage.run/1` result is aggregate stats, not one sequence
+  result. Without `coverage: true` it carries no coverage data, and both
+  `from_result/2` and `record/2` raise an `ArgumentError` naming that option.
+  `record/2` also accepts a single sequence result `{:ok, %{sequence: ...}}`.
 
   ## Coverage Metrics
 
@@ -54,7 +60,7 @@ defmodule PropertyDamage.Coverage do
 
   Use `Coverage.meets_threshold?/2` to fail CI if coverage is too low:
 
-      coverage = Coverage.from_result(result)
+      coverage = Coverage.from_result(result, M)
       unless Coverage.meets_threshold?(coverage, command: 80, transition: 50) do
         raise "Coverage threshold not met"
       end
@@ -154,12 +160,21 @@ defmodule PropertyDamage.Coverage do
   @doc """
   Record coverage from a test run result.
 
-  Works with both success and failure results. A success result may carry
+  Takes a failure `{:error, report}` or a single sequence result
+  `{:ok, %{sequence: ...}}`. A passing `PropertyDamage.run/1` result is neither:
+  it is aggregate stats with no `:sequence`, so `record/2` raises an
+  `ArgumentError` naming the `coverage: true` option. Use `from_result/2` on a
+  run made with `coverage: true` instead. A success result may carry
   `:choices`, what the target ran at each root of its sequence
   (the run's expansion choices); a failure report's `expansions` names what
   its reference target ran up to the failing root.
   """
   @spec record(t(), {:ok, map()} | {:error, PropertyDamage.FailureReport.t()}) :: t()
+  def record(_tracker, {:ok, result})
+      when is_map(result) and not is_map_key(result, :sequence) do
+    raise_missing_coverage()
+  end
+
   def record(tracker, {:ok, result}) do
     choices = Map.get(result, :choices)
 
@@ -215,16 +230,21 @@ defmodule PropertyDamage.Coverage do
 
   def from_result({:ok, stats}, _model)
       when is_map(stats) and not is_map_key(stats, :sequence) do
-    raise ArgumentError,
-          "coverage/2 received an aggregate run result without coverage data. " <>
-            "Pass `coverage: true` to PropertyDamage.run/1; the merged tracker is " <>
-            "then available as `stats.coverage` and returned by this function."
+    raise_missing_coverage()
   end
 
   def from_result(result, model) do
     model
     |> new()
     |> record(result)
+  end
+
+  defp raise_missing_coverage do
+    raise ArgumentError,
+          "the passing run result carries no coverage data. " <>
+            "Pass `coverage: true` to PropertyDamage.run/1; the merged tracker is " <>
+            "then available as `stats.coverage` and returned by " <>
+            "PropertyDamage.Coverage.from_result/2."
   end
 
   @doc """
@@ -452,7 +472,10 @@ defmodule PropertyDamage.Coverage do
   @doc """
   Format state class coverage as ASCII art.
 
-  Shows which state class transitions have been tested.
+  Shows which state class transitions have been tested. A cell off the
+  diagonal shows a bar (see `format_transition_matrix/1`); a diagonal cell,
+  a transition from a class to itself, shows its count, or `·` when there is
+  none.
   """
   @spec format_state_class_matrix(t()) :: String.t()
   def format_state_class_matrix(%__MODULE__{state_class_counts: counts} = tracker) do
@@ -484,7 +507,7 @@ defmodule PropertyDamage.Coverage do
           cells =
             Enum.map(classes, fn to ->
               count = get_in(matrix, [from, to]) || 0
-              format_cell(count, from == to, col_width)
+              format_matrix_cell(count, from == to, col_width)
             end)
 
           "#{from_name}  #{Enum.join(cells, "  ")}"
@@ -702,14 +725,17 @@ defmodule PropertyDamage.Coverage do
   - `░░░░` = lightly tested (1-5 occurrences)
   - `    ` = untested
 
+  A diagonal cell, a command that follows itself, shows its count, or `·`
+  when it never does.
+
   ## Example
 
       Transition Matrix
-      ───────────────────────────────────────
-                    → Create  Credit  Debit
-      Create           ·      ████    ████
-      Credit         ████       ·     ▓▓▓▓
-      Debit          ░░░░    ████       ·
+      ────────────────────────────────
+              → Create  Credit  Debit
+      Create  ·       ████    ████
+      Credit  ████    4       ▓▓▓▓
+      Debit   ░░░░    ████    ·
   """
   @spec format_transition_matrix(t()) :: String.t()
   def format_transition_matrix(%__MODULE__{command_modules: all} = tracker) do
@@ -743,7 +769,7 @@ defmodule PropertyDamage.Coverage do
           cells =
             Enum.map(commands, fn to ->
               count = get_in(matrix, [from, to]) || 0
-              format_cell(count, from == to, col_width)
+              format_matrix_cell(count, from == to, col_width)
             end)
 
           "#{from_name}  #{Enum.join(cells, "  ")}"
@@ -758,10 +784,14 @@ defmodule PropertyDamage.Coverage do
     end
   end
 
-  defp format_cell(_count, true, width) do
-    # Diagonal (same command twice) - show dot
-    String.pad_trailing("·", width)
-  end
+  # A same-command or same-class transition prints its count, since a bar would
+  # hide how often it happened; a diagonal cell with no transition keeps the dot.
+  defp format_matrix_cell(0, true, width), do: String.pad_trailing("·", width)
+
+  defp format_matrix_cell(count, true, width),
+    do: String.pad_trailing(Integer.to_string(count), width)
+
+  defp format_matrix_cell(count, false, width), do: format_cell(count, false, width)
 
   defp format_cell(0, false, width) do
     # Untested

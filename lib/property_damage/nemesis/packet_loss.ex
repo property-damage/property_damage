@@ -7,9 +7,16 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   ## Configuration
 
-  - `:loss_percent` - Percentage of packets to drop (0-100, default: 10)
-  - `:duration_ms` - How long packet loss persists (default: 5000ms)
-  - `:target` - Specific service/host to affect (default: `:all`)
+  - `:loss_percent` - Percentage of packets to drop (0-100, struct default: 10)
+  - `:duration_ms` - How long packet loss persists (struct default: 5000ms)
+  - `:target` - A label copied into the emitted events (default: `:all`). It does
+    not change which traffic loses packets.
+
+  The defaults above apply to a hand-built struct. When a model lists this
+  nemesis in `commands/0`, `new!/2` draws the values instead: `:loss_percent`
+  in 5..50 and `:duration_ms` in 1000..10_000. A key in the command's
+  `overrides:` replaces its draw with the value as given; pass a plain value,
+  not a generator.
 
   ## Usage with Toxiproxy
 
@@ -68,7 +75,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     case result do
       :ok ->
         event = %{
-          __struct__: PacketLossInjected,
+          __struct__: __MODULE__.PacketLossInjected,
           loss_percent: command.loss_percent,
           target: command.target,
           injected_at: now,
@@ -91,7 +98,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     case result do
       :ok ->
         event = %{
-          __struct__: PacketLossRestored,
+          __struct__: __MODULE__.PacketLossRestored,
           loss_percent: command.loss_percent,
           target: command.target,
           restored_at: now,
@@ -153,15 +160,14 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   end
 
   defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
-end
 
-# Event structs
-defmodule PacketLossInjected do
-  @moduledoc false
-  defstruct [:loss_percent, :target, :injected_at, simulated: false]
-end
+  defmodule PacketLossInjected do
+    @moduledoc false
+    defstruct [:loss_percent, :target, :injected_at, simulated: false]
+  end
 
-defmodule PacketLossRestored do
-  @moduledoc false
-  defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
+  defmodule PacketLossRestored do
+    @moduledoc false
+    defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
+  end
 end

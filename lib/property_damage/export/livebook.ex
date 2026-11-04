@@ -213,7 +213,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
   # Append the spec's query params as a `?k=v&...` fragment onto the path
   # string. Sorted for stable output; values interpolate like path params
-  # (a produced ref renders as `state.refs["name"]`).
+  # (a produced value renders as `state.refs["name"]`).
   defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
 
   defp append_query_code(path_code, params) do
@@ -259,9 +259,9 @@ defmodule PropertyDamage.Export.LiveBook do
     "%{#{fields}}"
   end
 
-  # A variable ref renders as a `state.refs[...]` lookup. Collections carrying a
-  # ref are rendered element-by-element so nested placeholders resolve; those
-  # without a ref fall through to `inspect/1`, preserving prior output exactly.
+  # A produced value renders as a `state.refs[...]` lookup. Collections that
+  # carry a produced value render element by element so nested placeholders
+  # resolve; others fall through to `inspect/1`, preserving prior output exactly.
   defp format_body_value(%StepPlan.Var{name: name}), do: "state.refs[#{inspect(name)}]"
 
   defp format_body_value(value) when is_list(value) do
@@ -337,10 +337,10 @@ defmodule PropertyDamage.Export.LiveBook do
 
     ```elixir
     # Try different values or additional commands here
-    # The `state` variable contains refs bound from previous steps
+    # The `state` variable holds the values that previous steps produced
     # The `base_url` is available for making HTTP calls
 
-    IO.puts("Available refs: \#{inspect(Map.keys(state.refs))}")
+    IO.puts("Available produced values: \#{inspect(Map.keys(state.refs))}")
 
     # Example: Try a different operation
     # Req.post!(base_url <> "/api/...", json: %{...})

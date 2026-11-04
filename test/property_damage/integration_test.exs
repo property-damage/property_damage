@@ -246,6 +246,18 @@ defmodule PropertyDamage.IntegrationTest do
       end)
     end
 
+    test "creates the report's missing parent directory", %{result: result} do
+      dir = report_path("missing_dir")
+      path = Path.join([dir, "nested", "report.md"])
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      capture_io(fn ->
+        Integration.generate_report(result, %{format: :markdown, path: path})
+      end)
+
+      assert File.exists?(path)
+    end
+
     test "markdown format writes a file with the expected content", %{result: result} do
       path = report_path("markdown") <> ".md"
       on_exit(fn -> File.rm(path) end)
@@ -273,6 +285,34 @@ defmodule PropertyDamage.IntegrationTest do
       decoded = path |> File.read!() |> Jason.decode!()
       assert decoded["total_runs"] == @pass_runs
       assert decoded["success"] == true
+      assert decoded["failed"] == 0
+      assert decoded["failures"] == []
+    end
+
+    test "json format writes a failed result's counts and failures" do
+      {:error, failed} = Integration.run(failing_opts(max_runs: 2, stop_on_failure: true))
+      [failure] = failed.failures
+
+      path = report_path("json_failed") <> ".json"
+      on_exit(fn -> File.rm(path) end)
+
+      capture_io(fn ->
+        Integration.generate_report(failed, %{format: :json, path: path})
+      end)
+
+      decoded = path |> File.read!() |> Jason.decode!()
+      assert decoded["success"] == false
+      assert decoded["total_runs"] == failed.total_runs
+      assert decoded["failed"] == 1
+      assert decoded["model"] == inspect(FailingModel)
+
+      assert decoded["failures"] == [
+               %{
+                 "seed" => failure.seed,
+                 "check" => inspect(PropertyDamage.FailureReport.check_name(failure)),
+                 "error" => PropertyDamage.FailureReport.failure_message(failure)
+               }
+             ]
     end
 
     test "junit format writes XML with a testsuite element", %{result: result} do

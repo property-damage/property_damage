@@ -330,6 +330,30 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
+  defp format_failure(
+         :setup_failed,
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :variant}} = failure,
+         context
+       ) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    The variant process died while the target came up, in a way neither the
+    adapter nor the model code could rescue: an untrappable kill, or the
+    crash of a process linked to it. The reason above is its exit reason.
+
+    Suggestions:
+      - Look for a process linked to the variant that crashed, or an outside
+        kill (for example the operating system's out-of-memory killer)
+      - The adapter and the model need no change unless the reason names them
+    """
+    |> String.trim()
+  end
+
   defp format_failure(:setup_failed, failure, context) do
     cmd_info = format_command_info(context)
 

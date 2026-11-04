@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mix pd.scaffold --force` overwrites existing files.** Without it, the
+  task refuses, names the files that already exist and writes nothing.
+- **`PropertyDamage.shrink_further/2` takes `external_markers:`.** A failure
+  report does not record the run's atom markers, so a re-shrink of a run that
+  named them passes them again.
 - **A simulator and a per-command smoke check in the `pd-model-interview`
   scaffold templates.** The model template gains a simulator built from each
   command's events, so a command that needs existing state is generated. The
@@ -351,7 +356,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured failure vocabulary: `%PropertyDamage.Failure{}` (DR-041).** A run's
   `failure_reason` is now one nested, public type instead of a loose family of
   `{:tag, ...}` tuples. It carries a class struct under `type`
-  (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`) so illegal
+  (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`; `Failure.Assertion`
+  was later renamed `Failure.Check`, see below) so illegal
   class/kind combinations are unrepresentable, plus a `branch_id` on the envelope
   that absorbs the old `{:branch_failure, id, inner}` wrapper. Kinds are globally
   unique atoms; `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
@@ -395,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SUT.
 
 - **Mock third-party services are now reachable through `PropertyDamage.run/1`
-  (WP-C5).** A new `:mock_services` run option accepts a list of
+  (WP-C5).** A new `:mock_services` run option (later removed in favor of
+  `mocks:` on a `targets:` entry; see below) accepts a list of
   `PropertyDamage.MockServiceAdapter` modules (or `{module, config}` tuples). Per
   run the framework starts a `PropertyDamage.MockServiceRegistry`, registers and
   `setup/1`s each mock (passing `%{registry: pid, event_queue: pid}` merged with
@@ -493,8 +500,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `command_index` (instead of the ambient `nil`), persistently for the rest of
   the run; overlapping matchers resolve to the first-registered with a logged
   diagnostic. This is **pure correlation**: judgment over a command's correlated
-  set is expressed in projections (a `@poll_state` for liveness, a
-  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  set is expressed in projections (a `@eventually` for liveness, a
+  `@check`/`@invariant` for safety/cardinality; these attributes were `@poll_state`
+  and `@trigger` before a later rename, see below), reusing the existing assertion
   machinery rather than a separate await loop. This implements, on the correct
   (semantic) surface, the capability the removed `Adapter.register_handler/2`
   advertised.
@@ -640,6 +648,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.IEx.debug_command/3` no longer accepts
+  `refs:`.** The option substituted symbolic-ref atoms that no current model
+  produces. Pass a command whose fields hold concrete values. Any option
+  other than `adapter_opts:` now raises `ArgumentError`.
+- **Breaking: `PropertyDamage.explain/1` names placeholder fields
+  `:placeholders`.** Each command map carries `:placeholders` instead of
+  `:refs`, and the formatted explanation prints `Placeholders:` instead of
+  `Refs:`.
+- **Exported Livebook notebooks and scripts call bound step values produced
+  values.** The notebook's exploration cell says the `state` variable holds
+  the values that previous steps produced and prints
+  `Available produced values:`.
+- **Breaking: the ExUnit export file name ends in `_test.exs`.**
+  `PropertyDamage.Export.save/4` with `:exunit` writes
+  `reproduce_<seed>_<signature>_test.exs` instead of
+  `reproduce_<seed>_<signature>.exs`, so `mix test` runs the file when you
+  save it under `test/`. The Elixir script keeps its `.exs` name. Code that
+  builds the old ExUnit path by hand must change.
+- **Validation names the real injector behavior.** The message for an
+  injectable event that no injector emits now reads "not covered by any
+  injector adapter @emits" instead of naming a module that does not exist.
+- **Breaking: the network fault event structs moved under their nemesis
+  module.** `NetworkPartitioned` and `NetworkPartitionHealed` moved under
+  `PropertyDamage.Nemesis.NetworkPartition`, `NetworkLatencyInjected` and
+  `NetworkLatencyRestored` under `PropertyDamage.Nemesis.NetworkLatency`, and
+  `PacketLossInjected` and `PacketLossRestored` under
+  `PropertyDamage.Nemesis.PacketLoss`. Each keeps its short name, so
+  `%NetworkPartitioned{}` becomes `%NetworkPartition.NetworkPartitioned{}`
+  after `alias PropertyDamage.Nemesis.NetworkPartition`. The library no
+  longer defines top-level modules. A projection that matches the old names
+  must update its patterns.
+- **`Mutation.run/1` returns `{:error, {:baseline_failed, command_module,
+  message}}` when the unmutated baseline run fails with an adapter error.**
+  Before, every mutation of that command failed the same way and counted as
+  killed by error. A caller that matched only `{:ok, _}` must handle the
+  error tuple.
+- **`mix pd.scaffold` refuses to overwrite existing files.** Run it again with
+  `--force` to regenerate.
 - **A mutation killed by an adapter error no longer counts toward the
   mutation score (DR-059).** A mutation whose run fails with an
   `:execution_failed` report, for example a status mutation that makes the
@@ -893,7 +939,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `{:adapter_setup_failed, reason}` tuple are removed. `run/1` returns a report
     with `kind: :setup_failed`; `execute/2`, `Replay.start/2` and `shrink_further/2`
     return `{:error, %Failure{type: %Failure.Setup{}}}`; `mix pd.replay` prints it.
-    The `setup_once_failed` and `setup_each_failed` shapes are unchanged.
+    The `setup_once_failed` and `setup_each_failed` shapes were unchanged at this
+    step (later removed too; see below).
   - `Shrinker.failure_signature/1` (a 2-tuple) is replaced by
     `Shrinker.failure_signature/2`, which returns `{kind, name, variant_index}`.
     `equivalent_failures?/2` takes `{reason, variant_index}` pairs.
@@ -976,17 +1023,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `assertion_catalog/1` is `check_catalog/1` (report kinds `:synchronous`,
       `:lifecycle`, `:eventual`); `assertion_fires` is `check_fires`;
       `Projection.__assertions__/0` is `Projection.__checks__/0`; the LoadTest
-      failure metrics are now `check_failures` and `check_failure_rate`; the `Statistics` option
-      `assertions:` is `checks:`.
+      failure metrics are now `check_failures` and `check_failure_rate`; the `Statistics`
+      projection takes no `assertions:` or `checks:` option.
     - The projection attributes `@trigger` and `@poll_state` become `@check` and
       `@eventually`, with the same `every:`, `at:`, `after:`, `timeout:` and
       `interval:` options.
     - The model callback `terminate?/3` is `terminate_early?/3`.
     - The command-spec option `with:` is `overrides:`.
     - A retired key raises an error that names its replacement. The messages are:
-      "`assertion_mode:` was renamed `check_mode:`", "`assertions:` was renamed
-      `checks:`" and "Invalid `with:` for command M: `with:` was renamed
-      `overrides:`."
+      "`assertion_mode:` was renamed `check_mode:`" and "Invalid `with:` for
+      command M: `with:` was renamed `overrides:`." The `Statistics` projection
+      ignores unknown options, so `assertions:` raises no error there.
     - The persisted `.pd` format moves to version `8`; older files are refused
       with `{:error, {:unsupported_format_version, version, 8}}`.
     - `mix pd.gen.model` now takes `--check-projections`.
@@ -1000,11 +1047,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the formatter titles, and `FailureIntelligence` fingerprinting all key on the
   kind. Two renames of note: `:ref_resolution_error` → `:placeholder_resolution`
   (the old name referred to the long-deleted `%Ref{}` system), and the
-  trigger/check failures unify under `:assertion_failed` (so
-  `FailureReport.failure_type/1` returns `:assertion_failed`, not `:check_failed`,
+  trigger/check failures unify under one assertion kind (first named
+  `:assertion_failed`, later renamed `:check_failed`; see above), so
+  `FailureReport.failure_type/1` returns that kind, not a per-source kind,
   and linearization failures report `:linearization`, not `:linearization_failed`).
   The shrinker's failure-equivalence granularity is unchanged — the `{kind, name}`
-  signature keeps a `:poll_timeout` of `:x` distinct from an `:assertion_failed`
+  signature keeps a `:poll_timeout` of `:x` distinct from a check failure
   of `:x` (a class-based signature would have merged them).
 
 - **Persisted-file format bumps to version `7`; pre-v7 files are refused
@@ -1074,7 +1122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       surface (it never applied to the `:exunit`-only generated tests).
     - **`RunComparison.investigate/1` takes `capture:` as a sub-keyword.**
       `RunTrace.capture/1` options are now nested under `:capture` (e.g.
-      `investigate(runs: 5, capture: [model: M, adapter: A, seed: 3])`) rather
+      `investigate(runs: 5, capture: [model: M, targets: [A], seed: 3])`) rather
       than passed flat, so `RunTrace`'s option surface stays single-sourced.
     - **`Analysis.generate_test/2` now validates its options** (the previously
       orphaned `format`/`module_name` schema is wired in); the dead
@@ -1103,7 +1151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computed `Fingerprint.hash/1` for such reports, so similarity clustering should
   be recomputed rather than compared against values cached under the old bug.
 - **Persistence format 2 → 3.** `.pd` files now stamp format version `3`, which
-  tracks the `FailureReport` struct shape. Version 1 and 2 files still load. A
+  tracks the `FailureReport` struct shape. Files of version 1 and 2 loaded at that step; later format bumps refuse them (see the persisted-file entries above). A
   file written before the field removal below deserializes losslessly: the two
   removed keys are recognized (not reported as struct-shape drift), and the
   failing command/events remain recoverable via `failure_step/1`, recomputed from
@@ -1129,7 +1177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (read-only IS the `:prefer_remove` shrink hint; there is no separate boolean)
   - `def downstream_observables, do: [...]` → `use PropertyDamage.Command, observables: [...]`
   - `def idempotent?, do: false` → `use PropertyDamage.Command, idempotent: false`
-  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]`
+  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]` (this key was removed later; see `stutter:` `using:` above)
   The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
   `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
   they cannot live in a static map). `Command.build_spec_from_legacy/1`
@@ -1277,7 +1325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FailureReport.failure_step(report).command` and `.entries` instead (both
   recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
   non-localized failure; the bare event of an entry is `entry.event`). Existing
-  `.pd` files remain loadable (see the persistence 2 → 3 note above).
+  `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
 - **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
   three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,
@@ -1294,6 +1342,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mix pd.reshrink` runs again.** The task never started the `:telemetry`
+  application, so every re-shrink stopped with "re-shrink could not run" and
+  exit 1. It now starts the project's applications after compiling, as
+  `mix pd.integration` does.
+- **`PropertyDamage.Integration.generate_report/2` writes JSON for a failed
+  run.** The `:json` format raised `Protocol.UndefinedError` whenever a run
+  failed. The report is now a plain map: the run counts, the model and the
+  adapter, and for each failure its seed, check and error message. Model and
+  adapter names now read `MyApp.Model` instead of `Elixir.MyApp.Model`.
+- **`PropertyDamage.Analysis.isolate_trigger/2` names the account's currency
+  in a currency mismatch again.** The lookup read a field of a struct the
+  library no longer has, so a trigger that reads its account through a
+  placeholder always got the generic message. It now follows the placeholder
+  to the command that produced it. Isolation over leaves keeps the generic
+  message.
+- **`Export.save_all/3` keeps the ExUnit test.** The ExUnit test and the
+  Elixir script got the same `reproduce_<seed>_<signature>.exs` path, so the
+  script overwrote the test and the returned `exunit:` path held the script.
+  The default `script_languages` includes `:elixir`, so the default call lost
+  the test. Each format now gets its own file name.
+- **A replay artifact replays in a fresh VM.** `only: [replay: path]` raised
+  "which this system does not know" when nothing had loaded
+  `PropertyDamage.Failure` or the model's projections yet, for example a
+  regression test run alone with `mix test path:line`. Before it resolves
+  atoms, the artifact reader now loads the framework's failure modules and the
+  commands and projections of the model the caller passed. An atom that no
+  loaded module defines is still refused.
+- **Atom markers named in `external_markers:` resolve on every path a run
+  simulates again.** The teardown draw, the expansion walk, shrinking,
+  `only: [replay: path]` and `shrink_further/2` used to hand a consuming
+  command the marker atom, or a placeholder no registry knew, instead of the
+  id the system minted. The replay artifact does not record the markers, so a
+  replay through `only:` uses the `external_markers:` of the replaying run.
+  `PropertyDamage.Replay`, `mix pd.reshrink`, `Analysis` and `Export` do not
+  read them; their docs say so.
+- **A variant process that dies while its target comes up is reported as
+  such.** An untrappable kill or the crash of a linked process reported the
+  setup cause `:adapter_setup`; it now reports the cause `:variant` with the
+  exit reason as detail. The error text, the error origin, the replay hint and
+  the meaning of `:setup_failed` name it too.
+- **A per-command `settle:` map merges per key over the defaults.**
+  `settle: %{timeout_ms: 1_000}` used to fail the run with a `KeyError` for
+  `:interval_ms`; omitted keys now keep their defaults.
+- **`Coverage.record/2` raises a readable error for a passing result without
+  coverage data.** It raised a `KeyError` on `:sequence`; it now raises the
+  same `ArgumentError` as `PropertyDamage.coverage/2`, naming
+  `coverage: true`. The moduledoc says which results need the option.
+- **The coverage matrices show a transition from a state or command to
+  itself.** A diagonal cell printed `·` whatever its count; it now prints the
+  count, and keeps `·` at 0.
+- **The terminal mutation report uses the same totals as the Markdown
+  report.** Each row shows killed over total and its error kills. The JSON
+  output carries a `score_rule` string saying the score excludes mutations
+  killed by an adapter error.
+- **`Integration.generate_report/2` creates the report directory.** A report
+  path under a missing directory raised `File.Error`; the function now
+  creates the parent directory, as `mix pd.integration` already did.
+- **`SeedLibrary.save/2` creates its directory.** A missing directory made the
+  save fail; it now creates the directory and returns `{:error, reason}` if
+  the write still fails.
+- **A failed write on the regression path logs a warning.**
+  `regression: [seed_library: path]`, `save_failures:` and `generate_tests:`
+  reported a failed write only under `verbose: true`. Each now logs a warning
+  with the path and the reason, as the top-level `seed_library:` option does.
+- **The model `mix pd.scaffold` writes passes `mix pd.validate`.** Its
+  `command_sequence_projection/0` raised; the task now writes a starter
+  `Projections.State` that the model names, and each command lists the event
+  the task generates for it under `observables:`. The task's docs and the
+  moduledocs it generates name `simulator/0`, not a `simulate/2` callback, and
+  its moduledoc quotes the code the generators emit.
+- **The `mutations_per_command` docs say the cap applies per operator.**
 - **The `pd-model-interview` verification ladder checks the model.** It runs
   `mix pd.validate <Model> <Adapter> --strict` under `MIX_ENV=test`. Fixtures
   become setup commands, invariants use `check` and `eventually`, generated

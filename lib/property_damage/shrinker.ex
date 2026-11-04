@@ -373,6 +373,10 @@ defmodule PropertyDamage.Shrinker do
       `:expansion` keys its choices by (default: each root's index)
     - `:stutter_config` - The run's stutter configuration; a stutter failure is
       reproduced with stutter forced on (DR-029)
+    - `:external_markers` - The run's atom markers (see `PropertyDamage.External`).
+      The teardown draw, the expansion walk and the replay check of every
+      candidate simulate commands again, and each turns an event field holding
+      one of these atoms into a placeholder, as generation did (default `[]`)
     - `:config` - Shrinker.Config struct (default: Config.new())
 
   ## Returns
@@ -506,6 +510,7 @@ defmodule PropertyDamage.Shrinker do
       check_mode: Keyword.get(opts, :check_mode, :halt),
       keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       config: Keyword.get(opts, :config, Config.new()),
+      external_markers: Keyword.get(opts, :external_markers, []),
       iterations: 0,
       # Candidates adopted so far, and the shrink cycles run.
       adopted: 0,
@@ -563,7 +568,8 @@ defmodule PropertyDamage.Shrinker do
     {:ok,
      Expansion.expand(state.model, candidate, state.targets, state.rng_seed,
        root_ids: root_ids,
-       carry: state.carry
+       carry: state.carry,
+       external_markers: state.external_markers
      )}
   rescue
     ArgumentError -> :invalid
@@ -1308,7 +1314,7 @@ defmodule PropertyDamage.Shrinker do
       state
     else
       # Drop this level's nodes, then pull back any ancestors that surviving
-      # nodes still depend on so refs stay resolvable. Everything here is in
+      # nodes still depend on so placeholders stay resolvable. Everything here is in
       # the original index space, which `graph` agrees with.
       candidate_keep = MapSet.difference(kept, MapSet.new(level))
 
@@ -1516,7 +1522,10 @@ defmodule PropertyDamage.Shrinker do
 
   # The teardown commands generated against `sequence`'s roots, with the run seed.
   defp with_teardown(%Sequence{} = sequence, state),
-    do: Generator.teardown_commands(state.model, sequence, state.rng_seed)
+    do:
+      Generator.teardown_commands(state.model, sequence, state.rng_seed,
+        external_markers: state.external_markers
+      )
 
   # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across
   # this shrink's attempts (and never 0, the exploration run's epoch), so each
@@ -1613,13 +1622,13 @@ defmodule PropertyDamage.Shrinker do
   # placeholder its commands hold, the leaves every target runs included,
   # is registered by the registry the artifact's re-execution rebuilds by
   # simulating the setup commands and the roots again
-  # (`PropertyDamage.ReplayArtifact.unregistered/4`). A simulator whose
+  # (`PropertyDamage.ReplayArtifact.unregistered/5`). A simulator whose
   # events depend on the state may mint nothing for a root once an earlier
   # root is gone, while the candidate still holds what the original run
   # minted there. Such a candidate is invalid: a shrunk failure it led to
   # could not be replayed from its own artifact. A simulator that raises on
   # the candidate makes it invalid too. A placeholder the rebuild misses for
-  # the sequence the shrink started from (one minted in a parallel branch,
+  # the sequence the shrink started from (one minted in a branch,
   # say) does not count: the shrink cannot lose what that sequence never had.
   defp replayable?(commands, positions, expansion, state) do
     commands
@@ -1644,7 +1653,10 @@ defmodule PropertyDamage.Shrinker do
           do: leaf
 
     held = state.setup_commands ++ commands ++ leaves
-    ReplayArtifact.unregistered(state.model, state.setup_commands, roots, held)
+
+    ReplayArtifact.unregistered(state.model, state.setup_commands, roots, held,
+      external_markers: state.external_markers
+    )
   end
 
   # The placeholder ids the registry rebuilt for the sequence the shrink
@@ -1766,11 +1778,11 @@ defmodule PropertyDamage.Shrinker do
   defp check_failure_equivalence(failure_reason, variant_index, nil) do
     # No original signature: we can't prove equivalence, so for backwards
     # compatibility we accept any failure EXCEPT ones that are unmistakably
-    # shrink artifacts. A dangling-ref / ref-resolution error only appears
+    # shrink artifacts. A placeholder-resolution error only appears
     # because a producing command was removed; accepting it would pass off a
     # different bug as the "minimal repro". (When a signature IS present, the
     # comparison below already rejects these unless the original was itself a
-    # ref-resolution error.)
+    # placeholder-resolution error.)
     elem(failure_signature(failure_reason, variant_index), 0) != :placeholder_resolution
   end
 

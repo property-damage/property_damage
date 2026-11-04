@@ -102,10 +102,9 @@ defmodule MyTest.Commands.ViewOrder do
 end
 ```
 
-The Model wires this command with state:
-
 The model needs a projection to hold the orders it has seen. `apply/2` stores
-each simulated `OrderCreated` under its (placeholder) id:
+each simulated `OrderCreated` under its (placeholder) id, and the Model wires
+the command with that state:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -591,11 +590,13 @@ always drew.
 ### When Setup Fails
 
 A setup failure has kind `:setup_failed`, and the report's `failed_at_index` is
-`nil`. It has four causes:
+`nil`. It has six causes:
 
 | Cause | What happened |
 |-------|---------------|
 | `:adapter_setup` | `Adapter.setup/1` returned `{:error, _}` or raised |
+| `:model` | model code (a projection or a check) raised, exited or threw while the target came up, after `setup/1` succeeded |
+| `:variant` | the variant process exited while the target came up, in a way nothing could rescue (an untrappable kill, or a linked process crashing) |
 | `:command` | a setup command answered `{:error, _}` or raised |
 | `:check` | a `@check` or `@eventually` check failed on a setup command's event |
 | `:unresolved_placeholder` | an `external()` a setup command produced was still unresolved after the last setup command |
@@ -1077,6 +1078,8 @@ defmodule ModelA do
 
   import SharedWiring.Orders
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
+
   def commands do
     [
       CreateOrder,
@@ -1094,6 +1097,8 @@ defmodule ModelB do
 
   import SharedWiring.Orders
 
+  alias MyTest.Commands.{CancelOrder, CreateOrder, ViewOrder}
+
   def commands do
     [
       CreateOrder,
@@ -1105,6 +1110,9 @@ defmodule ModelB do
   def command_sequence_projection, do: MyTest.PendingOrderProjection
 end
 ```
+
+These two models show only the wiring. Add a simulator, as in the first
+example, so that the `when:` guards can open.
 
 ### Pattern 3: Command Documentation
 
@@ -1207,7 +1215,7 @@ applies settle/retry logic — re-executing the probe until it succeeds or times
 
 Key behaviors:
 - Retried automatically according to settle configuration
-- Prioritized for removal during shrinking (read-only commands rarely contribute to bugs)
+- Not prioritized for removal during shrinking by default: the shrinker orders by the `:shrink` key alone, which defaults to `:neutral`. Set `shrink: :prefer_remove` (as above) to remove probes first
 - Do not mutate SUT state — safe to retry
 - Use for verifying eventual consistency (e.g., "does the order appear in search results?")
 
@@ -1232,7 +1240,7 @@ Probes and async commands use settle configuration for retry behavior:
     }
 
 With `:linear` backoff, retries happen at fixed intervals. With `:exponential`, the
-interval doubles after each retry (capped at the timeout).
+interval doubles after each retry, capped by the time left before the deadline.
 
 ## Summary
 

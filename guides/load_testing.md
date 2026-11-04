@@ -362,7 +362,8 @@ The callback does not receive a step count, so decide from the state. The
 second clause below counts accounts that a simulator predicts as
 `AccountCreated` events. Without a simulator the count stays at 0 and the
 clause never fires (see the
-[simulate callback](writing_commands.md#simulate-callback)).
+[simulate callback](writing_commands.md#simulate-callback)). In that case,
+match on the command instead, as the last clause below does.
 
 ```elixir
 # This terminates immediately: only 1 command per sequence
@@ -370,6 +371,9 @@ def terminate_early?(_state, _command, _events), do: true
 
 # With a simulator, this ends each sequence once it holds three accounts
 def terminate_early?(state, _command, _events), do: map_size(state.accounts) >= 3
+
+# Without a simulator, end each sequence at the first Shutdown command
+def terminate_early?(_state, %Shutdown{}, _events), do: true
 ```
 
 A load test has no `max_commands:` option. Without a `terminate_early?/3` that

@@ -185,7 +185,7 @@ defmodule PropertyDamage.FailureReport.Context do
          command
        ) do
     case setup do
-      %{cause: cause} when cause in [:adapter_setup, :model] -> []
+      %{cause: cause} when cause in [:adapter_setup, :model, :variant] -> []
       %{command: %{__struct__: module}} -> [module_item("Command", module, :full)]
       _other -> command_subject(command)
     end

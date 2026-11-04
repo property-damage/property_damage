@@ -60,12 +60,17 @@ MIX_ENV=test mix pd.scaffold --from <openapi path> --output test/support/pd/<slu
 ```
 
 Run it with `--dry-run` first, show the user the list, then run it again
-without `--dry-run`. Run it once, before the adapter becomes hand-owned: it
-overwrites `adapter.ex` and `model.ex` unconditionally. When the OpenAPI
-document drifts later, never rerun it whole; use `--dry-run` to see the
-difference. To add operations, `--commands-only --operations <ids>` writes
-each named operation's command (`commands/create_user.ex`) and its event file,
-and overwrites any file of the same name without asking. The event name comes
+without `--dry-run`. Run it once, before the adapter becomes hand-owned. A
+rerun refuses: it exits 1, names every existing target file, and writes
+nothing unless you pass `--force`. `--force` overwrites those files, so it
+destroys every hand edit in `adapter.ex`, `model.ex`, `projections/state.ex`
+and any command or event file it regenerates. Never pass `--force` to a whole
+run over a hand-owned adapter. When the OpenAPI document drifts later, never
+rerun it whole; use `--dry-run` to see the difference. To add operations,
+`--commands-only --operations <ids>` writes each named operation's command
+(`commands/create_user.ex`) and its event file. It refuses the same way if
+either file already exists, and you do not need `--force` for new files. The
+event name comes
 from the operationId: `create`, `update`, `delete`, `get` and `list` prefixes
 give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
 (`createUser` gives `UserCreated`, file `events/user_created.ex`); `find` and
@@ -73,20 +78,25 @@ give `<Resource>Created`, `Updated`, `Deleted`, `Retrieved` and `Listed`
 and `searchUser` share `UserCompleted`; any other operationId gives
 `<OperationId>Completed`. Run `--dry-run` first and turn each command and
 event module it lists into its file path. The dry run lists an event module
-for every operation, but the run writes an event file only for an operation
-whose success response has a schema. Leave out an operation if its command
-file already exists, or if its success response has a schema and its event
-file already exists (an event file that another operation shares counts).
-Ignore the event module of an operation without a schema: the run neither
-writes that file nor touches a file of that name.
+only for an operation with a 200, 201 or 202 response, and the run writes
+that event file only when the response has a JSON schema (`application/json`).
+The dry run does not show the schema, so look it up in the OpenAPI document.
+Leave out an operation if its command file already exists, or if its success
+response has a JSON schema and its event file already exists (an event file
+that another operation shares counts). Ignore the event module of an
+operation without a JSON schema: the run neither writes that file nor touches
+a file of that name.
 What it writes differs from the layout above: it writes `commands/`,
-`events/` (named as above), `adapter.ex` and `model.ex`, but no
-`projections/` and no `simulator.ex`; its `model.ex` raises in
-`command_sequence_projection/0` until a projection exists, and its files carry
-no class header. Add the class header lines from
+`events/` (named as above), `adapter.ex`, `model.ex` and
+`projections/state.ex`, but no `simulator.ex`. Its `model.ex` returns
+`Projections.State` from `command_sequence_projection/0`. That projection
+starts empty and ignores every event, so do not write a new projection file:
+edit `projections/state.ex` to track the state the spec needs, and add the
+spec's check projections beside it. The files carry no class header. Add the
+class header lines from
 [scaffold_templates.md](references/scaffold_templates.md) to each file
-afterwards, then write the projection, simulator and `@moduledoc` text from
-the spec as for any model.
+afterwards, then write the simulator and `@moduledoc` text from the spec as
+for any model.
 
 ## Workflow spine
 

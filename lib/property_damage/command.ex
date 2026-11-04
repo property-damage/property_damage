@@ -81,7 +81,7 @@ defmodule PropertyDamage.Command do
   takes an overrides map and returns a StreamData generator of maps. The framework
   wraps the result in the command struct automatically.
 
-  State-dependent concerns (preconditions, ref selection, expected events) are defined
+  State-dependent concerns (preconditions, selection of placeholder values, expected events) are defined
   in the **Model**, not the Command. This separation enables command reuse across
   different Models with different state shapes.
 
@@ -116,6 +116,16 @@ defmodule PropertyDamage.Command do
           ]
         end
 
+        def simulator, do: MyTest.OrderSimulator
+      end
+
+  The model names a simulator module in `simulator/0`. The engine calls
+  `simulate/2` on that module (see `PropertyDamage.Model.Simulator`):
+
+      defmodule MyTest.OrderSimulator do
+        @behaviour PropertyDamage.Model.Simulator
+
+        @impl true
         def simulate(%CreateOrder{amount: amount}, _state) do
           [%OrderCreated{amount: amount, order_ref: nil}]
         end
@@ -357,7 +367,9 @@ defmodule PropertyDamage.Command do
       #   settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
       #   when: fn _ -> true end,
       #   overrides: %{},
-      #   weight: 1
+      #   weight: 1,
+      #   observables: [],
+      #   idempotent: true
       # }
   """
   defmacro __using__(opts \\ []) do
@@ -420,6 +432,10 @@ defmodule PropertyDamage.Command do
   2. Module defaults (from `use PropertyDamage.Command` opts)
   3. Framework defaults
 
+  Every key replaces the lower layer's value, except `:settle`. A `:settle` map
+  merges per key over the layer below, so `settle: %{timeout_ms: 1_000}` keeps
+  the default `interval_ms` and `backoff`.
+
   ## Parameters
 
   - `module` - The command module
@@ -435,7 +451,15 @@ defmodule PropertyDamage.Command do
   def build_spec(module, module_defaults, overrides) do
     framework_defaults()
     |> Map.merge(%{command: module})
-    |> Map.merge(Map.new(module_defaults))
-    |> Map.merge(Map.new(overrides))
+    |> merge_layer(Map.new(module_defaults))
+    |> merge_layer(Map.new(overrides))
+  end
+
+  # A settle map merges per key; every other key replaces the lower layer's value.
+  defp merge_layer(spec, layer) do
+    Map.merge(spec, layer, fn
+      :settle, base, over when is_map(base) and is_map(over) -> Map.merge(base, over)
+      _key, _base, over -> over
+    end)
   end
 end

@@ -29,8 +29,10 @@ end
 The command generators in this guide call `StreamData` functions directly, so
 your project lists `:stream_data` itself.
 
-Each module in the steps below goes in its own file under `lib/my_app/` (for
-example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run.
+Each module in Steps 1 to 6 goes in its own file under `lib/my_app/` (for
+example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run;
+its test module goes under `test/` (for example `test/property_test.exs`), so
+`mix test` runs it.
 
 ## Core Concepts
 
@@ -253,20 +255,20 @@ The model above implements four callbacks, but only two are **required**:
 callback is optional (they are listed in `@optional_callbacks`), so a minimal
 model is just those two. The optional ones:
 
-- `check_projections/0` — invariant projections to run; defaults to `[]`.
-- `injectable_events/0` — events that arrive from outside command execution
+- `check_projections/0`: invariant projections to run; defaults to `[]`.
+- `injectable_events/0`: events that arrive from outside command execution
   (webhooks, callbacks) rather than from commands; defaults to `[]`.
 - `simulator/0`: the simulator module for sequence generation. It has no
   default: without `simulator/0` the generator predicts no events, so projection
   state stays at `init/0` while the sequence is generated and any `when:` guard
   that reads state never opens. A model whose commands need no such guard can
   leave it out.
-- `setup_each/0`, `teardown_each/0` — setup commands and teardown commands: a
+- `setup_each/0`, `teardown_each/0`: setup commands and teardown commands: a
   fixture such as "a user is logged in" is a command that runs before the first
   root of every run (or after the last), and each target's adapter decides how
   to do it. Both default to `[]`. See
   [Writing Commands](writing_commands.md#setup-and-teardown-commands).
-- `terminate_early?/3` — a predicate to stop generating a sequence early.
+- `terminate_early?/3`: a predicate to stop generating a sequence early.
 - `expansions/0`: command sequences a root command may run as, per target, when
   they mean the same as the root. A model without it has none. See
   [Writing Commands](writing_commands.md#expansions-one-root-several-commands).
@@ -433,9 +435,9 @@ the directory's `index.html` browses them all; see
 [Reading the report](debugging_failures.md#reading-the-report) walks through a
 real one. Shrinking can simplify a command's values to ones your generator
 would never draw, such as an empty string for a name that needs five
-characters; the shrunk failure still fails the same way. To put your own lines in it, such as the requests an
-adapter sends, call `PropertyDamage.log/2`; see the
-[log lines guide](log_lines.md).
+characters; the shrunk failure still fails the same way. To put your own lines
+in the report, such as the requests an adapter sends, call
+`PropertyDamage.log/2`; see the [log lines guide](log_lines.md).
 
 ## Next Steps
 

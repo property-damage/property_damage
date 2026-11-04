@@ -7,10 +7,17 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   ## Configuration
 
-  - `:latency_ms` - Base latency to add (default: 100ms)
-  - `:jitter_ms` - Random jitter ± this value (default: 0)
-  - `:duration_ms` - How long the latency persists (default: 5000ms)
-  - `:target` - What to affect: `:all`, `:upstream`, `:downstream`, or specific host
+  - `:latency_ms` - Base latency to add (struct default: 100ms)
+  - `:jitter_ms` - Random jitter ± this value (struct default: 0)
+  - `:duration_ms` - How long the latency persists (struct default: 5000ms)
+  - `:target` - A label copied into the emitted events (default: `:all`). It does
+    not change which traffic the toxic affects.
+
+  The defaults above apply to a hand-built struct. When a model lists this
+  nemesis in `commands/0`, `new!/2` draws the values instead: `:latency_ms` in
+  50..500, `:jitter_ms` in 0..50 and `:duration_ms` in 1000..10_000. A key in
+  the command's `overrides:` replaces its draw with the value as given; pass a
+  plain value, not a generator.
 
   ## Usage with Toxiproxy
 
@@ -43,7 +50,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   ## Events
 
-  Emits `%NetworkLatencyInjected{}` on inject and `%NetworkLatencyRestored{}` on restore.
+  Emits `%PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected{}` on inject and
+  `%PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyRestored{}` on restore.
   """
 
   @behaviour PropertyDamage.Nemesis
@@ -76,7 +84,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkLatencyInjected,
+          __struct__: __MODULE__.NetworkLatencyInjected,
           latency_ms: command.latency_ms,
           jitter_ms: command.jitter_ms,
           target: command.target,
@@ -100,7 +108,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     case result do
       :ok ->
         event = %{
-          __struct__: NetworkLatencyRestored,
+          __struct__: __MODULE__.NetworkLatencyRestored,
           latency_ms: command.latency_ms,
           target: command.target,
           restored_at: now,
@@ -165,15 +173,14 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   end
 
   defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
-end
 
-# Event structs
-defmodule NetworkLatencyInjected do
-  @moduledoc false
-  defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
-end
+  defmodule NetworkLatencyInjected do
+    @moduledoc false
+    defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
+  end
 
-defmodule NetworkLatencyRestored do
-  @moduledoc false
-  defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
+  defmodule NetworkLatencyRestored do
+    @moduledoc false
+    defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
+  end
 end

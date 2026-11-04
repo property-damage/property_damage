@@ -30,6 +30,12 @@ defmodule MyAdapter do
   use PropertyDamage.Adapter
 
   @impl true
+  def setup(config), do: {:ok, %{client: Req.new(base_url: config[:base_url])}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
   def execute(%CreateAuthorization{user_id: user_id, amount: amount}, ctx, runtime) do
     # Step 1: Create the authorization (returns immediately)
     {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
@@ -57,11 +63,13 @@ defmodule MyAdapter do
         {:ok, %{body: %{"status" => "approved"}}} ->
           {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
 
-        {:ok, %{body: %{"status" => "declined", "decline_reason" => reason}}} ->
-          {:done, %AuthorizationDeclined{id: id, reason: reason}}
+        {:ok, %{body: %{"status" => "declined"} = body}} ->
+          {:done, %AuthorizationDeclined{id: id, reason: body["decline_reason"]}}
 
-        {:error, reason} ->
-          {:error, {:http_error, reason}}
+        # A transport error (timeout, refused connection) is usually transient,
+        # so keep polling until `timeout_ms` instead of stopping the poller.
+        {:error, _reason} ->
+          :continue
       end
     )
 
@@ -120,7 +128,7 @@ handler: fn
   {:ok, %{body: %{"status" => "queued"}}} -> :continue
   {:ok, %{body: %{"status" => "processing"}}} -> {:inject, %ProcessingStarted{id: id}}
   {:ok, %{body: %{"status" => "completed"}}} -> {:done, %ProcessingCompleted{id: id}}
-  {:error, reason} -> {:error, {:http_error, reason}}
+  {:error, _reason} -> :continue
 end
 ```
 
@@ -134,8 +142,8 @@ handler: fn
     events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
     {:done, events ++ [%BatchCompleted{count: length(items)}]}
 
-  {:error, reason} ->
-    {:error, {:http_error, reason}}
+  {:error, _reason} ->
+    :continue
 end
 ```
 
@@ -148,8 +156,8 @@ handler: fn
   {:ok, %{status: 404}} ->
     {:error, :resource_not_found}
 
-  {:error, reason} ->
-    {:error, {:http_error, reason}}
+  {:error, _reason} ->
+    :continue
 end
 ```
 
@@ -258,14 +266,17 @@ its stacktrace and reported as `{:on_timeout_error, exception, stacktrace}`.
 
 ## Error Handling
 
-Errors from pollers are handled based on `check_mode`:
+The executor collects poller results once, at the end of the sequence. A
+poller error never interrupts the commands that run after it. Every command in
+the sequence still executes, and `check_mode` decides what happens when the
+executor collects the error:
 
 | Mode | Behavior |
 |------|----------|
-| `:halt` | First error stops execution, reported as failure |
-| `:record` | Errors recorded, sequence continues, all failures reported at end |
-| `:log` | Errors logged as warnings, sequence continues |
-| `:disabled` | Errors ignored |
+| `:halt` | The run fails with a resource poller error when the sequence ends. The first failed poller is the one reported |
+| `:record` | Every poller error becomes a recorded failure (check name `resource_poller`) when the sequence ends |
+| `:log` | Errors are logged as warnings, and the run passes, unless a callback threw or exited (see [Log Mode Formatting](#log-mode-formatting)) |
+| `:disabled` | Errors are ignored |
 
 ### Error Types
 
@@ -275,16 +286,25 @@ are explicitly returned:
 | Error | Has Stacktrace? | Cause |
 |-------|-----------------|-------|
 | `{:poll_fn_error, exception, stacktrace}` | Yes | `poll_fn` raised an exception |
+| `{:poll_fn_error, {kind, reason}, stacktrace}` | Yes | `poll_fn` threw or exited, so `kind` is `:throw` or `:exit` |
 | `{:handler_error, exception, stacktrace}` | Yes | `handler` raised an exception |
+| `{:handler_error, {kind, reason}, stacktrace}` | Yes | `handler` threw or exited |
 | `{:on_timeout_error, exception, stacktrace}` | Yes | `on_timeout` function raised |
+| `{:on_timeout_error, {kind, reason}, stacktrace}` | Yes | `on_timeout` function threw or exited |
 | `{:timeout, timeout_info}` | No | Polling timed out with `on_timeout: :fail` |
 | Custom `reason` | No | Handler or `on_timeout` returned `{:error, reason}` |
 
 ### Log Mode Formatting
 
+A `poll_fn`, handler or `on_timeout` function must return a value or raise. If it throws or exits,
+the `:log` formatter calls `Exception.message/1` on the `{kind, reason}` tuple,
+and that call crashes the run instead of logging a warning. `:halt` and
+`:record` modes report the tuple.
+
 In `:log` mode, errors are formatted for clean log output:
 
-- **Raised exceptions**: Shows exception type and message
+- **Raised exceptions**: Shows which callback raised and the exception message
+  (the exception type is not printed)
   ```
   [warning] Resource poller #Ref<...> error: handler raised: invalid response format
   ```
@@ -313,13 +333,19 @@ test "authorization polling" do
   ctx = %{client: mock_client}
 
   # Framework keys live on the runtime handle
+  test_pid = self()
+
   runtime = %PropertyDamage.Runtime{
     inject: fn _ -> :ok end,
     start_poller: fn opts ->
-      ResourcePoller.start(Keyword.merge(opts, [
+      poller = ResourcePoller.start(Keyword.merge(opts, [
         event_queue: queue,
         command_index: 0
       ]))
+
+      # Hand the poller handle to the test so it can await it
+      send(test_pid, {:poller, poller})
+      poller
     end
   }
 
@@ -328,10 +354,11 @@ test "authorization polling" do
 
   # Initial event returned immediately
   assert [%AuthorizationCreated{}] = events
+  assert_receive {:poller, poller}
 
-  # Wait for poller to complete
-  # (In real tests, the executor does this automatically)
-  Process.sleep(100)
+  # Wait for the poller to finish
+  # (In real runs, the executor does this at the end of the sequence)
+  assert {:success, _id} = ResourcePoller.await(poller)
 
   # Check injected events
   entries = EventQueue.drain(queue)

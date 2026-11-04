@@ -154,6 +154,11 @@ defmodule PropertyDamage.Export.Common do
 
   @doc """
   Generates a filename for the export based on seed and format.
+
+  Every format gets its own name, so `PropertyDamage.Export.save_all/3` never
+  writes two exports to one path. The ExUnit test ends in `_test.exs`, which
+  `mix test` collects when the file sits under `test/`. The Elixir script ends
+  in plain `.exs`, which `mix test` skips.
   """
   @spec generate_filename(FailureReport.t(), atom()) :: String.t()
   def generate_filename(%FailureReport{seed: seed} = report, format) do
@@ -177,7 +182,7 @@ defmodule PropertyDamage.Export.Common do
   defp variant_index(%FailureReport{variant: %{index: index}}), do: index
   defp variant_index(%FailureReport{}), do: 0
 
-  defp extension_for_format(:exunit), do: ".exs"
+  defp extension_for_format(:exunit), do: "_test.exs"
   defp extension_for_format(:elixir), do: ".exs"
   defp extension_for_format(:curl), do: ".sh"
   defp extension_for_format(:bash), do: ".sh"

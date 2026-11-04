@@ -6,6 +6,7 @@ defmodule PropertyDamage.ValidationTest do
   alias PropertyDamage.Test.{
     ExecutorModel,
     FullModel,
+    NoEmitsInjectorAdapter,
     SimpleAdapter,
     SimpleInjectorAdapter,
     UnloadedEmitsInjector
@@ -164,6 +165,16 @@ defmodule PropertyDamage.ValidationTest do
       # ExecutorModel may have injectable_events that need coverage
       {:ok, _warnings} =
         Validation.validate!(ExecutorModel, SimpleAdapter, injectors: [SimpleInjectorAdapter])
+    end
+
+    test "names the real injector behavior when an injectable event is uncovered" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Validation.validate!(FullModel, SimpleAdapter, injectors: [NoEmitsInjectorAdapter])
+        end
+
+      assert Exception.message(error) =~ "not covered by any injector adapter @emits"
+      refute Exception.message(error) =~ "InjectorAdapter"
     end
 
     test "covers injectable events even when the injector module is not yet loaded" do

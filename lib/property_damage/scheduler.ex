@@ -424,8 +424,14 @@ defmodule PropertyDamage.Scheduler do
         stop_variant(variant)
         {:error, setup_reason(reason), logs}
 
+      # The variant process died inside its setup call. The adapter's
+      # `setup/1`, an injector's or a mock's setup, and model code all run
+      # there, and each of them raises, exits or throws into a rescue, so
+      # only an exit that no rescue sees reaches this branch: an untrappable
+      # kill, or the crash of a process linked to the variant. Which code
+      # caused it is not known, so the cause is the variant itself.
       {:crashed, reason} ->
-        {:error, reason, %{}}
+        {:error, Failure.setup_failed(:variant, detail: reason), %{}}
     end
   end
 

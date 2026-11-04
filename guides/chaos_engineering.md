@@ -138,6 +138,7 @@ defmodule Cache.State do
   use PropertyDamage.Model.Projection
 
   alias Cache.Events.{KeySet, KeyRead}
+  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
 
   @impl true
   def init do
@@ -243,13 +244,13 @@ run result: {:ok,
  %{
    seed: 7,
    targets: [%{index: 0, name: "Adapter"}],
-   runs: 20,
+   check_fires: %{{Cache.State, :reads_are_consistent} => 106},
+   compare_counts: %{},
+   expansion_counts: %{"Adapter" => %{}},
    setup_commands: 0,
    teardown_commands: 0,
    total_commands: 240,
-   check_fires: %{{Cache.State, :reads_are_consistent} => 106},
-   compare_counts: %{},
-   expansion_counts: %{"Adapter" => %{}}
+   runs: 20
  }}
 ```
 
@@ -365,6 +366,9 @@ Create a projection that tracks active faults:
 defmodule MyApp.Projections.NemesisInvariants do
   use PropertyDamage.Model.Projection
 
+  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
+  alias PropertyDamage.Nemesis.NetworkPartition.{NetworkPartitioned, NetworkPartitionHealed}
+
   @impl true
   def init do
     %{
@@ -374,8 +378,9 @@ defmodule MyApp.Projections.NemesisInvariants do
   end
 
   # Track fault injection. There is no generic fault event: each nemesis emits
-  # its own injected/restored structs (NetworkLatencyInjected,
-  # NetworkLatencyRestored, PacketLossInjected, ...). Match the ones your model
+  # its own injected/restored structs (NetworkLatency.NetworkLatencyInjected,
+  # NetworkLatency.NetworkLatencyRestored, PacketLoss.PacketLossInjected, ...),
+  # each nested under its nemesis module. Match the ones your model
   # uses; the injected struct carries a `simulated: true | false` flag.
   @impl true
   def apply(state, %NetworkLatencyInjected{} = event) do
@@ -384,6 +389,16 @@ defmodule MyApp.Projections.NemesisInvariants do
 
   def apply(state, %NetworkLatencyRestored{}) do
     update_in(state, [:active_faults], &Map.delete(&1, :network_latency))
+  end
+
+  # The partition nemesis emits NetworkPartitioned and NetworkPartitionHealed.
+  # Track it under the key the relaxed check below reads.
+  def apply(state, %NetworkPartitioned{} = event) do
+    put_in(state, [:active_faults, :network_partition], event)
+  end
+
+  def apply(state, %NetworkPartitionHealed{}) do
+    update_in(state, [:active_faults], &Map.delete(&1, :network_partition))
   end
 
   def apply(state, _), do: state

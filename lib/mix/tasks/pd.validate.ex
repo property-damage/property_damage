@@ -583,7 +583,7 @@ defmodule Mix.Tasks.Pd.Validate do
           IO.puts(line)
           print_hint("Add the missing callback to implement the behaviour.")
 
-        String.contains?(line, "not covered by any InjectorAdapter") ->
+        String.contains?(line, "not covered by any injector adapter") ->
           IO.puts(line)
           print_hint("Add the event to an injector adapter's @emits list.")
 

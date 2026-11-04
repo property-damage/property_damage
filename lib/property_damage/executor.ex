@@ -20,7 +20,7 @@ defmodule PropertyDamage.Executor do
 
   ### Branching Sequences
 
-  Commands with parallel branches:
+  Commands with branches:
 
       %Sequence{
         prefix: [cmd1],

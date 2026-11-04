@@ -15,7 +15,7 @@ defmodule PropertyDamage.RunTrace.Step do
   ## Fields
 
   - `position` — the command's canonical `Sequence.Position` (section + offset),
-    unambiguous across parallel branches.
+    unambiguous across branches.
   - `flattened_index` — the command's `Sequence.to_list/1` reading-order ordinal.
     This is what labels, exporters, and diff alignment key on. It is the *derived*
     view of the location; `position` is authoritative. For branch commands it

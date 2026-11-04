@@ -397,51 +397,61 @@ list produces every event. List it in `injectable_events/0` and give it an
 injector. The injector stays hand-owned like the adapter, so scaffold a stub
 and let the user fill in the transport:
 
-    # test/support/pd/wallets/payment_webhook.ex
-    # Scaffolded by pd-model-interview (class: hand-owned). Yours after the first edit.
-    defmodule MyStore.PD.Wallets.PaymentWebhook do
-      @moduledoc """
-      Delivers the payment provider's confirmation webhook as a PaymentConfirmed event.
-      """
+<!-- pd-doc-verify: runnable -->
+```elixir
+# test/support/pd/wallets/payment_webhook.ex
+# Scaffolded by pd-model-interview (class: hand-owned). Yours after the first edit.
+defmodule MyStore.PD.Wallets.PaymentWebhook do
+  @moduledoc """
+  Delivers the payment provider's confirmation webhook as a PaymentConfirmed event.
+  """
 
-      use PropertyDamage.Adapter.Injector
+  use PropertyDamage.Adapter.Injector
 
-      @emits [MyStore.PD.Wallets.Events.PaymentConfirmed]
+  @emits [MyStore.PD.Wallets.Events.PaymentConfirmed]
 
-      @impl true
-      def setup(config) do
-        # TODO(pd-model-interview): start listening for the webhook, and call
-        # deliver(payload, queue) for each payload it receives.
-        {:ok, %{queue: config.event_queue}}
-      end
+  @impl true
+  def setup(config) do
+    # TODO(pd-model-interview): start listening for the webhook, and call
+    # deliver(payload, queue) for each payload it receives.
+    {:ok, %{queue: config.event_queue}}
+  end
 
-      @impl true
-      def teardown(_context), do: :ok
+  @impl true
+  def teardown(_context), do: :ok
 
-      @impl true
-      def to_event(_payload) do
-        # TODO(pd-model-interview): turn the payload into a PaymentConfirmed event.
-        :skip
-      end
+  @impl true
+  def to_event(_payload) do
+    # TODO(pd-model-interview): turn the payload into a PaymentConfirmed event.
+    :skip
+  end
 
-      # The queue stores whatever it receives as the event and the framework
-      # never calls to_event/1 for an injector, so convert before pushing.
-      def deliver(payload, queue) do
-        case to_event(payload) do
-          {:ok, event} -> PropertyDamage.EventQueue.push(queue, __MODULE__, event)
-          :skip -> :ok
-          {:error, reason} -> raise "to_event/1 returned an error: #{inspect(reason)}"
-        end
-      end
-    end
+  # The queue stores whatever it receives as the event and the framework
+  # never calls to_event/1 for an injector, so convert before pushing.
+  def deliver(payload, queue), do: push_result(to_event(payload), queue)
+
+  # Public on purpose. While to_event/1 returns only :skip, the compiler
+  # warns that two clauses of a private function never match.
+  def push_result({:ok, event}, queue),
+    do: PropertyDamage.EventQueue.push(queue, __MODULE__, event)
+
+  def push_result(:skip, _queue), do: :ok
+
+  def push_result({:error, reason}, _queue) do
+    raise "#{inspect(__MODULE__)}: to_event/1 returned an error: #{inspect(reason)}"
+  end
+end
+```
 
 The `raise` runs in the process that calls `deliver/2`, which is the user's
 listener, not the run. If the listener lets it end that process (a webhook
 server's request process, for one), the run never sees the error: it sees only
-a missing event. Have the listener report the failure back to the adapter,
-which raises it in the run, so the run fails with the message.
+a missing event. The library has no channel from the listener to the run, so
+the user builds one: the listener sends the failure to a named process, and
+the adapter checks that process in `execute/3` and raises. An exception that
+`execute/3` raises fails the run as an adapter error with its message.
 
-and attach the injector to the target with `injectors:`, in the first-run
+Attach the injector to the target with `injectors:`, in the first-run
 command (`targets: [{MyStore.PD.Wallets.Adapter, injectors:
 [MyStore.PD.Wallets.PaymentWebhook]}]`) and in the ladder. There,
 `mix pd.validate` takes `--targets` in place of the positional adapter
@@ -451,6 +461,31 @@ command (`targets: [{MyStore.PD.Wallets.Adapter, injectors:
 validation and the smoke run fail with "Injectable event
 MyStore.PD.Wallets.Events.PaymentConfirmed not covered by any InjectorAdapter
 @emits".
+
+Time the transport. The framework drains the injector's event queue after
+each command and once more after the last command, and neither drain waits for
+a transport that has not delivered yet. The `at: :teardown` checks run right
+after that last drain, before `teardown/1` of the adapter and of the injector.
+An event that arrives later, even 50 ms later, is never folded into the state
+the check reads. Two outcomes follow:
+
+- A check that needs the event (the payment was confirmed) fails with a
+  check failure that names the check, and the event log shows no such event.
+  The failure points at the check, but the system did nothing wrong.
+- A check that holds while the event is absent (at most one confirmation)
+  passes without a word, so a real overshoot that arrives late goes unseen.
+
+Flushing in `teardown/1` is too late, because the check has already run. Make
+the event arrive before the last drain instead. Either of these works:
+
+- Have `execute/3` of the command that triggers the transport wait until the
+  transport has delivered (a monitor on the delivering process, a reply from
+  the listener), and return its events afterwards. The next drain then holds
+  the injected event.
+- Add an `@eventually` for the operation, such as "after `PaymentInitiated`,
+  the confirmation counter catches up". The run waits for it, within its
+  `timeout:`, before the teardown checks run, and a timeout is reported as
+  a poll timeout that names the operation.
 
 When the spec lists setup or teardown commands (fixtures), the model also
 defines `setup_each/0` and `teardown_each/0`. They take the same entries as

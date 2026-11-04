@@ -38,25 +38,31 @@ and show your work.
 5. OpenAPI-composed spec → hash the referenced document. Mismatch: diff the
    operations against the spec's commands and delta-interview the difference.
    File missing: ask whether it moved; update the path if so. Never rerun
-   `mix pd.scaffold` whole over a hand-owned adapter: it overwrites `adapter.ex`
-   and `model.ex` unconditionally. Use `MIX_ENV=test mix pd.scaffold --from
+   `mix pd.scaffold` whole over a hand-owned adapter. Without `--force` the
+   rerun exits 1, names the existing files and writes nothing. With `--force`
+   it overwrites `adapter.ex`, `model.ex`, `projections/state.ex` and every
+   command and event file, so the user loses all hand edits in them. Use `MIX_ENV=test mix pd.scaffold --from
    <openapi path> --output <dir> --namespace <Namespace> --dry-run` to see what
    changed. To add operations, run it again with `--commands-only --operations
-   <ids>`: it writes each named operation's command and its event file, and
-   it overwrites any file of the same name without asking. The event name
+   <ids>`: it writes each named operation's command and its event file. If either
+   file already exists, the run exits 1 and names it; `--force` would
+   overwrite the file, so leave out any operation whose files exist (see
+   below) instead of forcing. The event name
    follows the operationId: `createUser` gives `events/user_created.ex`
    (`update`, `delete`, `get` and `list` give `Updated`, `Deleted`,
    `Retrieved` and `Listed`), `findUser` and `searchUser` both give
    `events/user_completed.ex`, and any other operationId gives
    `<operation_id>_completed.ex`. Run the `--dry-run` first and turn each
    command and event module it lists into its file path. The dry run lists an
-   event module for every operation, but the run writes an event file only
-   for an operation whose success response has a schema. Leave out an
-   operation if its command file already exists, or if its success response
-   has a schema and its event file already exists (an event file that
-   another operation shares counts). Ignore the event module of an operation
-   without a schema: the run neither writes that file nor touches a file of
-   that name. Then add the class header lines to the new files.
+   event module only for an operation with a 200, 201 or 202 response, and
+   the run writes that event file only when the response has a JSON schema
+   (`application/json`). The dry run does not show the schema, so look it up
+   in the OpenAPI document. Leave out an operation if its command file
+   already exists, or if its success response has a JSON schema and its
+   event file already exists (an event file that another operation shares
+   counts). Ignore the event module of an operation without a JSON schema:
+   the run neither writes that file nor touches a file of that name. Then
+   add the class header lines to the new files.
 
 ## The delta interview
 

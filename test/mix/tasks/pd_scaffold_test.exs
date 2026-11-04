@@ -258,7 +258,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
           [
             Scaffold.generate_event(sample_event(), ns),
             Scaffold.generate_adapter(ops, ns, api_info, []),
-            Scaffold.generate_model(ops, ns)
+            Scaffold.generate_model(ops, ns),
+            Scaffold.generate_state_projection(ns)
           ]
 
       for code <- sources do
@@ -279,7 +280,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
           [
             Scaffold.generate_event(sample_event(), ns),
             Scaffold.generate_adapter(ops, ns, api_info, []),
-            Scaffold.generate_model(ops, ns)
+            Scaffold.generate_model(ops, ns),
+            Scaffold.generate_state_projection(ns)
           ]
 
       {_, diagnostics} =
@@ -293,6 +295,17 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
 
       # The codegen contract that makes it usable by the executor:
       assert function_exported?(Module.concat(ns, "Commands.PutValue"), :events, 3)
+
+      # The model answers command_sequence_projection/0 with a loadable
+      # projection (pd.validate calls it), and each command that maps to a
+      # generated event lists that event as an observable.
+      model = Module.concat(ns, "Model")
+      assert Code.ensure_loaded?(model.command_sequence_projection())
+
+      assert Module.concat(ns, "Commands.PutValue").command_spec([]).observables ==
+               [Module.concat(ns, "Events.PutValueCompleted")]
+
+      assert Module.concat(ns, "Commands.GetValue").command_spec([]).observables == []
       get_value = Module.concat(ns, "Commands.GetValue")
       assert function_exported?(get_value, :command_spec, 1)
       assert get_value.command_spec([]).shrink == :prefer_remove
@@ -681,6 +694,63 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     end
   end
 
+  describe "overwrite guard" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      spec = Path.join(dir, "spec.json")
+      File.write!(spec, Jason.encode!(@kv_spec))
+      out = Path.join(dir, "out")
+      %{spec: spec, out: out}
+    end
+
+    defp run_quiet(args) do
+      ExUnit.CaptureIO.capture_io(fn -> Scaffold.run(args) end)
+    end
+
+    test "refuses to overwrite an existing model.ex and names the file and flag", %{
+      spec: spec,
+      out: out
+    } do
+      args = ["--from", spec, "--output", out, "--namespace", "GuardNs"]
+      run_quiet(args)
+      File.write!(Path.join(out, "model.ex"), "# my edits\n")
+
+      error = assert_raise Mix.Error, fn -> run_quiet(args) end
+      assert error.message =~ Path.join(out, "model.ex")
+      assert error.message =~ "--force"
+      assert File.read!(Path.join(out, "model.ex")) == "# my edits\n"
+    end
+
+    test "refuses to overwrite an existing adapter.ex without touching other files", %{
+      spec: spec,
+      out: out
+    } do
+      args = ["--from", spec, "--output", out, "--namespace", "GuardNs"]
+      run_quiet(args)
+      File.write!(Path.join(out, "adapter.ex"), "# my adapter\n")
+      command = Path.join(out, "commands/put_value.ex")
+      File.write!(command, "# my command\n")
+
+      error = assert_raise Mix.Error, fn -> run_quiet(args) end
+      assert error.message =~ "adapter.ex"
+      assert error.message =~ "--force"
+      assert File.read!(Path.join(out, "adapter.ex")) == "# my adapter\n"
+      assert File.read!(command) == "# my command\n"
+    end
+
+    test "--force overwrites existing files", %{spec: spec, out: out} do
+      args = ["--from", spec, "--output", out, "--namespace", "GuardNs"]
+      run_quiet(args)
+      File.write!(Path.join(out, "model.ex"), "# my edits\n")
+      File.write!(Path.join(out, "adapter.ex"), "# my adapter\n")
+
+      run_quiet(args ++ ["--force"])
+      assert File.read!(Path.join(out, "model.ex")) =~ "defmodule GuardNs.Model"
+      assert File.read!(Path.join(out, "adapter.ex")) =~ "defmodule GuardNs.Adapter"
+    end
+  end
+
   describe "generate_model/2" do
     test "generates model with weighted commands" do
       operations = extract_operations(@sample_openapi_spec, nil)
@@ -697,7 +767,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "{Commands.CreatePet, weight: 3}"
       # DELETE has weight 1
       assert code =~ "{Commands.DeletePet, weight: 1}"
-      assert code =~ "def command_sequence_projection do"
+      assert code =~ "def command_sequence_projection, do: Projections.State"
       assert code =~ "def check_projections do"
 
       # The commented lifecycle example shows setup and teardown commands.

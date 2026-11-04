@@ -174,6 +174,124 @@ defmodule PropertyDamage.AnalysisTest do
     end
   end
 
+  describe "format_explanation/1 of a command that reads a placeholder" do
+    test "lists the placeholder fields under Placeholders:" do
+      ph = Placeholder.new_at(Event, [:id], Position.prefix(0), 0)
+
+      seq =
+        [%Producer{}, %Consumer{ref: ph}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(PlaceholderRegistry.register(PlaceholderRegistry.new(), ph))
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:TestCheck, "boom")
+        )
+
+      explanation = Analysis.explain(report)
+      consumer = Enum.find(explanation.commands, &(&1.command_name == "Consumer"))
+      text = Analysis.format_explanation(explanation)
+      assert text =~ "    Placeholders: ref=placeholder:id@"
+      refute text =~ "Refs:"
+
+      label = "placeholder:id@#{inspect(Position.prefix(0))}"
+      assert consumer.placeholders == %{ref: label}
+    end
+  end
+
+  # A credit fails unless its currency matches the account's. The credit reads
+  # the account id the CreateAccount event minted through a placeholder.
+  defmodule Bank do
+    @moduledoc false
+
+    defmodule AccountCreated do
+      @moduledoc false
+      import PropertyDamage, only: [external: 0]
+      defstruct account_id: external()
+    end
+
+    defmodule CreateAccount do
+      @moduledoc false
+      @behaviour PropertyDamage.Command
+      defstruct [:currency]
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{currency: "USD"})
+    end
+
+    defmodule Credit do
+      @moduledoc false
+      @behaviour PropertyDamage.Command
+      defstruct [:account_ref, :currency]
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{currency: "EUR"})
+    end
+
+    defmodule Projection do
+      @moduledoc false
+      @behaviour PropertyDamage.Model.Projection
+      @impl true
+      def init, do: %{}
+      @impl true
+      def apply(state, _item), do: state
+    end
+
+    defmodule Model do
+      @moduledoc false
+      use PropertyDamage.Model
+      @impl true
+      def commands, do: [CreateAccount, Credit]
+      @impl true
+      def command_sequence_projection, do: Projection
+    end
+
+    defmodule Adapter do
+      @moduledoc false
+      use PropertyDamage.Adapter
+      @impl true
+      def setup(config), do: {:ok, config}
+      @impl true
+      def execute(%CreateAccount{}, _ctx, _runtime),
+        do: {:ok, [%AccountCreated{account_id: "acc_1"}]}
+
+      def execute(%Credit{account_ref: "acc_1", currency: "USD"}, _ctx, _runtime), do: {:ok, []}
+      def execute(%Credit{}, _ctx, _runtime), do: {:error, :currency_mismatch}
+      @impl true
+      def teardown(_ctx), do: :ok
+    end
+  end
+
+  describe "isolate_trigger/2 on a credit whose account comes from a placeholder" do
+    test "names the currency of the account the placeholder points at" do
+      ph = Placeholder.new_at(Bank.AccountCreated, [:account_id], Position.prefix(0), 0)
+
+      seq =
+        [%Bank.CreateAccount{currency: "USD"}, %Bank.Credit{account_ref: ph, currency: "EUR"}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(PlaceholderRegistry.register(PlaceholderRegistry.new(), ph))
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.adapter_error(:currency_mismatch),
+          model: Bank.Model,
+          targets: [{Bank.Adapter, []}]
+        )
+
+      assert {:ok, isolation} = Analysis.isolate_trigger(report)
+      assert Enum.any?(isolation.changes, &(&1.field == :currency and &1.fixed == "USD"))
+
+      assert isolation.likely_cause ==
+               ~s(Currency mismatch: operation uses "EUR" but account uses "USD")
+    end
+  end
+
   describe "format_explanation/1 of a command that only sets up state" do
     # A shrunk sequence [Decoy, Consumer] where no placeholder
     # links Decoy to the failing Consumer: the shrinker kept Decoy because

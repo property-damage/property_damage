@@ -364,6 +364,17 @@ defmodule Mix.Tasks.Pd.Replay do
   end
 
   defp print_replay_error(
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :variant}} = failure
+       ) do
+    print_color(:red, "ERROR: the variant process died while the target came up\n")
+    IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
+
+    print_hint(
+      "Neither the adapter nor model code could rescue it. Look for an outside kill or a crashed linked process."
+    )
+  end
+
+  defp print_replay_error(
          %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
        ) do
     print_color(:red, "ERROR: the setup commands failed\n")

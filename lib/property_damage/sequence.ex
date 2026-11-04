@@ -9,7 +9,7 @@ defmodule PropertyDamage.Sequence do
 
   ## Linear Sequences
 
-  A linear (non-parallel) sequence has `branches: nil` and all commands in `prefix`:
+  A linear (non-branching) sequence has `branches: nil` and all commands in `prefix`:
 
       %Sequence{prefix: [cmd1, cmd2, cmd3], branches: nil, suffix: []}
 
@@ -55,11 +55,14 @@ defmodule PropertyDamage.Sequence do
   reads the roots only and carries the two lists through unchanged. Read them
   with `setup_commands/1` and `teardown_commands/1`.
 
-  ## Ref Constraints
+  ## Placeholder Constraints
 
-  - Refs created in `prefix` can be used in any branch
-  - Refs created in one branch CANNOT be used in another branch
-  - Refs created in branches CAN be used in `suffix` (after merge)
+  A value the system mints is a placeholder (see
+  `PropertyDamage.External`):
+
+  - Placeholders minted in `prefix` can be used in any branch
+  - Placeholders minted in one branch CANNOT be used in another branch
+  - Placeholders minted in branches CAN be used in `suffix` (after merge)
   """
 
   alias PropertyDamage.Sequence.Position
@@ -105,7 +108,7 @@ defmodule PropertyDamage.Sequence do
   end
 
   @doc """
-  Create a branching sequence with parallel execution.
+  Create a branching sequence. The branches run one after another.
 
   ## Parameters
 
@@ -178,7 +181,7 @@ defmodule PropertyDamage.Sequence do
   end
 
   @doc """
-  Check if a sequence is linear (no parallel branches).
+  Check if a sequence is linear (no branches).
 
   ## Examples
 
@@ -194,7 +197,7 @@ defmodule PropertyDamage.Sequence do
   def linear?(%__MODULE__{}), do: false
 
   @doc """
-  Check if a sequence has parallel branches.
+  Check if a sequence has branches.
   """
   @spec branching?(t()) :: boolean()
   def branching?(seq), do: not linear?(seq)
@@ -233,7 +236,7 @@ defmodule PropertyDamage.Sequence do
   For linear sequences, returns the prefix.
   For branching sequences, returns prefix ++ (flattened branches) ++ suffix.
 
-  Note: This loses the parallel structure - use only for display/debugging.
+  Note: This loses the branch structure - use only for display/debugging.
 
   ## Examples
 
@@ -382,7 +385,7 @@ defmodule PropertyDamage.Sequence do
   Filter commands in the sequence, preserving structure.
 
   Empty branches are removed. If one or zero branches remain, the result is
-  converted to a linear sequence (a single branch is not parallel).
+  converted to a linear sequence (a single branch is not a branch point).
   """
   @spec filter(t(), (command() -> boolean())) :: t()
   def filter(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, pred) do
@@ -404,7 +407,7 @@ defmodule PropertyDamage.Sequence do
         %{seq | prefix: filtered_prefix, branches: nil, suffix: filtered_suffix}
 
       [only_branch] ->
-        # A single remaining branch is not parallel, so inline it linearly
+        # A single remaining branch is not a branch point, so inline it linearly
         # (prefix, then the branch's commands, then suffix).
         %{
           seq

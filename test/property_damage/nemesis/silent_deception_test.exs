@@ -88,8 +88,19 @@ defmodule PropertyDamage.Nemesis.SilentDeceptionTest do
     end
 
     test "honors an explicit simulated: false" do
-      refute Nemesis.simulated_event?(%NetworkLatencyInjected{latency_ms: 1, simulated: false})
-      assert Nemesis.simulated_event?(%NetworkLatencyInjected{latency_ms: 1, simulated: true})
+      refute Nemesis.simulated_event?(
+               %PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected{
+                 latency_ms: 1,
+                 simulated: false
+               }
+             )
+
+      assert Nemesis.simulated_event?(
+               %PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected{
+                 latency_ms: 1,
+                 simulated: true
+               }
+             )
     end
   end
 end

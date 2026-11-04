@@ -16,8 +16,8 @@ injecting bugs and seeing whether your tests catch them.
 property against the mutated responses:
 
 1. For each command, it runs the property once as a baseline (one whole run
-   of up to 10 commands, with a fresh seed for each baseline run) and keeps the events of
-   that run, from all commands, as samples.
+   of up to 10 commands, with a fresh seed for each baseline run) and keeps
+   the events of that run, from all commands, as samples.
 2. It generates that command's mutations (via the configured operators) from
    its own samples, so two commands do not share one sample set.
 3. It runs your property against each mutated adapter.
@@ -37,6 +37,15 @@ the measurable mutations that a check killed. Timeouts stay in the
 denominator. The score is 0.0 when every mutation was killed by an error. A
 low score means your invariants or checks are not pinning down behavior
 tightly enough.
+
+Before it mutates a command, `run/1` runs that command once with the unmodified
+adapter. If that baseline run fails with an adapter error, every mutation of
+the command would fail the same way and count as killed by error, which hides
+that the adapter is broken. So `run/1` stops and returns
+`{:error, {:baseline_failed, command_module, message}}`, where `message` is the
+failure message of the baseline run (for example `":backend_down"`). Fix the
+adapter or its setup and run again. A baseline run that fails a check is not an
+adapter error, and it does not stop the run.
 
 ## Quick start
 
@@ -115,14 +124,18 @@ IO.puts(PropertyDamage.Mutation.format(report, :markdown))
 
 When any mutation was killed by error, the terminal and Markdown outputs name
 the count and say the score excludes it. The JSON output carries
-`killed_by_error` as a number only (in the report, in each `by_command` and
-`by_operator` entry) and does not say that the score excludes it. The terminal
-output shows a line such as:
+`killed_by_error` as a number (in the report, in each `by_command` and
+`by_operator` entry) and a `score_rule` string that states the exclusion. The
+terminal output shows a summary such as the following. The
+`, 3 by adapter error` suffix appears only when the count is above 0:
 
 ```text
-Mutation Score: 14.3% (3/21 killed)  ✗ FAIL (target: 80.0%)
+Mutation Score: 41.7% (5/15 killed, 3 by adapter error)  ✗ FAIL (target: 80.0%)
 3 killed by adapter error, excluded from the score (no check caught them)
 ```
+
+Each row of the by-command and by-operator boxes ends with the kill count, the
+total and the error kills, for example `(0/3, 3 by error)`.
 
 The Markdown output adds a "Killed by adapter error" row to its summary and a
 "Killed by error" column to its per-command and per-operator tables:
@@ -130,7 +143,8 @@ The Markdown output adds a "Killed by adapter error" row to its summary and a
 ```text
 | Operator | Score | Killed | Killed by error | Survived | Total |
 |----------|-------|--------|-----------------|----------|-------|
-| `:status` | 0.0% | 0 | 3 | 1 | 4 |
+| `:value` | 33.3% | 1 | 0 | 2 | 3 |
+| `:status` | 0.0% | 0 | 3 | 0 | 3 |
 ```
 
 ## Improving a low score

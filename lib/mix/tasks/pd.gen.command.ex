@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
   ## Server-generated values
 
-  Commands no longer declare the refs they create. Instead, mark
+  Commands do not declare the values the server creates. Instead, mark
   server-generated fields with `external()` in your event struct definitions:
 
       defmodule MyApp.Events.UserCreated do

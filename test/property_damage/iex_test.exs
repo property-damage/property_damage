@@ -136,18 +136,14 @@ defmodule PropertyDamage.IExTest do
       assert output =~ "ItemCreated"
     end
 
-    test "shows ref resolution annotation when refs are supplied" do
-      command = %CreateItem{name: :ref0, quantity: 1}
+    test "rejects the removed :refs option instead of ignoring it" do
+      command = %CreateItem{name: "widget", quantity: 1}
 
-      output =
+      assert_raise ArgumentError, ~r/unknown keys \[:refs\]/, fn ->
         capture_io(fn ->
-          assert IEx.debug_command(command, SingleEventAdapter, refs: %{ref0: "resolved_name"}) ==
-                   :ok
+          IEx.debug_command(command, SingleEventAdapter, refs: %{ref0: "resolved_name"})
         end)
-
-      # The COMMAND section annotates the resolved ref value, and the adapter
-      # received the resolved struct (name => "resolved_name").
-      assert output =~ "resolved_name"
+      end
     end
 
     test "prints ERROR status when the adapter returns an error" do

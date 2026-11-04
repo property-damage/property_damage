@@ -19,14 +19,15 @@ defmodule PropertyDamage do
   - **Model**: Defines what commands are available and how state is tracked
   - **Projections**: Pure state reducers that process commands and events to maintain state
   - **Adapters**: Bridge between the test framework and the actual SUT
-  - **Refs**: Symbolic placeholders for entity IDs, resolved during execution
+  - **Placeholders**: Symbolic stand-ins for values the system under test mints (see `PropertyDamage.External`), resolved during execution
 
   ## Two-Phase Execution
 
   PropertyDamage uses a two-phase execution model:
 
-  1. **Symbolic Phase**: Generate a sequence of commands with symbolic refs
-  2. **Concrete Phase**: Execute commands against the SUT, resolving refs to real values
+  1. **Symbolic Phase**: Generate a sequence of commands, with a placeholder
+     for each value the system will mint
+  2. **Concrete Phase**: Execute commands against the SUT, resolving placeholders to real values
 
   This separation enables powerful shrinking of failing test cases while maintaining
   the dependency relationships between commands.
@@ -97,8 +98,11 @@ defmodule PropertyDamage do
 
   ## Coverage Metrics
 
-  Track how thoroughly your model is being exercised:
+  Track how thoroughly your model is being exercised. `coverage: true` attaches
+  the tracker to the success stats as `:coverage`; a passing result without it
+  raises `ArgumentError`:
 
+      result = PropertyDamage.run(model: MyModel, targets: [MyAdapter], coverage: true)
       coverage = PropertyDamage.coverage(result, MyModel)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 
@@ -122,8 +126,8 @@ defmodule PropertyDamage do
 
   The framework consists of several layers:
 
-  - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
-  - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
+  - **Tier 0 (Core Types)**: Command, Projection, Model behaviours, Placeholder
+  - **Tier 1 (Execution)**: Adapter, EventQueue, Adapter.Injector, Executor
   - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
   - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, RunComparison
   - **Utilities**: Persistence, SeedLibrary, mix tasks
@@ -217,7 +221,25 @@ defmodule PropertyDamage do
   - `:max_commands` - Maximum commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility (default: random)
-  - `:shrink` - Whether to shrink failing sequences (default: true)
+  - `:shrink` - Whether to shrink failing sequences (default: true; `false`
+    under `only: [replay: path]`)
+  - `:run_nonce` - A 64-bit integer that seeds the values the client mints for
+    a run (default: strong random entropy). Hold the seed and vary the nonce to
+    run the same plan with fresh minted values on a shared system
+  - `:only` - Run part of a campaign: `[run: n, variants: names,
+    with_reference: boolean]` runs run `n` of the seed alone, and
+    `[replay: path]` runs a replay artifact (default: the whole campaign)
+  - `:replay_dir` - The directory a failing run writes its replay artifact
+    into, created when missing (default: `"property_damage_replays"`); `false`
+    writes none
+  - `:coverage` - Accumulate the command, transition and state coverage of the
+    whole run and attach the tracker to the success stats as `:coverage`
+    (default: false)
+  - `:external_markers` - Extra atoms to treat as `external()` markers, for
+    domain libraries that mark server-generated fields without depending on
+    PropertyDamage (default: `[]`)
+  - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` updates
+    during the run and a final result (default: nil)
   - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
     disabled), `true` (default file), or a path. Previously-failing seeds are
     replayed before exploration; a still-failing replay halts the run.
@@ -337,7 +359,7 @@ defmodule PropertyDamage do
   more branches and a suffix, run on one target:
 
   - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of parallel branches (default: 3)
+  - `:max_branches` - Maximum number of branches (default: 3)
   - `:max_branch_length` - Maximum commands per branch (default: 5)
   - `:min_prefix_length` - Minimum commands before branching (default: 3)
 
@@ -394,7 +416,7 @@ defmodule PropertyDamage do
 
   - `:name` - Label used in reports (default: last segment of the module name)
   - `:config` - Map passed to `adapter.setup/1` (default: `%{}`)
-  - `:injectors` - List of InjectorAdapter modules for event injection
+  - `:injectors` - List of `PropertyDamage.Adapter.Injector` modules for event injection
     (default: `[]`)
   - `:mocks` - Mock third-party services the SUT calls (default: `[]`).
     A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`
@@ -404,6 +426,9 @@ defmodule PropertyDamage do
     is handed to the adapter on the `PropertyDamage.Runtime` handle
     (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
     the "Mocking Third-Party Services" guide.
+  - `:expansion` - How this target chooses among a root's expansions:
+    `:random` (default), `:identity` or `:reference`. See
+    `PropertyDamage.Target`.
 
   ## Examples
 
@@ -680,7 +705,10 @@ defmodule PropertyDamage do
 
         case Keyword.fetch(only, :replay) do
           {:ok, path} ->
-            replay = load_replay!(path, opts[:model], opts[:targets])
+            replay =
+              load_replay!(path, opts[:model], opts[:targets],
+                external_markers: opts[:external_markers] || []
+              )
 
             {opts
              |> Keyword.put(:seed, replay.term.seed)
@@ -693,10 +721,15 @@ defmodule PropertyDamage do
     end
   end
 
-  defp load_replay!(path, model, targets) do
-    # The loader builds structs of loaded modules only and never loads one, so
-    # the modules `model:` names are loaded first: the model and the commands
-    # it lists. A leaf module no other command names must be loaded by the
+  # The artifact does not record the run's `external_markers:`: the replay
+  # reads its commands with the markers this run passes.
+  defp load_replay!(path, model, targets, markers) do
+    # The loader builds structs of loaded modules only. Before it resolves the
+    # file's atoms it loads the framework's failure and expansion modules and,
+    # when the model the file names is loaded, the commands and projections
+    # that model lists. It loads no other module the file names, so the
+    # modules `model:` names are loaded first: the model and the commands it
+    # lists. A leaf module no other command names must be loaded by the
     # caller.
     load_model_modules(model)
 
@@ -755,14 +788,14 @@ defmodule PropertyDamage do
         %{Enum.find(targets, &(&1.name == name)) | index: index, expansion: mode}
       end)
 
-    sequence = ReplayArtifact.sequence(term)
+    sequence = ReplayArtifact.sequence(term, markers)
 
     %{
       term: term,
       path: path,
       targets: replayed,
       sequence: sequence,
-      expansion: ReplayArtifact.expansion(term, sequence)
+      expansion: ReplayArtifact.expansion(term, sequence, nil, markers)
     }
   end
 
@@ -1229,8 +1262,11 @@ defmodule PropertyDamage do
   # its teardown commands generated against the state the roots leave.
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
-    Generator.teardown_commands(ctx.model, sequence, run_seed)
+    Generator.teardown_commands(ctx.model, sequence, run_seed, markers(ctx))
   end
+
+  # The `:external_markers` option of the generator and expansion calls.
+  defp markers(ctx), do: [external_markers: ctx.external_markers]
 
   # Every target's concrete sequence for a generated linear sequence: the roots
   # with each target's expansions realized, before any target is set up. A
@@ -1240,7 +1276,7 @@ defmodule PropertyDamage do
   defp expand(ctx, sequence, run_seed) do
     if Expansion.defines?(ctx.model) do
       ctx.model
-      |> Expansion.expand(sequence, ctx.all_targets, run_seed)
+      |> Expansion.expand(sequence, ctx.all_targets, run_seed, markers(ctx))
       |> running(ctx)
     else
       Expansion.identity(sequence, ctx.targets)
@@ -2163,6 +2199,11 @@ defmodule PropertyDamage do
     step's last settle or stutter attempts keep their log lines in the new
     report (default 3). The report does not record the run's value, so a run
     given another value passes it here again.
+  - `:external_markers` - The atom markers of the run, as on
+    `PropertyDamage.run/1` (default `[]`). The report does not record them, so
+    a run that named atom markers passes them here again: the re-shrink
+    simulates the report's commands again, and only a marker named here turns
+    an event field into a placeholder that later commands resolve.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2214,7 +2255,8 @@ defmodule PropertyDamage do
           ReplayArtifact.reexecution(
             report,
             Enum.map(targets, & &1.name),
-            "PropertyDamage.shrink_further/2"
+            "PropertyDamage.shrink_further/2",
+            external_markers: Keyword.get(opts, :external_markers, [])
           )
 
         if names_failing_target?(targets, report.variant),
@@ -2246,6 +2288,7 @@ defmodule PropertyDamage do
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
       keep_attempts: Options.keep_attempts!(opts),
+      external_markers: Keyword.get(opts, :external_markers, []),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }
@@ -2283,6 +2326,7 @@ defmodule PropertyDamage do
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
         keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
@@ -2909,12 +2953,23 @@ defmodule PropertyDamage do
   For simple tests that only need command return values (no injector events),
   calling the adapter directly is simpler:
 
-      {:ok, adapter_ctx} = MyAdapter.setup(%{})
-      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx)
-      assert [%UserCreated{name: "alice"}] = events
-      MyAdapter.teardown(adapter_ctx)
+      {:ok, user_context} = MyAdapter.setup(%{})
 
-  Use `execute/2` when you need the full infrastructure: injector adapters,
+      runtime = %PropertyDamage.Runtime{
+        inject: fn _event -> :ok end,
+        start_poller: fn _opts -> raise "no pollers in a direct call" end
+      }
+
+      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, user_context, runtime)
+
+      assert [%UserCreated{name: "alice"}] = events
+      MyAdapter.teardown(user_context)
+
+  The adapter callback is `execute/3`: command, user context, runtime handle.
+  The stub handle above suits an adapter that neither injects events nor
+  starts pollers; the two functions are the required fields of the struct.
+
+  Use `PropertyDamage.execute/2` when you need the full infrastructure: injector adapters,
   event queue, external() value resolution across commands, etc.
   """
   @spec execute([struct()], keyword()) ::
@@ -3010,10 +3065,10 @@ defmodule PropertyDamage do
         import PropertyDamage, only: [external: 0]
 
         defstruct [
-          payment_id: external(),
-          transaction_ref: external(),
           :order_id,
-          :amount
+          :amount,
+          payment_id: external(),
+          transaction_id: external()
         ]
       end
 
@@ -3022,8 +3077,8 @@ defmodule PropertyDamage do
   Externals are supported in nested maps:
 
       defstruct [
-        ids: %{transaction: external(), confirmation: external()},
-        :amount
+        :amount,
+        ids: %{transaction: external(), confirmation: external()}
       ]
 
   ## Fixed-Length Lists
@@ -3031,8 +3086,8 @@ defmodule PropertyDamage do
   Externals are supported in fixed-length lists:
 
       defstruct [
-        item_ids: [external(), external(), external()],
-        :batch_name
+        :batch_name,
+        item_ids: [external(), external(), external()]
       ]
 
   ## How It Works

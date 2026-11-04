@@ -49,6 +49,10 @@ defmodule PropertyDamage.Model.Projection.Statistics do
         end
       end
 
+  `every: 10` samples by step, not by command: each command and each of its
+  events counts as one step, so the check runs after every 10th step. To
+  sample by command, write `every: {10, :command}`.
+
   List `MyApp.LatencyBudget` in `check_projections/0` in place of this module.
   The same pattern covers `error_rate`, `success_rate` and the other metrics.
 

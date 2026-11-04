@@ -9,7 +9,8 @@ defmodule PropertyDamage.Integration do
   - Database reset between runs
   - Report generation (terminal, markdown, JUnit XML)
   - Bug hunting mode (run until N unique bugs found)
-  - Chaos testing with Toxiproxy
+  - Fault injection through nemesis commands that the model lists in `commands/0`
+    (see `PropertyDamage.Nemesis`); this module has no Toxiproxy option of its own
 
   ## Usage
 
@@ -52,7 +53,9 @@ defmodule PropertyDamage.Integration do
         }
       )
 
-  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`
+  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`. The `:json`
+  format writes the run counts and, for each failure, its seed, check and error
+  message.
   """
 
   alias PropertyDamage.FailureIntelligence
@@ -230,12 +233,14 @@ defmodule PropertyDamage.Integration do
   - `:terminal` - Print to console
   - `:markdown` - Generate markdown file
   - `:junit` - Generate JUnit XML for CI
-  - `:json` - Generate JSON report
+  - `:json` - Generate a JSON file with the run counts and, per failure, its
+    seed, check and error message
 
   ## Options
 
   - `:format` - Report format (required)
-  - `:path` - Output file path (required for file formats)
+  - `:path` - Output file path (required for file formats); its directory is
+    created when missing
   """
   @spec generate_report(map(), keyword() | map()) :: :ok
   def generate_report(result, opts) when is_list(opts) do
@@ -248,25 +253,30 @@ defmodule PropertyDamage.Integration do
 
   def generate_report(result, %{format: :markdown, path: path}) do
     content = format_markdown_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("Report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :junit, path: path}) do
     content = format_junit_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("JUnit report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :json, path: path}) do
-    content = Jason.encode!(result, pretty: true)
-    File.write!(path, content)
+    content = result |> json_report() |> Jason.encode!(pretty: true)
+    write_report!(path, content)
     IO.puts("JSON report saved to: #{path}")
   end
 
   # ============================================================================
   # Private Functions
   # ============================================================================
+
+  defp write_report!(path, content) do
+    path |> Path.dirname() |> File.mkdir_p!()
+    File.write!(path, content)
+  end
 
   defp print_header(model, %{adapter: adapter, config: config}, max_runs) do
     IO.puts("\n")
@@ -465,7 +475,7 @@ defmodule PropertyDamage.Integration do
     path = Path.join(dir, filename)
 
     content = Jason.encode!(sanitize_for_json(failure), pretty: true)
-    File.write!(path, content)
+    write_report!(path, content)
   end
 
   defp sanitize_for_json(data) when is_map(data) do
@@ -706,6 +716,29 @@ defmodule PropertyDamage.Integration do
 
     #{failure_entries}
     """
+  end
+
+  # The JSON report holds the data the Markdown report shows, as plain values:
+  # a failure report is a struct with no JSON encoding.
+  defp json_report(result) do
+    %{
+      success: result.success,
+      model: inspect(result.model),
+      adapter: inspect(result.adapter),
+      duration_ms: result.duration_ms,
+      total_runs: result.total_runs,
+      passed: result.passed,
+      failed: result.failed,
+      failures: Enum.map(result.failures, &json_failure/1)
+    }
+  end
+
+  defp json_failure(failure) do
+    %{
+      seed: failure.seed,
+      check: inspect(PropertyDamage.FailureReport.check_name(failure)),
+      error: PropertyDamage.FailureReport.failure_message(failure)
+    }
   end
 
   defp format_junit_report(result) do
