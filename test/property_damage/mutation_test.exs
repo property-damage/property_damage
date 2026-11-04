@@ -964,6 +964,19 @@ defmodule PropertyDamage.MutationTest do
     end
   end
 
+  defmodule SetupFailsAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:error, :backend_unreachable}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(_command, _context, _runtime), do: {:ok, []}
+  end
+
   describe "run/1 baseline guard" do
     @opts [
       model: PassingModel,
@@ -985,6 +998,13 @@ defmodule PropertyDamage.MutationTest do
                Mutation.run([targets: [ErrorAfterFirstAdapter]] ++ @opts)
 
       assert message =~ "backend_down"
+    end
+
+    test "an adapter whose setup fails returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [SetupFailsAdapter]] ++ @opts)
+
+      assert message =~ "backend_unreachable"
     end
 
     test "a healthy adapter still yields a report (control)" do

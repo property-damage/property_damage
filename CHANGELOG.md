@@ -1310,6 +1310,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `currency` field, a domain rule no framework can know. A currency change
   now gets the generic message that names the field and both values.
 
+- **BREAKING: `PropertyDamage.Diagram` drops `:show_timestamps`,
+  `:highlight_failure` and `:show_branches`.** No renderer read them, so
+  setting them changed nothing. They are gone from the docs, the `options`
+  type and the defaults; the failure step is always highlighted.
 - **BREAKING: `PropertyDamage.Model.Projection.Liveness` is removed.** It
   could not run: listed bare in `check_projections/0` it crashed the engine,
   and listed with options it raised `FunctionClauseError`. To check that an
@@ -1400,6 +1404,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **A replay artifact naming an unlisted module of the project replays in a
+  fresh VM.** The loader loaded only the model and the modules it lists, so an
+  atom of a constants module, or a leaf command only an expansion produces,
+  stayed unknown and the replay was refused. On such a refusal the loader now
+  loads the modules of every loaded application and reads the file once more,
+  as the failure-file loader does (DR-050 amendment).
+- **`Mutation.run/1` stops when the baseline's adapter setup fails.** The
+  baseline produced no events to mutate, so the run returned an empty report
+  that read as a result. It now returns
+  `{:error, {:baseline_failed, command_module, message}}`, as it does for an
+  adapter error.
+- **The built-in network nemeses validate their overrides at generation.**
+  `NetworkPartition.new!/2` copied any `partition_type:` override into the
+  command, so an invalid type crashed with `FunctionClauseError` only at
+  inject time. `NetworkPartition`, `NetworkLatency` and `PacketLoss` now raise
+  `ArgumentError` naming the allowed values when an override is invalid.
+- **`Export.save/4` and `save_all/3` validate their options.** Both passed
+  options to the generators unchecked, so a misspelled option was ignored and
+  the file was written anyway. `save/4` now validates with the schema of the
+  matching `to_*` function, and `save_all/3` rejects an option no format
+  takes; both raise `NimbleOptions.ValidationError`, as the `to_*` functions
+  do, before writing any file.
+- **`mix pd.replay` starts the project's applications.** The task compiled
+  the project but never started it, so an adapter whose `setup/1` needs a
+  process an application starts failed, and `mix pd.bisect` skipped every
+  commit for it. A failure to start is indeterminate (exit 125), like a
+  failure to compile.
+- **`mix pd.integration --hunt` honors `--runs` and runs the health check.**
+  The hunt ignored `--runs` and skipped the health check, so a hunt against a
+  service with fewer bugs than asked for never ended. `--runs` now caps the
+  hunt, and `PropertyDamage.Integration.hunt_bugs/1` takes `:health_check`
+  and checks it before the hunt, as `run/1` does.
+- **Every injected fault is lifted at the end of the run.** A fault whose
+  nemesis returns false from `auto_restore?/0` was never recorded as active,
+  so `restore/2` never ran for it, not even at sequence end. The run now
+  restores every still-active fault when the sequence ends; such a fault is
+  still never lifted on a timer.
+- **The regression handler never overwrites a seed library it cannot read.**
+  A `:seed_library` file that existed but did not load (corrupt, or written by
+  another version) was replaced by a new library holding only the new seed.
+  The handler now leaves the file unchanged, returns
+  `{:error, {:seed_library_unreadable, path, reason}}` and logs a warning.
 - **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
   an integer field, the candidate values repeated (an original of 1 tried 0
   three times), so `changes` carried duplicate entries. The candidates are now

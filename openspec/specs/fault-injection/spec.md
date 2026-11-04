@@ -41,8 +41,13 @@ Nemesis commands SHALL auto-restore by default. Implementations MAY override thi
 #### Scenario: Explicit restoration
 
 - **WHEN** a Nemesis command implements `auto_restore?/0` returning `false`
-- **THEN** the framework SHALL NOT automatically call `restore/2`
-- **AND** restoration MUST be triggered by an explicit RestoreFault command in the sequence
+- **THEN** the framework SHALL NOT call `restore/2` when a duration expires
+- **AND** the framework SHALL call `restore/2` once at sequence end if the fault is still active
+
+#### Scenario: Every fault lifted at sequence end
+
+- **WHEN** a sequence ends, whether it passed or failed
+- **THEN** the framework SHALL call `restore/2` once for every injected fault that is still active, whatever its `auto_restore?/0` returns
 
 ### Requirement: Duration Resolution
 

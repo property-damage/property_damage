@@ -23,7 +23,9 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   nemesis in `commands/0`, `new!/2` draws the values instead: `:partition_type`
   from `:full`, `:upstream` and `:downstream`, and `:duration_ms` in
   1000..15_000. A key in the command's `overrides:` replaces its draw with the
-  value as given; pass a plain value, not a generator.
+  value as given; pass a plain value, not a generator. An override outside
+  the allowed values (a `:partition_type` other than the three above, or a
+  `:duration_ms` that is not a non-negative integer) raises `ArgumentError`.
 
   ## Usage with Toxiproxy
 
@@ -57,6 +59,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
 
   @behaviour PropertyDamage.Nemesis
 
+  alias PropertyDamage.Nemesis
   alias PropertyDamage.Nemesis.Toxiproxy
 
   defstruct partition_type: :full,
@@ -127,6 +130,16 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
+
+    Nemesis.check_override!(
+      __MODULE__,
+      overrides,
+      :partition_type,
+      "one of :full, :upstream, :downstream",
+      &(&1 in @partition_types)
+    )
+
+    Nemesis.check_duration_override!(__MODULE__, overrides)
 
     bind(member_of(@partition_types), fn type ->
       bind(integer(1000..15_000), fn duration ->

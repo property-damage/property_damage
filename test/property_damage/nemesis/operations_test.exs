@@ -58,6 +58,14 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
         assert cmd.duration_ms >= 1000
       end
     end
+
+    test "new! raises for an invalid numeric override, naming the allowed values" do
+      for {key, value} <- [latency_ms: -5, jitter_ms: "fast", duration_ms: 1.5] do
+        assert_raise ArgumentError, ~r/#{key}.*non-negative integer/, fn ->
+          NetworkLatency.new!(%{}, %{key => value})
+        end
+      end
+    end
   end
 
   describe "NetworkPartition" do
@@ -104,6 +112,16 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
                "unexpected partition type: #{inspect(type)}"
       end
     end
+
+    test "new! raises for an invalid override, naming the allowed values" do
+      assert_raise ArgumentError, ~r/partition_type.*:full, :upstream, :downstream/, fn ->
+        NetworkPartition.new!(%{}, %{partition_type: :sideways})
+      end
+
+      assert_raise ArgumentError, ~r/duration_ms.*non-negative integer/, fn ->
+        NetworkPartition.new!(%{}, %{duration_ms: -1})
+      end
+    end
   end
 
   describe "PacketLoss" do
@@ -128,6 +146,16 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
       for cmd <- commands do
         assert %PacketLoss{} = cmd
         assert cmd.loss_percent >= 5 and cmd.loss_percent <= 50
+      end
+    end
+
+    test "new! raises for an invalid numeric override, naming the allowed values" do
+      assert_raise ArgumentError, ~r/loss_percent.*number from 0 to 100/, fn ->
+        PacketLoss.new!(%{}, %{loss_percent: 150})
+      end
+
+      assert_raise ArgumentError, ~r/duration_ms.*non-negative integer/, fn ->
+        PacketLoss.new!(%{}, %{duration_ms: :forever})
       end
     end
   end

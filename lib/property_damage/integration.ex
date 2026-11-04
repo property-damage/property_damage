@@ -159,6 +159,8 @@ defmodule PropertyDamage.Integration do
   - `:stop_after` - Stop after finding this many unique bugs (default: 10)
   - `:max_runs` - Maximum runs before giving up (default: :unlimited)
   - `:save_to` - Directory to save discovered bugs (optional)
+  - `:health_check` - Health check configuration, checked before the hunt as
+    `run/1` does (optional)
   - `:verbose` - Print progress (default: true)
 
   ## Returns
@@ -184,6 +186,11 @@ defmodule PropertyDamage.Integration do
       IO.puts("Model:      #{inspect(model)}")
       IO.puts("Target:     #{stop_after} unique bugs")
       IO.puts("")
+    end
+
+    case Keyword.get(opts, :health_check) do
+      nil -> :ok
+      health_opts -> perform_health_check(health_opts, verbose)
     end
 
     hunt_loop(

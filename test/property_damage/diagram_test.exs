@@ -369,4 +369,30 @@ defmodule PropertyDamage.DiagramTest do
       end
     end
   end
+
+  describe "options" do
+    test "the options type and the module docs list only the options a renderer reads" do
+      removed = [:show_timestamps, :highlight_failure, :show_branches]
+
+      {:ok, types} = Code.Typespec.fetch_types(Diagram)
+
+      option_keys =
+        Enum.find_value(types, fn
+          {:type, {:options, {:type, _, :list, [{:type, _, :union, pairs}]}, []}} ->
+            Enum.map(pairs, fn {:type, _, :tuple, [{:atom, _, key}, _]} -> key end)
+
+          _ ->
+            nil
+        end)
+
+      assert :title in option_keys
+      assert Enum.filter(removed, &(&1 in option_keys)) == []
+
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(Diagram)
+
+      for key <- removed do
+        refute moduledoc =~ inspect(key)
+      end
+    end
+  end
 end

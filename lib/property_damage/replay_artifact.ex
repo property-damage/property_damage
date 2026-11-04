@@ -15,7 +15,9 @@ defmodule PropertyDamage.ReplayArtifact do
   # define the atoms an artifact names, so that a fresh VM knows them: the
   # framework's failure and expansion modules, and, when the model the file
   # names is loaded already, the commands and projections that model lists.
-  # The reader loads no other module the file names.
+  # When an atom or a struct module is still unknown, the reader loads the
+  # modules of every loaded application and reads the file once more, as the
+  # failure-file loader does. The file never chooses a module to load.
   #
   # A struct literal in a command's own place (an element of `prefix`, a
   # root's `command`, an element of a choice's `commands`) loads only when its
@@ -486,6 +488,42 @@ defmodule PropertyDamage.ReplayArtifact do
   @spec parse(String.t()) ::
           {:ok, t()} | {:error, String.t() | {:unknown_struct_module, module()}}
   def parse(text) when is_binary(text) do
+    case parse_once(text) do
+      {:error, {:unknown_atom, _name, _line}} ->
+        reparse_with_application_modules(text)
+
+      {:error, {:unknown_struct_module, _module}} ->
+        reparse_with_application_modules(text)
+
+      result ->
+        result
+    end
+  end
+
+  # A name the first parse did not know can belong to a module of the project
+  # that nothing has loaded yet, such as a constants module or a command that
+  # only an expansion produces. Load the modules of every loaded application
+  # and parse once more. The file names no module to load, so it cannot make
+  # the reader load code outside the loaded applications.
+  defp reparse_with_application_modules(text) do
+    load_application_modules()
+
+    case parse_once(text) do
+      {:error, {:unknown_atom, name, line}} -> {:error, unknown_atom(name, line)}
+      result -> result
+    end
+  end
+
+  defp load_application_modules do
+    for {app, _description, _vsn} <- :application.loaded_applications(),
+        module <- Application.spec(app, :modules) || [] do
+      Code.ensure_loaded(module)
+    end
+
+    :ok
+  end
+
+  defp parse_once(text) do
     with :ok <- check_header(text),
          {:ok, quoted} <- quote_text(text),
          {:ok, term} <- walk(quoted, text),
@@ -531,7 +569,7 @@ defmodule PropertyDamage.ReplayArtifact do
         {:ok, resolve_atoms(quoted)}
 
       {:error, {meta, "unsafe atom does not exist: " <> _, token}} ->
-        {:error, unknown_atom(token, Keyword.get(meta, :line, "?"))}
+        {:error, {:unknown_atom, token, Keyword.get(meta, :line, "?")}}
 
       {:error, {meta, message, token}} ->
         {:error,
@@ -618,7 +656,7 @@ defmodule PropertyDamage.ReplayArtifact do
     {:ok, literal!(quoted)}
   catch
     {:refuse, node, why} -> {:error, "#{why}: #{source(node, text)} at line #{line(node)}"}
-    {:unknown_atom, name, line} -> {:error, unknown_atom(name, line)}
+    {:unknown_atom, name, line} -> {:error, {:unknown_atom, name, line}}
     {:unknown_struct_module, module} -> {:error, {:unknown_struct_module, module}}
   end
 

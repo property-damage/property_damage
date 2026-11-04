@@ -16,7 +16,9 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   nemesis in `commands/0`, `new!/2` draws the values instead: `:loss_percent`
   in 5..50 and `:duration_ms` in 1000..10_000. A key in the command's
   `overrides:` replaces its draw with the value as given; pass a plain value,
-  not a generator.
+  not a generator. A `:loss_percent` override outside 0 to 100, or a
+  `:duration_ms` override that is not a non-negative integer, raises
+  `ArgumentError`.
 
   ## Usage with Toxiproxy
 
@@ -49,6 +51,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   @behaviour PropertyDamage.Nemesis
 
+  alias PropertyDamage.Nemesis
   alias PropertyDamage.Nemesis.Toxiproxy
 
   defstruct loss_percent: 10,
@@ -117,6 +120,16 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
+
+    Nemesis.check_override!(
+      __MODULE__,
+      overrides,
+      :loss_percent,
+      "a number from 0 to 100",
+      &(is_number(&1) and &1 >= 0 and &1 <= 100)
+    )
+
+    Nemesis.check_duration_override!(__MODULE__, overrides)
 
     bind(integer(5..50), fn loss ->
       bind(integer(1000..10_000), fn duration ->

@@ -624,8 +624,8 @@ mix pd.replay failures/the-failure.pd --verbose
 It prints each step and exits non-zero while the bug still reproduces (zero once
 it is fixed), so the same command doubles as a regression check. Concretely it
 exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
-replay could not run at all (the project does not compile, the file fails to
-load, it records no model/adapter, the sequence is branching, or the target's setup or
+replay could not run at all (the project does not compile, its applications do
+not start, the file fails to load, it records no model/adapter, the sequence is branching, or the target's setup or
 a setup command fails). That third
 case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
 needs to treat as "skip".

@@ -1738,6 +1738,51 @@ defmodule PropertyDamage.Options do
     NimbleOptions.validate!(opts, @export_livebook_schema)
   end
 
+  @doc false
+  # Validates `opts` for one export format with the schema of the matching
+  # `to_*` function. Used by `PropertyDamage.Export.save/4`.
+  @spec validate_export!(PropertyDamage.Export.format(), keyword()) :: keyword()
+  def validate_export!(:exunit, opts), do: validate_export_exunit!(opts)
+  def validate_export!(:livebook, opts), do: validate_export_livebook!(opts)
+  def validate_export!({:script, _language}, opts), do: validate_export_script!(opts)
+
+  @doc false
+  # The option keys the schema of one export format accepts.
+  @spec export_option_keys(PropertyDamage.Export.format()) :: [atom()]
+  def export_option_keys(:exunit), do: Keyword.keys(@export_exunit_schema_definition)
+  def export_option_keys(:livebook), do: Keyword.keys(@export_livebook_schema_definition)
+  def export_option_keys({:script, _}), do: Keyword.keys(@export_script_schema_definition)
+
+  # `save_all/3` takes the options of every format at once, so its schema is
+  # the union of the format schemas plus `:script_languages`. Required and
+  # default settings stay with each format's own schema.
+  @export_format_options Enum.uniq_by(
+                           for {key, spec} <-
+                                 @export_exunit_schema_definition ++
+                                   @export_livebook_schema_definition ++
+                                   @export_script_schema_definition do
+                             {key, Keyword.drop(spec, [:required, :default])}
+                           end,
+                           fn {key, _spec} -> key end
+                         )
+
+  @export_all_schema_definition [
+                                  script_languages: [
+                                    type: {:list, {:in, [:elixir, :curl, :python]}},
+                                    doc: "Languages to save scripts in."
+                                  ]
+                                ] ++ @export_format_options
+
+  @export_all_schema NimbleOptions.new!(@export_all_schema_definition)
+
+  @doc false
+  # Rejects an option that no format of `PropertyDamage.Export.save_all/3`
+  # takes, or a value of the wrong type.
+  @spec validate_export_all!(keyword()) :: keyword()
+  def validate_export_all!(opts) do
+    NimbleOptions.validate!(opts, @export_all_schema)
+  end
+
   # ============================================================================
   # PropertyDamage.execute/2 Schema
   # ============================================================================
@@ -1864,6 +1909,10 @@ defmodule PropertyDamage.Options do
     save_to: [
       type: :string,
       doc: "Directory to save discovered bugs."
+    ],
+    health_check: [
+      type: :any,
+      doc: "Health check configuration (keyword list or map); see `health_check/1`."
     ],
     verbose: [
       type: :boolean,

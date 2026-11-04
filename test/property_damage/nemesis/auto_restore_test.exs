@@ -6,7 +6,7 @@ defmodule PropertyDamage.Nemesis.AutoRestoreTest do
   sites: faults were injected and tracked in `active_faults` but never lifted.
   The executor now (a) lifts any auto-restoring fault whose `duration_ms` has
   elapsed after each command, and (b) restores all still-active faults at
-  sequence end.
+  sequence end, including faults whose nemesis does not auto-restore.
 
   The nemeses here record every inject/restore in the executor process's
   dictionary (`Executor.run/4` executes commands synchronously in the caller),
@@ -166,11 +166,14 @@ defmodule PropertyDamage.Nemesis.AutoRestoreTest do
     assert {:restored, :c} in log_get(), "fault leaked when a later command failed"
   end
 
-  test "a non-auto-restoring fault is NOT restored automatically" do
+  test "a non-auto-restoring fault is restored once, at sequence end" do
     commands = [%ManualFault{tag: :m}, %NoOp{}, %NoOp{}]
     assert {:ok, _result} = Executor.run(commands, Model, Adapter)
 
     assert {:injected, :m} in log_get()
-    refute {:restored, :m} in log_get()
+    # Not lifted by the per-command elapsed sweep, only by the sequence-end
+    # restore, so restore/2 runs exactly once and after every command.
+    assert Enum.count(log_get(), &(&1 == {:restored, :m})) == 1
+    assert List.last(log_get()) == {:restored, :m}
   end
 end

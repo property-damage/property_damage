@@ -229,19 +229,14 @@ The system SHALL generate visual sequence diagrams from test executions in Merma
 
 #### Scenario: Failure highlighting
 
-- **WHEN** the `:highlight_failure` option is `true` (default)
+- **WHEN** a diagram is generated for a failing sequence
 - **THEN** the command that triggered the failure SHALL be visually distinguished in the diagram
 - **AND** the violated check or error SHALL be annotated
-
-#### Scenario: Branch visualization
-
-- **WHEN** the `:show_branches` option is `true` (default) and the sequence contains parallel branches
-- **THEN** the diagram SHALL show the branching execution flow
 
 #### Scenario: Configurable options
 
 - **WHEN** a diagram is generated
-- **THEN** the system SHALL accept options for title, show_state, show_timestamps, max_value_length (default 50), highlight_failure, and show_branches
+- **THEN** the system SHALL accept options for title, show_state and max_value_length (default 50)
 
 ### Requirement: Progress and Telemetry Name the Variant (DR-045)
 

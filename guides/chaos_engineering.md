@@ -50,8 +50,9 @@ no-op "fault".
 
 Auto-restoring faults (`auto_restore?/0` returning true, the default) are lifted
 automatically: PropertyDamage calls `restore/2` once a fault's `duration_ms` has
-elapsed during the run, and restores any still-active faults when the sequence
-ends, so a fault never leaks past the test that injected it.
+elapsed during the run. A fault whose nemesis returns false stays active for the
+rest of the sequence. When the sequence ends, the run lifts every still-active
+fault of either kind, so a fault never leaks past the test that injected it.
 
 ## Run it now: a complete chaos test
 

@@ -252,6 +252,17 @@ defmodule Mix.Tasks.Pd.ReplayTest do
       assert output =~ "setup blew up"
     end
 
+    # The task cannot produce this cause, so the message is checked directly.
+    test "a variant process that died while the target came up prints its own hint" do
+      failure = Failure.setup_failed(:variant, detail: :killed)
+
+      output = capture_io(fn -> Replay.print_replay_error(failure) end)
+
+      assert output =~ "ERROR: the variant process died while the target came up"
+      assert output =~ "Reason: :killed"
+      assert output =~ "Look for an outside kill or a crashed linked process."
+    end
+
     test "PropertyDamage.replay/1 returns the setup error instead of raising", %{dir: dir} do
       path = save_failure(dir, FailingModel, RaisingSetupAdapter)
       {:ok, failure} = PropertyDamage.load_failure(path)
@@ -306,6 +317,36 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       assert output =~ "Failure:  "
       assert output =~ "(#{inspect(Counter)}.count)"
+    end
+  end
+
+  describe "a fresh mix process" do
+    @root Path.expand("../../..", __DIR__)
+
+    # The test VM has already started every application, so only a new OS
+    # process shows whether the task starts them. The adapter's setup/1 needs
+    # the process the :telemetry application starts.
+    test "starts the project's applications before the replay", %{dir: dir} do
+      {:error, failure} =
+        PropertyDamage.run(
+          model: PropertyDamage.Test.FailingModel,
+          targets: [PropertyDamage.Test.AppProcessAdapter],
+          max_runs: 100,
+          seed: 1,
+          replay_dir: false
+        )
+
+      {:ok, path} = PropertyDamage.save_failure(failure, dir)
+
+      {output, status} =
+        System.cmd("mix", ["pd.replay", path],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 1, output
+      assert output =~ "VERDICT: failure reproduces"
     end
   end
 
