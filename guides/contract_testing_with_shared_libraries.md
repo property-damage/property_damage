@@ -174,10 +174,14 @@ case PropertyDamage.Persistence.load("failures/bug-123.pd") do
   {:ok, report, warnings} ->
     # Version mismatch detected
     IO.warn("Version warnings: #{inspect(warnings)}")
-    # Warnings might include:
+    # Version warnings might include:
     # {:property_damage_version_mismatch, "0.2.0", "0.2.1"}
     # {:dependency_version_mismatch, :company_domain, "2.1.0", "2.2.0"}
     # {:dependency_missing, :old_domain, "1.0.0"}
+    #
+    # The list can also carry a warning about the saved report itself, not
+    # about your domain structs: the file's FailureReport has different
+    # fields than the FailureReport struct of the running PropertyDamage.
     # {:struct_shape_drift, [:missing_field], [:unexpected_field]}
 
   {:error, reason} ->

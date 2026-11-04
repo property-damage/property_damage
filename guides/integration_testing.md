@@ -251,7 +251,16 @@ mix pd.integration \
 ## Programmatic API
 
 The quick start already used `PropertyDamage.Integration.run/1`. Its full option
-set:
+set.
+
+If you run these blocks in the same IEx session as the bug run above, that run
+left the SUT empty and dropping writes, so the health check on `/kv/0` below
+would fail. Reset the SUT (without the bug) and seed that key first:
+
+```elixir
+OpenapiBench.Server.reset(false)
+OpenapiBench.Store.put(0, 1)
+```
 
 ```elixir
 run_result =
