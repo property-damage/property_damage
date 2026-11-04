@@ -1342,6 +1342,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The integration report prints `n/a` for the pass rate of a result with no
+  runs.** The terminal and Markdown reports divided by zero and raised
+  `ArithmeticError`.
 - **`mix pd.replay` exits 125 when the adapter's `setup/1` raises.** The
   raise escaped `PropertyDamage.replay/1` and the task died with exit 1, which
   `git bisect run` reads as a bad commit. The replay now returns the setup
