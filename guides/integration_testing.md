@@ -147,17 +147,24 @@ must already be running **separately** and be reachable over the network.
 | `--report-path` | Output path for report file | auto-generated |
 | `--save-failures` | Directory to save failing sequences | - |
 | `--stop-on-fail` | Stop immediately on first failure | false |
-| `--hunt N` | Bug hunt mode: run until N unique bugs found | - |
+| `--hunt N` | Bug hunt mode: run until N unique bugs are found (see [Bug hunt mode](#bug-hunt-mode)) | - |
 | `--quiet` | Suppress progress output | false |
 
 ### About the health check
 
-`mix pd.integration` **always** performs a health check before the first run and
-has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
+Without `--hunt`, `mix pd.integration` performs a health check before the first
+run and has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
 until it answers with a `2xx` status. Point `--health` at any endpoint your
 service answers with `2xx`. If your service has no health route, use the
 programmatic `PropertyDamage.Integration.run/1` shown above instead: there the
 `:health_check` option is optional.
+
+### Bug hunt mode
+
+With `--hunt N`, the task runs no health check. It also ignores `--runs`, so the
+hunt does not stop until it finds N unique bugs. If the service has fewer than
+N bugs, the hunt runs until you stop it with Ctrl+C. `--commands`, `--report`
+and `--stop-on-fail` do not apply to a hunt either.
 
 ### Running the task against the bench
 
@@ -383,9 +390,20 @@ mix pd.integration --model MyApp.Model --adapter MyApp.HTTPAdapter \
   --url http://localhost:4000 --save-failures bugs/
 ```
 
-To keep a shrunk, replayable `.pd` failure instead, save it from a
-`PropertyDamage.run` failure report (see [Static Regression
-Tests](static_regression_tests.md)), then replay it:
+To keep a shrunk, replayable `.pd` failure instead, save one of the failure
+reports in `result.failures` (see [Static Regression
+Tests](static_regression_tests.md)). `PropertyDamage.save_failure/2` names the
+file after the time, the failure kind, the check and the seed, and returns its
+path:
+
+```elixir
+{:ok, path} = PropertyDamage.save_failure(hd(result.failures), "failures/")
+# path == "failures/20261104T002751-check_failed-read_consistent-seed920551348.pd"
+# (your time and seed differ)
+```
+
+Then replay it. Against the bench, set `PD_OPENAPI_URL` as for the task above,
+so the replay resets the running server:
 
 ```bash
 # Re-run the failing sequence against the SUT and print a verdict. Exit codes:
@@ -393,10 +411,10 @@ Tests](static_regression_tests.md)), then replay it:
 # project does not compile, the file fails to load or records no model or
 # target, the sequence is branching, or the target's setup fails), 2 = usage
 # error.
-mix pd.replay bugs/read_consistent-seed352687743.pd
+mix pd.replay failures/20261104T002751-check_failed-read_consistent-seed920551348.pd
 
 # Show per-step events and projection state
-mix pd.replay bugs/read_consistent-seed352687743.pd --verbose
+mix pd.replay failures/20261104T002751-check_failed-read_consistent-seed920551348.pd --verbose
 ```
 
 The `.pd` file records its own model and targets, so no `--model` / `--adapter`
@@ -408,7 +426,7 @@ For custom adapter config (e.g. a different base URL), replay
 programmatically:
 
 ```elixir
-{:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
+{:ok, failure} = PropertyDamage.load_failure("failures/20261104T002751-check_failed-read_consistent-seed920551348.pd")
 PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
 ```
 

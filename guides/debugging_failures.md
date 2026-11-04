@@ -972,9 +972,16 @@ Enable verbose output to see how a run progresses:
     )
 
 Verbose mode prints progress and configuration, nothing per step:
-- A header with the model, each target (index, name, adapter), the run and
-  command limits, and the seed if you gave one
-- One line per run: the run number, the command count and the branch count
+- A "PropertyDamage Configuration Summary" block per target, first: the model
+  and the adapter, each command with its weight, the state projection, the
+  check projections with their check counts, and the validation warnings
+  (printed under `validate: true`, the default)
+- A "Runtime Warnings" block if an option such as `max_runs:` or
+  `max_commands:` is set very low
+- A "PropertyDamage Test Run" header with the model, each target (index, name,
+  adapter), the run and command limits, and the seed if you gave one
+- One line per run: the run number, the command count and, for a branching
+  sequence, the branch count
 - A final summary: the run totals and seed on success, or the failure summary
   on failure
 
