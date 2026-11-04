@@ -48,13 +48,13 @@ The system SHALL shrink in two stages: sequence shrinking removes unnecessary co
 - **THEN** the shrinker SHALL first attempt to remove commands (sequence shrinking)
 - **AND** then attempt to simplify arguments in remaining commands (argument simplification)
 
-#### Scenario: Phase 2 optional
+#### Scenario: Argument simplification optional
 - **WHEN** shrinking configuration disables argument shrinking
-- **THEN** only Phase 1 (sequence shrinking) SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
+- **THEN** only sequence shrinking SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
 
-### Requirement: Phase 1 Sequence Shrinking Steps
+### Requirement: Sequence Shrinking Steps
 
-Phase 1 SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
+Sequence shrinking SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
 
 #### Scenario: Drop unexecuted commands
 - **WHEN** a sequence failed at command index N
@@ -106,7 +106,7 @@ Probe (read-only) commands SHALL be prioritized for removal during shrinking, si
 
 ### Requirement: Argument Shrinking
 
-In Phase 2, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Placeholders SHALL never be shrunk.
+In argument simplification, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Placeholders SHALL never be shrunk.
 
 #### Scenario: Integer shrinks toward zero
 - **WHEN** a command contains an integer argument
@@ -152,7 +152,7 @@ Given the same seed and the same initial failure, shrinking SHALL produce the sa
 
 ### Requirement: Shrinking Configuration
 
-The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether Phase 2 runs.
+The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether argument simplification runs.
 
 #### Scenario: Granularity threshold controls strategy
 - **WHEN** the remaining sequence length is below the granularity threshold

@@ -20,7 +20,7 @@ Evidence level: high; algorithm, config, and equivalence rules are all in the sh
 ## Consequences
 
 - `lib/property_damage/shrinker.ex`: two-phase design, failure equivalence, determinism, branching-sequence strategies (remove branches, shrink branches, convert to linear, reduce branch count); config in `PropertyDamage.Shrinker.Config` (`granularity_threshold`, `max_iterations`, `max_time_ms`, `shrink_arguments`).
-- `openspec/specs/shrinking/spec.md` requirements "Failure Equivalence", "Sequence Shrinking Then Argument Simplification", "Phase 1 Sequence Shrinking Steps", "Hierarchical Dependency Graph".
+- `openspec/specs/shrinking/spec.md` requirements "Failure Equivalence", "Sequence Shrinking Then Argument Simplification", "Sequence Shrinking Steps", "Hierarchical Dependency Graph".
 - Shrink hints interact with the hierarchy: `:prefer_remove` (typical for probes, DR-008) prioritizes removal; `:prefer_keep` protects commands; async producers with consumed refs are protected (`openspec/specs/command/spec.md`).
 - Tests: `test/property_damage/shrinker_test.exs` (including the DR-008 probe-priority section at line 725).
 
