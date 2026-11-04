@@ -85,6 +85,66 @@ defmodule PropertyDamage.Log.PersistenceTest do
     assert F.field(loaded, :logs) == %{}
   end
 
+  # Rewrites the payload of a saved file in the file's own envelope: the "PD"
+  # magic, the version byte, the checksum of the term, and the term encoded as
+  # save/3 encodes it.
+  defp rewrite_payload!(path, fun) do
+    <<"PD", version::8, _checksum::32, term::binary>> = File.read!(path)
+    term = :erlang.binary_to_term(term) |> fun.() |> :erlang.term_to_binary([:compressed])
+    File.write!(path, <<"PD", version::8, :erlang.crc32(term)::32, term::binary>>)
+  end
+
+  # The lines a trace holds, in the order of its execution points.
+  defp some_lines(trace), do: trace |> F.field(:logs) |> Map.values() |> List.flatten()
+
+  test "a current-version report file that holds lines loads without them", %{dir: dir} do
+    # A file a hand or another tool wrote with lines in it must not return
+    # them through a load (DR-054 decision 9).
+    report = diverged_report()
+    lines = some_lines(report.trace)
+    assert lines != [], "control: the trace holds lines"
+
+    assert {:ok, path} = Persistence.save(report, dir)
+
+    rewrite_payload!(path, fn payload ->
+      held =
+        report
+        |> Map.put(:setup_log, lines)
+        |> Map.put(:log_filter, only: [:sentinel])
+
+      %{payload | report: held}
+    end)
+
+    assert {_bytes, decoded} = saved(path)
+    assert decoded =~ F.sentinel(), "control: the rewritten file holds the sentinel"
+
+    loaded = loaded!(path)
+    assert F.field(loaded, :setup_log) == []
+    assert F.field(loaded, :log_filter) == nil
+    assert F.field(loaded.trace, :logs) == %{}
+    assert F.field(loaded.reference_trace, :logs) == %{}
+  end
+
+  test "a current-version trace file that holds lines loads without them", %{dir: dir} do
+    report = diverged_report()
+    assert some_lines(report.trace) != [], "control: the trace holds lines"
+
+    assert {:ok, path} = Persistence.save_trace(report.trace, dir)
+    rewrite_payload!(path, fn payload -> %{payload | trace: report.trace} end)
+
+    assert {_bytes, decoded} = saved(path)
+    assert decoded =~ F.sentinel(), "control: the rewritten file holds the sentinel"
+
+    loaded =
+      case Persistence.load_trace(path) do
+        {:ok, trace} -> trace
+        {:ok, trace, _warnings} -> trace
+        other -> flunk("load_trace failed: #{inspect(other)}")
+      end
+
+    assert F.field(loaded, :logs) == %{}
+  end
+
   test "a replay artifact and the compact output carry no line, the JSON only under logs", %{
     dir: dir
   } do

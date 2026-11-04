@@ -456,19 +456,24 @@ defmodule PropertyDamage.Persistence do
 
   # Log lines live only in memory (DR-054 decision 9): a file is committed, and
   # a line its author forgot to redact would be published. Every trace is
-  # saved with `logs: %{}`, and a report with `setup_log: []`, so a loaded
-  # file holds no line. The report's tag filter (`log_filter`) is a view of
-  # the run and is dropped the same way.
+  # saved with `logs: %{}` and loaded with `logs: %{}`, and a report with
+  # `setup_log: []`, whatever the file holds, so the format and its version do
+  # not change. The report's tag filter (`log_filter`) is a view of the run
+  # and is dropped the same way.
   defp without_logs(%FailureReport{} = report) do
     report
     |> Map.put(:setup_log, [])
     |> Map.put(:log_filter, nil)
-    |> Map.update!(:trace, &without_logs/1)
-    |> Map.update!(:reference_trace, &without_logs/1)
+    |> update_present(:trace, &without_logs/1)
+    |> update_present(:reference_trace, &without_logs/1)
   end
 
   defp without_logs(%RunTrace{} = trace), do: Map.put(trace, :logs, %{})
   defp without_logs(other), do: other
+
+  # A drifted shape may lack the key altogether; the drift check reports it.
+  defp update_present(map, key, fun) when is_map_key(map, key), do: Map.update!(map, key, fun)
+  defp update_present(map, _key, _fun), do: map
 
   defp encode_payload(payload) do
     term_binary = :erlang.term_to_binary(payload, [:compressed])
@@ -537,7 +542,8 @@ defmodule PropertyDamage.Persistence do
 
       case payload[:kind] do
         :run_trace ->
-          {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
+          trace = without_logs(payload.trace)
+          {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
 
         _ ->
           report_payload(payload.report, metadata_warnings)
@@ -587,6 +593,7 @@ defmodule PropertyDamage.Persistence do
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
       nil ->
+        report = without_logs(report)
         {:ok, report, warnings ++ check_struct_drift(report)}
 
       field ->
