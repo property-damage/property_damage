@@ -1404,6 +1404,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **A replay artifact naming an unlisted module of the project replays in a
+  fresh VM.** The loader loaded only the model and the modules it lists, so an
+  atom of a constants module, or a leaf command only an expansion produces,
+  stayed unknown and the replay was refused. On such a refusal the loader now
+  loads the modules of every loaded application and reads the file once more,
+  as the failure-file loader does (DR-050 amendment).
 - **`Mutation.run/1` stops when the baseline's adapter setup fails.** The
   baseline produced no events to mutate, so the run returned an empty report
   that read as a result. It now returns

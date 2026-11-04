@@ -276,3 +276,16 @@ loader refuses an atom the running system does not know, so a replay in a
 fresh VM refused a file that the VM that wrote it could read. Loading the
 modules that define the atoms first makes the atoms exist, and the rule that
 reading never creates an atom stays intact.
+
+## Amendment (2026-11-04)
+
+When a first read refuses an unknown atom or struct module, the loader loads
+the modules of every loaded application and reads the file once more. The
+failure-file loader of `PropertyDamage.Persistence` already does the same.
+
+Why: the first amendment loads only the model and the modules it lists. An
+atom that only an unlisted module of the project defines, such as a constants
+module or a leaf command that only an expansion produces, stayed unknown in a
+fresh VM, so the replay refused a valid file. The file still chooses no
+module to load: the set is every module of the applications already loaded,
+and an atom none of them defines is still refused.

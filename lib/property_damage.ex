@@ -733,10 +733,11 @@ defmodule PropertyDamage do
     # The loader builds structs of loaded modules only. Before it resolves the
     # file's atoms it loads the framework's failure and expansion modules and,
     # when the model the file names is loaded, the commands and projections
-    # that model lists. It loads no other module the file names, so the
-    # modules `model:` names are loaded first: the model and the commands it
-    # lists. A leaf module no other command names must be loaded by the
-    # caller.
+    # that model lists, so the modules `model:` names are loaded first: the
+    # model and the commands it lists. A name still unknown after that, such
+    # as a leaf only an expansion produces or an atom of a constants module,
+    # makes the loader load the modules of every loaded application and read
+    # the file once more.
     load_model_modules(model)
 
     term =
