@@ -357,7 +357,7 @@ convergence bound, or the function claims a readiness it cannot reach.
 ### What `==` does not do
 
 `==` is what `assert a == b` uses, so it is the default. Five traps each give a
-false divergence; the [Writing Invariants](writing_invariants.md#what--does-not-do)
+false divergence; the [Writing Invariants](writing_invariants.md#what-does-not-do)
 guide lists them. In short: return a map when order is not the contract,
 use `using: {Kernel, :===}` when integer and float must differ, compare a key
 for value structs such as `Decimal` and `DateTime`, and use

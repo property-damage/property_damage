@@ -57,6 +57,7 @@ end
 
 # --- Command ---
 defmodule CreateAccount do
+  @moduledoc "Creates an account with a random name."
   use PropertyDamage.Command
 
   defstruct [:name]
@@ -71,6 +72,7 @@ end
 
 # --- Projection (state tracking + check) ---
 defmodule AccountState do
+  @moduledoc "Tracks the accounts the system has created."
   use PropertyDamage.Model.Projection
 
   def init, do: %{accounts: %{}}
@@ -85,6 +87,7 @@ defmodule AccountState do
   # generator can legitimately repeat. This one holds for the in-memory adapter
   # below (every stored account keeps a non-empty name), so the run passes; see
   # writing_invariants.md for invariants that catch real bugs.
+  @doc "Every stored account keeps a non-empty name."
   @check every: 1
   def assert_names_present(state, _) do
     Enum.all?(state.accounts, fn {_id, acc} -> acc.name not in [nil, ""] end) or
@@ -104,6 +107,7 @@ end
 
 # --- Model ---
 defmodule AccountModel do
+  @moduledoc "Creates accounts and checks that each keeps its name."
   use PropertyDamage.Model
 
   @impl true
@@ -142,6 +146,8 @@ end
 defines functions, such as `use GenServer`; a module that breaks either rule
 does not compile. The same holds for `use PropertyDamage.Model.Projection`,
 `use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
+
+The `@moduledoc` and `@doc` lines are not decoration. A failure report quotes the model, command and projection `@moduledoc` and the failing check's `@doc`, and prints `(no description: ...)` where one is missing.
 
 Run it:
 

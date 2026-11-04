@@ -204,9 +204,10 @@ def commands do
 end
 ```
 
-The `overrides:` function receives the current projection state and returns a map of
-field overrides. Each override value is a `StreamData` generator that replaces
-the command's default generator for that field.
+The `overrides:` option takes a map, or a function that receives the current
+projection state and returns a map. Each map entry replaces the command's default
+generator for that field. An entry value is either a `StreamData` generator or a
+plain value, which the framework turns into a constant generator.
 
 ## Command Weights for Coverage
 

@@ -76,7 +76,10 @@ the result: record it as `completion: poll` and capture that probe as a
 command. "The system calls me back" (a webhook, a callback, a message) means
 the finishing event does not come from any command: record `completion:
 injected` and mark that event `source: injected` in the spec's Events
-section. Ask what the callback carries, as you would for any event.
+section. Ask what the callback carries, as you would for any event. In code,
+`poll` becomes a probe command (`execution: :probe`) plus an `@eventually`
+check; `injected` becomes an injector plus `awaits/2` on the async command
+plus an `@eventually` check.
 
 ## Phase 4 - State and preconditions
 
@@ -150,7 +153,8 @@ Then offer two optional features, once each, in the user's words:
   entries: ask which observations must match, and when.
 - **Equivalent routes**: "is there an operation that can be done in several
   ways that should end the same (one payment step versus authorize then
-  capture)?" A yes becomes `expansions:`.
+  capture)?" A yes becomes `expansions:`. Ask for a short name of each route
+  too: it becomes the expansion's `doc:` in the model.
 
 If the user declines either, record it as `declined` with the reason. If
 they postpone it, record it as `deferred`.

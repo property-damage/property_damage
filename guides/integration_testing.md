@@ -134,13 +134,13 @@ must already be running **separately** and be reachable over the network.
 |--------|-------------|
 | `--model` | Your PropertyDamage model module (e.g., `MyApp.Model`) |
 | `--adapter` | Your adapter module (e.g., `MyApp.HTTPAdapter`) |
-| `--url` | Base URL of the running service |
+| `--url` | Base URL of the running service (required unless the `PROPERTYDAMAGE_BASE_URL` environment variable is set) |
 
 ### Optional Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--runs` | Number of test sequences to run | 100 |
+| `--runs` | Number of test sequences to run | `PROPERTYDAMAGE_RUNS`, else 100 |
 | `--commands` | Maximum commands per sequence | 50 |
 | `--health` | Health check URL to wait for | `{url}/api/health` |
 | `--report` | Report format: `terminal`, `markdown`, `junit`, `json` | terminal |
@@ -148,7 +148,12 @@ must already be running **separately** and be reachable over the network.
 | `--save-failures` | Directory to save failing sequences | - |
 | `--stop-on-fail` | Stop immediately on first failure | false |
 | `--hunt N` | Bug hunt mode: run until N unique bugs are found (see [Bug hunt mode](#bug-hunt-mode)) | - |
-| `--quiet` | Suppress progress output | false |
+| `--verbose` | Show detailed progress | true |
+| `--quiet` | Suppress progress output (overrides `--verbose`) | false |
+
+The task reads two environment variables: `PROPERTYDAMAGE_BASE_URL` supplies the
+base URL when `--url` is absent, and `PROPERTYDAMAGE_RUNS` supplies the default
+run count when `--runs` is absent.
 
 ### About the health check
 
@@ -259,7 +264,8 @@ run_result =
     health_check: %{
       url: "http://localhost:4010/kv/0",
       timeout_ms: 30_000,
-      retries: 30
+      retries: 30,
+      interval_ms: 1_000
     },
     # Optional: write a report file (its directory is created if missing).
     report: %{format: :markdown, path: "reports/integration.md"},
@@ -353,8 +359,9 @@ For programmatic analysis:
   "total_runs": 10,
   "passed": 10,
   "failed": 0,
-  "model": "Elixir.OpenapiBench.Generated.Model",
-  "adapter": "Elixir.OpenapiBench.Generated.Adapter",
+  "model": "OpenapiBench.Generated.Model",
+  "adapter": "OpenapiBench.Generated.Adapter",
+  "duration_ms": 205,
   "failures": []
 }
 ```

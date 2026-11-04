@@ -637,6 +637,7 @@ The authoritative report is still the `{:ok, report}` return value;
 ## Next Steps
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs
+- [Coverage and Invariant Catalogs](coverage_and_catalogs.md) - The invariant catalog and `@invariant id:` coverage
 - [Differential Testing](differential_testing.md) - Comparing targets through `@compare`
 - [Path Equivalence Testing](path_equivalence_testing.md) - The same `@compare` observations across equivalent command sequences
 - [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis

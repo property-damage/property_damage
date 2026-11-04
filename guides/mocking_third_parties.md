@@ -163,8 +163,29 @@ end
 
 ### Model Integration
 
+The model guards `SubmitPayment` on `orders` in the sequence projection and
+needs a simulator. During generation there is no SUT, so projection state
+fills only from the events the simulator predicts. Without one, `orders` stays
+empty and `SubmitPayment` is never generated.
+
+`CreateOrder` and `SubmitPayment` are ordinary commands, and `OrderCreated`
+is an event whose `id` is `external()` (see
+[Writing Commands](writing_commands.md)).
+
 ```elixir
+defmodule PaymentState do
+  use PropertyDamage.Model.Projection
+
+  def init, do: %{orders: %{}}
+
+  def apply(state, %OrderCreated{id: id, amount: amt}),
+    do: put_in(state, [:orders, id], %{amount: amt})
+
+  def apply(state, _event), do: state
+end
+
 defmodule PaymentTestModel do
+  @behaviour PropertyDamage.Model.Simulator
   use PropertyDamage.Model
 
   @impl true
@@ -184,6 +205,16 @@ defmodule PaymentTestModel do
 
   @impl true
   def check_projections, do: [PaymentInvariant]
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  # CreateOrder predicts an OrderCreated, which opens the `when:` guard.
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%CreateOrder{amount: amount}, _state),
+    do: [%OrderCreated{amount: amount}]
+
+  def simulate(_command, _state), do: []
 end
 ```
 
@@ -420,7 +451,9 @@ end
    configuration is a separate concern from core model correctness.
 
 3. **Declare emitted events.** Use `@emits [Event1, Event2]` in your mock
-   module. The framework uses this for validation and coverage checking.
+   module to document which events it can push. Validation does not check a
+   mock's `@emits` (it does check an injector's), so keep the list in step with
+   `handle_request/2` yourself.
 
 4. **Keep mock state minimal.** Track only what you need for response decisions.
    Complex mock state is a sign that the mock is doing too much -- consider

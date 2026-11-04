@@ -32,9 +32,8 @@ defmodule PropertyDamage.Adapter.Injector do
   @emits [PaymentConfirmed, PaymentDeclined]
   ```
 
-  The framework uses this for:
-  - Validating that Model.injectable_events/0 covers all possible injected events
-  - Detecting orphan events that no check projection handles
+  `mix pd.validate` and run validation report an `injectable_events/0` entry
+  that no injector lists in `@emits`.
 
   ## Example
 
@@ -168,7 +167,8 @@ defmodule PropertyDamage.Adapter.Injector do
       @doc """
       Returns the list of event types this adapter can emit.
 
-      Used by the framework for validation and coverage checking.
+      Validation reads it to check that some injector emits each event in
+      the model's `injectable_events/0`.
       """
       @spec __emits__() :: [module()]
       def __emits__, do: unquote(emits)

@@ -35,7 +35,10 @@ defmodule PropertyDamage.Persistence do
   Auto-generated filenames follow the pattern:
   `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
 
-  Example: `2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd`
+  The timestamp has the basic ISO 8601 form `YYYYMMDDTHHMMSS`. The check name
+  is the name of the failing check, for example the name of its function.
+
+  Example: `20251226T143000-check_failed-non_negative_balance-seed512902757.pd`
 
   ## Sensitive data
 
@@ -112,7 +115,7 @@ defmodule PropertyDamage.Persistence do
 
       # Save with auto-generated name
       {:ok, path} = Persistence.save(failure, "failures/")
-      # => {:ok, "failures/2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd"}
+      # => {:ok, "failures/20251226T143000-check_failed-non_negative_balance-seed512902757.pd"}
 
       # Save with custom name
       {:ok, path} = Persistence.save(failure, "failures/", filename: "currency-bug.pd")

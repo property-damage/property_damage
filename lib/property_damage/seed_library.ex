@@ -15,9 +15,12 @@ defmodule PropertyDamage.SeedLibrary do
   pointer, not a durable test of a behavior.
 
   - **Durable regressions belong to the Export subsystem.** Exporting a failure
-    to an ExUnit test (`PropertyDamage.Export`) freezes the concrete shrunk
-    sequence, which survives generator changes. Use that for anything you want
-    to keep.
+    to an ExUnit test (`PropertyDamage.Export`) gives you a test you can commit.
+    If the report has a replay artifact, the test replays that file by path. It
+    runs the commands the file records, so a generator change does not alter
+    them, as long as you keep the file. Without an artifact, the test re-runs
+    the report's seed, and a generator change can send that seed down a
+    different sequence. Use the export for anything you want to keep.
   - **The library self-cleans.** Each entry tracks a `consecutive_passes`
     streak; an entry is pruned once it reaches the configured threshold
     (default 3). Genuinely-fixed seeds pass repeatedly and age out; flaky seeds

@@ -28,7 +28,7 @@ defmodule PropertyDamage.LoadTest do
       )
 
       # Print the report
-      IO.puts(PropertyDamage.LoadTest.Report.format(report, :terminal))
+      IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
 
   ## Advanced Usage
 
@@ -54,9 +54,19 @@ defmodule PropertyDamage.LoadTest do
             IO.puts("RPS: \#{m.requests_per_second}, p95: \#{m.latency_p95}ms")
 
           %PropertyDamage.Progress{data: %PropertyDamage.Progress.LoadResult{report: report}} ->
-            PropertyDamage.LoadTest.Report.save(report, "load_test.md", :markdown)
+            PropertyDamage.LoadTest.save(report, "load_test.md", :markdown)
         end
       )
+
+  ## What a Worker Runs
+
+  Each worker generates a sequence from the model's `commands/0` and runs the
+  prefix and suffix commands of that sequence. It does not run the model's
+  `setup_each/0` or `teardown_each/0` commands, and it does not apply the
+  model's `expansions/0`. If the model needs fixtures, create them in the
+  adapter's `setup/1` or seed the system before the test starts. The generator
+  still draws the roots against the state the setup commands would leave, so a
+  root that uses a value a setup command creates fails in a load test.
 
   ## Dynamic Worker Pool
 
@@ -116,7 +126,7 @@ defmodule PropertyDamage.LoadTest do
 
   alias PropertyDamage.LoadTest.{Report, Runner}
 
-  @type duration :: {pos_integer(), :milliseconds | :seconds | :minutes}
+  @type duration :: {pos_integer(), :milliseconds | :seconds | :minutes | :hours}
 
   @type ramp_strategy ::
           :immediate
@@ -126,6 +136,7 @@ defmodule PropertyDamage.LoadTest do
 
   @type report :: %{
           metrics: map(),
+          pool_stats: map(),
           config: map()
         }
 

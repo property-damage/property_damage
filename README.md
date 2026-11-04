@@ -14,7 +14,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
 - **Server-Generated Values**: Commands can reference `external()` results from earlier commands
 - **Branching Sequences**: Prefix, branches and suffix, run one branch at a time and checked for linearizability against the model (no race detection yet)
-- **Linearization Checking**: Verify parallel results are sequentially explainable
+- **Linearization Checking**: Verify branch results are explainable by some ordering of the branch commands
 - **Idempotency Testing**: Built-in stutter testing for retry safety
 - **Rich Failure Reports**: Comprehensive diagnostics when tests fail, with your own log lines attached
 - **HTML Failure Page**: One self-contained page per failing run, with one column per target
@@ -27,10 +27,13 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Run Comparison**: Compare full traces of the same plan to localize where passing and failing runs diverge
 - **Failure Bisection**: `mix pd.bisect` drives `git bisect` to find the commit where a saved failure first reproduces
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
-- **OpenAPI Scaffolding**: Generate command modules from API specifications
+- **OpenAPI Scaffolding**: Generate commands, events, an adapter, a model and a state projection from an API specification
+- **Load Testing**: Drive generated sequences from many workers at once with `PropertyDamage.LoadTest` (see the [load testing guide](guides/load_testing.md))
+- **Mutation Testing**: Inject bugs into the events your adapter returns with `PropertyDamage.Mutation`, to check that your tests catch them (see the [mutation testing guide](guides/mutation_testing.md))
 - **Fault Injection (Nemesis)**: Built-in network faults (latency, partition, packet loss), Toxiproxy-backed, plus your own nemeses
 - **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
 - **Path Equivalence Testing**: List command sequences that mean the same as a command (`expansions/0`); each target picks its own path and the targets' `@compare` observations must agree, and a divergence shrinks to the one path that matters and replays from a file
+- **Mix Tasks**: `pd.replay`, `pd.reshrink`, `pd.bisect`, `pd.audit`, `pd.explain`, `pd.integration`, `pd.scaffold`, `pd.validate` and the `pd.gen.*` generators
 
 ## Installation
 
@@ -253,6 +256,21 @@ case PropertyDamage.run(
 end
 ```
 
+In an ExUnit suite, use `PropertyDamage.ExUnit` instead. It takes the same options as `run/1`, and a failing test prints the full failure report:
+
+```elixir
+defmodule MyApp.SystemTest do
+  use ExUnit.Case
+  use PropertyDamage.ExUnit
+
+  property_damage "system maintains invariants",
+    model: MyApp.TestModel,
+    targets: [MyApp.TestAdapter],
+    max_commands: 50,
+    max_runs: 100
+end
+```
+
 ## Debugging Failures
 
 When PropertyDamage finds a failure, it provides rich tools for understanding what went wrong.
@@ -443,7 +461,7 @@ Save failures for later analysis or to build a regression suite:
 # Save a failure
 {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
-# => {:ok, "failures/20251226T143000-check_failed-UniqueEmails-seed512902757.pd"}
+# => {:ok, "failures/20251226T143000-check_failed-emails_present-seed512902757.pd"}
 
 # Load and analyze later
 {:ok, loaded} = PropertyDamage.load_failure(path)
@@ -603,32 +621,36 @@ The transitions pair consecutive recorded results, so six recorded failures give
 
 ## OpenAPI Scaffolding
 
-Generate command modules from an OpenAPI specification:
+Generate a test suite from an OpenAPI specification:
 
 ```bash
 # Generate from a local file
-mix pd.scaffold --from openapi.json --output lib/my_app_test/commands/
+mix pd.scaffold --from openapi.json --output lib/my_app_test --namespace MyAppTest
 
 # Generate from a URL
-mix pd.scaffold --from https://api.example.com/openapi.json --output lib/
+mix pd.scaffold --from https://api.example.com/openapi.json --output lib/my_app_test --namespace MyAppTest
 
 # Only specific operations
 mix pd.scaffold --from openapi.json --operations createUser,updateUser
+
+# Only commands and events (no adapter, model or projection)
+mix pd.scaffold --from openapi.json --commands-only
 
 # Preview without writing
 mix pd.scaffold --from openapi.json --dry-run
 
 # Regenerate over existing files (overwrites them)
-mix pd.scaffold --from openapi.json --output lib/my_app_test/commands/ --force
+mix pd.scaffold --from openapi.json --output lib/my_app_test --namespace MyAppTest --force
 ```
 
 A rerun that would touch an existing file exits 1, names the files and writes nothing unless you pass `--force`. `--force` overwrites every file the run generates, so it discards your edits to them.
 
-Generated commands include:
-- Struct fields from request body schemas
-- Type hints from OpenAPI types
-- Placeholder generators based on field types
-- Adapter execution hints
+The task writes:
+- One command module per operation, with struct fields from the request body schema, type hints, placeholder generators and adapter execution hints
+- One event module per operation whose 200, 201 or 202 response has a JSON schema (operations that share an event name share one module)
+- An adapter, a model and a state projection (skipped with `--commands-only`)
+
+Pass `--namespace` so the module names come out clean, for example `MyAppTest.Commands.CreateUser`. Without it, the task infers the namespace from `--output`. The [scaffolding guide](guides/scaffolding.md) walks through the generated files.
 
 ## Model Validation
 
