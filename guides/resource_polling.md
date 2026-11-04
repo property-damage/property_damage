@@ -275,7 +275,7 @@ executor collects the error:
 |------|----------|
 | `:halt` | The run fails with a resource poller error when the sequence ends. The first failed poller is the one reported |
 | `:record` | Every poller error becomes a recorded failure (check name `resource_poller`) when the sequence ends |
-| `:log` | Errors are logged as warnings, and the run passes |
+| `:log` | Errors are logged as warnings, and the run passes, unless a callback threw or exited (see [Log Mode Formatting](#log-mode-formatting)) |
 | `:disabled` | Errors are ignored |
 
 ### Error Types
@@ -286,16 +286,25 @@ are explicitly returned:
 | Error | Has Stacktrace? | Cause |
 |-------|-----------------|-------|
 | `{:poll_fn_error, exception, stacktrace}` | Yes | `poll_fn` raised an exception |
+| `{:poll_fn_error, {kind, reason}, stacktrace}` | Yes | `poll_fn` threw or exited, so `kind` is `:throw` or `:exit` |
 | `{:handler_error, exception, stacktrace}` | Yes | `handler` raised an exception |
+| `{:handler_error, {kind, reason}, stacktrace}` | Yes | `handler` threw or exited |
 | `{:on_timeout_error, exception, stacktrace}` | Yes | `on_timeout` function raised |
+| `{:on_timeout_error, {kind, reason}, stacktrace}` | Yes | `on_timeout` function threw or exited |
 | `{:timeout, timeout_info}` | No | Polling timed out with `on_timeout: :fail` |
 | Custom `reason` | No | Handler or `on_timeout` returned `{:error, reason}` |
 
 ### Log Mode Formatting
 
+A `poll_fn`, handler or `on_timeout` function must return a value or raise. If it throws or exits,
+the `:log` formatter calls `Exception.message/1` on the `{kind, reason}` tuple,
+and that call crashes the run instead of logging a warning. `:halt` and
+`:record` modes report the tuple.
+
 In `:log` mode, errors are formatted for clean log output:
 
-- **Raised exceptions**: Shows exception type and message
+- **Raised exceptions**: Shows which callback raised and the exception message
+  (the exception type is not printed)
   ```
   [warning] Resource poller #Ref<...> error: handler raised: invalid response format
   ```
