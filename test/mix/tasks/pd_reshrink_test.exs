@@ -292,6 +292,36 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
     end
   end
 
+  describe "a fresh mix process" do
+    @root Path.expand("../../..", __DIR__)
+
+    # The test VM has already started every application, so only a new OS
+    # process shows whether the task starts what the shrinker needs.
+    test "re-shrinks a saved failure the engine produced", %{dir: dir} do
+      {:error, failure} =
+        PropertyDamage.run(
+          model: PropertyDamage.Test.FailingModel,
+          targets: [PropertyDamage.Test.SimpleAdapter],
+          max_runs: 100,
+          seed: 1,
+          replay_dir: false
+        )
+
+      {:ok, path} = PropertyDamage.save_failure(failure, dir)
+
+      {output, status} =
+        System.cmd("mix", ["pd.reshrink", path, "--strategy", "quick"],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      assert output =~ "Before:"
+      refute output =~ "re-shrink could not run"
+    end
+  end
+
   describe "argument handling" do
     test "no arguments returns :error and prints usage" do
       {status, output} = with_output(fn -> Reshrink.exec([]) end)
