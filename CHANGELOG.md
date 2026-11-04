@@ -650,6 +650,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.Mutation.run/1` stops when a baseline run fails
+  a check.** A model whose property fails against the unmodified adapter, for
+  example through a check, an invariant or a poll timeout, now gets
+  `{:error, {:baseline_failed, command_module, message}}` instead of a report.
+  Such a report counted every mutation as killed, so its score measured
+  nothing.
 - **Breaking: the failure report and the replay artifact record the run's
   `external_markers:` (DR-061).** Replay, re-shrink, trigger isolation, the
   exports, `mix pd.replay` and `mix pd.reshrink` use the recorded markers, so a

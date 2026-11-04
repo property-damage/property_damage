@@ -176,15 +176,15 @@ defmodule PropertyDamage.Mutation.Runner do
         max_commands: 10
       )
 
+    # A baseline that fails for any reason (an adapter error, a failed setup, a
+    # failed check or invariant) fails every mutant run the same way, so it
+    # leaves nothing to measure.
     case trace.outcome do
       {:fail, %Failure{} = failure} ->
-        # An adapter error or a failed setup breaks every mutant run the same
-        # way, so neither leaves anything to measure.
-        if FailureReport.kind_of(failure) in [:execution_failed, :setup_failed] do
-          {:error, FailureReport.failure_message(failure) || inspect(failure)}
-        else
-          {:ok, sample_events(trace)}
-        end
+        {:error, FailureReport.failure_message(failure) || inspect(failure)}
+
+      {:fail, other} ->
+        {:error, inspect(other)}
 
       _ ->
         {:ok, sample_events(trace)}

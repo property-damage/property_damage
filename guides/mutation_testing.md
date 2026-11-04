@@ -48,11 +48,12 @@ Before it mutates a command, `run/1` runs one baseline property run with the unm
 adapter. If that baseline run fails with an adapter error, every mutation of
 the command would fail the same way and count as killed by error. If the
 adapter's setup fails, the baseline yields no events to mutate and the report
-comes back empty. Both hide that the adapter is broken. So `run/1` stops and returns
+comes back empty. If a check or an invariant fails the baseline, every mutation
+would count as killed, and the score would say nothing about your checks. Each
+case hides a broken model or adapter. So `run/1` stops and returns
 `{:error, {:baseline_failed, command_module, message}}`, where `message` is the
-failure message of the baseline run (for example `":backend_down"`). Fix the
-adapter or its setup and run again. A baseline run that fails a check is not an
-adapter error, and it does not stop the run.
+failure message of the baseline run (for example `":backend_down"`). Make the
+property pass against the unmodified adapter and run again.
 
 ## Quick start
 
