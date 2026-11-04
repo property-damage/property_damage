@@ -1406,6 +1406,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mix pd.integration --hunt` honors `--commands`.** A hunt ran every
+  sequence with up to 50 commands, whatever `--commands` said.
+  `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by
+  default), and the task passes `--commands` to it.
 - **`PropertyDamage.SeedLibrary.load/1` returns an error for a file that is not
   a current library.** Valid JSON without an `entries` list raised a
   `KeyError`, and a file of another version loaded. Both now return

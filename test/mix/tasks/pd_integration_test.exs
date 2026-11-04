@@ -66,6 +66,37 @@ defmodule Mix.Tasks.Pd.IntegrationTest do
     end
   end
 
+  # SimpleAdapter that reports its setup and each command to the loopback
+  # server at the run's base URL, so a test reads every run's commands from the
+  # recorded request paths.
+  defmodule LoopbackAdapter do
+    @moduledoc false
+    use PropertyDamage.Adapter
+
+    alias PropertyDamage.Test.SimpleAdapter
+
+    @impl true
+    def setup(config) do
+      report(config, "/setup")
+      SimpleAdapter.setup(config)
+    end
+
+    @impl true
+    def teardown(context), do: SimpleAdapter.teardown(context)
+
+    @impl true
+    def execute(command, context, runtime) do
+      report(context, "/execute")
+      SimpleAdapter.execute(command, context, runtime)
+    end
+
+    defp report(config, path) do
+      url = String.to_charlist(Map.new(config).base_url <> path)
+      {:ok, {{_, 200, _}, _, _}} = :httpc.request(:get, {url, []}, [timeout: 5000], [])
+      :ok
+    end
+  end
+
   # `run/1` halts the BEAM, so it is not testable in-process. The logic is
   # exercised through the halt-free seams instead: `result_to_code/1` (the
   # result -> exit-code mapping) and `exec/1` (returns the exit code without
@@ -182,10 +213,60 @@ defmodule Mix.Tasks.Pd.IntegrationTest do
     end
   end
 
-  # Run a hunt with SimpleAdapter in a task, returning {code, captured_stdout}.
+  describe "exec/1 --hunt --commands" do
+    setup do
+      server = HealthServer.start()
+      on_exit(fn -> HealthServer.stop(server) end)
+      %{server: server}
+    end
+
+    test "runs sequences of at most --commands commands", %{server: server} do
+      assert Enum.max(hunt_lengths(server, ["--commands", "3"])) <= 3
+    end
+
+    test "runs longer sequences without --commands (control)", %{server: server} do
+      assert Enum.max(hunt_lengths(server, [])) > 3
+    end
+  end
+
+  # Hunt a passing model over the loopback adapter for a fixed number of runs
+  # and return the command count of each run, read from the recorded paths.
+  defp hunt_lengths(server, extra_args) do
+    base = HealthServer.base_url(server)
+
+    {code, _output} =
+      hunt(
+        ["--model", "PropertyDamage.Test.ExecutorModel", "--url", base] ++
+          ["--health", base <> "/health", "--hunt", "1", "--runs", "20"] ++
+          ["--adapter", inspect(LoopbackAdapter)] ++ extra_args
+      )
+
+    assert code == 0
+
+    lengths =
+      server
+      |> HealthServer.paths()
+      |> Enum.drop_while(&(&1 != "/setup"))
+      |> Enum.chunk_while(
+        nil,
+        fn
+          "/setup", nil -> {:cont, 0}
+          "/setup", count -> {:cont, count, 0}
+          "/execute", count -> {:cont, count + 1}
+          _other, count -> {:cont, count}
+        end,
+        fn count -> {:cont, count, nil} end
+      )
+
+    assert length(lengths) == 20, "expected 20 runs, got #{inspect(lengths)}"
+    lengths
+  end
+
+  # Run a hunt in a task, returning {code, captured_stdout}. The adapter is
+  # SimpleAdapter unless `args` names another: the last `--adapter` wins.
   # A hunt that never ends fails the test instead of hanging the suite.
   defp hunt(args) do
-    args = args ++ ["--adapter", "PropertyDamage.Test.SimpleAdapter"]
+    args = ["--adapter", "PropertyDamage.Test.SimpleAdapter"] ++ args
     task = Task.async(fn -> with_output(fn -> Integration.exec(args) end) end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, :brutal_kill) do
