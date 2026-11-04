@@ -246,6 +246,18 @@ defmodule PropertyDamage.IntegrationTest do
       end)
     end
 
+    test "a result with 0 runs prints n/a as the pass rate in both formats", %{result: result} do
+      empty = %{result | total_runs: 0, passed: 0, failed: 0, failures: []}
+
+      output = capture_io(fn -> Integration.generate_report(empty, %{format: :terminal}) end)
+      assert output =~ "Pass rate:  n/a"
+
+      path = report_path("zero_runs") <> ".md"
+      on_exit(fn -> File.rm(path) end)
+      capture_io(fn -> Integration.generate_report(empty, %{format: :markdown, path: path}) end)
+      assert File.read!(path) =~ "| Pass Rate | n/a |"
+    end
+
     test "creates the report's missing parent directory", %{result: result} do
       dir = report_path("missing_dir")
       path = Path.join([dir, "nested", "report.md"])

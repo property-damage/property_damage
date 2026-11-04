@@ -634,6 +634,11 @@ defmodule PropertyDamage.Integration do
     end
   end
 
+  defp pass_rate(%{total_runs: 0}), do: "n/a"
+
+  defp pass_rate(%{passed: passed, total_runs: total}),
+    do: "#{Float.round(passed / total * 100, 1)}%"
+
   defp print_terminal_report(result) do
     IO.puts("")
     IO.puts(String.duplicate("═", 65))
@@ -648,7 +653,7 @@ defmodule PropertyDamage.Integration do
     IO.puts("  Total runs: #{result.total_runs}")
     IO.puts("  Passed:     #{result.passed}")
     IO.puts("  Failed:     #{result.failed}")
-    IO.puts("  Pass rate:  #{Float.round(result.passed / result.total_runs * 100, 1)}%")
+    IO.puts("  Pass rate:  #{pass_rate(result)}")
 
     if result.failed > 0 do
       IO.puts("")
@@ -685,7 +690,7 @@ defmodule PropertyDamage.Integration do
     | Total Runs | #{result.total_runs} |
     | Passed | #{result.passed} |
     | Failed | #{result.failed} |
-    | Pass Rate | #{Float.round(result.passed / result.total_runs * 100, 1)}% |
+    | Pass Rate | #{pass_rate(result)} |
 
     #{format_failures_markdown(result.failures)}
 

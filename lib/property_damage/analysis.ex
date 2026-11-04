@@ -645,7 +645,7 @@ defmodule PropertyDamage.Analysis do
   defp generate_variations(_field, original, _commands, _failed_at) when is_integer(original) do
     # For integers, try 0 and some nearby values
     variations = [0, 1, original - 1, original + 1, div(original, 2)]
-    Enum.filter(variations, &(&1 != original and &1 >= 0))
+    variations |> Enum.filter(&(&1 != original and &1 >= 0)) |> Enum.uniq()
   end
 
   defp generate_variations(_field, _original, _commands, _failed_at) do

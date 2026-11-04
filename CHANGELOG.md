@@ -1342,6 +1342,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
+  an integer field, the candidate values repeated (an original of 1 tried 0
+  three times), so `changes` carried duplicate entries. The candidates are now
+  distinct.
+- **The integration report prints `n/a` for the pass rate of a result with no
+  runs.** The terminal and Markdown reports divided by zero and raised
+  `ArithmeticError`.
+- **`mix pd.replay` exits 125 when the adapter's `setup/1` raises.** The
+  raise escaped `PropertyDamage.replay/1` and the task died with exit 1, which
+  `git bisect run` reads as a bad commit. The replay now returns the setup
+  error, and the task reports it as indeterminate.
+- **`Export.to_exunit/2` accepts a string `module_name:`.** A string wrote
+  `defmodule "Name" do`, which does not parse. Both a string and an atom now
+  write `defmodule Name do`.
+- **The `PropertyDamage.load_failure/1` spec lists the warnings tuple.** The
+  function returns `{:ok, report, warnings}` for a file saved by another
+  version; the spec and doc now say so.
+- **A resource poller that throws or exits no longer crashes a run in `:log` check mode.**
+  The log formatter called `Exception.message/1` on a `{kind, reason}` pair.
+  It now logs `poll_fn threw: ...` or `poll_fn exited: ...`, and the same for
+  the handler and `on_timeout`.
 - **`mix pd.reshrink` runs again.** The task never started the `:telemetry`
   application, so every re-shrink stopped with "re-shrink could not run" and
   exit 1. It now starts the project's applications after compiling, as

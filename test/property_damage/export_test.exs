@@ -693,6 +693,15 @@ defmodule PropertyDamage.ExportTest do
       assert test_code =~ "MyApp.Regressions.CustomTest"
     end
 
+    test "a string module name yields the same header as an atom" do
+      failure = create_test_failure_report()
+
+      test_code = Export.to_exunit(failure, module_name: "RegressionAccountTest")
+
+      assert test_code =~ "defmodule RegressionAccountTest do"
+      assert {:ok, _} = Code.string_to_quoted(test_code)
+    end
+
     test "a command with a non-literal field (PID) does not emit invalid #PID<> source" do
       commands = [%PidCommand{pid: self(), name: "worker"}]
 
