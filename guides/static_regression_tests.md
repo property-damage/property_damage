@@ -227,6 +227,40 @@ test_code = PropertyDamage.generate_test(failure, format: :exunit)
 IO.puts(test_code)
 ```
 
+### Automatic Capture with regression:
+
+To save every failure without writing capture code, pass the `regression:` run
+option. A failing run then saves the failure file, adds the seed to a library
+and writes an ExUnit test:
+
+```elixir
+PropertyDamage.run(
+  model: MyModel,
+  targets: [MyAdapter],
+  regression: [
+    save_failures: "failures/",
+    seed_library: "seeds.json",
+    generate_tests: "test/regressions/",
+    tags: [:auto_detected],
+    dedup: true
+  ]
+)
+```
+
+| Key | Effect |
+|-----|--------|
+| `save_failures:` | Directory for the saved failure files (`.pd`) |
+| `seed_library:` | Path of the seed library JSON file |
+| `generate_tests:` | Directory for the generated ExUnit files |
+| `tags:` | Tags for seed library entries (default `[:auto_detected]`) |
+| `dedup:` | Skip a failure similar to one already saved (default `false`) |
+
+To replay a saved `.pd` file, run `mix pd.replay FILE.pd`. The exit code makes
+the task usable as a regression gate: `0` when the failure no longer
+reproduces, `1` when it still does, and `125` when the replay could not run
+(for example, the project does not compile). A usage error exits `2`. See
+[Debugging Failures](debugging_failures.md) for replay and the failure file.
+
 ## Best Practices
 
 ### 1. Keep Regression Tests Focused
