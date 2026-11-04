@@ -50,7 +50,15 @@ end
 
 (Your command generators call `StreamData` directly, so add it as a dependency too.)
 
+To use a checkout of PropertyDamage instead of a published release, point the dependency at its path. This form fits a checkout that sits next to your project, as in [Explaining a failure page](#explaining-a-failure-page):
+
+```elixir
+{:property_damage, path: "../property_damage"}
+```
+
 ## Quick Start
+
+Each module in steps 1 to 6 goes in its own file under `lib/my_app/` (for example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run: put the call in a script such as `run.exs` and start it with `mix run run.exs`. The ExUnit form goes in a test module under `test/`, so `mix test` runs it.
 
 ### 1. Define Events
 
@@ -677,6 +685,8 @@ It warns about:
 - A model with a single command (the Quick Start model has one)
 - Events that no check projection handles
 - Two targets that share an adapter and an identical `config:`
+
+The task prints a summary of `Model:`, one line per target, `Commands:` (the number of commands the model lists) and `Extra:` (the number of check projections from `check_projections/0`).
 
 `--verbose` shows more detail and `--strict` turns warnings into errors. On the Quick Start model, `--strict` prints `FAILED: 2 warning(s) in strict mode`. For a
 model with `expansions/0`, `--seeds N` sets how many root sequences to sample
@@ -1642,7 +1652,15 @@ APIs a released version does not have:
 
 ```bash
 git clone --depth 1 https://github.com/property-damage/property_damage /tmp/pd
+mkdir -p your_app/.claude/skills
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
+```
+
+If you already have a checkout (a path dependency), copy from it instead of cloning. From your project root:
+
+```bash
+mkdir -p .claude/skills
+cp -r ../property_damage/.claude/skills/pd-* .claude/skills/
 ```
 
 The Hex package ships only `pd-explain` (under `priv/claude/skills`). Every other skill, including `pd-model-interview`, comes from this repository, which is its distribution channel.
