@@ -534,17 +534,14 @@ defmodule PropertyDamage.Regression do
         nil
 
       directory ->
-        # Forward the full option set to the exporter. The ExUnit generator reads
-        # the keys it understands (e.g. :targets, :model) and ignores the
-        # regression-control keys, so a caller can shape the generated test rather
-        # than only supply :targets.
-        result =
-          Export.save(
-            failure,
-            directory,
-            :exunit,
-            PropertyDamage.Options.with_target_entries(opts)
-          )
+        # Forward the options the ExUnit export takes (e.g. :targets); the
+        # exporter validates its options and rejects the regression-control keys.
+        exunit_opts =
+          opts
+          |> PropertyDamage.Options.with_target_entries()
+          |> Keyword.take(PropertyDamage.Options.export_option_keys(:exunit))
+
+        result = Export.save(failure, directory, :exunit, exunit_opts)
 
         warn_write_failure(result, "generated test", directory)
 

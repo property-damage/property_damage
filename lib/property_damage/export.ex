@@ -194,7 +194,9 @@ defmodule PropertyDamage.Export do
   - `report` - The failure report to export
   - `directory` - Directory to save the file in
   - `format` - Export format (`:exunit`, `{:script, :curl}`, `:livebook`, etc.)
-  - `opts` - Format-specific options
+  - `opts` - Format-specific options, validated as the matching `to_*`
+    function validates them: an unknown or invalid option raises
+    `NimbleOptions.ValidationError` and writes no file
 
   ## Example
 
@@ -209,6 +211,10 @@ defmodule PropertyDamage.Export do
   @spec save(FailureReport.t(), Path.t(), format(), keyword()) ::
           {:ok, Path.t()} | {:error, term()}
   def save(%FailureReport{} = report, directory, format, opts \\ []) do
+    write(report, directory, format, validate(format, opts))
+  end
+
+  defp write(report, directory, format, opts) do
     content = generate(report, format, opts)
     filename = generate_filename(report, format)
     path = Path.join(directory, filename)
@@ -233,7 +239,10 @@ defmodule PropertyDamage.Export do
   - `:base_url` - Base URL for HTTP calls (required for scripts/livebook)
   - `:adapter` - Adapter module for HTTPSpec
   - `:script_languages` - Languages for scripts (default: `[:elixir, :curl]`)
-  - All other options are passed to individual generators
+  - All other options go to each format whose `to_*` function takes them
+
+  An option that no format takes, or that fails a format's validation,
+  raises `NimbleOptions.ValidationError` before any file is written.
 
   ## Example
 
@@ -254,13 +263,20 @@ defmodule PropertyDamage.Export do
   @spec save_all(FailureReport.t(), Path.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def save_all(%FailureReport{} = report, directory, opts \\ []) do
+    Options.validate_export_all!(opts)
     script_languages = Keyword.get(opts, :script_languages, [:elixir, :curl])
 
     formats = [:exunit, :livebook] ++ Enum.map(script_languages, &{:script, &1})
 
+    # Validate every format before writing the first file.
+    validated =
+      Enum.map(formats, fn format ->
+        {format, validate(format, Keyword.take(opts, Options.export_option_keys(format)))}
+      end)
+
     results =
-      Enum.reduce_while(formats, {:ok, %{}}, fn format, {:ok, paths} ->
-        case save(report, directory, format, opts) do
+      Enum.reduce_while(validated, {:ok, %{}}, fn {format, format_opts}, {:ok, paths} ->
+        case write(report, directory, format, format_opts) do
           {:ok, path} ->
             key = format_key(format)
             {:cont, {:ok, Map.put(paths, key, path)}}
@@ -277,8 +293,10 @@ defmodule PropertyDamage.Export do
   # Helpers
   # ============================================================================
 
-  # For internal generate calls from save/save_all, we skip validation
-  # since the caller may pass options for multiple formats
+  defp validate(format, opts) do
+    format |> Options.validate_export!(opts) |> Options.with_target_entries()
+  end
+
   defp generate(report, :exunit, opts), do: ExUnit.generate(report, opts)
   defp generate(report, :livebook, opts), do: LiveBook.generate(report, opts)
   defp generate(report, {:script, lang}, opts), do: Script.generate(report, lang, opts)

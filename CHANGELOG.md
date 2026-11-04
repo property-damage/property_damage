@@ -1404,6 +1404,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **`Export.save/4` and `save_all/3` validate their options.** Both passed
+  options to the generators unchecked, so a misspelled option was ignored and
+  the file was written anyway. `save/4` now validates with the schema of the
+  matching `to_*` function, and `save_all/3` rejects an option no format
+  takes; both raise `NimbleOptions.ValidationError`, as the `to_*` functions
+  do, before writing any file.
 - **`mix pd.replay` starts the project's applications.** The task compiled
   the project but never started it, so an adapter whose `setup/1` needs a
   process an application starts failed, and `mix pd.bisect` skipped every

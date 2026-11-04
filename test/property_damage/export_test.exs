@@ -869,12 +869,24 @@ defmodule PropertyDamage.ExportTest do
 
       paths =
         for format <- formats do
-          {:ok, path} = Export.save(failure, tmp_dir, format, opts)
+          format_opts = if format == :exunit, do: [], else: opts
+          {:ok, path} = Export.save(failure, tmp_dir, format, format_opts)
           path
         end
 
       assert length(Enum.uniq(paths)) == length(formats),
              "two formats share a file name: #{inspect(paths)}"
+    end
+
+    @tag :tmp_dir
+    test "rejects an unknown option and writes no file", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
+        Export.save(failure, tmp_dir, :exunit, bogus: true)
+      end
+
+      assert File.ls!(tmp_dir) == []
     end
   end
 
@@ -917,6 +929,17 @@ defmodule PropertyDamage.ExportTest do
       Enum.each(Map.values(paths), fn path ->
         assert File.exists?(path), "Expected file to exist: #{path}"
       end)
+    end
+
+    @tag :tmp_dir
+    test "rejects an unknown option and writes no file", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
+        Export.save_all(failure, tmp_dir, base_url: "http://localhost:4000", bogus: true)
+      end
+
+      assert File.ls!(tmp_dir) == []
     end
   end
 
