@@ -68,23 +68,9 @@ defmodule PropertyDamage.FailureReport.LayoutMarkdownTest do
       :ok
     end
 
-    test "renders in terminal and markdown with the sections of the layout" do
-      # A version-15 :diverged report without the new fields renders without raising.
-      report =
-        case Persistence.load(@fixture) do
-          {:ok, report} -> report
-          {:ok, report, _warnings} -> report
-        end
-
-      assert report.kind == :diverged
-      facts = L.facts(report)
-      plain = L.plain(report)
-      colored = L.colored(report)
-      markdown = L.markdown(report)
-
-      for text <- [plain, L.strip_ansi(colored), markdown], do: L.assert_sections(text, facts)
-      L.assert_markdown_mirrors(markdown, plain, facts)
-      assert L.fields_labeled(plain, "Compared") != []
+    test "is refused as format version 15, so it never reaches the layout" do
+      # Version 16 refuses every older file (DR-061).
+      assert Persistence.load(@fixture) == {:error, {:unsupported_format_version, 15, 16}}
     end
   end
 end

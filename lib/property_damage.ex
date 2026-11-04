@@ -704,14 +704,21 @@ defmodule PropertyDamage do
 
         case Keyword.fetch(only, :replay) do
           {:ok, path} ->
+            # An `external_markers:` the caller gave replaces the artifact's.
+            given = if Keyword.has_key?(raw_opts, :external_markers), do: opts, else: []
+
             replay =
-              load_replay!(path, opts[:model], opts[:targets],
-                external_markers: opts[:external_markers] || []
+              load_replay!(
+                path,
+                opts[:model],
+                opts[:targets],
+                Keyword.take(given, [:external_markers])
               )
 
             {opts
              |> Keyword.put(:seed, replay.term.seed)
              |> Keyword.put(:targets, replay.targets)
+             |> Keyword.put(:external_markers, replay.external_markers)
              |> Keyword.put(:shrink, Keyword.get(raw_opts, :shrink, false)), replay}
 
           :error ->
@@ -720,8 +727,8 @@ defmodule PropertyDamage do
     end
   end
 
-  # The artifact does not record the run's `external_markers:`: the replay
-  # reads its commands with the markers this run passes.
+  # The replay reads the artifact's commands with the markers it records,
+  # or with the `external_markers:` in `markers` when the caller gave one.
   defp load_replay!(path, model, targets, markers) do
     # The loader builds structs of loaded modules only. Before it resolves the
     # file's atoms it loads the framework's failure and expansion modules and,
@@ -793,6 +800,7 @@ defmodule PropertyDamage do
       term: term,
       path: path,
       targets: replayed,
+      external_markers: Keyword.get(markers, :external_markers, term.external_markers),
       sequence: sequence,
       expansion: ReplayArtifact.expansion(term, sequence, nil, markers)
     }
@@ -941,6 +949,7 @@ defmodule PropertyDamage do
           %{variant: variant_of(other), root: nil, failure: other_failure}
         end,
       check_mode: ctx.check_mode,
+      external_markers: ctx.external_markers,
       campaign: %{seed: ctx.seed, max_runs: ctx.max_runs},
       latency: ctx.latency,
       metrics: metrics
@@ -1957,6 +1966,7 @@ defmodule PropertyDamage do
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_mode: ctx.check_mode,
+      external_markers: ctx.external_markers,
       check_fires: found.fires,
       run_check_fires: run_fires(found),
       other_failures: Enum.map(found.other_failures, &other_failure/1),
@@ -2199,10 +2209,10 @@ defmodule PropertyDamage do
     report (default 3). The report does not record the run's value, so a run
     given another value passes it here again.
   - `:external_markers` - The atom markers of the run, as on
-    `PropertyDamage.run/1` (default `[]`). The report does not record them, so
-    a run that named atom markers passes them here again: the re-shrink
-    simulates the report's commands again, and only a marker named here turns
-    an event field into a placeholder that later commands resolve.
+    `PropertyDamage.run/1` (default: the report's `external_markers`, the
+    markers the run named). The re-shrink simulates the report's commands
+    again, and only a marker in this list turns an event field into a
+    placeholder that later commands resolve.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2258,7 +2268,7 @@ defmodule PropertyDamage do
             report,
             Enum.map(targets, & &1.name),
             "PropertyDamage.shrink_further/2",
-            external_markers: Keyword.get(opts, :external_markers, [])
+            external_markers: further_markers(report, opts)
           )
 
         if names_failing_target?(targets, report.variant),
@@ -2266,6 +2276,10 @@ defmodule PropertyDamage do
           else: {:error, {:variant_not_in_targets, report.variant.name}}
     end
   end
+
+  # The markers a re-shrink simulates with: the option, else the run's.
+  defp further_markers(report, opts),
+    do: Keyword.get(opts, :external_markers, report.external_markers)
 
   # Whether `targets` hold the target the report failed in at the index it
   # failed at. A candidate counts only when it fails in that target, so
@@ -2290,7 +2304,7 @@ defmodule PropertyDamage do
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
       keep_attempts: Options.keep_attempts!(opts),
-      external_markers: Keyword.get(opts, :external_markers, []),
+      external_markers: further_markers(report, opts),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }
@@ -2399,6 +2413,7 @@ defmodule PropertyDamage do
             stutter: ctx.stutter,
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,
+            external_markers: ctx.external_markers,
             linearization: Map.get(result, :linearization),
             logs: Map.get(result, :logs, %{}),
             stacktrace: failure.stacktrace,

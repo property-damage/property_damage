@@ -84,7 +84,8 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
   end
 
   defp assert_ranges(entry, lines, path) do
-    assert entry["file"] == path
+    # The file sits outside the project, so the bundle names its base name.
+    assert entry["file"] == Path.basename(path)
     assert entry["lines"] == B.line_count(path)
     assert entry["lines"] == lines.lines
 
@@ -149,7 +150,7 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
       assert function["from"] == def_line
       assert function["to"] == def_line + 1
       assert entry["role"] == "projection"
-      assert entry["file"] == system.file
+      assert entry["file"] == Path.basename(system.file)
     end
 
     test "end the last function of a command at the line before the end of its module" do
@@ -227,8 +228,8 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
     test "gives the module's source as missing, with the path", %{system: system, report: report} do
       entry = report |> B.build() |> B.module_entry(system.model)
 
-      assert entry["source"] == %{"missing" => system.file}
-      assert entry["file"] == system.file
+      assert entry["source"] == %{"missing" => Path.basename(system.file)}
+      assert entry["file"] == Path.basename(system.file)
     end
 
     test "keeps the moduledoc and the docs of the functions", %{system: system, report: report} do
@@ -268,15 +269,18 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
     test "lists the path under missing_sources, once", %{system: system, report: report} do
       bundle = B.build(report)
 
-      assert system.file in bundle["missing_sources"]
+      assert Path.basename(system.file) in bundle["missing_sources"]
       assert bundle["missing_sources"] == Enum.uniq(bundle["missing_sources"])
     end
 
     test "says so in the bundle of the page", %{system: system, report: report} do
       bundle = report |> HTML.render() |> B.page_bundle()
 
-      assert system.file in bundle["missing_sources"]
-      assert B.module_entry(bundle, system.model)["source"] == %{"missing" => system.file}
+      assert Path.basename(system.file) in bundle["missing_sources"]
+
+      assert B.module_entry(bundle, system.model)["source"] == %{
+               "missing" => Path.basename(system.file)
+             }
     end
   end
 
@@ -285,7 +289,7 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
       system = B.define()
       bundle = system |> B.run() |> B.build()
 
-      refute system.file in bundle["missing_sources"]
+      refute Path.basename(system.file) in bundle["missing_sources"]
       assert B.module_entry(bundle, system.model)["source"] == system.source
       assert B.module_entry(bundle, system.model)["lines"] == B.line_count(system.file)
     end
@@ -317,7 +321,7 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
 
       assert entry["resolution"] == "captured"
       assert entry["role"] == "adapter"
-      assert entry["file"] == system.adapter_file
+      assert entry["file"] == Path.basename(system.adapter_file)
       assert entry["moduledoc"] == "The adapter of the ledger."
 
       execute = B.function_entry(entry, :execute, 3)

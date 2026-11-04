@@ -265,7 +265,7 @@ defmodule PropertyDamage.AnalysisTest do
   end
 
   describe "isolate_trigger/2 on a credit whose account comes from a placeholder" do
-    test "names the currency of the account the placeholder points at" do
+    test "gives a CreateAccount producer the generic message, with no currency special case" do
       ph = Placeholder.new_at(Bank.AccountCreated, [:account_id], Position.prefix(0), 0)
 
       seq =
@@ -288,7 +288,7 @@ defmodule PropertyDamage.AnalysisTest do
       assert Enum.any?(isolation.changes, &(&1.field == :currency and &1.fixed == "USD"))
 
       assert isolation.likely_cause ==
-               ~s(Currency mismatch: operation uses "EUR" but account uses "USD")
+               ~s(Changing currency from "EUR" to "USD" eliminates failure)
     end
   end
 

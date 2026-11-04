@@ -10,10 +10,10 @@ defmodule PropertyDamage.Expansion do
   target's entries the way the run realized them.
 
   `for/5` accepts only `:targets` and `:max_commands`, and it has no option for
-  the atom markers a run named through `external_markers:`. The failure report
-  does not record them either. For a model with expansions that relied on such
-  markers, a command that consumes a marked value gets a placeholder no
-  registry knows, so the result can differ from what the run executed.
+  the atom markers a run named through `external_markers:`. For a model with
+  expansions that relied on such markers, a command that consumes a marked
+  value gets a placeholder no registry knows, so the result can differ from
+  what the run executed.
 
       {:ok, result} = PropertyDamage.Expansion.for(MyModel, 42, 1, "second", targets: targets)
       result.sequence

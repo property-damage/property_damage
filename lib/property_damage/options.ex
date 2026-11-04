@@ -518,9 +518,12 @@ defmodule PropertyDamage.Options do
 
       Every step of the run reads this option: sequence generation,
       execution, the teardown draw, the expansion walk, shrinking, and
-      `only: [replay: path]`. `PropertyDamage.shrink_further/2` takes the same
-      `:external_markers` key. This run option is the sole source of atom
-      markers; there is no ambient app-config channel (DR-032).
+      `only: [replay: path]`. The failure report and the replay artifact
+      record the list, and every path that runs a failure again uses it
+      (DR-061); `PropertyDamage.shrink_further/2` and `only: [replay: path]`
+      take the same `:external_markers` key, which replaces it. This run
+      option is the sole source of atom markers; there is no ambient
+      app-config channel (DR-032).
       """
     ],
     shrinker_config: [

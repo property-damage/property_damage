@@ -12,7 +12,7 @@ defmodule PropertyDamage.ReplayArtifactTrustTest do
   alias PropertyDamage.Test.Lockstep.{GuardedStepModel, StepAdapter}
   alias PropertyDamage.Test.ReplayFixtures, as: R
 
-  @header "# PropertyDamage replay artifact, format 1"
+  @header "# PropertyDamage replay artifact, format 2"
 
   # A minimal well-formed artifact for F.Model, with `prefix:` holding PAYLOAD.
   defp artifact(payload) do
@@ -21,8 +21,9 @@ defmodule PropertyDamage.ReplayArtifactTrustTest do
     # model: PropertyDamage.Test.ExpansionFor.Model
     %{
       choices: %{"ref" => []},
+      external_markers: [],
       failure: %{kind: :diverged, name: :x, root_index: 0, variant_index: 0},
-      format: 1,
+      format: 2,
       model: PropertyDamage.Test.ExpansionFor.Model,
       prefix: [#{payload}],
       roots: [],

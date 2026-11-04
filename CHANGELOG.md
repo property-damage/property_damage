@@ -11,9 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`mix pd.scaffold --force` overwrites existing files.** Without it, the
   task refuses, names the files that already exist and writes nothing.
-- **`PropertyDamage.shrink_further/2` takes `external_markers:`.** A failure
-  report does not record the run's atom markers, so a re-shrink of a run that
-  named them passes them again.
+- **`PropertyDamage.shrink_further/2` takes `external_markers:`.** The option
+  replaces the atom markers the failure report records.
 - **A simulator and a per-command smoke check in the `pd-model-interview`
   scaffold templates.** The model template gains a simulator built from each
   command's events, so a command that needs existing state is generated. The
@@ -651,6 +650,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: the failure report and the replay artifact record the run's
+  `external_markers:` (DR-061).** Replay, re-shrink, trigger isolation, the
+  exports, `mix pd.replay` and `mix pd.reshrink` use the recorded markers, so a
+  model that relies on atom markers runs its failure again without naming them.
+  The persistence format is version 16 and the artifact format is 2: saved
+  `.pd` and `.pdtrace` files of version 15 or older, and format-1 artifacts, no
+  longer load.
 - **Breaking: `PropertyDamage.IEx.debug_command/3` no longer accepts
   `refs:`.** The option substituted symbolic-ref atoms that no current model
   produces. Pass a command whose fields hold concrete values. Any option
@@ -1298,6 +1304,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`PropertyDamage.Analysis.isolate_trigger/2` no longer special-cases a
+  `CreateAccount` command.** The analysis named a currency mismatch when the
+  trigger read `account_ref` from a command named `CreateAccount` with a
+  `currency` field, a domain rule no framework can know. A currency change
+  now gets the generic message that names the field and both values.
+
 - **BREAKING: `PropertyDamage.Model.Projection.Liveness` is removed.** It
   could not run: listed bare in `check_projections/0` it crashed the engine,
   and listed with options it raised `FunctionClauseError`. To check that an
@@ -1384,6 +1396,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The bundle of a failure page names source files by their path from the
+  project root.** It embedded the absolute local path of each bundled file, so
+  a shared page showed the directory names above the project. A file outside
+  the project is now named by its base name.
 - **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
   an integer field, the candidate values repeated (an original of 1 tried 0
   three times), so `changes` carried duplicate entries. The candidates are now

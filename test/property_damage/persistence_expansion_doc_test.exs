@@ -1,17 +1,18 @@
 defmodule PropertyDamage.PersistenceExpansionDocTest do
-  # A saved report keeps the doc of each realized choice, and a version-15
-  # file saved before an entry could carry a doc still loads: each choice in
-  # its trace has the doc key, set to nil.
+  # A saved report keeps the doc of each realized choice. A version-15 report
+  # or trace saved before an entry could carry a doc is refused, as every file
+  # older than version 16 is (DR-061).
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport, only: [start_recorder: 0]
 
-  alias PropertyDamage.{Expansion, FailureReport, Persistence}
+  alias PropertyDamage.{FailureReport, Persistence}
   alias PropertyDamage.Test.Expansion, as: X
-  alias PropertyDamage.Test.Expansion.{Authorize, Capture, Pay, StaticModel}
+  alias PropertyDamage.Test.Expansion.{Authorize, Capture, Pay}
   alias PropertyDamage.Test.TmpPath
 
-  # The files were written at bf16b8d, before an entry could carry a doc.
+  # The files were written at format version 15, before an entry could carry
+  # a doc.
   @fixtures Path.expand("../support/fixtures/persistence", __DIR__)
   @report Path.join(@fixtures, "v15_expansion_without_doc.pd")
   @trace Path.join(@fixtures, "v15_expansion_trace_without_doc.pdtrace")
@@ -27,62 +28,18 @@ defmodule PropertyDamage.PersistenceExpansionDocTest do
   defp loaded({:ok, value}), do: {value, []}
   defp loaded({:ok, value, warnings}), do: {value, warnings}
 
-  defp expansion_choices(%{expansion: expansion}), do: expansion |> Map.values() |> List.flatten()
-
-  defp assert_no_drift(warnings) do
-    for warning <- warnings do
-      refute inspect(warning) =~ ~r/expansion|doc|missing/i,
-             "unexpected warning: #{inspect(warning)}"
-    end
-  end
-
-  describe "a version-15 report saved before the field" do
-    test "loads, and each choice of its trace has the doc key set to nil" do
+  describe "a version-15 file saved before the field" do
+    test "is refused for a report" do
       assert <<"PD", 15, _rest::binary>> = File.read!(@report)
 
-      {report, warnings} = loaded(Persistence.load(@report))
-      assert_no_drift(warnings)
-
-      choices = expansion_choices(report.trace)
-      assert [_ | _] = choices
-
-      for choice <- choices do
-        assert Map.has_key?(choice, :doc)
-        assert Map.fetch!(choice, :doc) == nil
-      end
+      assert Persistence.load(@report) == {:error, {:unsupported_format_version, 15, 16}}
     end
 
-    test "realizes its carried choices again, each with the doc key" do
-      {report, _warnings} = loaded(Persistence.load(@report))
-      traced = report.trace.expansion["solo"]
-      assert Enum.any?(traced, &(&1.index == 1))
-
-      carried = Expansion.carried(StaticModel, FailureReport.shrunk_sequence(report), traced)
-
-      assert Enum.map(carried.choices, &{&1.root_id, &1.entry}) ==
-               Enum.map(traced, &{&1.root_id, &1.entry})
-
-      for choice <- carried.choices do
-        assert Map.has_key?(choice, :doc)
-        assert Map.fetch!(choice, :doc) == nil
-      end
-    end
-  end
-
-  describe "a version-15 trace saved before the field" do
-    test "loads, and each choice has the doc key set to nil" do
+    test "is refused for a trace" do
       assert <<"PD", 15, _rest::binary>> = File.read!(@trace)
 
-      {trace, warnings} = loaded(Persistence.load_trace(@trace))
-      assert_no_drift(warnings)
-
-      choices = expansion_choices(trace)
-      assert [_ | _] = choices
-
-      for choice <- choices do
-        assert Map.has_key?(choice, :doc)
-        assert Map.fetch!(choice, :doc) == nil
-      end
+      assert Persistence.load_trace(@trace) ==
+               {:error, {:unsupported_format_version, 15, 16}}
     end
   end
 

@@ -217,8 +217,9 @@ defmodule PropertyDamage.Export.ExUnit do
   # ============================================================================
 
   # A report with a replay artifact replays it, on the report's targets (or
-  # the `:targets` given), so the test names the file it reads; any other
-  # report re-runs its seed on one target.
+  # the `:targets` given), so the test names the file it reads, which records
+  # the run's atom markers; any other report re-runs its seed on one target,
+  # with the markers the report records.
   defp generate_run_opts(%FailureReport{replay_path: path} = report, {target, given?})
        when is_binary(path) do
     targets =
@@ -240,6 +241,11 @@ defmodule PropertyDamage.Export.ExUnit do
       "seed: #{report.seed}",
       "max_runs: 1"
     ]
+
+    opts =
+      if report.external_markers == [],
+        do: opts,
+        else: opts ++ ["external_markers: #{inspect(report.external_markers)}"]
 
     {"Run with the exact seed for deterministic reproduction", Enum.join(opts, ",\n          ")}
   end

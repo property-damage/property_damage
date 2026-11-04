@@ -186,7 +186,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
     # The decoded term of a saved file, inspected in full.
     defp saved_text(path) do
       bytes = File.read!(path)
-      assert <<"PD", 15, _checksum::32, term::binary>> = bytes
+      assert <<"PD", 16, _checksum::32, term::binary>> = bytes
       inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     end
 

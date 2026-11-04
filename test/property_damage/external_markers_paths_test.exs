@@ -354,6 +354,39 @@ defmodule PropertyDamage.ExternalMarkersPathsTest do
     end
   end
 
+  describe "a saved report" do
+    @describetag :tmp_dir
+
+    defp save_and_load(report, dir) do
+      {:ok, path} = PropertyDamage.Persistence.save(report, dir)
+
+      case PropertyDamage.Persistence.load(path) do
+        {:ok, loaded} -> loaded
+        {:ok, loaded, _warnings} -> loaded
+      end
+    end
+
+    test "keeps the run's external markers through a save and a load",
+         %{log: log, tmp_dir: dir} do
+      assert {:error, report} = run(ExpansionModel, log, fail: :tracked, shrink: false)
+
+      loaded = save_and_load(report, dir)
+
+      assert Map.get(loaded, :external_markers) == [@marker]
+    end
+
+    test "replays through PropertyDamage.replay/1 with the markers it records",
+         %{log: log, tmp_dir: dir} do
+      assert {:error, report} = run(ExpansionModel, log, fail: :tracked, shrink: false)
+      loaded = save_and_load(report, dir)
+      reset(log)
+
+      assert {:ok, _steps} = PropertyDamage.replay(loaded)
+
+      assert_resolved(log, :tracked)
+    end
+  end
+
   describe "re-shrink" do
     test "shrink_further/2 re-executes with the markers it is given", %{log: log} do
       assert {:error, report} = run(ExpansionModel, log, fail: :tracked, shrink: false)

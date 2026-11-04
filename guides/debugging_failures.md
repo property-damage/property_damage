@@ -247,6 +247,7 @@ The rule reads one line at a time, and the page redacts nothing else.
 - **The target config.** The Reproduction section prints each target's `config:` as written, so `config: %{password: "hunter2"}` appears in the page as `targets: [{MyApp.Adapter, config: %{password: "hunter2"}}]`.
 - **Events and command arguments.** The page prints them in full.
 - **A source file that holds no adapter.** The page does not scan it.
+- **Source paths.** The bundle names each source file by its path from the project root, such as `lib/my_app/adapter.ex`, so the page shows your project's directory and file names but no directory above the project. A file outside the project shows its base name only.
 - **A value on the line after its key.** When a formatter wraps `password:` and puts the string on the next line, the key line ends in `:` and masks nothing. The string stays.
 - **A secret deep in a multi-line map or call.** The reach past a secret-named line is one line. In `%{token: "..."`, `user: "..."`, `host: "..."`, `login: "..."` on four lines, the page masks the `token` and `user` strings and leaves `host` and `login`, because neither line names a secret word.
 - **A name that is not an identifier.** A key such as `"x-api-key"` has hyphens, so it does not count as a secret name.
@@ -403,8 +404,8 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "propert
 
 Every target executes the commands the file records, so the replay needs the
 same `targets:` the report printed. `shrink:` defaults to false under
-`only: [replay: path]`. The artifact does not record `external_markers:`, so a run
-that named it passes the same option to the replaying `run/1` call. A replay that reproduces the failure returns
+`only: [replay: path]`. The artifact records the run's `external_markers:`, so the
+replaying `run/1` call does not repeat them. A replay that reproduces the failure returns
 `{:error, report}`, the same shape as a failing run. A replay that does not
 fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
 `:not_reproduced`. The bank's replay file is
@@ -429,7 +430,7 @@ The artifact is one Elixir literal term, so you can read it and edit an
 argument before you run it again. This is the start of a real one:
 
 ```elixir
-# PropertyDamage replay artifact, format 1
+# PropertyDamage replay artifact, format 2
 # model: CachexBench.Model
 # seed: 3
 # run: 1 (the run this seed generates)
@@ -1127,8 +1128,8 @@ mix pd.reshrink failures/the-failure.pd --strategy exhaustive
 It prints the before/after command counts and, by default, writes nothing. Pass
 `--output PATH` to save the smaller report, or `--overwrite` to replace the input
 file in place. Re-shrinking re-runs the engine, so against a live SUT it exercises
-the service repeatedly. The file does not record `external_markers:`. To re-shrink a
-run that named it, call `shrink_further/2` with the same `external_markers:` option.
+the service repeatedly. The file records the run's `external_markers:`, and the
+re-shrink uses them.
 
 ### Understanding Shrink Stats
 

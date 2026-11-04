@@ -189,13 +189,12 @@ case PropertyDamage.Persistence.load("failures/bug-123.pd") do
 end
 ```
 
-`PropertyDamage.Replay.run/2` takes no `external_markers:` option. A model that
-names atom markers through `external_markers:` and also defines `expansions/0`
-therefore cannot replay those values through `Replay`. Replay it with
-`PropertyDamage.run/1`, passing `only: [replay: path]` and the same
-`external_markers:`. An exported test carries no `external_markers:` either, so
-add the option to it by hand. The model in this guide defines no
-`expansions/0`, so this limit does not apply to it.
+A failure report and its replay artifact record the run's `external_markers:`.
+`PropertyDamage.Replay.run/2`, `PropertyDamage.shrink_further/2`, a replay
+through `PropertyDamage.run/1` with `only: [replay: path]`, and an exported test
+use the recorded markers, so you do not pass them again. An `external_markers:`
+option given to `shrink_further/2` or to the replaying `run/1` call replaces
+the recorded list.
 
 ### Strict Loading
 
