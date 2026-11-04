@@ -27,7 +27,8 @@ defmodule Mix.Tasks.Pd.Replay do
 
   The failure file already records which model and target produced it, so no
   `--model` or `--target` flags are needed. Those modules must be compiled and
-  loadable in the current project, otherwise the file cannot be decoded.
+  loadable in the current project, otherwise the file cannot be decoded. The
+  task compiles the project and starts its applications before the replay.
 
   ## Exit code
 
@@ -40,7 +41,7 @@ defmodule Mix.Tasks.Pd.Replay do
   - **1** when the failure reproduces: a command failed its check or errored
     during execution (*bad*).
   - **125** when the replay could not run at all: the project does not compile,
-    the file fails to load, it records no model or target, the sequence is
+    its applications do not start, the file fails to load, it records no model or target, the sequence is
     branching, or the target's setup failed (the target's `setup/1`, or one of
     the setup commands the replay runs before the first step). The outcome is *indeterminate*, not a reproduction, so `git bisect`
     treats it as *skip* rather than wrongly blaming the commit (*skip*). 125 is
@@ -115,17 +116,26 @@ defmodule Mix.Tasks.Pd.Replay do
     # Ensure the project (and the model/adapter the file references) is compiled
     # before we try to decode terms that name those modules. A commit that does
     # not compile is indeterminate (125 -> bisect skip), never a reproduction.
-    case compile_project() do
-      :ok ->
-        # Compile writes .beam files but does not load them; load the SUT app's
-        # modules so the atoms/structs the failure file references exist before
-        # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
-        TaskSupport.load_project_modules()
-        replay_file(path, verbose)
-
-      :error ->
+    # Then start its applications: an adapter's setup/1 may need a process
+    # one of them starts. A commit whose applications do not start is
+    # indeterminate too.
+    with {:compile, :ok} <- {:compile, compile_project()},
+         {:start, :ok} <- {:start, start_project()} do
+      # Compile writes .beam files but does not load them; load the SUT app's
+      # modules so the atoms/structs the failure file references exist before
+      # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
+      TaskSupport.load_project_modules()
+      replay_file(path, verbose)
+    else
+      {:compile, :error} ->
         print_color(:red, "ERROR: the project failed to compile\n")
         print_hint("Cannot replay at a commit that does not build. (exit 125)")
+        :indeterminate
+
+      {:start, {:error, reason}} ->
+        print_color(:red, "ERROR: the project's applications failed to start\n")
+        IO.puts("  Reason: #{reason}\n")
+        print_hint("Cannot replay at a commit whose applications do not start. (exit 125)")
         :indeterminate
     end
   end
@@ -151,6 +161,17 @@ defmodule Mix.Tasks.Pd.Replay do
     end
   rescue
     _ -> :error
+  end
+
+  # Start the project's applications, mapping a failure to an error instead of
+  # letting it raise or exit (which would read as "bad" under `git bisect run`).
+  defp start_project do
+    Mix.Task.run("app.start")
+    :ok
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    kind, reason -> {:error, Exception.format_banner(kind, reason)}
   end
 
   defp halt_on_status(:ok), do: :ok

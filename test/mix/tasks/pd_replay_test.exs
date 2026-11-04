@@ -309,6 +309,36 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     end
   end
 
+  describe "a fresh mix process" do
+    @root Path.expand("../../..", __DIR__)
+
+    # The test VM has already started every application, so only a new OS
+    # process shows whether the task starts them. The adapter's setup/1 needs
+    # the process the :telemetry application starts.
+    test "starts the project's applications before the replay", %{dir: dir} do
+      {:error, failure} =
+        PropertyDamage.run(
+          model: PropertyDamage.Test.FailingModel,
+          targets: [PropertyDamage.Test.AppProcessAdapter],
+          max_runs: 100,
+          seed: 1,
+          replay_dir: false
+        )
+
+      {:ok, path} = PropertyDamage.save_failure(failure, dir)
+
+      {output, status} =
+        System.cmd("mix", ["pd.replay", path],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 1, output
+      assert output =~ "VERDICT: failure reproduces"
+    end
+  end
+
   describe "argument handling (usage errors exit 2)" do
     test "no arguments returns :usage_error and prints usage" do
       {status, output} = with_output(fn -> Replay.exec([]) end)

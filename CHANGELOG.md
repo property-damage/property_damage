@@ -1404,6 +1404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root.** It embedded the absolute local path of each bundled file, so
   a shared page showed the directory names above the project. A file outside
   the project is now named by its base name.
+- **`mix pd.replay` starts the project's applications.** The task compiled
+  the project but never started it, so an adapter whose `setup/1` needs a
+  process an application starts failed, and `mix pd.bisect` skipped every
+  commit for it. A failure to start is indeterminate (exit 125), like a
+  failure to compile.
 - **`mix pd.integration --hunt` honors `--runs` and runs the health check.**
   The hunt ignored `--runs` and skipped the health check, so a hunt against a
   service with fewer bugs than asked for never ended. `--runs` now caps the

@@ -279,7 +279,7 @@ The system SHALL support step-by-step re-execution of a saved command sequence f
 
 - **WHEN** `mix pd.replay <failure-file>` is run on a saved `.pd` file
 - **THEN** the system SHALL load the failure (reading its recorded model and adapter from the file, requiring no model/adapter flags), re-execute the shrunk sequence through the engine, and print each step with its result
-- **AND** the task SHALL exit `0` only when every step passes (the failure no longer reproduces), `1` when the failure reproduces (any step fails its check or errors during execution), and `125` when the replay cannot run at all (the project does not compile, the file fails to load, it records no model/adapter, or the sequence is branching)
+- **AND** the task SHALL exit `0` only when every step passes (the failure no longer reproduces), `1` when the failure reproduces (any step fails its check or errors during execution), and `125` when the replay cannot run at all (the project does not compile, its applications do not start, the file fails to load, it records no model/adapter, or the sequence is branching)
 - **AND** the `125` exit SHALL distinguish a replay that could not run (indeterminate) from one where the failure reproduces, so `git bisect run` skips such commits rather than marking them bad
 - **AND** a branching (parallel) failure, a load error, or a missing model/adapter SHALL produce a clear message and the `125` exit rather than a crash
 
