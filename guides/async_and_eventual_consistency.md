@@ -733,18 +733,23 @@ defmodule MyTest.PaymentWebhookAdapter do
   @impl true
   def setup(config) do
     # Start a mock webhook server
-    {:ok, server} = Plug.Cowboy.http(
+    # `Plug.Cowboy.shutdown/1` takes the listener ref, not the pid that
+    # `http/3` returns. Name the ref here so `teardown/1` can stop the listener.
+    ref = MyTest.WebhookHandler.HTTP
+
+    {:ok, _pid} = Plug.Cowboy.http(
       MyTest.WebhookHandler,
       [event_queue: config.event_queue, adapter: __MODULE__],
+      ref: ref,
       port: config[:webhook_port] || 4001
     )
 
-    {:ok, %{server: server, event_queue: config.event_queue}}
+    {:ok, %{ref: ref, event_queue: config.event_queue}}
   end
 
   @impl true
-  def teardown(%{server: server}) do
-    Plug.Cowboy.shutdown(server)
+  def teardown(%{ref: ref}) do
+    Plug.Cowboy.shutdown(ref)
     :ok
   end
 
