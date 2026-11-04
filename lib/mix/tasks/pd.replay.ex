@@ -346,12 +346,16 @@ defmodule Mix.Tasks.Pd.Replay do
     end
   end
 
-  defp print_replay_error(:missing_model) do
+  # Prints why a replay could not run, with a hint. Public only so a test can
+  # reach the clauses a replay through the task cannot produce.
+  @doc false
+  @spec print_replay_error(term()) :: :ok
+  def print_replay_error(:missing_model) do
     print_color(:red, "ERROR: the failure file does not record a model\n")
     print_hint("Replay needs the model that produced the failure; this file cannot be replayed.")
   end
 
-  defp print_replay_error(:missing_adapter) do
+  def print_replay_error(:missing_adapter) do
     print_color(:red, "ERROR: the failure file does not record an adapter\n")
 
     print_hint(
@@ -359,7 +363,7 @@ defmodule Mix.Tasks.Pd.Replay do
     )
   end
 
-  defp print_replay_error(:branching_replay_unsupported) do
+  def print_replay_error(:branching_replay_unsupported) do
     print_color(:red, "ERROR: this failure used parallel/branching execution\n")
 
     print_hint(
@@ -367,26 +371,26 @@ defmodule Mix.Tasks.Pd.Replay do
     )
   end
 
-  defp print_replay_error(
-         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :adapter_setup}} =
-           failure
-       ) do
+  def print_replay_error(
+        %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :adapter_setup}} =
+          failure
+      ) do
     print_color(:red, "ERROR: adapter setup failed\n")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
     print_hint("The SUT could not be brought up for replay. Check the adapter's setup/1.")
   end
 
-  defp print_replay_error(
-         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :model}} = failure
-       ) do
+  def print_replay_error(
+        %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :model}} = failure
+      ) do
     print_color(:red, "ERROR: model code failed while the target came up\n")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
     print_hint("The adapter's setup/1 succeeded. Check the model's projections and checks.")
   end
 
-  defp print_replay_error(
-         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :variant}} = failure
-       ) do
+  def print_replay_error(
+        %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :variant}} = failure
+      ) do
     print_color(:red, "ERROR: the variant process died while the target came up\n")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
 
@@ -395,9 +399,7 @@ defmodule Mix.Tasks.Pd.Replay do
     )
   end
 
-  defp print_replay_error(
-         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
-       ) do
+  def print_replay_error(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure) do
     print_color(:red, "ERROR: the setup commands failed\n")
     IO.puts("  At:     #{PropertyDamage.FailureReport.setup_location(failure)}")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
@@ -407,7 +409,7 @@ defmodule Mix.Tasks.Pd.Replay do
     )
   end
 
-  defp print_replay_error(reason) do
+  def print_replay_error(reason) do
     print_color(:red, "ERROR: replay could not run\n")
     IO.puts("  Reason: #{inspect(reason)}")
   end

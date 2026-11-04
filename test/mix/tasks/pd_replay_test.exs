@@ -252,6 +252,17 @@ defmodule Mix.Tasks.Pd.ReplayTest do
       assert output =~ "setup blew up"
     end
 
+    # The task cannot produce this cause, so the message is checked directly.
+    test "a variant process that died while the target came up prints its own hint" do
+      failure = Failure.setup_failed(:variant, detail: :killed)
+
+      output = capture_io(fn -> Replay.print_replay_error(failure) end)
+
+      assert output =~ "ERROR: the variant process died while the target came up"
+      assert output =~ "Reason: :killed"
+      assert output =~ "Look for an outside kill or a crashed linked process."
+    end
+
     test "PropertyDamage.replay/1 returns the setup error instead of raising", %{dir: dir} do
       path = save_failure(dir, FailingModel, RaisingSetupAdapter)
       {:ok, failure} = PropertyDamage.load_failure(path)
