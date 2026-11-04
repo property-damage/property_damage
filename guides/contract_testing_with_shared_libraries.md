@@ -259,8 +259,8 @@ loop writes each string to a file itself.
 
 Regenerating rewrites the test text only. When the report has a replay artifact,
 the generated test names that file by path, and regenerating does not refresh
-the structs inside it. If an upgrade removes or renames a field of a command or
-event struct, the artifact no longer loads: `only: [replay: path]` raises
+the structs inside it. If an upgrade removes or renames a field of a command
+struct, the artifact no longer loads: `only: [replay: path]` raises
 `ArgumentError` with "cannot hold its fields". The artifact is not migrated.
 Run the property again until it fails under the new structs, which writes a new
 artifact, then export that failure again.

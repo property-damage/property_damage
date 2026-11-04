@@ -359,8 +359,9 @@ For programmatic analysis:
   "total_runs": 10,
   "passed": 10,
   "failed": 0,
-  "model": "Elixir.OpenapiBench.Generated.Model",
-  "adapter": "Elixir.OpenapiBench.Generated.Adapter",
+  "model": "OpenapiBench.Generated.Model",
+  "adapter": "OpenapiBench.Generated.Adapter",
+  "duration_ms": 205,
   "failures": []
 }
 ```

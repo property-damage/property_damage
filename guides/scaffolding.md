@@ -329,7 +329,8 @@ projection and the optional expansions.
 2. **Write a state projection with invariants**: this is the part that catches
    bugs. It reduces events into model state and asserts properties with
    `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
-   Catalogs*.
+   Catalogs*. Replace the generated `@moduledoc` of the model and projection
+   and add `@doc` to each check, because the failure report quotes them.
 
 3. **Wire the projection into the model**: fill in the generated
    `Projections.State` (or point `command_sequence_projection/0` at your own
@@ -393,7 +394,7 @@ shrinker reduces it to the minimal reproduction:
 PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 ```
 
-produces a result like this (the keys and values vary with the seed; the `Failure.Check` struct also has `context` and `projection` fields, left out here):
+produces a result like this (the keys and values vary with the seed; the `Failure` and `Failure.Check` structs have more fields (`branch_id`, `context`, `projection`), left out here):
 
 ```elixir
 [

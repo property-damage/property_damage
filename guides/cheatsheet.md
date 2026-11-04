@@ -240,6 +240,10 @@ returns its verdict, an `@eventually` function returns the predicate to poll,
 a `@compare` function returns the value compared. A function carries one kind.
 Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
 and [Differential Testing](differential_testing.md#boundary-observations).
+`@check` and `@eventually` also take `id:` (with an optional `description:`) to
+declare an invariant, or `validates:` to link to one declared with
+`@invariant id: ..., description: ...`; see
+[Coverage and Invariant Catalogs](coverage_and_catalogs.md).
 
 ### @check Syntax
 
@@ -420,7 +424,7 @@ PropertyDamage.run(
   run_nonce: 12345,          # default: random 64-bit; seeds client-minted values, vary it to re-run a plan with fresh values
   coverage: true,            # default: false; adds whole-run command/transition/state coverage to the success stats
   external_markers: [:__external__], # default: []; extra atoms to treat as external() markers
-  shrinker_config: config,   # a ShrinkerConfig struct that tunes shrinking
+  shrinker_config: config,   # a PropertyDamage.Shrinker.Config struct that tunes shrinking
   on_progress: fn progress -> IO.inspect(progress) end, # receives %PropertyDamage.Progress{} updates and a final result
 
   # Branching (branches run one after another; linearizability is checked afterward)
@@ -460,7 +464,7 @@ PropertyDamage.run(
 
   # Seed library (replayed before exploration; see PropertyDamage.SeedLibrary)
   seed_library: true,        # default: false; true uses property_damage_seeds.json, or give a path
-  seed_library_prune_after: 3, # default: 3; passing replays after which a seed leaves the library
+  seed_library_prune_after: 3, # default: 3; consecutive passing replays after which a seed leaves the library
 
   # Regression
   regression: [
