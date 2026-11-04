@@ -38,6 +38,12 @@ denominator. The score is 0.0 when every mutation was killed by an error. A
 low score means your invariants or checks are not pinning down behavior
 tightly enough.
 
+> **Expansions caveat:** for a model with `expansions/0`, mutation targets are
+> still the roots of `commands/0`. The events of an expansion leaf are not
+> mutated. A mutant of a root that every run executes as an expansion is never
+> applied, so the report counts it as survived. Do not read those survivors as
+> weak checks.
+
 Before it mutates a command, `run/1` runs that command once with the unmodified
 adapter. If that baseline run fails with an adapter error, every mutation of
 the command would fail the same way and count as killed by error, which hides
