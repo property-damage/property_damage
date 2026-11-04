@@ -538,6 +538,27 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
     end
   end
 
+  describe "Analysis.isolate_trigger/2 changes" do
+    test "never repeat a {field, fixed} pair" do
+      model =
+        model!(IsolateDistinct,
+          commands: SetupCommands.act_roots(),
+          checks: [SecondActFails],
+          setup: SetupCommands.standard_setup(),
+          teardown: [{Cleanup, overrides: fn state -> %{thing_id: state.user} end}]
+        )
+
+      assert {:error, %FailureReport{} = report} =
+               run(model, [SetupCommands.target("a", start_recorder())], seed: 1, shrink: false)
+
+      assert {:ok, isolation} = Analysis.isolate_trigger(report)
+
+      pairs = Enum.map(isolation.changes, &{&1.field, &1.fixed})
+      assert pairs != []
+      assert pairs == Enum.uniq(pairs)
+    end
+  end
+
   # ==========================================================================
   # Checks that fail on a setup command's event
   # ==========================================================================

@@ -1342,6 +1342,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`PropertyDamage.Analysis.isolate_trigger/2` lists each change once.** For
+  an integer field, the candidate values repeated (an original of 1 tried 0
+  three times), so `changes` carried duplicate entries. The candidates are now
+  distinct.
 - **The integration report prints `n/a` for the pass rate of a result with no
   runs.** The terminal and Markdown reports divided by zero and raised
   `ArithmeticError`.
