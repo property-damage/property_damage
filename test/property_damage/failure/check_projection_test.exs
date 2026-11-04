@@ -301,24 +301,10 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
   end
 
   describe "a saved report" do
-    @persistence Path.expand("../../support/fixtures/persistence", __DIR__)
-
     defp load(path) do
       case Persistence.load(path) do
         {:ok, report} -> report
         {:ok, report, _warnings} -> report
-      end
-    end
-
-    # The two files were written at format version 15, before a failure
-    # carried its projection. Version 16 refuses every older file (DR-061).
-    for {kind, file} <- [
-          {:check_failed, "v15_check_failed_without_projection.pd"},
-          {:poll_timeout, "v15_poll_timeout_without_projection.pd"}
-        ] do
-      test "written before the field existed is refused as format version 15 (#{kind})" do
-        assert Persistence.load(Path.join(@persistence, unquote(file))) ==
-                 {:error, {:unsupported_format_version, 15, 16}}
       end
     end
 

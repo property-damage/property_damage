@@ -1,7 +1,6 @@
 defmodule PropertyDamage.Log.PersistenceTest do
   # Log lines live only in memory (DR-054 decision 9): a saved report or
-  # trace drops them and loads with `logs: %{}`, a version-15 file saved
-  # before the field existed is refused, and no replay artifact or `:compact` output carries a line (the
+  # trace drops them and loads with `logs: %{}`, and no replay artifact or `:compact` output carries a line (the
   # `:json` output prints them under `logs`, in memory only). Every run here
   # logs a sentinel that its config holds only in parts, so a file holding the
   # whole sentinel got it from a line.
@@ -11,13 +10,6 @@ defmodule PropertyDamage.Log.PersistenceTest do
   alias PropertyDamage.Persistence
   alias PropertyDamage.Test.LogFixtures, as: F
   alias PropertyDamage.Test.TmpPath
-
-  # Saved by the format-15 code before reports kept the reference trace,
-  # from a run of two PayAdapter targets compared on this projection.
-  @fixture Path.expand(
-             "../../support/fixtures/persistence/v15_without_reference_fields.pd",
-             __DIR__
-           )
 
   setup do
     dir = TmpPath.unique("pd_log_persistence")
@@ -91,11 +83,6 @@ defmodule PropertyDamage.Log.PersistenceTest do
       end
 
     assert F.field(loaded, :logs) == %{}
-  end
-
-  test "a version-15 file saved before the field existed is refused" do
-    # Version 16 refuses every older file (DR-061).
-    assert Persistence.load(@fixture) == {:error, {:unsupported_format_version, 15, 16}}
   end
 
   test "a replay artifact and the compact output carry no line, the JSON only under logs", %{

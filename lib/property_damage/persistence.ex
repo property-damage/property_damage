@@ -69,17 +69,6 @@ defmodule PropertyDamage.Persistence do
   # key IS drift and should be surfaced.
   @removed_fields []
 
-  # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Version-15 files saved before the reference side of a
-  # comparison failure and the shrink stop existed lack these three; the loader
-  # backfills each with nil (see `backfill_added_fields/1`). Any other absent
-  # field is a genuine shape change worth a warning.
-  @added_fields [:reference_trace, :reference_state_at_failure, :shrink_stop]
-
-  # The same for a divergence (`%Failure.Divergence{}`) saved before it recorded
-  # how long the comparison waited and the bound it waited against.
-  @added_divergence_fields [:waited_ms, :within_ms]
-
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
   # header; a hostile file can claim a multi-gigabyte expansion from a few
@@ -467,16 +456,15 @@ defmodule PropertyDamage.Persistence do
 
   # Log lines live only in memory (DR-054 decision 9): a file is committed, and
   # a line its author forgot to redact would be published. Every trace is
-  # saved with `logs: %{}` and loaded with `logs: %{}`, and a report with
-  # `setup_log: []`, a file saved before either field existed included, so the
-  # format and its version do not change. The report's tag filter
-  # (`log_filter`) is a view of the run and is dropped the same way.
+  # saved with `logs: %{}`, and a report with `setup_log: []`, so a loaded
+  # file holds no line. The report's tag filter (`log_filter`) is a view of
+  # the run and is dropped the same way.
   defp without_logs(%FailureReport{} = report) do
     report
     |> Map.put(:setup_log, [])
     |> Map.put(:log_filter, nil)
-    |> backfill_key(:trace, &without_logs/1)
-    |> backfill_key(:reference_trace, &without_logs/1)
+    |> Map.update!(:trace, &without_logs/1)
+    |> Map.update!(:reference_trace, &without_logs/1)
   end
 
   defp without_logs(%RunTrace{} = trace), do: Map.put(trace, :logs, %{})
@@ -506,10 +494,10 @@ defmodule PropertyDamage.Persistence do
   # V16 format: a report records the run's `external_markers`, which every
   # path that simulates its commands again reads. A v16 report lacking it is
   # refused.
-  # V15 format: a report records the run's `check_mode`, the `campaign` a
+  # As in v15, a report records the run's `check_mode`, the `campaign` a
   # latency budget was judged over (`%{seed:, max_runs:}`, nil for every other
   # kind), the `original_failed_at_index` of the run that found the
-  # failure and the `run_check_fires` of the run the report describes. A v15
+  # failure and the `run_check_fires` of the run the report describes. A
   # report lacking `run`, `replay`, `replay_path` or `check_mode` is refused:
   # the paths that execute a loaded report read them.
   # V14 format: a report records the campaign `run` it failed in, its replay
@@ -549,8 +537,7 @@ defmodule PropertyDamage.Persistence do
 
       case payload[:kind] do
         :run_trace ->
-          trace = payload.trace |> backfill_expansion_choices() |> without_logs()
-          {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
+          {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
 
         _ ->
           report_payload(payload.report, metadata_warnings)
@@ -600,7 +587,6 @@ defmodule PropertyDamage.Persistence do
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
       nil ->
-        report = report |> backfill_added_fields() |> without_logs()
         {:ok, report, warnings ++ check_struct_drift(report)}
 
       field ->
@@ -609,76 +595,6 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp report_payload(report, warnings), do: {:ok, report, warnings ++ check_struct_drift(report)}
-
-  # A report saved before an added field existed holds no key for it, so a dot
-  # access would raise. The key is given the value nil.
-  defp backfill_added_fields(report) when is_struct(report, FailureReport) do
-    @added_fields
-    |> Enum.reduce(report, &Map.put_new(&2, &1, nil))
-    |> backfill_key(:failure_reason, &backfill_failure/1)
-    |> backfill_key(:other_failures, &backfill_others/1)
-    |> backfill_key(:trace, &backfill_trace_outcome/1)
-    |> backfill_key(:reference_trace, &backfill_trace_outcome/1)
-    |> backfill_key(:trace, &backfill_expansion_choices/1)
-    |> backfill_key(:reference_trace, &backfill_expansion_choices/1)
-  end
-
-  defp backfill_added_fields(report), do: report
-
-  # A trace's failed outcome holds the same `%Failure{}` the report does.
-  defp backfill_trace_outcome(%RunTrace{outcome: {:fail, failure}} = trace),
-    do: %{trace | outcome: {:fail, backfill_failure(failure)}}
-
-  defp backfill_trace_outcome(trace), do: trace
-
-  # A choice an expansion made, saved before a choice carried the `doc:` of its
-  # entry or the `function` that returned the entries, holds no `:doc` or
-  # `:function` key. Each is given nil: no doc, and no function name.
-  defp backfill_expansion_choices(%RunTrace{expansion: expansion} = trace)
-       when is_map(expansion) do
-    fill = fn choices ->
-      Enum.map(choices, &(&1 |> Map.put_new(:doc, nil) |> Map.put_new(:function, nil)))
-    end
-
-    %{trace | expansion: Map.new(expansion, fn {name, choices} -> {name, fill.(choices)} end)}
-  end
-
-  defp backfill_expansion_choices(trace), do: trace
-
-  # A divergence, and the divergences listed beside it, saved before the wait
-  # fields existed get each of them as nil. A failed check saved before it
-  # recorded its projection gets that as nil.
-  defp backfill_failure(%Failure{type: %Failure.Divergence{} = type} = failure) do
-    type = Enum.reduce(@added_divergence_fields, type, &Map.put_new(&2, &1, nil))
-    %{failure | type: backfill_other_keys(type)}
-  end
-
-  defp backfill_failure(%Failure{type: %Failure.Convergence{} = type} = failure),
-    do: %{failure | type: backfill_other_keys(type)}
-
-  defp backfill_failure(%Failure{type: %Failure.Check{} = type} = failure),
-    do: %{failure | type: Map.put_new(type, :projection, nil)}
-
-  defp backfill_failure(failure), do: failure
-
-  defp backfill_other_keys(%{other_keys: others} = type),
-    do: %{type | other_keys: backfill_others(others)}
-
-  defp backfill_other_keys(type), do: type
-
-  # A drifted shape may lack the key altogether; the drift check reports it.
-  defp backfill_key(report, key, fun) when is_map_key(report, key),
-    do: Map.update!(report, key, fun)
-
-  defp backfill_key(report, _key, _fun), do: report
-
-  defp backfill_others(others) when is_list(others), do: Enum.map(others, &backfill_other/1)
-  defp backfill_others(others), do: others
-
-  defp backfill_other(%{failure: failure} = other),
-    do: %{other | failure: backfill_failure(failure)}
-
-  defp backfill_other(other), do: other
 
   # Shared decode envelope: verify checksum + size bound, then hand the safely
   # decoded payload to `fun`. Post-checksum ArgumentError means unknown/unloadable
@@ -868,12 +784,9 @@ defmodule PropertyDamage.Persistence do
     current = MapSet.new(Map.keys(current_struct))
     loaded_keys = MapSet.new(Map.keys(loaded))
 
-    # Fields added in a later version are legitimately absent on an older file
-    # (synthesized on load), so they are not "missing" drift.
     missing =
       current
       |> MapSet.difference(loaded_keys)
-      |> MapSet.difference(MapSet.new(@added_fields))
       |> Enum.sort()
 
     unexpected =
