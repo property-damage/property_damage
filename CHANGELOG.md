@@ -1019,9 +1019,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - The model callback `terminate?/3` is `terminate_early?/3`.
     - The command-spec option `with:` is `overrides:`.
     - A retired key raises an error that names its replacement. The messages are:
-      "`assertion_mode:` was renamed `check_mode:`", "`assertions:` was renamed
-      `checks:`" and "Invalid `with:` for command M: `with:` was renamed
-      `overrides:`."
+      "`assertion_mode:` was renamed `check_mode:`" and "Invalid `with:` for
+      command M: `with:` was renamed `overrides:`." The `Statistics` projection
+      ignores unknown options, so `assertions:` raises no error there.
     - The persisted `.pd` format moves to version `8`; older files are refused
       with `{:error, {:unsupported_format_version, version, 8}}`.
     - `mix pd.gen.model` now takes `--check-projections`.
@@ -1036,7 +1036,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kind. Two renames of note: `:ref_resolution_error` → `:placeholder_resolution`
   (the old name referred to the long-deleted `%Ref{}` system), and the
   trigger/check failures unify under one assertion kind (first named
-  `:assertion_failed`, later renamed `:check_failed`; see below), so
+  `:assertion_failed`, later renamed `:check_failed`; see above), so
   `FailureReport.failure_type/1` returns that kind, not a per-source kind,
   and linearization failures report `:linearization`, not `:linearization_failed`).
   The shrinker's failure-equivalence granularity is unchanged — the `{kind, name}`
@@ -1139,7 +1139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computed `Fingerprint.hash/1` for such reports, so similarity clustering should
   be recomputed rather than compared against values cached under the old bug.
 - **Persistence format 2 → 3.** `.pd` files now stamp format version `3`, which
-  tracks the `FailureReport` struct shape. Files of version 1 and 2 loaded at that step; later format bumps refuse them (see the persisted-file entries below). A
+  tracks the `FailureReport` struct shape. Files of version 1 and 2 loaded at that step; later format bumps refuse them (see the persisted-file entries above). A
   file written before the field removal below deserializes losslessly: the two
   removed keys are recognized (not reported as struct-shape drift), and the
   failing command/events remain recoverable via `failure_step/1`, recomputed from
@@ -1165,7 +1165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (read-only IS the `:prefer_remove` shrink hint; there is no separate boolean)
   - `def downstream_observables, do: [...]` → `use PropertyDamage.Command, observables: [...]`
   - `def idempotent?, do: false` → `use PropertyDamage.Command, idempotent: false`
-  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]` (this key was removed later; see `stutter:` `using:` below)
+  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]` (this key was removed later; see `stutter:` `using:` above)
   The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
   `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
   they cannot live in a static map). `Command.build_spec_from_legacy/1`
@@ -1313,7 +1313,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FailureReport.failure_step(report).command` and `.entries` instead (both
   recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
   non-localized failure; the bare event of an entry is `entry.event`). Existing
-  `.pd` files remain loadable (see the persistence 2 → 3 note above).
+  `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
 - **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
   three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,

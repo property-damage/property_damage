@@ -1029,7 +1029,7 @@ IO.puts(diagram)
 # From sequence and event log
 diagram = PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
   title: "Account Creation Flow",
-  highlight_failure: true
+  failed_at_index: 2
 )
 
 # Save to file
@@ -1061,7 +1061,11 @@ sequenceDiagram
 - `:title` - Custom diagram title
 - `:show_state` - Include state participant
 - `:max_value_length` - Truncate long values (default: 50)
-- `:highlight_failure` - Visual failure markers (default: true)
+- `:failed_at_index` - `generate/4` only: the flattened index of the failing
+  command, which marks that step as the failure (`from_failure_report/3` takes
+  the failure point from the report)
+- `:highlight_failure`, `:show_timestamps`, `:show_branches` - Accepted and
+  currently ignored: no renderer reads them
 
 ## Run Comparison
 
@@ -1102,7 +1106,8 @@ fingerprint or model).
 ### Reading the Ranking
 
 Each ranked entry is a `%RunComparison.Field{}` with a `location`
-(`{:command, position, path}` or `{:event, ...}`), a `classification`, a
+(`{:command, position, path}`, `{:event, ...}`, or
+`{:state, position, module, path}` for projection state), a `classification`, a
 `provenance`, and `values` (a `%{trace_index => value}` map):
 
 | Classification | Meaning |
@@ -1606,15 +1611,15 @@ instead of copying it (see [Explaining a failure page](#explaining-a-failure-pag
   PropertyDamage itself. Only meaningful inside this repository.
 
 To use the other `pd-*` skills in your application, copy them from
-the git tag matching your installed version. Skills track the API of their release, so skills from a newer
+the git tag matching your installed version, `v0.3.0` or later (earlier tags carry no `pd-*` skill). Skills track the API of their release, so skills from a newer
 tag may reference APIs your version does not have:
 
 ```bash
-git clone --depth 1 --branch v0.2.0 https://github.com/property-damage/property_damage /tmp/pd
+git clone --depth 1 --branch v0.3.0 https://github.com/property-damage/property_damage /tmp/pd
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 
-Skills are not part of the hex package; this repository is the distribution channel.
+The Hex package ships only `pd-explain` (under `priv/claude/skills`). Every other skill, including `pd-model-interview`, comes from this repository, which is its distribution channel.
 
 ## Architecture
 
