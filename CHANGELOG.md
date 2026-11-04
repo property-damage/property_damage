@@ -1342,6 +1342,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Export.to_exunit/2` accepts a string `module_name:`.** A string wrote
+  `defmodule "Name" do`, which does not parse. Both a string and an atom now
+  write `defmodule Name do`.
 - **The `PropertyDamage.load_failure/1` spec lists the warnings tuple.** The
   function returns `{:ok, report, warnings}` for a file saved by another
   version; the spec and doc now say so.

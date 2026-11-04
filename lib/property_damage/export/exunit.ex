@@ -67,7 +67,7 @@ defmodule PropertyDamage.Export.ExUnit do
     adapter_str = if adapter, do: inspect(adapter), else: "YourAdapter"
 
     """
-    defmodule #{inspect(module_name)} do
+    defmodule #{inspect(normalize_module_name(module_name))} do
       @moduledoc \"\"\"
       Regression test to prevent reintroduction of a previously found bug.
 
@@ -80,6 +80,9 @@ defmodule PropertyDamage.Export.ExUnit do
       alias #{adapter_str}, as: Adapter
     """
   end
+
+  defp normalize_module_name(name) when is_binary(name), do: Module.concat([name])
+  defp normalize_module_name(name), do: name
 
   defp generate_test(report, test_name, target, expect_fixed) do
     seed = report.seed
