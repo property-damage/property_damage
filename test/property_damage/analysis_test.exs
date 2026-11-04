@@ -174,6 +174,35 @@ defmodule PropertyDamage.AnalysisTest do
     end
   end
 
+  describe "format_explanation/1 of a command that reads a placeholder" do
+    test "lists the placeholder fields under Placeholders:" do
+      ph = Placeholder.new_at(Event, [:id], Position.prefix(0), 0)
+
+      seq =
+        [%Producer{}, %Consumer{ref: ph}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(PlaceholderRegistry.register(PlaceholderRegistry.new(), ph))
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:TestCheck, "boom")
+        )
+
+      explanation = Analysis.explain(report)
+      consumer = Enum.find(explanation.commands, &(&1.command_name == "Consumer"))
+      text = Analysis.format_explanation(explanation)
+      assert text =~ "    Placeholders: ref=placeholder:id@"
+      refute text =~ "Refs:"
+
+      label = "placeholder:id@#{inspect(Position.prefix(0))}"
+      assert consumer.placeholders == %{ref: label}
+    end
+  end
+
   # A credit fails unless its currency matches the account's. The credit reads
   # the account id the CreateAccount event minted through a placeholder.
   defmodule Bank do

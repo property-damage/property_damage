@@ -158,7 +158,7 @@ defmodule PropertyDamage.Analysis do
         [
           "[#{cmd.index}] #{cmd.command_name} #{role_marker}",
           "    #{cmd.reason}",
-          format_refs(cmd.refs),
+          format_placeholders(cmd.placeholders),
           ""
         ]
         |> Enum.reject(&is_nil/1)
@@ -209,7 +209,7 @@ defmodule PropertyDamage.Analysis do
            "Kept by shrinking: removing it lost the failure; it may set up state the failing command reads"}
       end
 
-    refs = extract_refs(cmd)
+    placeholders = extract_placeholders(cmd)
 
     %{
       index: idx,
@@ -217,11 +217,11 @@ defmodule PropertyDamage.Analysis do
       command: cmd,
       role: role,
       reason: reason,
-      refs: refs
+      placeholders: placeholders
     }
   end
 
-  defp extract_refs(cmd) do
+  defp extract_placeholders(cmd) do
     cmd
     |> Map.from_struct()
     |> Enum.filter(fn {_k, v} -> match?(%Placeholder{}, v) end)
@@ -234,11 +234,11 @@ defmodule PropertyDamage.Analysis do
     "placeholder:#{path_str}@#{inspect(position)}"
   end
 
-  defp format_refs(refs) when map_size(refs) == 0, do: nil
+  defp format_placeholders(placeholders) when map_size(placeholders) == 0, do: nil
 
-  defp format_refs(refs) do
-    ref_strs = Enum.map(refs, fn {k, v} -> "#{k}=#{v}" end)
-    "    Refs: #{Enum.join(ref_strs, ", ")}"
+  defp format_placeholders(placeholders) do
+    labels = Enum.map(placeholders, fn {k, v} -> "#{k}=#{v}" end)
+    "    Placeholders: #{Enum.join(labels, ", ")}"
   end
 
   defp build_summary(command_explanations, report) do
