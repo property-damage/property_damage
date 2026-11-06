@@ -114,8 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     is formatted, and a 0-arity function is called then.
   - `tags:` is the only option, a literal list of atoms.
   - Every phase that runs user code is a scope: the adapter's `setup/1` and
-    `teardown/1`, every command, every settle and stutter attempt, a
-    nemesis's `inject/2` and `restore/2`, injector and mock setup, and a
+    `teardown/1`, every command, every settle and stutter attempt,
+    injector and mock setup, and a
     mock's `on_command/2` and `on_event/2`, whose lines go under the command
     they are told of. A `Task` the adapter starts logs to its step; a
     process that `setup/1` leaves running does not log under `teardown/1`.
@@ -421,24 +421,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole mocking feature was unreachable through the public API. The
   "Mocking Third-Party Services" guide now documents the wired path end to end.
 
-- **Live network fault injection is now reachable through the engine (DR-038).**
-  The built-in network nemeses (`NetworkLatency`, `NetworkPartition`,
-  `PacketLoss`) discover their Toxiproxy config from the adapter context: return
-  `toxiproxy: %{proxy_name: ..., api_url: ...}` from your adapter's `setup/1` and
-  the fault injects for real against that proxy. Previously the executor built
-  the nemesis context with only `:adapter_context` (never a top-level
-  `:toxiproxy`), so through `PropertyDamage.run` these nemeses *always* ran
-  simulated no matter how the SUT was proxied; live injection was reachable only
-  by hand-calling `inject/2`. Config discovery now checks `context[:toxiproxy]`
-  (top-level, still honored for direct calls) then
-  `context.adapter_context[:toxiproxy]`. The simulated fallback (no config found
-  ⇒ `simulated: true`, no HTTP) is unchanged. The shared plumbing moved to a new
-  `PropertyDamage.Nemesis.Toxiproxy` module (config discovery, `:httpc`
-  post/delete, URL building, status dispatch, live-vs-simulated decision); the
-  three nemeses shrank to a generator, a pure `toxics/1` toxic-spec, and event
-  construction.
-
-- **Generation determinism audit (DR-037).** `PropertyDamage.audit/2` and the
   `mix pd.audit` task prove a model's generation is a pure function of the seed:
   they realize the model's generated sequence twice at each of N seeds through
   the seeded path and assert the two are structurally equal (honest raw equality
@@ -462,8 +444,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed?}` values in flattened reading order. Each step's `entries` are the full
   `EventLog.Entry` structs attributed to the command, in log order, so per-event
   provenance (`source`, `branch_id`; the bare event is `entry.event`) is
-  preserved — a nemesis / mock / stutter event stays distinguishable from SUT
-  output, and the "Command → Event Timeline" (with its CMD/NEM/MOC/STU source
+  preserved — a mock / stutter event stays distinguishable from SUT
+  output, and the "Command → Event Timeline" (with its CMD/MOC/STU source
   badges) is served from `steps/1` rather than a private `event_log` walk. Each
   step also carries a new shared
   `%PropertyDamage.Sequence.Position{section, offset}` (reifying the executor's
@@ -486,14 +468,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stashed state in the run process's process dictionary or relied on `self()` identity must
   thread that state through `user_context` instead. See the `PropertyDamage.Adapter` module
   docs, "Execution process and the per-command timeout".
-- **Nemesis generation dispatch (DR-031).** A Nemesis module listed in a Model's
-  `commands/0` is now selected by weight during sequence generation and produces
-  instances via its `new!/2` callback (Nemesis modules implement `new!/2`, not
-  `generator/1`). Its `precondition/1` acts as a generation-time filter, the
-  Nemesis analogue of a command's `when:`. Previously a weighted Nemesis would
-  fall through to `generator/1` and crash; Nemesis commands only reached the
-  runtime when pre-baked into a sequence. A selected Nemesis without `new!/2` now
-  raises a clear error instead of an opaque `UndefinedFunctionError`.
 - **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
   correlates inbound injector events back to the command that owns them. It
   returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
@@ -532,8 +506,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The generator draws and simulates setup commands before the roots, so
   `overrides:` and `external()` ids flow into later commands, and adding a setup
   command re-draws the roots for a given seed. Setup commands are never compared,
-  expanded or shrunk; stutter and nemesis faults are off (a nemesis module in
-  either callback is a validation error); teardown commands are best effort.
+  expanded or shrunk, and stutter is off; teardown commands are best effort.
 - **`:setup_failed` carries a cause (DR-048).** `PropertyDamage.Failure.Setup`
   gains `cause` (`:adapter_setup`, `:command`, `:check` or
   `:unresolved_placeholder`), `command`, `setup_index`, `field` and `detail`.
@@ -689,16 +662,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Validation names the real injector behavior.** The message for an
   injectable event that no injector emits now reads "not covered by any
   injector adapter @emits" instead of naming a module that does not exist.
-- **Breaking: the network fault event structs moved under their nemesis
-  module.** `NetworkPartitioned` and `NetworkPartitionHealed` moved under
-  `PropertyDamage.Nemesis.NetworkPartition`, `NetworkLatencyInjected` and
-  `NetworkLatencyRestored` under `PropertyDamage.Nemesis.NetworkLatency`, and
-  `PacketLossInjected` and `PacketLossRestored` under
-  `PropertyDamage.Nemesis.PacketLoss`. Each keeps its short name, so
-  `%NetworkPartitioned{}` becomes `%NetworkPartition.NetworkPartitioned{}`
-  after `alias PropertyDamage.Nemesis.NetworkPartition`. The library no
-  longer defines top-level modules. A projection that matches the old names
-  must update its patterns.
 - **Breaking: `Mutation.run/1` returns `{:error, {:baseline_failed, command_module,
   message}}` when the unmutated baseline run fails with an adapter error.**
   Before, every mutation of that command failed the same way and counted as
@@ -1061,7 +1024,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`failure_reason` is a `%PropertyDamage.Failure{}` everywhere it flowed as a
   raw tuple (BREAKING, DR-041).** Every producer (the executor, branching,
-  nemesis, finalization, linearization) now constructs a `%Failure{}`, and every
+  finalization, linearization) now constructs a `%Failure{}`, and every
   consumer reads one: `Shrinker.failure_signature/1` returns a `{kind, name}`
   tuple (was a `%{type:, check_name:}` map) and accepts only a `%Failure{}`;
   `FailureReport.classify_reason/1`, `ErrorOrigin.classify/2`, `Error.format/2`,
@@ -1148,12 +1111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - **`Analysis.generate_test/2` now validates its options** (the previously
       orphaned `format`/`module_name` schema is wired in); the dead
       `:include_setup` option was removed.
-
-- **Breaking: `NetworkPartition` `:full` now cuts both directions (DR-038).** A full
-  partition installs two `bandwidth` toxics at rate `0` (`pd_partition_up` on the
-  upstream, `pd_partition_down` on the downstream); restore removes both.
-  Previously it sent one unqualified `bandwidth` toxic, which Toxiproxy defaults
-  to downstream only, so requests still flowed and only responses were blocked.
 
 - **Breaking: structural failure-query interface (Phase B), callers
   migrated.** Every
@@ -1371,12 +1328,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rollup, and render it with your own dashboard (Phoenix LiveView, an IEx loop, an
   exporter, etc.).
 
-- **BREAKING (DR-038):** removed `NetworkPartition`'s `:asymmetric`
-  `partition_type`. Its documentation ("requests go through, responses blocked")
-  and its implementation were both exactly `:downstream` — duplicate vocabulary
-  for one behavior. Models overriding `partition_type: :asymmetric` must switch
-  to `:downstream`.
-
 - **Breaking: `PropertyDamage.Diff` is removed; use `RunTrace` and
   `RunComparison` (DR-033 to DR-036).** The module was broken by construction:
   it aligned commands by index and never checked that the runs were comparable.
@@ -1403,19 +1354,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
   non-localized failure; the bare event of an entry is `entry.event`). Existing
   `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
-
-- **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
-  three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,
-  `PacketLoss`. Removed `ClockSkew`, `SlowIO`, `CertificateExpiry` (cooperative:
-  a virtual clock / flags the adapter reads via a global no-arg API),
-  `CPUStress`, `MemoryPressure`, `ResourceExhaustion` (host-effect: stress the
-  *local* BEAM/host), and `ProcessKill` (kills a *local* process). These only
-  affected the test harness's own VM, not an external System Under Test driven
-  through an adapter, so they tested the wrong thing; the host-stress ones could
-  also destabilize the run (and, under the new core timeout, manufacture false
-  `CommandTimeoutError`s). To fault an in-process collaborator, do it in your own
-  adapter/command code. This also removes the last shared-global process-dict
-  fault state (the original "per-instance handle" plan is superseded by removal).
 
 ### Fixed
 
@@ -1444,11 +1382,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that read as a result. It now returns
   `{:error, {:baseline_failed, command_module, message}}`, as it does for an
   adapter error.
-- **The built-in network nemeses validate their overrides at generation.**
-  `NetworkPartition.new!/2` copied any `partition_type:` override into the
-  command, so an invalid type crashed with `FunctionClauseError` only at
-  inject time. `NetworkPartition`, `NetworkLatency` and `PacketLoss` now raise
-  `ArgumentError` naming the allowed values when an override is invalid.
 - **`Export.save/4` and `save_all/3` validate their options.** Both passed
   options to the generators unchecked, so a misspelled option was ignored and
   the file was written anyway. `save/4` now validates with the schema of the
@@ -1465,11 +1398,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service with fewer bugs than asked for never ended. `--runs` now caps the
   hunt, and `PropertyDamage.Integration.hunt_bugs/1` takes `:health_check`
   and checks it before the hunt, as `run/1` does.
-- **Every injected fault is lifted at the end of the run.** A fault whose
-  nemesis returns false from `auto_restore?/0` was never recorded as active,
-  so `restore/2` never ran for it, not even at sequence end. The run now
-  restores every still-active fault when the sequence ends; such a fault is
-  still never lifted on a timer.
 - **The regression handler never overwrites a seed library it cannot read.**
   A `:seed_library` file that existed but did not load (corrupt, or written by
   another version) was replaced by a new library holding only the new seed.
@@ -1798,9 +1726,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`mix pd.bisect` reads the verdict of newer git.** It reported "did not
   identify a first bad commit" when git printed the verdict as `<sha> is the
   first 'bad' commit`. Both spellings now parse.
-- **A Nemesis module in `commands/0` passes validation.** Validation demanded
-  `generator/1` and raised before generation ran. It now requires `new!/2` for
-  nemesis modules and `generator/1` for every other command.
 - **`mix pd.audit`, `pd.bisect`, `pd.replay` and `pd.reshrink` print no ANSI
   codes when color is off.** The generated model template emits the canonical
   `{Command, weight: n}` entry.
