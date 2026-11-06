@@ -188,7 +188,6 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       for reason <- [
             Failure.poll_error(:boom),
             Failure.settle_timeout(:nope),
-            Failure.nemesis_error(:down),
             Failure.resource_poller_error(:x),
             Failure.projection_violation(SomeEvent, %RuntimeError{message: "bad transition"})
           ] do

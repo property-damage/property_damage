@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from eight sources:
+  Events can come from seven sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -18,29 +18,25 @@ defmodule PropertyDamage.EventLog.Entry do
      `command_index: nil` since they're not triggered by a specific command,
      and include the `injector_adapter` module that received them.
 
-  3. **Nemesis events** (`:nemesis` source) - Events produced by fault
-     injection commands. These have a `command_index` like command events,
-     plus the `nemesis_module` that produced them.
-
-  4. **Telemetry events** (`:telemetry` source) - Events derived from
+  3. **Telemetry events** (`:telemetry` source) - Events derived from
      OpenTelemetry spans received from the SUT. These include the
      `telemetry_receiver` module and optional `trace_id`/`span_id`.
 
-  5. **Stutter events** (`:stutter` source) - Events from retry executions
+  4. **Stutter events** (`:stutter` source) - Events from retry executions
      during idempotency testing. These are captured but NOT applied to
      projections. They include `stutter_attempt` and `stutter_comparison`.
 
-  6. **Mock events** (`:mock` source) - Events injected by mock service
+  5. **Mock events** (`:mock` source) - Events injected by mock service
      adapters when the SUT calls them. These have a `command_index` indicating
      which command triggered the mock call.
 
-  7. **Injected events** (`:injected` source) - Events emitted mid-execution
+  6. **Injected events** (`:injected` source) - Events emitted mid-execution
      by adapters with `:async` semantics using `runtime.inject.(event)`. These
      update projections immediately when injected, unlike command events which
      batch all events at the end. They have a `command_index` indicating
      which command's adapter injected them.
 
-  8. **Resource poller events** (`:resource_poller` source) - Events injected
+  7. **Resource poller events** (`:resource_poller` source) - Events injected
      by background resource pollers started via `runtime.start_poller.(opts)`.
      These are processed between commands when the EventQueue is drained.
      They have a `command_index` indicating which command started the poller,
@@ -86,9 +82,8 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - One of `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, `:mock`, `:injected`, or `:resource_poller`
+  - `source` - One of `:command`, `:injector`, `:telemetry`, `:stutter`, `:mock`, `:injected`, or `:resource_poller` (see `sources/0`)
   - `injector_adapter` - Module that received the event (only for `:injector` source)
-  - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
   - `trace_id` - Distributed trace ID (only for `:telemetry` source)
   - `span_id` - Span ID within the trace (only for `:telemetry` source)
@@ -111,17 +106,8 @@ defmodule PropertyDamage.EventLog.Entry do
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source:
-            :command
-            | :injector
-            | :nemesis
-            | :telemetry
-            | :stutter
-            | :mock
-            | :injected
-            | :resource_poller,
+          source: source(),
           injector_adapter: module() | nil,
-          nemesis_module: module() | nil,
           telemetry_receiver: module() | nil,
           trace_id: String.t() | nil,
           span_id: String.t() | nil,
@@ -133,6 +119,18 @@ defmodule PropertyDamage.EventLog.Entry do
           fold_index: non_neg_integer() | nil,
           leaf_index: non_neg_integer() | nil
         }
+
+  @sources [:command, :injector, :telemetry, :stutter, :mock, :injected, :resource_poller]
+
+  @typedoc "Where an event came from; see `sources/0`."
+  @type source :: unquote(Enum.reduce(Enum.reverse(@sources), &{:|, [], [&1, &2]}))
+
+  @doc """
+  The sources an entry can name: the ones the engine produces. A saved file
+  whose event log names any other source is refused on load.
+  """
+  @spec sources() :: [source()]
+  def sources, do: @sources
 
   @typedoc "Which part of a run an entry belongs to; see \"Phase\"."
   @type phase :: :setup | :root | :teardown
@@ -150,7 +148,6 @@ defmodule PropertyDamage.EventLog.Entry do
     :event,
     :source,
     :injector_adapter,
-    :nemesis_module,
     :telemetry_receiver,
     :trace_id,
     :span_id,
@@ -268,54 +265,6 @@ defmodule PropertyDamage.EventLog.Entry do
   def injector?(%__MODULE__{}), do: false
 
   @doc """
-  Create a new entry for a nemesis event.
-
-  ## Parameters
-
-  - `event` - The event struct
-  - `command_index` - Index of the nemesis command that produced this event
-  - `nemesis_module` - Module that produced the event
-
-  ## Options
-
-  - `:timestamp` - Override timestamp (default: current monotonic time)
-  - `:branch_id` - Branch identifier for parallel execution
-
-  ## Examples
-
-      iex> entry = PropertyDamage.EventLog.Entry.from_nemesis(%PartitionEvent{}, 3, MyNemesis)
-      iex> entry.source
-      :nemesis
-      iex> entry.nemesis_module
-      MyNemesis
-  """
-  @spec from_nemesis(struct(), non_neg_integer(), module(), keyword()) :: t()
-  def from_nemesis(event, command_index, nemesis_module, opts \\ []) do
-    %__MODULE__{
-      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
-      command_index: command_index,
-      event: event,
-      source: :nemesis,
-      injector_adapter: nil,
-      nemesis_module: nemesis_module,
-      branch_id: Keyword.get(opts, :branch_id)
-    }
-  end
-
-  @doc """
-  Check if an entry is from a nemesis.
-
-  ## Examples
-
-      iex> entry = PropertyDamage.EventLog.Entry.from_nemesis(%SomeEvent{}, 0, MyNemesis)
-      iex> PropertyDamage.EventLog.Entry.nemesis?(entry)
-      true
-  """
-  @spec nemesis?(t()) :: boolean()
-  def nemesis?(%__MODULE__{source: :nemesis}), do: true
-  def nemesis?(%__MODULE__{}), do: false
-
-  @doc """
   Create a new entry for a telemetry event.
 
   ## Parameters
@@ -346,7 +295,6 @@ defmodule PropertyDamage.EventLog.Entry do
       event: event,
       source: :telemetry,
       injector_adapter: nil,
-      nemesis_module: nil,
       telemetry_receiver: telemetry_receiver,
       trace_id: Keyword.get(opts, :trace_id),
       span_id: Keyword.get(opts, :span_id),
@@ -401,7 +349,6 @@ defmodule PropertyDamage.EventLog.Entry do
       event: event,
       source: :stutter,
       injector_adapter: nil,
-      nemesis_module: nil,
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,
@@ -456,7 +403,6 @@ defmodule PropertyDamage.EventLog.Entry do
       event: event,
       source: :mock,
       injector_adapter: nil,
-      nemesis_module: nil,
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,
@@ -515,7 +461,6 @@ defmodule PropertyDamage.EventLog.Entry do
         event: event,
         source: :injected,
         injector_adapter: nil,
-        nemesis_module: nil,
         telemetry_receiver: nil,
         trace_id: nil,
         span_id: nil,
@@ -573,7 +518,6 @@ defmodule PropertyDamage.EventLog.Entry do
       event: event,
       source: :resource_poller,
       injector_adapter: nil,
-      nemesis_module: nil,
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,

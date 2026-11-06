@@ -38,7 +38,6 @@ defmodule PropertyDamage.FailureReport.Context do
   # Kinds whose subject is the command that failed.
   @execution_kinds [
     :adapter_error,
-    :nemesis_error,
     :stutter_execution_failed,
     :resource_poller_error,
     :retry_from_sync_command,

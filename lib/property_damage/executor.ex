@@ -80,7 +80,6 @@ defmodule PropertyDamage.Executor do
     Failure,
     Mint,
     MockServiceRegistry,
-    Nemesis,
     Placeholder,
     PlaceholderRegistry,
     ResourcePoller,
@@ -508,7 +507,6 @@ defmodule PropertyDamage.Executor do
       sequence
       |> Sequence.to_list()
       |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
-      |> restore_remaining_faults(env.adapter_context, env.event_queue)
 
     {ended, nil}
   end
@@ -549,14 +547,7 @@ defmodule PropertyDamage.Executor do
              event_queue
            ) do
         {:ok, new_state} ->
-          # Lift any auto-restoring fault whose duration has elapsed, so a
-          # time-bounded fault stops affecting later commands.
-          {:cont,
-           PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
-             new_state,
-             adapter_context,
-             event_queue
-           )}
+          {:cont, new_state}
 
         {:error, reason, failed_state} ->
           {:halt, {:failed, index, reason, failed_state}}
@@ -583,32 +574,6 @@ defmodule PropertyDamage.Executor do
              check_counters: startup_counters
          }}
     end
-  end
-
-  # Restore any still-active faults at sequence end so none leak past the run.
-  # On success the restore events flow into the reported state; on failure it is
-  # best-effort environment cleanup and the failed state is reported unchanged,
-  # except for the log lines restore/2 wrote, which stay under the injecting
-  # step (DR-054).
-  # Shared with PropertyDamage.Executor.Branching (prefix/suffix end). DR-029.
-  @doc false
-  def restore_remaining_faults(
-        {:failed, index, reason, failed_state},
-        adapter_context,
-        event_queue
-      ) do
-    restored =
-      PropertyDamage.Executor.Nemesis.restore_all_faults(
-        failed_state,
-        adapter_context,
-        event_queue
-      )
-
-    {:failed, index, reason, Map.put(failed_state, :logs, Map.get(restored, :logs, %{}))}
-  end
-
-  def restore_remaining_faults(state, adapter_context, event_queue) do
-    PropertyDamage.Executor.Nemesis.restore_all_faults(state, adapter_context, event_queue)
   end
 
   # ============================================================================
@@ -704,9 +669,8 @@ defmodule PropertyDamage.Executor do
   # state. The outcome is one of:
   #
   #   {:ok, events}      the events the adapter returned (settled events for
-  #                      :probe/:async; the events inject/2 returned for a
-  #                      nemesis command)
-  #   {:error, reason}   the adapter's (or nemesis inject/2's) own error term;
+  #                      :probe/:async)
+  #   {:error, reason}   the adapter's own error term;
   #                      a settle timeout is {:error, {:timeout, last_reason}}
   #                      and a return outside the adapter protocol is
   #                      {:error, return_value}
@@ -738,7 +702,16 @@ defmodule PropertyDamage.Executor do
       command,
       index,
       fn ->
-        execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
+        execute_regular_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          state.mock_registry
+        )
       end,
       leaf_index(state.current_position)
     )
@@ -752,30 +725,6 @@ defmodule PropertyDamage.Executor do
   # command does not (its `every: N` triggers neither count nor fire).
   defp sampling?({:setup, _offset}), do: false
   defp sampling?(_index), do: true
-
-  defp execute_any_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    if Nemesis.nemesis_command?(command) do
-      PropertyDamage.Executor.Nemesis.execute_nemesis_command(
-        command,
-        index,
-        state,
-        model,
-        adapter_context,
-        event_queue
-      )
-    else
-      execute_regular_command(
-        command,
-        index,
-        state,
-        model,
-        adapter,
-        adapter_context,
-        event_queue,
-        state.mock_registry
-      )
-    end
-  end
 
   # The mocks' on_command/2 runs under a scope of its own; its lines go under
   # the command's step (DR-054). A callback that raised, exited or threw comes
@@ -800,7 +749,7 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Execute a regular (non-nemesis) command. The mocks are told of it first;
+  # Execute a command. The mocks are told of it first;
   # a mock's on_command/2 that raised fails the step before the adapter is
   # called, as an adapter error whose detail names the mock and the callback,
   # the shape a raising execute/3 gets.
@@ -1456,7 +1405,6 @@ defmodule PropertyDamage.Executor do
   # changed. Uses struct!/2 so a write to an undeclared field RAISES rather than
   # silently producing a corrupt struct-shaped map (DR-029); the State struct is
   # the single source of truth for the run-state shape.
-  # Shared with PropertyDamage.Executor.Nemesis (active_faults updates). DR-029.
   @doc false
   def put_state(%State{} = state, updates), do: struct!(state, updates)
 
@@ -1744,7 +1692,6 @@ defmodule PropertyDamage.Executor do
   # Legacy wrapper for backward compatibility
   # Maps old check_ctx format to new step_ctx format
   # Now accepts check_mode and check_failures from state
-  # Shared with PropertyDamage.Executor.Nemesis (nemesis-command checks). DR-029.
   @doc false
   def run_checks(
         _model,
@@ -1878,7 +1825,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
   #
   # The asynchronous event paths (resource-poller / injector-adapter events,
-  # mock-service events, nemesis events, and the finalize-time drains) fold
+  # mock-service events, and the finalize-time drains) fold
   # events into projection state. DR-025 additionally evaluates `@check every:`
   # checks on those events, so a violation is reported AT the offending event
   # (with that event's `command_index`) rather than only at the
@@ -2335,7 +2282,6 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   # Resolve placeholders in a command before execution.
-  # Shared with PropertyDamage.Executor.Nemesis (nemesis placeholder resolution). DR-029.
   @doc false
   def resolve_command_placeholders(command, registry, mint \\ {nil, 0}) do
     {run_nonce, mint_epoch} = mint

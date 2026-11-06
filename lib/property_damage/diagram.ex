@@ -243,7 +243,6 @@ defmodule PropertyDamage.Diagram do
         source_indicator =
           case entry.source do
             :command -> ""
-            :nemesis -> " [nemesis]"
             :injector -> " [injected]"
             :mock -> " [mock]"
             _ -> ""
@@ -330,7 +329,6 @@ defmodule PropertyDamage.Diagram do
 
         source_indicator =
           case entry.source do
-            :nemesis -> " **[nemesis]**"
             :injector -> " //[injected]//"
             :mock -> " ''[mock]''"
             _ -> ""

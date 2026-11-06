@@ -78,10 +78,6 @@ defmodule PropertyDamage.Failure.Explain do
     do:
       "Unable to test the system: a resource poller failed while it waited on the system. Look at the poller's error and at whether the system was reachable."
 
-  def meaning(:nemesis_error),
-    do:
-      "Unable to test the system: the fault injector failed to inject or remove a fault. This is a problem in the test environment, not in the system."
-
   def meaning(:placeholder_resolution),
     do:
       "Unable to test the system: a value the system should have created, such as an id, never arrived, so a later command could not use it. Look at the event that should have carried the value."

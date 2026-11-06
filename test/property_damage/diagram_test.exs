@@ -222,25 +222,6 @@ defmodule PropertyDamage.DiagramTest do
   end
 
   describe "event sources" do
-    test "shows nemesis events with indicator" do
-      commands = [%TestCommand{account_id: "acc_1", amount: 100}]
-      sequence = Sequence.linear(commands)
-
-      event_log = [
-        %Entry{
-          timestamp: 1000,
-          command_index: 0,
-          event: %TestEvent{id: "e1", balance: 100},
-          source: :nemesis,
-          nemesis_module: SomeNemesis
-        }
-      ]
-
-      diagram = Diagram.generate(sequence, event_log, :mermaid)
-
-      assert String.contains?(diagram, "[nemesis]")
-    end
-
     test "shows injector events with indicator" do
       commands = [%TestCommand{account_id: "acc_1", amount: 100}]
       sequence = Sequence.linear(commands)

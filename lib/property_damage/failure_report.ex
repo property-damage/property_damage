@@ -980,7 +980,6 @@ defmodule PropertyDamage.FailureReport do
       :poll_error -> "Poll Predicate Error"
       :adapter_error -> "Adapter Error"
       :settle_timeout -> "Settle Timeout"
-      :nemesis_error -> "Fault Injection Error"
       :resource_poller_error -> "Resource Poller Error"
       :stutter_execution_failed -> "Stutter Execution Failed"
       :retry_from_sync_command -> "Sync Command Returned Retry"
@@ -1501,9 +1500,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Failure.Execution{kind: :adapter_error, detail: reason}}),
     do: extract_message(reason)
-
-  defp message_for(%Failure{type: %Failure.Execution{kind: :nemesis_error, detail: reason}}),
-    do: "Fault injection failed: #{inspect(reason)}"
 
   defp message_for(%Failure{
          type: %Failure.Execution{kind: :resource_poller_error, detail: reason}

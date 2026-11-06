@@ -11,8 +11,8 @@ defmodule PropertyDamage.Model.Projection.Statistics do
 
   ## Why Statistical Projections?
 
-  Nemesis can inject latency, but we need **statistical checks** to verify
-  the system handles it gracefully:
+  A system can slow down under load, so a **statistical check** is needed to
+  verify it handles that gracefully:
 
   - A single slow request isn't a bug
   - 50% of requests being slow IS a bug

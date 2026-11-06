@@ -116,15 +116,14 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
           failure_reason: Failure.check_failed(:TestCheck, "boom"),
           event_log: [
             %Entry{timestamp: 1, command_index: 0, event: %CreateOrder{id: 1}, source: :command},
-            # A nemesis event recorded against command 0 (non-nil command_index):
-            # it must render with its NEM badge, not as a bare command output, so
-            # fault injection stays visible.
+            # A mock event recorded against command 0 (non-nil command_index):
+            # it must render with its MOC badge, not as a bare command output, so
+            # the mock's contribution stays visible.
             %Entry{
               timestamp: 2,
               command_index: 0,
               event: %PaymentConfirmed{id: 1},
-              source: :nemesis,
-              nemesis_module: SomeNemesis
+              source: :mock
             }
           ],
           model: TestModel,
@@ -133,7 +132,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
 
       output = strip_ansi(Timeline.format_event_timeline(report, color: false))
 
-      assert output =~ "NEM"
+      assert output =~ "MOC"
       assert output =~ "CMD"
     end
 

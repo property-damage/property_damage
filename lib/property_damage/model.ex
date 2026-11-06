@@ -176,7 +176,7 @@ defmodule PropertyDamage.Model do
 
       Adapter.setup/1
         @check at: :startup checks
-        setup commands            (checks on; stutter and faults off)
+        setup commands            (checks on; stutter off)
         roots 0..n-1              (compared at each root boundary)
         final boundary, then finalization and @check at: :teardown checks
         teardown commands         (no checks; events logged, not folded)
@@ -726,8 +726,7 @@ defmodule PropertyDamage.Model do
 
   @doc """
   Raise an `ArgumentError` when `model` defines a removed lifecycle hook
-  (`setup_each/1`, `teardown_each/1`, `setup_once/0,1`, `teardown_once/0,1`)
-  or lists a nemesis module among its setup or teardown commands.
+  (`setup_each/1`, `teardown_each/1`, `setup_once/0,1`, `teardown_once/0,1`).
 
   Runs before any target is set up, so a stale model fails before it touches a
   system.
@@ -741,16 +740,6 @@ defmodule PropertyDamage.Model do
          end) do
       [] -> :ok
       hooks -> raise ArgumentError, removed_hooks_message(model, hooks)
-    end
-
-    for callback <- [:setup_each, :teardown_each],
-        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
-        module <- Enum.map(apply(model, callback, []), &entry_module/1),
-        is_atom(module) and PropertyDamage.Nemesis.nemesis_module?(module) do
-      raise ArgumentError,
-            "#{inspect(model)}.#{callback}/0 lists the nemesis #{inspect(module)}: " <>
-              "faults are never injected before the first root or during teardown, " <>
-              "so list it in commands/0 instead."
     end
 
     :ok

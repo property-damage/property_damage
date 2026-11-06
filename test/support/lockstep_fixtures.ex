@@ -76,16 +76,6 @@ defmodule PropertyDamage.Test.Lockstep do
     defstruct [:value]
   end
 
-  defmodule FaultInjected do
-    @moduledoc false
-    defstruct [:tag]
-  end
-
-  defmodule FaultRestored do
-    @moduledoc false
-    defstruct [:tag]
-  end
-
   defmodule CloseRequested do
     @moduledoc false
     defstruct [:issue_id]
@@ -215,39 +205,6 @@ defmodule PropertyDamage.Test.Lockstep do
     end
   end
 
-  # A fault whose injection and restoration are reported to the adapter
-  # context's `test_pid`, as `{:fault_injected, tag, pid}` and
-  # `{:fault_restored, tag, pid}`.
-  defmodule TimedFault do
-    @moduledoc false
-    @behaviour PropertyDamage.Nemesis
-
-    alias PropertyDamage.Test.Lockstep
-
-    defstruct duration_ms: 0, tag: :fault
-
-    @impl true
-    def precondition(_state), do: true
-
-    @impl true
-    def inject(%__MODULE__{tag: tag}, context) do
-      Lockstep.notify(context.adapter_context, {:fault_injected, tag, self()})
-      {:ok, [%FaultInjected{tag: tag}]}
-    end
-
-    @impl true
-    def restore(%__MODULE__{tag: tag}, context) do
-      Lockstep.notify(context.adapter_context, {:fault_restored, tag, self()})
-      {:ok, [%FaultRestored{tag: tag}]}
-    end
-
-    @impl true
-    def auto_restore?, do: true
-
-    @impl true
-    def duration_ms(%__MODULE__{duration_ms: duration}), do: duration
-  end
-
   # ==========================================================================
   # Projections
   # ==========================================================================
@@ -259,7 +216,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @impl true
     def init do
-      %{commands: 0, stepped: [], noted: [], polled: [], late: [], probed: [], faults: []}
+      %{commands: 0, stepped: [], noted: [], polled: [], late: [], probed: []}
     end
 
     @impl true
@@ -271,8 +228,6 @@ defmodule PropertyDamage.Test.Lockstep do
     def apply(state, %Polled{id: id}), do: %{state | polled: [id | state.polled]}
     def apply(state, %Late{from: from}), do: %{state | late: [from | state.late]}
     def apply(state, %Probed{value: v}), do: %{state | probed: [v | state.probed]}
-    def apply(state, %FaultInjected{tag: t}), do: %{state | faults: [{:on, t} | state.faults]}
-    def apply(state, %FaultRestored{tag: t}), do: %{state | faults: [{:off, t} | state.faults]}
     def apply(state, _other), do: state
   end
 

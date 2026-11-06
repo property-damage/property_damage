@@ -30,10 +30,10 @@ defmodule PropertyDamage.RunTrace.Step do
   - `entries` — the `EventLog.Entry` structs observed for this command, in log
     order: the log entries whose `(command_index, branch_id)` resolves to this
     step's `position`. Everything *attributed* to the command by its index,
-    including its own output plus any mock / nemesis / stutter events recorded
+    including its own output plus any mock / stutter events recorded
     against it. Full entries (not bare events) are kept so per-event provenance
     survives: each entry carries its `source`
-    (`:command` / `:nemesis` / `:mock` / `:stutter` / `:resource_poller`) and
+    (`:command` / `:mock` / `:stutter` / `:resource_poller`) and
     `branch_id`. The bare event struct is `entry.event`. Injector / telemetry
     events carry no command index and belong to no step (see
     `PropertyDamage.RunTrace.async_entries/1`).

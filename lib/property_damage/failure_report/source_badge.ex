@@ -8,7 +8,6 @@ defmodule PropertyDamage.FailureReport.SourceBadge do
   @badges %{
     command: {"CMD", "\e[32m"},
     injector: {"INJ", "\e[33m"},
-    nemesis: {"NEM", "\e[31m"},
     mock: {"MOC", "\e[35m"},
     stutter: {"STU", "\e[34m"},
     resource_poller: {"POL", "\e[36m"},

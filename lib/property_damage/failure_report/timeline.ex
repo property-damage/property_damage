@@ -404,10 +404,9 @@ defmodule PropertyDamage.FailureReport.Timeline do
   end
 
   # `events` are the full log entries attributed to this command (by
-  # command_index), which INCLUDE command output plus any mock/nemesis/stutter
+  # command_index), which INCLUDE command output plus any mock/stutter
   # events recorded against it — so each is rendered with its source badge and
-  # branch, keeping fault-injected/retry events visually distinct from SUT
-  # output.
+  # branch, keeping retry events visually distinct from SUT output.
   defp format_command_with_events(cmd, idx, events, is_failure, max_events, color) do
     marker = if is_failure, do: " #{red(color)}► FAILURE#{reset(color)}", else: ""
     cmd_name = short_module_name(cmd.__struct__)

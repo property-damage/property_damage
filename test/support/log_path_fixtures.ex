@@ -2,8 +2,8 @@ defmodule PropertyDamage.Test.LogPathFixtures do
   @moduledoc false
   # Fixtures for the paths a log line takes outside a command's `execute/3`
   # (DR-054): a process that the adapter's `setup/1` leaves running, an
-  # injector around a failing adapter setup, a nemesis whose fault outlives
-  # a failing run, and a mock notified of commands and events. They build on
+  # injector around a failing adapter setup, and a mock notified of commands
+  # and events. They build on
   # `PropertyDamage.Test.LogFixtures`, whose events, commands and checks they
   # reuse.
 
@@ -254,86 +254,6 @@ defmodule PropertyDamage.Test.LogPathFixtures do
 
     @impl true
     def teardown(_ctx), do: :ok
-  end
-
-  defmodule Fault do
-    @moduledoc false
-    # An auto-restoring nemesis that logs in inject/2 and restore/2; its
-    # `duration_ms` decides whether a later sweep or the end of the run
-    # lifts it.
-    @behaviour PropertyDamage.Nemesis
-    require PropertyDamage
-
-    defstruct [:tag, duration_ms: 0]
-
-    @impl true
-    def precondition(_state), do: true
-
-    @impl true
-    def new!(_state, overrides) do
-      StreamData.constant(%__MODULE__{
-        tag: Map.get(overrides, :tag, :short),
-        duration_ms: Map.get(overrides, :duration_ms, 0)
-      })
-    end
-
-    @impl true
-    def inject(%__MODULE__{tag: tag}, _ctx) do
-      PropertyDamage.log("inject #{tag}")
-      {:ok, []}
-    end
-
-    @impl true
-    def restore(%__MODULE__{tag: tag}, _ctx) do
-      PropertyDamage.log("restore #{tag}")
-      {:ok, []}
-    end
-
-    @impl true
-    def auto_restore?, do: true
-
-    @impl true
-    def duration_ms(%__MODULE__{duration_ms: duration}), do: duration
-  end
-
-  defmodule FaultCounter do
-    @moduledoc false
-    # Numbers the roots: two faults first, then Acts.
-    @behaviour PropertyDamage.Model.Projection
-
-    @impl true
-    def init, do: %{count: 0}
-
-    @impl true
-    def apply(s, %PropertyDamage.Test.LogFixtures.Act{}), do: %{s | count: s.count + 1}
-    def apply(s, %PropertyDamage.Test.LogPathFixtures.Fault{}), do: %{s | count: s.count + 1}
-    def apply(s, _other), do: s
-  end
-
-  defmodule FaultModel do
-    @moduledoc false
-    # Root 0 injects a fault the next sweep lifts, root 1 one only the end of
-    # the run lifts, every later root is an Act checked by Guard.
-    use PropertyDamage.Model
-
-    alias PropertyDamage.Test.LogFixtures.Act
-    alias PropertyDamage.Test.LogPathFixtures.Fault
-
-    @impl true
-    def commands do
-      [
-        {Fault, when: &(&1.count == 0), overrides: fn _ -> %{tag: :short, duration_ms: 0} end},
-        {Fault,
-         when: &(&1.count == 1), overrides: fn _ -> %{tag: :long, duration_ms: 600_000} end},
-        {Act, when: &(&1.count >= 2), overrides: &%{n: &1.count - 2}}
-      ]
-    end
-
-    @impl true
-    def command_sequence_projection, do: PropertyDamage.Test.LogPathFixtures.FaultCounter
-
-    @impl true
-    def check_projections, do: [PropertyDamage.Test.LogFixtures.Guard]
   end
 
   defmodule NotifiedMock do

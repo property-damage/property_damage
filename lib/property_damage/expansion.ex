@@ -1244,11 +1244,10 @@ defmodule PropertyDamage.Expansion do
   end
 
   # A leaf module is validated the first time this process realizes it: it
-  # must exist and have the callbacks of a command (`generator/1`, or `new!/2`
-  # for a nemesis). A pass is kept in the process dictionary for the rest of
-  # the process, so later realizations skip the check; a failure is never
-  # kept, so every realization of a broken module fails the same way. Each
-  # validation emits `[:property_damage, :expansion, :leaf_validated]`. The
+  # must exist and have the callbacks of a command (`generator/1`). A pass is
+  # kept in the process dictionary for the rest of the process, so later
+  # realizations skip the check; a failure is never kept, so every realization
+  # of a broken module fails the same way. Each validation emits `[:property_damage, :expansion, :leaf_validated]`. The
   # keys of a leaf's `overrides:` depend on the entry, not the module, and are
   # checked at every realization when the leaf's generator is built.
   defp check_leaf_module!(base, key, module, leaf) do

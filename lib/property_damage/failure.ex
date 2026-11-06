@@ -39,7 +39,6 @@ defmodule PropertyDamage.Failure.Execution do
 
   @type kind ::
           :adapter_error
-          | :nemesis_error
           | :stutter_execution_failed
           | :resource_poller_error
           | :poll_error
@@ -285,7 +284,6 @@ defmodule PropertyDamage.Failure do
   | kind | detail | partial_events |
   |------|--------|----------------|
   | `:adapter_error` | the adapter error / exception | events captured before the error (or `nil`) |
-  | `:nemesis_error` | the fault-injection error | `nil` |
   | `:stutter_execution_failed` | the retry failure details | `nil` |
   | `:resource_poller_error` | the poller error | `nil` |
   | `:poll_error` | the error from waiting on a check's poller, such as `:await_timeout` | `nil` |
@@ -369,7 +367,6 @@ defmodule PropertyDamage.Failure do
           | :settle_timeout
           | :projection_violation
           | :adapter_error
-          | :nemesis_error
           | :stutter_execution_failed
           | :resource_poller_error
           | :poll_error
@@ -556,12 +553,6 @@ defmodule PropertyDamage.Failure do
     }
   end
 
-  @doc "A nemesis (fault-injection) command failed to inject or restore."
-  @spec nemesis_error(term()) :: t()
-  def nemesis_error(reason) do
-    %__MODULE__{type: %Execution{kind: :nemesis_error, detail: reason}}
-  end
-
   @doc "A retry attempt during stutter testing raised."
   @spec stutter_execution_failed(term()) :: t()
   def stutter_execution_failed(details) do
@@ -678,7 +669,6 @@ defmodule PropertyDamage.Failure do
 
   @execution_kinds [
     :adapter_error,
-    :nemesis_error,
     :stutter_execution_failed,
     :resource_poller_error,
     :poll_error,

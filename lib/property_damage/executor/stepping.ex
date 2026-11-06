@@ -44,15 +44,14 @@ defmodule PropertyDamage.Executor.Stepping do
   ## Guarantees
 
   `step/4` runs **the single per-command engine path**: placeholder
-  resolution, settle, nemesis, injector/mock events, projections, checks,
+  resolution, settle, injector/mock events, projections, checks,
   stutter, and pollers all run exactly as they do inside a full run. It is the
   same engine primitive the full-run loop uses, so stepping cannot diverge from
   running.
 
-  Two duties of the full-run loop stay with the caller, because a stepping
-  caller may want them at different points: `@check at: :startup` checks
-  before the first command, and lifting auto-restoring faults whose duration
-  elapsed after each command. `PropertyDamage.Variant` does both.
+  One duty of the full-run loop stays with the caller, because a stepping
+  caller may want it at a different point: `@check at: :startup` checks
+  before the first command. `PropertyDamage.Variant` does it.
 
   Stepping assumes a **linear** sequence: each command's position is
   `Position.prefix(index)` (DR-021), where `index` is its 0-based offset. Do not
@@ -169,12 +168,10 @@ defmodule PropertyDamage.Executor.Stepping do
   not rebuild them from the state:
 
     * `{:ok, events}` - the events the adapter returned; for a `:probe` or
-      `:async` command, the settled events; for a nemesis command, the events
-      its `inject/2` returned
-    * `{:error, reason}` - the adapter's own error term (a nemesis command's
-      `inject/2` error likewise). A `:probe`/`:async` command that never
-      settled is `{:error, {:timeout, last_reason}}`, and a return outside the
-      adapter protocol is `{:error, return_value}`.
+      `:async` command, the settled events
+    * `{:error, reason}` - the adapter's own error term. A `:probe`/`:async`
+      command that never settled is `{:error, {:timeout, last_reason}}`, and a
+      return outside the adapter protocol is `{:error, return_value}`.
     * `{:raised, exception}` - `execute/3` raised
     * `:not_called` - a placeholder in the command could not be resolved, so
       the adapter was never called
@@ -544,18 +541,15 @@ defmodule PropertyDamage.Executor.Stepping do
 
   Takes either the last state, or the failed tuple
   `{:failed, index, %PropertyDamage.Failure{}, failed_state}` for a run that
-  stopped at `index` (`nil` when no command was to blame). Faults still active
-  are restored through the context's adapter context first, then the run is
+  stopped at `index` (`nil` when no command was to blame). The run is
   finalized exactly as `PropertyDamage.Executor.run/4` finalizes it: await the
   `@eventually` pollers, settle the queue, run `@check at: :teardown` checks,
   and stop every poller. Returns the result map `Executor.run/4` reports.
   """
   @spec finalize(map() | {:failed, non_neg_integer() | nil, Failure.t(), map()}, Context.t()) ::
           Executor.result()
-  def finalize(state_or_failed, %Context{} = ctx) do
-    state_or_failed
-    |> Executor.restore_remaining_faults(ctx.adapter_context, ctx.event_queue)
-    |> Finalization.finalize_result()
+  def finalize(state_or_failed, %Context{}) do
+    Finalization.finalize_result(state_or_failed)
   end
 
   @doc """

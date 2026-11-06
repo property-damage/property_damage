@@ -13,8 +13,6 @@ defmodule PropertyDamage.Executor.SteppingTest do
   alias PropertyDamage.Test.TestAdapter
 
   alias PropertyDamage.Test.Lockstep.{
-    FaultInjected,
-    FaultRestored,
     GuardedStepModel,
     Ledger,
     Noted,
@@ -26,8 +24,7 @@ defmodule PropertyDamage.Executor.SteppingTest do
     Step,
     StepAdapter,
     StepModel,
-    Stepped,
-    TimedFault
+    Stepped
   }
 
   defp context do
@@ -182,25 +179,19 @@ defmodule PropertyDamage.Executor.SteppingTest do
   end
 
   describe "finalize/2" do
-    test "restores faults still active and returns the finalized run result" do
+    test "returns the finalized run result" do
       ctx = context(StepModel, StepAdapter, %{test_pid: self()})
       state = Stepping.init_state(StepModel)
 
-      {:ok, state, _} =
-        Stepping.step(%TimedFault{duration_ms: 600_000, tag: :long}, 0, state, ctx)
-
-      {:ok, state, _} = Stepping.step(%Step{value: 1}, 1, state, ctx)
-      refute_received {:fault_restored, :long, _}
+      {:ok, state, _} = Stepping.step(%Step{value: 1}, 0, state, ctx)
 
       result = stepping(:finalize, [state, ctx])
 
       assert result.success
-      assert_received {:fault_restored, :long, _}
 
       events = Enum.map(result.event_log, & &1.event)
-      assert [%FaultInjected{tag: :long}, %Stepped{value: 1} | _] = events
-      assert %FaultRestored{tag: :long} in events
-      assert {:command, 1, %Stepped{value: 1}} in entries(result.event_log)
+      assert [%Stepped{value: 1} | _] = events
+      assert {:command, 0, %Stepped{value: 1}} in entries(result.event_log)
     end
   end
 

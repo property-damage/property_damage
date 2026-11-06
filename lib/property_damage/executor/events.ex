@@ -76,7 +76,6 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: source,
             injector_adapter: nil,
-            nemesis_module: nil,
             branch_id: branch_id,
             fold_index: fc
           },
@@ -134,7 +133,6 @@ defmodule PropertyDamage.Executor.Events do
                 event: queue_entry.event,
                 source: :injector,
                 injector_adapter: queue_entry.adapter_module,
-                nemesis_module: nil,
                 branch_id: branch_id
               },
               correlate(queue_entry.event, matchers)
@@ -246,7 +244,6 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: :mock,
             injector_adapter: nil,
-            nemesis_module: nil,
             branch_id: branch_id,
             fold_index: fc
           },

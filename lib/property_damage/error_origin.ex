@@ -214,17 +214,6 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  defp classify_kind(:nemesis_error, failure, _stacktrace) do
-    %{
-      origin: :test_code_error,
-      details: %{
-        reason: "Nemesis (fault injection) command failed",
-        evidence: %{reason: inspect(Failure.detail(failure))},
-        confidence: :medium
-      }
-    }
-  end
-
   defp classify_kind(:stutter_execution_failed, failure, _stacktrace) do
     %{
       origin: :unknown,

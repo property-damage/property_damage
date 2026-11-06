@@ -104,14 +104,6 @@ defmodule PropertyDamage.LifecycleValidationTest do
       assert error.message =~ "nmae"
     end
 
-    test "a nemesis module in setup_each/0 is a validation error naming the callback" do
-      model = model!(Nemesis, setup: [PropertyDamage.Nemesis.NetworkLatency])
-
-      error = assert_raise ArgumentError, fn -> Validation.validate!(model, FixtureAdapter) end
-      assert error.message =~ "setup_each/0"
-      assert error.message =~ "NetworkLatency"
-    end
-
     test "a bare integer weight in teardown_each/0 is rejected naming weight:" do
       model = model!(BareWeight, teardown: [{Login, 3}])
 

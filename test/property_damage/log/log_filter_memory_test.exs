@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Log.LogFilterMemoryTest do
   # A report's tag filter lives only in memory (DR-054 decision 9 extends to
   # it): a saved and loaded report holds none, a version-15 file saved before
-  # the field existed still loads, and the persistence version stays 15.
+  # the field existed still loads, and the persistence version is unchanged.
   use ExUnit.Case, async: false
 
   alias PropertyDamage.Persistence
@@ -23,14 +23,14 @@ defmodule PropertyDamage.Log.LogFilterMemoryTest do
     end
   end
 
-  test "a saved and loaded report holds no filter, and the file is still version 16", %{dir: dir} do
+  test "a saved and loaded report holds no filter, and the file is still version 17", %{dir: dir} do
     report = F.filter_report!(log: [only: [:http], except: [:body]])
 
     assert F.field(report, :log_filter) == [only: [:http], except: [:body]],
            "control: it holds one"
 
     assert {:ok, path} = Persistence.save(report, dir)
-    assert <<"PD", 16, _checksum::32, term::binary>> = File.read!(path)
+    assert <<"PD", 17, _checksum::32, term::binary>> = File.read!(path)
 
     saved = inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     refute saved =~ "only: [:http]"

@@ -27,8 +27,8 @@ defmodule PropertyDamage.Failure.ExplainTest do
   test "every kind of the kind type has a non-empty meaning" do
     kinds = kinds()
 
-    assert length(kinds) == 19
-    assert length(Enum.uniq(kinds)) == 19
+    assert length(kinds) == 18
+    assert length(Enum.uniq(kinds)) == 18
 
     for kind <- kinds do
       meaning = explain().meaning(kind)
@@ -122,11 +122,6 @@ defmodule PropertyDamage.Failure.ExplainTest do
   test "the meaning of resource_poller_error is the agreed text" do
     assert Explain.meaning(:resource_poller_error) ==
              "Unable to test the system: a resource poller failed while it waited on the system. Look at the poller's error and at whether the system was reachable."
-  end
-
-  test "the meaning of nemesis_error is the agreed text" do
-    assert Explain.meaning(:nemesis_error) ==
-             "Unable to test the system: the fault injector failed to inject or remove a fault. This is a problem in the test environment, not in the system."
   end
 
   test "the meaning of placeholder_resolution is the agreed text" do

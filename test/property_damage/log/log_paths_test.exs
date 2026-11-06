@@ -1,10 +1,9 @@
 defmodule PropertyDamage.Log.PathsTest do
   # Log lines from code the engine runs outside a command's `execute/3`
   # (DR-054 decisions 4, 5, 7 and 9): a process the adapter's `setup/1` left
-  # running, an injector around a failing adapter setup on both engines, a
-  # nemesis fault the end of a failed run lifts, and a mock told of commands
-  # and events. Each line prints once, under the point that wrote it, or the
-  # call raises `PropertyDamage.Log.NoScopeError`.
+  # running, an injector around a failing adapter setup on both engines, and
+  # a mock told of commands and events. Each line prints once, under the point
+  # that wrote it, or the call raises `PropertyDamage.Log.NoScopeError`.
   use ExUnit.Case, async: false
 
   alias PropertyDamage.Executor
@@ -17,8 +16,6 @@ defmodule PropertyDamage.Log.PathsTest do
   end
 
   defp listing(report), do: report |> F.plain() |> F.listing(nil)
-
-  defp all_messages(logs), do: logs |> Map.values() |> List.flatten() |> F.messages()
 
   describe "a process started at an inline point" do
     test "cannot log under a later point of the process that started it" do
@@ -155,34 +152,6 @@ defmodule PropertyDamage.Log.PathsTest do
              } = lockstep
 
       assert setup_failure(F.report!(F.Model, [target], @branching)) == lockstep
-    end
-  end
-
-  describe "a nemesis fault still active when the run fails" do
-    test "prints its end-of-run restore/2 line under the injecting step" do
-      target = F.target("alice", %{quiet: true, fail_at: 1})
-      report = F.report!(P.FaultModel, [target], max_commands: 4)
-
-      lines = listing(report)
-      assert P.log_messages(F.block(lines, "[0]")) == ["inject short", "restore short"]
-      assert P.log_messages(F.block(lines, "[1]")) == ["inject long", "restore long"]
-    end
-
-    test "keeps its end-of-run restore/2 line on the linear engine" do
-      commands = [
-        %P.Fault{tag: :short, duration_ms: 0},
-        %P.Fault{tag: :long, duration_ms: 600_000},
-        %F.Act{n: 0, amount: 1},
-        %F.Act{n: 1, amount: 1}
-      ]
-
-      {:ok, result} =
-        Executor.run(commands, P.FaultModel, F.log_adapter(),
-          config: %{name: "alice", quiet: true, fail_at: 1}
-        )
-
-      refute result.success
-      assert Enum.count(all_messages(result.logs), &(&1 == "restore long")) == 1
     end
   end
 

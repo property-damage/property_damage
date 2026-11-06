@@ -25,7 +25,7 @@ defmodule Mix.Tasks.Pd.Validate do
   - Injectable events are covered by injector adapters
   - The model defines no removed lifecycle hook (`setup_each/1`,
     `teardown_each/1`, `setup_once`, `teardown_once`); setup and teardown
-    entries are valid commands and no nemesis
+    entries are valid commands
 
   ### Warnings (validation passes with warnings)
   - Commands that declare no `:observables` in their `command_spec/1`
@@ -376,7 +376,7 @@ defmodule Mix.Tasks.Pd.Validate do
     end
   end
 
-  # A removed lifecycle hook, or a nemesis among the setup or teardown commands.
+  # A removed lifecycle hook.
   defp lifecycle_errors(model) do
     PropertyDamage.Model.check_lifecycle!(model)
     []
