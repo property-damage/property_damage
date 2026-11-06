@@ -757,8 +757,7 @@ in another target breaches `max_ratio:` as infinity; two zeros do not breach.
 
 ### What stays one-target
 
-Branching sequences run against one target: `branching:` with two or more
-targets is an option error. `PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
+`PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
 the report's reference target (with its name and config), and
 `PropertyDamage.replay/2` replays any recorded target. `isolate_trigger/2`
 returns `{:error, :not_applicable}` for a divergence or a failure to converge:

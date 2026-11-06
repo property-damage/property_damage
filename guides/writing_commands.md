@@ -898,7 +898,6 @@ The run stops before any `Adapter.setup/1` when:
 - `expansions/0` lists a module that `commands/0` does not (a setup or teardown
   command is not a root), lists a module twice, or lists a root with
   `execution: :probe`;
-- the run passes `branching:` for a model with `expansions/0`;
 - an expansion function has the wrong arity, or raises, throws or exits (the
   error names the root, and a throw or an exit as `{:throw, value}` or
   `{:exit, reason}`); a leaf's `overrides:` function or generator that raises,

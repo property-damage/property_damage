@@ -163,7 +163,7 @@ end
 | `target expansion:` | `:random` (default), `:identity` or `:reference` (copy the first target, leaf for leaf; error on the first target) |
 | Pick | keyed on the run seed, the target's name and the root; renaming a target picks again |
 | Nothing fits | the root runs as itself, counted `:forced` |
-| Load errors | no `@compare` that reaches the end; a listed module not in `commands/0`; a probe root; `branching:` |
+| Load errors | no `@compare` that reaches the end; a listed module not in `commands/0`; a probe root |
 | Counts | leaves are commands; `@compare`, `max_commands` and `total_commands` count roots |
 | Retired | `{Module, 3}` is an error: write `{Module, weight: 3}` |
 
@@ -389,14 +389,6 @@ PropertyDamage.run(
   shrinker_config: config,   # a PropertyDamage.Shrinker.Config struct that tunes shrinking
   on_progress: fn progress -> IO.inspect(progress) end, # receives %PropertyDamage.Progress{} updates and a final result
 
-  # Branching (branches run one after another; linearizability is checked afterward)
-  branching: [
-    branch_probability: 0.2, # probability of branch point
-    max_branches: 3,         # max branches per branch point
-    max_branch_length: 5,    # max commands per branch
-    min_prefix_length: 3     # min commands before branching
-  ],
-
   # Stutter (idempotency testing)
   stutter: [
     probability: 0.1,        # probability of stuttering each command
@@ -439,7 +431,7 @@ PropertyDamage.run(
 )
 ```
 
-`only:` goes in a call of its own. It runs one of the runs a seed generates, or replays an artifact, and it is an error beside `max_runs:` other than 1 and beside `branching:`. With `replay:`, `seed:` is an error too, because the artifact records the seed.
+`only:` goes in a call of its own. It runs one of the runs a seed generates, or replays an artifact, and it is an error beside `max_runs:` other than 1. With `replay:`, `seed:` is an error too, because the artifact records the seed.
 
 ```elixir
 # Run 3 of the seed alone

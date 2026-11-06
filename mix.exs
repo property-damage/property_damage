@@ -65,7 +65,6 @@ defmodule PropertyDamage.MixProject do
         "guides/async_and_eventual_consistency.md",
         "guides/resource_polling.md",
         "guides/idempotency_testing.md",
-        "guides/parallel_testing.md",
         "guides/mocking_third_parties.md",
         "guides/contract_testing_with_shared_libraries.md",
         "guides/differential_testing.md",
