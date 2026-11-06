@@ -2,7 +2,7 @@ defmodule PropertyDamage.Log do
   @moduledoc """
   Log lines for the failure report (DR-054).
 
-  An adapter, a nemesis or a mock handler calls `PropertyDamage.log/2` to say
+  An adapter or a mock handler calls `PropertyDamage.log/2` to say
   what it did: the request it sent, the response it read, the rows it seeded.
   A line is shown only in a failure report, under the step that wrote it,
   beside that step's events. PropertyDamage never prints a line during a run
@@ -20,8 +20,7 @@ defmodule PropertyDamage.Log do
 
   Every call needs a scope. The engine opens one before it runs user code at
   an execution point: an adapter's `setup/1`, each setup command, each root
-  and each leaf, each settle or stutter attempt, a nemesis's `inject/2` and
-  `restore/2`, mock setup, a mock's `on_command/2` and `on_event/2`, each
+  and each leaf, each settle or stutter attempt, mock setup, a mock's `on_command/2` and `on_event/2`, each
   teardown command and an adapter's `teardown/1`. A mock's `on_command/2`
   and `on_event/2` run under a scope of the command they are told of, so
   their lines print under that command's step. The scope is held by the
@@ -37,8 +36,8 @@ defmodule PropertyDamage.Log do
   step. A call that finds no scope raises `PropertyDamage.Log.NoScopeError`.
 
   Some points run in a process that outlives them: an adapter's `setup/1`
-  and `teardown/1`, injector and mock setup and teardown, a nemesis's
-  `inject/2` and `restore/2`, and a mock's `on_command/2` and `on_event/2`.
+  and `teardown/1`, injector and mock setup and teardown, and a mock's
+  `on_command/2` and `on_event/2`.
   Such a point admits a `$callers` chain only when the process directly
   below its holder in that chain was started by the holder while the point
   ran: the point marks its holder's `$callers` with a token of its own while
@@ -352,7 +351,7 @@ defmodule PropertyDamage.Log do
 
   @doc false
   # Runs `fun` in the calling process as an execution point of its own
-  # (an adapter's setup/1 or teardown/1, a nemesis call) and returns its
+  # (an adapter's setup/1 or teardown/1) and returns its
   # result with the lines it wrote.
   @spec inline((-> result)) :: {result, [Line.t()]} when result: var
   def inline(fun), do: collect(fn sink -> with_scope(writer(sink, 1), fun) end)

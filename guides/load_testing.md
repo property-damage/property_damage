@@ -516,5 +516,4 @@ IO.puts("\n#{LoadTest.summary(report)}")
 ## Next Steps
 
 - [Integration Testing](integration_testing.md) - Correctness testing
-- [Chaos Engineering](chaos_engineering.md) - Fault injection under load
 - [Debugging Failures](debugging_failures.md) - Analyzing test failures

@@ -1,14 +1,13 @@
 defmodule RedisBenchTest do
   @moduledoc """
-  Baseline: the register is linearizable against real Redis with NO faults.
+  Baseline: the register is linearizable against real Redis.
 
   `INCR` is atomic, so a faithful adapter must never violate the read-consistency
-  invariant. This is the green-before-faults baseline; the fault-injection
-  suites build on the same model.
+  invariant.
   """
   use ExUnit.Case, async: false
 
-  test "register reads stay consistent against real Redis (linear, no faults)" do
+  test "register reads stay consistent against real Redis (linear)" do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: RedisBench.Model,

@@ -6,7 +6,7 @@ defmodule PropertyDamage.Variant do
   gets a variant over the same command list, and the variants are advanced
   side by side so their answers can be compared command by command. Each
   variant runs the full per-command engine path (`PropertyDamage.Executor.Stepping`):
-  placeholder resolution, settle, nemesis, injector and mock events, projections,
+  placeholder resolution, settle, injector and mock events, projections,
   checks, stutter and pollers all work exactly as in `PropertyDamage.run/1`.
 
   ## Lifecycle
@@ -72,8 +72,7 @@ defmodule PropertyDamage.Variant do
   ## Engine duties outside `Stepping`
 
   Setup runs the model's `@check at: :startup` checks after the adapter's
-  `setup/1` and before command 0, and every step is followed by lifting the
-  auto-restoring faults whose duration elapsed, as the linear engine does. A
+  `setup/1` and before command 0, as the linear engine does. A
   one-variant run therefore folds the same events in the same order as
   `PropertyDamage.Executor.run/4` on the same sequence.
 
@@ -385,7 +384,7 @@ defmodule PropertyDamage.Variant do
   of the adapter's `execute/3`, every retry of a `:probe` or `:async` command
   and the waits between them included, and nothing after the adapter answered
   (projections, checks and stutter are not timed). A command that never reached
-  the adapter (a nemesis command, an unresolved placeholder) has no entry.
+  the adapter (an unresolved placeholder) has no entry.
   """
   @spec latencies(pid()) :: [
           {non_neg_integer() | {non_neg_integer(), non_neg_integer()}, non_neg_integer()}
@@ -1070,16 +1069,8 @@ defmodule PropertyDamage.Variant do
     end
   end
 
-  # Lift faults whose duration elapsed, as the linear engine does after every
-  # command, and hand any new pollers to the guardian.
+  # Hand any new pollers to the guardian.
   defp after_step(state, exec, index) do
-    exec =
-      Executor.Nemesis.restore_elapsed_faults(
-        exec,
-        state.ctx.adapter_context,
-        state.event_queue
-      )
-
     guard_pollers(%{state | exec: exec, next: index + 1})
   end
 
@@ -1189,9 +1180,8 @@ defmodule PropertyDamage.Variant do
   defp logs(%{exec: nil} = state), do: state.logs
   defp logs(state), do: Map.merge(step_logs(state), state.logs)
 
-  # A finished run's result also holds the lines its finalization wrote (the
-  # end-of-run restore/2 of a fault still active), which the executor state
-  # does not.
+  # A finished run's result also holds the lines its finalization wrote, which
+  # the executor state does not.
   defp step_logs(%{result: %{logs: logs}, exec: exec}),
     do: PropertyDamage.Log.merge(logs, exec.logs)
 

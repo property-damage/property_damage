@@ -24,10 +24,11 @@ defmodule PropertyDamage.MixProject do
 
   def application do
     [
-      # :inets provides :httpc, which the built-in network nemeses use to drive
-      # the Toxiproxy control API; :ssl is listed so its modules (public_key et
-      # al.) are on the code path, since httpc computes SSL verify defaults when
-      # building request options even for a plain-HTTP request.
+      # :inets provides :httpc, the HTTP client that the health check in
+      # `PropertyDamage.Integration` and the scaffold task use when Req is not
+      # installed; :ssl is listed so its modules (public_key et al.) are on the
+      # code path, since httpc computes SSL verify defaults when building
+      # request options even for a plain-HTTP request.
       extra_applications: [:logger, :inets, :ssl]
     ]
   end
@@ -65,7 +66,6 @@ defmodule PropertyDamage.MixProject do
         "guides/resource_polling.md",
         "guides/idempotency_testing.md",
         "guides/parallel_testing.md",
-        "guides/chaos_engineering.md",
         "guides/mocking_third_parties.md",
         "guides/contract_testing_with_shared_libraries.md",
         "guides/differential_testing.md",
@@ -90,8 +90,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Model.Projection.Statistics,
           PropertyDamage.Model.Simulator,
           PropertyDamage.Adapter,
-          PropertyDamage.Adapter.Injector,
-          PropertyDamage.Nemesis
+          PropertyDamage.Adapter.Injector
         ],
         Generation: [
           PropertyDamage.External,
@@ -113,11 +112,6 @@ defmodule PropertyDamage.MixProject do
         Shrinking: [
           PropertyDamage.Shrinker,
           PropertyDamage.Shrinker.Config
-        ],
-        "Fault Injection": [
-          PropertyDamage.Nemesis.NetworkLatency,
-          PropertyDamage.Nemesis.NetworkPartition,
-          PropertyDamage.Nemesis.PacketLoss
         ],
         "Diagnostics & Reporting": [
           PropertyDamage.FailureReport,

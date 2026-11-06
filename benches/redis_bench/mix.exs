@@ -14,7 +14,7 @@ defmodule RedisBench.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :inets]
+      extra_applications: [:logger]
     ]
   end
 
@@ -25,8 +25,8 @@ defmodule RedisBench.MixProject do
     ]
   end
 
-  # Friction-free infra lifecycle: `mix test` brings the dedicated Redis +
-  # Toxiproxy stack up (idempotent: a no-op when already healthy), then runs.
+  # Friction-free infra lifecycle: `mix test` brings the dedicated Redis
+  # container up (idempotent: a no-op when already healthy), then runs.
   # Tear down explicitly with `mix bench.db.down` when you are done. If
   # PD_REDIS_URL is set (e.g. in CI with service containers), the container
   # step is skipped and the bench points at that endpoint instead.

@@ -19,7 +19,6 @@ defmodule PropertyDamage.Executor.StateTest do
     :check_mode,
     :active_pollers,
     :active_resource_pollers,
-    :active_faults,
     :async_halt,
     :branch_id,
     :current_position,
@@ -55,9 +54,8 @@ defmodule PropertyDamage.Executor.StateTest do
     end
   end
 
-  test "the ghost fields default sanely (active_faults => %{}, async_halt => nil)" do
+  test "the ghost field defaults sanely (async_halt => nil)" do
     state = minimal_state()
-    assert state.active_faults == %{}
     assert state.async_halt == nil
   end
 

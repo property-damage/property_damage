@@ -10,15 +10,13 @@ defmodule PropertyDamage.Executor.Branching do
   # observed events while satisfying the checks).
   #
   # The per-command/linear spine stays in PropertyDamage.Executor and is called
-  # back: execute_command and restore_remaining_faults. The executor builds the
+  # back: execute_command. The executor builds the
   # initial state, runs the startup checks and the setup commands before
   # calling execute_body/6, and finalizes and runs the teardown commands after
-  # it. Event folds come from Executor.Events and auto-restore from
-  # Executor.Nemesis.
+  # it. Event folds come from Executor.Events.
 
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.Events
-  alias PropertyDamage.Executor.Nemesis
   alias PropertyDamage.Failure
   alias PropertyDamage.Linearization
   alias PropertyDamage.Placeholder
@@ -57,12 +55,7 @@ defmodule PropertyDamage.Executor.Branching do
                event_queue
              ) do
           {:ok, new_state} ->
-            {:cont,
-             Nemesis.restore_elapsed_faults(
-               new_state,
-               adapter_context,
-               event_queue
-             )}
+            {:cont, new_state}
 
           {:error, reason, failed_state} ->
             {:halt, {:failed, index, reason, failed_state}}
@@ -71,11 +64,7 @@ defmodule PropertyDamage.Executor.Branching do
 
     case prefix_result do
       {:failed, index, reason, state} ->
-        {Executor.restore_remaining_faults(
-           {:failed, index, reason, state},
-           adapter_context,
-           event_queue
-         ), nil}
+        {{:failed, index, reason, state}, nil}
 
       prefix_state ->
         # Phase 2: Execute branches from forked state
@@ -124,20 +113,14 @@ defmodule PropertyDamage.Executor.Branching do
                        event_queue
                      ) do
                   {:ok, new_state} ->
-                    {:cont,
-                     Nemesis.restore_elapsed_faults(
-                       new_state,
-                       adapter_context,
-                       event_queue
-                     )}
+                    {:cont, new_state}
 
                   {:error, reason, failed_state} ->
                     {:halt, {:failed, index, reason, failed_state}}
                 end
               end)
 
-            {Executor.restore_remaining_faults(suffix_result, adapter_context, event_queue),
-             linearization}
+            {suffix_result, linearization}
 
           {:error, branch_id, index, reason, state} ->
             {{:failed, index, Failure.in_branch(reason, branch_id), state}, nil}

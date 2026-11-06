@@ -36,7 +36,6 @@ defmodule PropertyDamage.VariantTest do
     StepAdapter,
     StepModel,
     Stepped,
-    TimedFault,
     Use,
     WebhookInjector
   }
@@ -262,42 +261,8 @@ defmodule PropertyDamage.VariantTest do
   end
 
   describe "engine duties inside a variant" do
-    test "an elapsed fault is restored after the step it outlived, in the variant process" do
-      [target] = step_targets(["solo"])
-
-      commands = [
-        %TimedFault{duration_ms: 0, tag: :brief},
-        %Step{value: 1},
-        %TimedFault{duration_ms: 600_000, tag: :long},
-        %Step{value: 2}
-      ]
-
-      v = start_ready_variant(target, StepModel, commands)
-
-      {:ok, _} = advance_to(v, 0)
-      assert_received {:fault_injected, :brief, ^v}
-      assert_received {:fault_restored, :brief, ^v}
-
-      {:ok, _} = advance_to(v, 3)
-      assert_received {:fault_injected, :long, ^v}
-      refute_received {:fault_restored, :long, _}
-
-      # Finalizing restores the faults still active, in the variant process.
-      result = finish(v)
-      assert result.success
-      assert_received {:fault_restored, :long, ^v}
-
-      :ok = stop_variant(v)
-    end
-
-    test "a run with nemesis commands equals the linear engine's run" do
-      commands = [
-        %Step{value: 1},
-        %TimedFault{duration_ms: 0, tag: :a},
-        %Step{value: 2},
-        %TimedFault{duration_ms: 600_000, tag: :b},
-        %Step{value: 3}
-      ]
+    test "a run of several commands equals the linear engine's run" do
+      commands = [%Step{value: 1}, %Step{value: 2}, %Step{value: 3}]
 
       assert_same_as_executor(commands, StepModel, StepAdapter, %{name: "solo"})
     end

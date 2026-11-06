@@ -200,25 +200,6 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  defp format_failure(:nemesis_error, failure, context) do
-    cmd_info = format_command_info(context)
-
-    """
-    Nemesis Error
-    #{cmd_info}
-    Error: #{format_message(PropertyDamage.Failure.detail(failure))}
-
-    A fault injection (nemesis) command failed to inject or restore.
-    This is usually an infrastructure issue, not a SUT bug.
-
-    Suggestions:
-      - Verify fault injection infrastructure (toxiproxy, etc.)
-      - Check nemesis command implementation
-      - Ensure restore can run even if inject partially failed
-    """
-    |> String.trim()
-  end
-
   defp format_failure(:diverged, failure, context) do
     cmd_info = format_command_info(context)
     detail = PropertyDamage.Failure.detail(failure)

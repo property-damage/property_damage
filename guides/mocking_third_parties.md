@@ -3,20 +3,11 @@
 How to control external API behavior during property-based tests using
 `PropertyDamage.MockServiceAdapter`.
 
-## When to Use What
+## When to Use It
 
-| Scenario | Tool | Examples |
-|----------|------|---------|
-| Application-level responses | **MockServiceAdapter** | Payment declined, email bounced, API rate limit |
-| Infrastructure-level faults | **Nemesis** | Network partition, latency spike, DNS failure |
-
-**Decision rule:** Is the fault something the external API returns (HTTP 402,
-timeout response, error body)? Use MockServiceAdapter. Is the fault something
-that prevents the call from completing (network down, connection refused)?
-Use Nemesis.
-
-MockServiceAdapter controls what the third-party API *says*.
-Nemesis controls whether the third-party API is *reachable*.
+Use `MockServiceAdapter` for what a third-party API *says*: a payment
+declined, an email bounced, an API rate limit. It controls the responses the
+system under test receives from the service.
 
 ## MockServiceAdapter Behaviour
 
@@ -462,8 +453,3 @@ end
 5. **Document mock behaviors.** Each behavior value (`:success`, `:decline`,
    `:timeout`) should have a clear, testable meaning. If you find yourself
    adding many behavior variants, consider whether some are redundant.
-
-6. **Combine with Nemesis for full coverage.** MockServiceAdapter handles
-   application-level failures (declined, invalid response). Nemesis handles
-   infrastructure failures (network partition, latency). Use both together
-   for comprehensive resilience testing.

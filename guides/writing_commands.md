@@ -573,9 +573,8 @@ A setup list is a sequence, not a pick list. The same holds for a teardown list.
   and each entry follows its own rules.
 - The engine keeps placeholder resolution, projections, pollers, injectors,
   the per-command settle and retry, and checks on during setup commands.
-  Stutter and nemesis faults are off, because they would test the fixture
-  instead of the property, so a nemesis module in either callback is a
-  validation error. No latency sample is recorded for a setup command.
+  Stutter is off, because it would test the fixture instead of the property.
+  No latency sample is recorded for a setup command.
 - Sampling counters (`every: N`) start at the first root: setup commands never
   advance them.
 

@@ -666,10 +666,8 @@ Health check (...)... ✗ FAILED
 
 - Look for time-dependent behavior or shared state not reset between runs
 - Use a `:reset_fn`, or reset the service in an idempotent `Adapter.setup/1`
-- See [Chaos Engineering](chaos_engineering.md) to deliberately surface races
 
 ## Next Steps
 
 - [Writing Effective Invariants](writing_invariants.md) - Improve test quality
 - [Debugging Failures](debugging_failures.md) - Analyze and fix bugs
-- [Chaos Engineering](chaos_engineering.md) - Fault injection testing

@@ -249,7 +249,6 @@ defmodule PropertyDamage.InjectionTest do
       assert entry.command_index == 5
       assert entry.event == event
       assert entry.injector_adapter == nil
-      assert entry.nemesis_module == nil
     end
 
     test "supports branch_id option" do

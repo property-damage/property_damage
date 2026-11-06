@@ -25,7 +25,7 @@ and `partial_events/1` accessors.
 
 - **WHEN** a run fails
 - **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
-- **AND** `:execution` for a command-execution failure (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
+- **AND** `:execution` for a command-execution failure (`:adapter_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
 - **AND** `:framework` for a framework-level failure (`:placeholder_resolution`, `:unknown`)
 
 #### Scenario: Report views derive from the failure reason
@@ -298,7 +298,7 @@ The system SHALL produce structured failure reports containing location (run num
 - **WHEN** a `FailureReport` is inspected structurally
 - **THEN** `FailureReport.steps/1` SHALL delegate to `RunTrace.steps/1` (DR-033) on the report's embedded trace, returning the run as an ordered list of `%RunTrace.Step{position, flattened_index, command, executed_command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order; `command` is the plan's symbolic command (unchanged semantics for existing consumers) and `executed_command` is the concrete resolved command actually sent (`nil` when not captured, e.g. a command that never executed)
 - **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
-- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a nemesis / mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
+- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
 - **AND** at most one step SHALL have `failed?: true`: the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
 - **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
@@ -579,10 +579,6 @@ The `:terminal` and `:markdown` reports SHALL print every log line of the report
 - **WHEN** the adapter's `setup/1` logs and then fails
 - **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note, on the lockstep and the branching path alike
 - **AND** the lines of the target's injector and mock setup and teardown SHALL print once each, under the `adapter setup/1` and `adapter teardown/1` notes
-
-#### Scenario: A fault lifted at the end of a failed run shows its restore line
-- **WHEN** a nemesis fault is still active when the run fails, and its `restore/2` logs at the end of the run
-- **THEN** the report SHALL print that line under the nemesis step that injected the fault
 
 #### Scenario: A shrunk report shows the reported run's lines only
 - **WHEN** a failure is shrunk

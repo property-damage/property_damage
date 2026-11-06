@@ -55,10 +55,10 @@ defmodule PropertyDamage.Persistence do
   file holds.
   """
 
-  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 16
+  @version 17
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -496,6 +496,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V17 format: the fault-injection event source and failure kind are gone, and
+  # a loaded file whose event log names a source the engine does not produce is
+  # refused.
   # V16 format: a report records the run's `external_markers`, which every
   # path that simulates its commands again reads. A v16 report lacking it is
   # refused.
@@ -538,20 +541,24 @@ defmodule PropertyDamage.Persistence do
   # folding or trace synthesis. A standalone trace payload returns the trace.
   defp decode(<<"PD", @version::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
-      metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
+      with :ok <- check_event_sources(payload) do
+        metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
-      case payload[:kind] do
-        :run_trace ->
-          trace = without_logs(payload.trace)
-          {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
+        case payload[:kind] do
+          :run_trace ->
+            trace = without_logs(payload.trace)
+            {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
 
-        _ ->
-          report_payload(payload.report, metadata_warnings)
+          _ ->
+            report_payload(payload.report, metadata_warnings)
+        end
       end
     end)
   end
 
-  # Pre-v16 files (format versions 1-15) are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-16 are refused (DR-041, following DR-039/DR-040).
+  # A v16 file may carry the fault-injection event source or failure kind,
+  # which v17 dropped.
   # A v15 report does not record the run's `external_markers`, so a replay or
   # re-shrink of a run that named atom markers cannot simulate its commands
   # again (DR-061).
@@ -583,6 +590,36 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp decode(_), do: {:error, :invalid_format}
+
+  # Every event-log entry of a loaded report (its trace and, when present, its
+  # reference trace) or standalone trace must name a source the engine
+  # produces. A file naming any other source is refused rather than loaded.
+  defp check_event_sources(payload) do
+    traces =
+      case payload[:kind] do
+        :run_trace -> [payload[:trace]]
+        _ -> report_traces(payload[:report])
+      end
+
+    traces
+    |> Enum.flat_map(&trace_sources/1)
+    |> Enum.find(&(&1 not in Entry.sources()))
+    |> case do
+      nil -> :ok
+      source -> {:error, {:unknown_event_source, source}}
+    end
+  end
+
+  defp report_traces(report) when is_map(report),
+    do: [Map.get(report, :trace), Map.get(report, :reference_trace)]
+
+  defp report_traces(_report), do: []
+
+  defp trace_sources(%{event_log: log}) when is_list(log) do
+    for %{source: source} <- log, do: source
+  end
+
+  defp trace_sources(_trace), do: []
 
   # A report must carry the fields the paths that execute a loaded report
   # read: the replay artifact term (nil when it has none), its path, the

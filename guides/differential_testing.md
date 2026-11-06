@@ -469,7 +469,7 @@ Target B: cmd1 → cmd2 → cmd3
 
 Each target runs as a **variant**: its own process, with its own projections,
 event queue, injectors, mocks and pollers. A variant runs the full engine, so
-checks, settle, stutter and nemesis work as they do in `PropertyDamage.run/1`.
+checks, settle and stutter work as they do in `PropertyDamage.run/1`.
 
 A run stops at the first boundary where a target's observation still differs
 from the reference's at the convergence bound. That is a divergence, and it is a
@@ -647,7 +647,7 @@ failure and for a startup check, which belong to no command.
 | `:diverged` | Ready sides of a `@compare` observation differ at the convergence bound. |
 | `:did_not_converge` | A side of a `@compare` observation is still pending at the convergence bound. |
 | `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too, and so does a failing setup command: one whose adapter answered `{:error, _}` or raised, a setup `@check` that failed, or a placeholder that stayed unresolved. A setup failure is not shrunk. |
-| `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a nemesis, stutter or placeholder step failed. |
+| `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a stutter or placeholder step failed. |
 | `:latency_exceeded` | A `latency:` budget was breached. It is judged once at the end of the run and is not shrunk (see [Latency](#latency)). |
 
 ### Adapter errors
@@ -1038,5 +1038,4 @@ PropertyDamage.run(
 - See the `PropertyDamage.run/1` docs for the full API, and `PropertyDamage.FailureReport` for the report
 - [Writing Invariants](writing_invariants.md#comparing-targets-with-compare) for `@compare` and the `==` traps
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) for settle, convergence and `@eventually`
-- Read about [Chaos Engineering](chaos_engineering.md) for fault injection
 - Use [Integration Testing](integration_testing.md) for live service testing

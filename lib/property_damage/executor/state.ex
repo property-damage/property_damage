@@ -9,11 +9,11 @@ defmodule PropertyDamage.Executor.State do
   This replaces the former untyped flat map. With `Executor.put_state/2` rewritten
   to `struct!/2` and the in-loop updates using struct-update syntax, a write to an
   **undeclared** field now raises instead of silently producing a corrupt
-  struct-shaped map (`Map.merge/2` onto a struct does not raise). The two fields
-  that previously existed only as "ghosts" (entering solely via `Map.put` writes
-  and `Map.get(state, k, default)` reads, never initialized in
-  `build_initial_state/7`) are declared here with explicit defaults:
-  `:active_faults` and `:async_halt`.
+  struct-shaped map (`Map.merge/2` onto a struct does not raise). A field
+  that previously existed only as a "ghost" (entering solely via `Map.put`
+  writes and `Map.get(state, k, default)` reads, never initialized in
+  `build_initial_state/7`) is declared here with an explicit default:
+  `:async_halt`.
 
   ## Fields
 
@@ -50,7 +50,6 @@ defmodule PropertyDamage.Executor.State do
     * `:branch_id` - current branch id during branching (`nil` on the linear path)
     * `:active_pollers` - running `@eventually` pollers
     * `:active_resource_pollers` - running resource pollers
-    * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
     * `:async_halt` - `{name, projection, reason, command_index}` set when a DR-025 async
       `every:` check trips during a `@eventually` await drain (ghost field)
     * `:async_failed_index` - the command index a DR-025 async `every:` check
@@ -75,7 +74,7 @@ defmodule PropertyDamage.Executor.State do
     * `:last_execute_us` - wall-clock microseconds the adapter's `execute/3`
       took for the most recent command, every settle attempt and the waits
       between them included; `nil` when that command never reached the adapter
-      (a nemesis command, an unresolved placeholder). Written on every command:
+      (an unresolved placeholder). Written on every command:
       two monotonic clock reads, so a run that ignores it pays nothing
       measurable. `PropertyDamage.Variant` reads it for latency comparison.
     * `:last_command_index` - the index of the most recent command (`{:setup,
@@ -138,7 +137,6 @@ defmodule PropertyDamage.Executor.State do
     branch_id: nil,
     active_pollers: [],
     active_resource_pollers: [],
-    active_faults: %{},
     async_halt: nil,
     async_failed_index: :unset,
     await_matchers: [],
@@ -175,7 +173,6 @@ defmodule PropertyDamage.Executor.State do
           branch_id: term(),
           active_pollers: list(),
           active_resource_pollers: list(),
-          active_faults: map(),
           async_halt: term(),
           async_failed_index: non_neg_integer() | nil | :unset,
           await_matchers: [map()],

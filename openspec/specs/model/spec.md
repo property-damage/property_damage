@@ -196,7 +196,7 @@ A setup or teardown command SHALL NOT be a comparison boundary, SHALL NOT be exp
 
 ### Requirement: Removed Lifecycle Hooks Are Rejected
 
-A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`, `setup_once/0` or `teardown_once/0` SHALL fail at run start with an error that names the replacement. A model that lists a nemesis module in `setup_each/0` or `teardown_each/0` SHALL fail with a validation error, because faults are never injected during setup or teardown commands.
+A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`, `setup_once/0` or `teardown_once/0` SHALL fail at run start with an error that names the replacement.
 
 #### Scenario: A removed hook fails at run start
 - **WHEN** a model defines `setup_each/1`
@@ -206,10 +206,6 @@ A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardow
 #### Scenario: A once hook has no replacement hook
 - **WHEN** a model defines `setup_once/0`
 - **THEN** the error says once-per-campaign setup belongs in an idempotent `Adapter.setup/1` or in the caller's wrapper
-
-#### Scenario: A nemesis among the setup commands
-- **WHEN** `setup_each/0` lists a nemesis module
-- **THEN** validation fails with an error that names the callback and the module
 
 ### Requirement: Expansions Callback (DR-049)
 

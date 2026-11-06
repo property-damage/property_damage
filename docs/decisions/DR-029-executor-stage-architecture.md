@@ -3,6 +3,9 @@
 **Status:** Accepted (design pass; implementation in progress). Amended by DR-046: a stutter retry is compared through `using:` (default `&==/2`); the `comparison:` atoms and tuples are removed.
 **Date:** 2026-06-29
 
+> **Note (DR-062):** the fault-injection stage `Executor.Nemesis` and the `:active_faults` run-state
+> field named below were removed by DR-062. The other stages stay as recorded.
+
 > Part of the served/servant clean-break campaign. Applies the framework's own layering
 > discipline to its largest servant module. Almost entirely internal: the public seam and all
 > observable behavior (DR-024/025/026 ordering, determinism) are preserved; the decomposition

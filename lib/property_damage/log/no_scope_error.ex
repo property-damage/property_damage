@@ -24,7 +24,7 @@ defmodule PropertyDamage.Log.NoScopeError do
     """
     PropertyDamage.log/2 found no scope at #{site(error)} in process #{inspect(error.pid)}.
     A log line lands only in a scope, and neither this process nor any process in its $callers holds one. Fix it in one of three ways:
-      * call it from code PropertyDamage runs (an adapter callback, a command, a nemesis or mock handler);
+      * call it from code PropertyDamage runs (an adapter callback, a command or mock handler);
       * wrap the code in PropertyDamage.Log.capture/1;
       * log through PropertyDamage.Runtime.log/3 with the runtime the adapter was handed.\
     """

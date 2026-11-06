@@ -2884,7 +2884,7 @@ defmodule PropertyDamage do
   ## Scope
 
   The call needs a scope: code PropertyDamage runs at an execution point (an
-  adapter callback, a command, a nemesis or mock handler), or a process
+  adapter callback, a command, a mock handler), or a process
   started from it through `Task`. Anywhere else it raises
   `PropertyDamage.Log.NoScopeError`; a process the adapter did not start
   through `Task` logs with `PropertyDamage.Runtime.log/3`. See

@@ -118,7 +118,7 @@ items depend on the failure kind, and each prints under its label:
   kind that blames the test or the framework, not the system, opens with the
   words "Unable to test the system". Examples are `:adapter_error` (the
   adapter raised or returned an error), `:setup_failed` (a target could not be
-  prepared) and `:nemesis_error` (a fault injector failed).
+  prepared) and `:stutter_execution_failed` (a retry attempt raised).
   `PropertyDamage.Failure.Explain.meaning/1` returns the text for each kind.
 - `Model` prints the model's `@moduledoc`.
 - The subject comes next: here `Check`, for a comparison failure
@@ -174,8 +174,8 @@ section of the report:
 command produced and the log lines its code wrote print in the order they
 happened. Each line starts with its offset from the start of the target's run
 (`+0.00s`), then `log` or `event`. A log line shows its tags in brackets. An
-event from another source keeps a badge for it (`NEM` for a nemesis, `POL` for
-a resource poller, and so on). Entries tied to no command print after the
+event from another source keeps a badge for it (`POL` for a
+resource poller, and so on). Entries tied to no command print after the
 listing under "Not tied to a command". For log lines, see the
 [log lines guide](log_lines.md).
 
@@ -329,7 +329,7 @@ There are seven **classes** (`PropertyDamage.Failure.class/1` returns the atom):
   misbehaved.
 - `:execution`: the machinery around the SUT failed to run a command
   (an adapter raise or `{:error, _}` answer is `:adapter_error` in every run,
-  never compared as an observation; `:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
+  never compared as an observation; `:adapter_error`, `:stutter_execution_failed`,
   `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`,
   `:malformed_adapter_return`). Often a test-harness or
   infrastructure problem rather than a SUT bug.
@@ -1200,5 +1200,4 @@ verdicts, bounded memory).
 ## Next Steps
 
 - [Writing Invariants](writing_invariants.md) - Improve your checks
-- [Chaos Engineering](chaos_engineering.md) - Test resilience
 - See `PropertyDamage.FailureIntelligence` for pattern detection

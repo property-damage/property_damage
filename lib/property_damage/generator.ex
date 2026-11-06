@@ -59,7 +59,6 @@ defmodule PropertyDamage.Generator do
 
   alias PropertyDamage.External
   alias PropertyDamage.Mint
-  alias PropertyDamage.Nemesis
   alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
   alias PropertyDamage.Sequence.Position
 
@@ -948,9 +947,8 @@ defmodule PropertyDamage.Generator do
 
   @doc false
   # The generator of `module`'s commands with `overrides` (a map) applied, as
-  # the root draw builds it: a nemesis through `new!/2`, any other command
-  # through `generator/1`, with every override key checked against the
-  # command's fields.
+  # the root draw builds it: through `generator/1`, with every override key
+  # checked against the command's fields.
   @spec command_generator(module(), map(), map()) :: StreamData.t(struct())
   def command_generator(module, overrides, state) do
     get_command_generator(module, %{overrides: overrides}, state)
@@ -966,8 +964,8 @@ defmodule PropertyDamage.Generator do
   # ============================================================================
 
   defp filter_valid_commands(commands, state) do
-    Enum.filter(commands, fn {_weight, cmd_module, spec} ->
-      when_satisfied?(spec, state) and nemesis_precondition_satisfied?(cmd_module, state)
+    Enum.filter(commands, fn {_weight, _cmd_module, spec} ->
+      when_satisfied?(spec, state)
     end)
   end
 
@@ -976,16 +974,6 @@ defmodule PropertyDamage.Generator do
     case Map.get(spec, :when) do
       nil -> true
       pred when is_function(pred, 1) -> pred.(state)
-    end
-  end
-
-  # A nemesis module's `precondition/1` is a generation-time filter, the nemesis
-  # analogue of a command's `when:` (DR-031). Non-nemesis commands are unaffected.
-  defp nemesis_precondition_satisfied?(cmd_module, state) do
-    if Nemesis.nemesis_module?(cmd_module) do
-      cmd_module.precondition(state)
-    else
-      true
     end
   end
 
@@ -1015,30 +1003,10 @@ defmodule PropertyDamage.Generator do
         map when is_map(map) -> map
       end
 
-    if Nemesis.nemesis_module?(cmd_module) do
-      # DR-031: nemesis modules generate via `new!/2` (which already returns a
-      # `StreamData.t(struct())`), not `generator/1` — they do not `use Command`.
-      nemesis_generator(cmd_module, state, overrides)
-    else
-      validate_override_keys!(cmd_module, overrides)
+    validate_override_keys!(cmd_module, overrides)
 
-      cmd_module.generator(overrides)
-      |> StreamData.map(&struct!(cmd_module, &1))
-    end
-  end
-
-  defp nemesis_generator(cmd_module, state, overrides) do
-    # `function_exported?/3` is false for a not-yet-loaded module, so ensure the
-    # module is loaded before reflecting on the optional `new!/2` callback.
-    if Code.ensure_loaded?(cmd_module) and function_exported?(cmd_module, :new!, 2) do
-      cmd_module.new!(state, overrides)
-    else
-      raise ArgumentError,
-            "Nemesis #{inspect(cmd_module)} is listed in commands/0 but does not " <>
-              "implement new!/2, so the generator cannot produce instances of it. " <>
-              "Implement new!/2 (returning a StreamData generator of the nemesis " <>
-              "struct), or only inject it via a pre-baked command sequence."
-    end
+    cmd_module.generator(overrides)
+    |> StreamData.map(&struct!(cmd_module, &1))
   end
 
   # An `overrides:` option only takes effect for fields the command defines (the

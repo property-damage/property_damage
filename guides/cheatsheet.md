@@ -1,6 +1,6 @@
 # PropertyDamage Cheatsheet
 
-Compact syntax reference for all five core behaviours, run options, and common patterns.
+Compact syntax reference for all four core behaviours, run options, and common patterns.
 
 ## Command Template
 
@@ -116,7 +116,7 @@ Both default to `[]`.
 | Setup commands | run in every target after `Adapter.setup/1`, before the first root, in every run and shrink attempt |
 | Teardown commands | run after the roots, pass or fail, before `Adapter.teardown/1`; best effort, never change the verdict |
 | Not roots | never compared, expanded, or shrunk; `terminate_early?/3` and `max_commands` count roots only |
-| Engine | stutter, nemesis and latency samples are off; a nemesis module in either callback is an error |
+| Engine | stutter and latency samples are off |
 | Seeds | adding a setup command re-draws the roots for a given seed |
 | Old hooks | a model that defines a side-effect lifecycle hook (arity 1, or a `_once` hook) fails at run start |
 
@@ -362,44 +362,6 @@ Prefer `PropertyDamage.Runtime.stuttering?(runtime)` to detect a retry.
 - `PD_LOG="only:http except:body"`: replace the run's filter for one invocation, without a code change.
 
 To read a failure as a browsable page, set `report_html: "dir/"` (or the `PD_REPORT_HTML` environment variable): a failing run writes an HTML report there, with an `index.html` that lists every report in the directory.
-
-## Nemesis Template
-
-```elixir
-defmodule MyApp.Nemesis.PartitionNetwork do
-  @behaviour PropertyDamage.Nemesis
-
-  defstruct [:partition_type, :duration_ms]
-
-  @impl true
-  def inject(%__MODULE__{partition_type: type}, ctx) do
-    # ctx.adapter_context is what the adapter's setup/1 returned
-    :ok = Toxiproxy.partition(ctx.adapter_context.proxy, type)
-    {:ok, [%PartitionStarted{type: type}]}
-  end
-
-  @impl true
-  def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.adapter_context.proxy, type)
-    {:ok, [%PartitionEnded{type: type}]}
-  end
-
-  @impl true
-  def precondition(_state), do: true
-
-  # Required for a nemesis listed in commands/0: returns a generator of structs
-  @impl true
-  def new!(_state, overrides) do
-    %{
-      partition_type: StreamData.member_of([:full, :partial]),
-      duration_ms: StreamData.integer(100..1_000)
-    }
-    |> PropertyDamage.Generator.merge_overrides(overrides)
-    |> StreamData.fixed_map()
-    |> StreamData.map(&struct!(__MODULE__, &1))
-  end
-end
-```
 
 ## Run Options
 
