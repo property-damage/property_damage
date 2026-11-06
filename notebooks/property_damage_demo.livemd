@@ -23,7 +23,6 @@ We build one running example: a tiny in-memory **bank**. You will:
 2. Run the property test against a correct implementation.
 3. Read a **coverage** report to confirm the run was not vacuous.
 4. Introduce a bug and watch PropertyDamage **find and shrink** it, then debug it.
-5. Layer in **chaos engineering** with a nemesis.
 
 The five moving parts:
 
@@ -508,121 +507,11 @@ Other debugging tools worth knowing (see the *Debugging Failures* guide):
 path
 ```
 
-## Part 5 — Chaos engineering with a nemesis
-
-A **nemesis** injects faults so you can test resilience. `NetworkLatency` degrades
-the SUT's network path when a Toxiproxy endpoint is configured in the adapter
-context; without one it runs in **simulated** mode (a no-op that still tags its
-event), which is perfect for a self-contained demo.
-
-You can see the marker directly:
-
-```elixir
-alias PropertyDamage.Nemesis.NetworkLatency
-
-{:ok, [event]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 100, jitter_ms: 20}, %{})
-%{simulated?: PropertyDamage.Nemesis.simulated_event?(event)}
-```
-
-To wire a nemesis into a run, add it to the model's `commands/0` with a low weight.
-Its injected/restored events (`PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyInjected` and
-`PropertyDamage.Nemesis.NetworkLatency.NetworkLatencyRestored`)
-flow through your projection like any other, so you can count active faults. The
-balance invariant must still hold under (simulated) latency, so the run passes.
-
-```elixir
-defmodule Demo.ChaosBank do
-  use PropertyDamage.Model.Projection
-
-  alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
-  alias PropertyDamage.Nemesis.NetworkLatency.{NetworkLatencyInjected, NetworkLatencyRestored}
-
-  @impl true
-  def init, do: %{accounts: %{}, faults: 0}
-
-  @impl true
-  def apply(state, %AccountOpened{account_id: id, currency: c, opening_balance: b}) do
-    put_in(state, [:accounts, id], %{currency: c, balance: b})
-  end
-
-  def apply(state, %Credited{account_id: id, new_balance: nb}) do
-    if Map.has_key?(state.accounts, id),
-      do: put_in(state, [:accounts, id, :balance], nb),
-      else: state
-  end
-
-  def apply(state, %Debited{account_id: id, new_balance: nb}) do
-    if Map.has_key?(state.accounts, id),
-      do: put_in(state, [:accounts, id, :balance], nb),
-      else: state
-  end
-
-  def apply(state, %DebitRejected{}), do: state
-  def apply(state, %NetworkLatencyInjected{}), do: update_in(state, [:faults], &(&1 + 1))
-  def apply(state, %NetworkLatencyRestored{}), do: state
-  def apply(state, _event), do: state
-
-  @check every: 1
-  def assert_balance_non_negative(state, _step) do
-    negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
-
-    negative == [] or
-      PropertyDamage.fail!("account balance went negative", accounts: negative)
-  end
-end
-
-defmodule Demo.ChaosModel do
-  use PropertyDamage.Model
-
-  alias Demo.Commands.{OpenAccount, Credit, Debit}
-  alias PropertyDamage.Nemesis.NetworkLatency
-
-  @impl true
-  def commands do
-    [
-      {OpenAccount, weight: 3},
-      {Credit,
-       weight: 3,
-       when: fn s -> map_size(s.accounts) > 0 end,
-       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
-      {Debit,
-       weight: 3,
-       when: fn s -> map_size(s.accounts) > 0 end,
-       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
-      # Low weight = occasional faults.
-      {NetworkLatency, weight: 1}
-    ]
-  end
-
-  @impl true
-  def command_sequence_projection, do: Demo.ChaosBank
-
-  @impl true
-  def check_projections, do: [Demo.ChaosBank]
-
-  @impl true
-  def simulator, do: Demo.Simulator
-end
-
-PropertyDamage.run(
-  model: Demo.ChaosModel,
-  targets: [Demo.BankAdapter],
-  max_commands: 20,
-  max_runs: 30,
-  seed: 7
-)
-```
-
-To make the fault *real*, have your adapter's `setup/1` return
-`%{toxiproxy: %{proxy_name: ..., api_url: ...}}` and route the SUT through that
-proxy. See the **Chaos Engineering** guide for the live Toxiproxy recipe.
-
 ## Where to go next
 
 - `guides/getting_started.md` and `guides/quickstart.md` — the canonical shapes.
 - `guides/writing_commands.md`, `guides/writing_invariants.md` — commands and invariants in depth.
 - `guides/coverage_and_catalogs.md` — anti-vacuity coverage and the invariant catalog.
 - `guides/debugging_failures.md` — the full debugging workflow (replay, bisect, run comparison).
-- `guides/chaos_engineering.md` — nemesis operations, simulated vs. real faults.
 - `benches/cachex_bench/` — a complete, CI-gated model + adapter against real software.
 ```

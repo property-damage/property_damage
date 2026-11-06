@@ -51,7 +51,7 @@ Projections SHALL receive both commands and events through their `apply/2` callb
 
 Projections SHALL support synchronous checks decorated with the `@check` module attribute. Triggered checks run immediately when their condition is met. Check functions take two arguments: the current projection state and the command or event that triggered the check.
 
-A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously (a resource-poller or injector-adapter event, a mock-service event, or a nemesis event) is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
+A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously (a resource-poller or injector-adapter event, or a mock-service event) is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
 
 #### Scenario: Trigger every step
 - **WHEN** a check is decorated with `@check every: 1`
@@ -64,11 +64,11 @@ A `@check every:` check fires on **every observed event** regardless of how the 
 #### Scenario: Trigger every event
 - **WHEN** a check is decorated with `@check every: :event`
 - **THEN** it runs after any event is processed but not after commands
-- **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, mock-service, and nemesis events), not only a command's own returned events
+- **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, and mock-service events), not only a command's own returned events
 
 #### Scenario: Trigger fires on an asynchronously-observed event
 - **WHEN** a projection declares `@check every: :event` (or `every: 1`, or `every: SomeEvent`)
-- **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, a mock service, or a nemesis)
+- **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, or a mock service)
 - **THEN** the check SHALL be evaluated on the projection state after that event is folded in
 
 #### Scenario: every: :command does not fire on events

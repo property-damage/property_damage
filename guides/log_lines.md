@@ -481,7 +481,6 @@ one before it runs your code at an execution point, which is any of these:
 - an adapter's `setup/1`, `execute/3` and `teardown/1`;
 - each setup and teardown command, each root and each leaf, and each attempt
   of a settle or stutter retry;
-- a nemesis's `inject/2` and `restore/2`;
 - an injector's setup and teardown;
 - a mock's setup, its `on_command/2` and `on_event/2` handlers, and its teardown.
 
@@ -583,7 +582,7 @@ mix run no_scope.exs
 ```text
 PropertyDamage.log/2 found no scope at lib/my_app/auth.ex:6 in process #PID<0.95.0>.
 A log line lands only in a scope, and neither this process nor any process in its $callers holds one. Fix it in one of three ways:
-  * call it from code PropertyDamage runs (an adapter callback, a command, a nemesis or mock handler);
+  * call it from code PropertyDamage runs (an adapter callback, a command or mock handler);
   * wrap the code in PropertyDamage.Log.capture/1;
   * log through PropertyDamage.Runtime.log/3 with the runtime the adapter was handed.
 ```

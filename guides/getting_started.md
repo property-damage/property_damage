@@ -443,5 +443,4 @@ in the report, such as the requests an adapter sends, call
 
 - [Writing Effective Invariants](writing_invariants.md)
 - [Debugging Failures](debugging_failures.md)
-- [Chaos Engineering with Nemesis](chaos_engineering.md)
 - See `benches/` for complete, CI-gated working examples against real software

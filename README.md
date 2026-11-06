@@ -30,7 +30,6 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **OpenAPI Scaffolding**: Generate commands, events, an adapter, a model and a state projection from an API specification
 - **Load Testing**: Drive generated sequences from many workers at once with `PropertyDamage.LoadTest` (see the [load testing guide](guides/load_testing.md))
 - **Mutation Testing**: Inject bugs into the events your adapter returns with `PropertyDamage.Mutation`, to check that your tests catch them (see the [mutation testing guide](guides/mutation_testing.md))
-- **Fault Injection (Nemesis)**: Built-in network faults (latency, partition, packet loss), Toxiproxy-backed, plus your own nemeses
 - **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
 - **Path Equivalence Testing**: List command sequences that mean the same as a command (`expansions/0`); each target picks its own path and the targets' `@compare` observations must agree, and a divergence shrinks to the one path that matters and replays from a file
 - **Mix Tasks**: `pd.replay`, `pd.reshrink`, `pd.bisect`, `pd.audit`, `pd.explain`, `pd.integration`, `pd.scaffold`, `pd.validate` and the `pd.gen.*` generators
@@ -676,7 +675,7 @@ mix pd.validate MyApp.TestModel --targets "[MyApp.TestAdapter]"
 It fails on:
 - A missing model, adapter, command or projection module, or a missing required callback
 - Injectable events that no injector adapter covers
-- A removed lifecycle hook, or a nemesis in `setup_each/0` or `teardown_each/0`
+- A removed lifecycle hook
 
 It warns about:
 - Commands that declare no `:observables` (the Quick Start's `CreateUser` does)
@@ -895,146 +894,6 @@ A `:sync` command must not return `{:retry, _}`: the run fails with a
 See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
 for complete documentation including bridge commands, `Adapter.Injector`, and
 handling async operations that require polling.
-
-## Fault Injection (Nemesis)
-
-Test system resilience by injecting faults like network partitions, latency,
-and packet loss.
-
-### Defining a Nemesis Command
-
-```elixir
-defmodule MyTest.Nemesis.PartitionNetwork do
-  @behaviour PropertyDamage.Nemesis
-
-  defstruct [:partition_type, :duration_ms]
-
-  @impl true
-  def precondition(_state), do: true
-
-  # Required for any nemesis listed in commands/0: the generator calls it
-  @impl true
-  def new!(_state, overrides \\ %{}) do
-    StreamData.bind(StreamData.member_of([:full, :upstream, :downstream]), fn type ->
-      StreamData.constant(%__MODULE__{
-        partition_type: Map.get(overrides, :partition_type, type),
-        duration_ms: Map.get(overrides, :duration_ms, 5_000)
-      })
-    end)
-  end
-
-  @impl true
-  def inject(%__MODULE__{partition_type: type}, ctx) do
-    # ctx.adapter_context is what the adapter's setup/1 returned
-    :ok = Toxiproxy.partition(ctx.adapter_context.proxy, type)
-    {:ok, [%PartitionStarted{type: type}]}
-  end
-
-  @impl true
-  def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.adapter_context.proxy, type)
-    {:ok, [%PartitionEnded{type: type}]}
-  end
-
-  # Auto-restore after duration
-  @impl true
-  def auto_restore?, do: true
-
-  @impl true
-  def duration_ms(%__MODULE__{duration_ms: d}), do: d
-end
-```
-
-### Using Nemesis in Models
-
-Add nemesis commands with lower weights. Every nemesis listed here must
-implement `new!/2` (see above), or generation raises an `ArgumentError`:
-
-```elixir
-def commands do
-  [
-    {CreateOrder, weight: 5},
-    {ProcessPayment, weight: 3},
-    {PartitionNetwork, weight: 1},   # Fault injection
-    {InjectLatency, weight: 1}
-  ]
-end
-```
-
-### Built-in Nemesis Operations
-
-PropertyDamage includes ready-to-use nemesis operations for common fault injection scenarios:
-
-#### Network Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `NetworkLatency` | Add latency (50-500ms) with optional jitter |
-| `NetworkPartition` | Block traffic (full, upstream, downstream) |
-| `PacketLoss` | Drop percentage of packets (5-50%) |
-
-```elixir
-# Add network latency
-alias PropertyDamage.Nemesis.NetworkLatency
-
-def commands do
-  [
-    {CreateOrder, weight: 5},
-    {NetworkLatency, weight: 1}  # Drawn per command: 50-500ms latency, 0-50ms jitter, 1-10s duration
-  ]
-end
-
-# Or customize
-%NetworkLatency{latency_ms: 200, jitter_ms: 50, duration_ms: 10_000}
-```
-
-> **Scope.** The built-in nemeses fault the SUT's *network path* only. They
-> deliberately do not stress the local BEAM/host (CPU, memory, OS resources),
-> kill local processes, or install a virtual clock: those affect the test
-> harness's own VM rather than an external SUT driven through an adapter. To
-> fault an in-process collaborator, do it in your own adapter/command code.
-
-#### Integration with Toxiproxy
-
-Network operations integrate with [Toxiproxy](https://github.com/Shopify/toxiproxy) when available:
-
-```elixir
-# Return the config from the adapter's setup/1, the only place the engine
-# reads it (a top-level :toxiproxy key in the nemesis context is not set by a run)
-def setup(_config) do
-  {:ok,
-   %{
-     toxiproxy: %{
-       proxy_name: "my_service",
-       api_url: "http://localhost:8474"
-     }
-   }}
-end
-
-# Nemesis operations will automatically use Toxiproxy
-# Falls back to simulated mode if not configured
-```
-
-> **Caveat — chaos is only as real as its backend.** Network operations
-> (`NetworkPartition`, `PacketLoss`, `NetworkLatency`) require Toxiproxy to
-> inject a real fault. Without it they currently fall back to a *simulated*
-> mode that emits the fault event but injects nothing at the transport layer,
-> so a test can pass with zero fault actually applied. Treat un-backed network
-> nemesis as documentation, not evidence; the Redis bench's nemesis audit
-> exercises each operation against a live SUT.
-
-### Adjusting Invariants During Faults
-
-```elixir
-@check every: 1
-def assert_latency_sla(state, _cmd_or_event) do
-  # Skip SLA check during partition
-  partitioned? = Map.get(state.active_faults, :network_partition, false)
-
-  partitioned? or state.last_latency_ms < 100 or
-    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-end
-```
 
 ## Visual Sequence Diagrams
 
@@ -1617,8 +1476,7 @@ benches/oban_bench/
 
 ### redis_bench
 
-[Redis](https://redis.io) over the network with live [Toxiproxy](https://github.com/Shopify/toxiproxy)
-fault injection: the external-SUT + nemesis rung. Provisions via Docker.
+[Redis](https://redis.io) over the network: the external-SUT rung. Provisions via Docker.
 
 ```
 benches/redis_bench/
@@ -1637,7 +1495,7 @@ benches/gitea_bench/
 ## Guides
 
 The full set of guides (getting started, writing commands and invariants,
-debugging, chaos engineering, differential and dual-transport testing, and more)
+debugging, differential and dual-transport testing, and more)
 is browsable in the `guides/` directory and rendered on
 [HexDocs](https://hexdocs.pm/property_damage). New here? Start with
 [Getting Started](guides/getting_started.md). To add your own lines to the
@@ -1704,7 +1562,6 @@ PropertyDamage
 │   ├── Executor     - Command execution (linear and parallel)
 │   ├── Linearization - Parallel execution verification
 │   ├── Settle       - Probe/async retry for eventual consistency
-│   ├── Nemesis      - Fault injection behaviour + built-in operations
 │   └── EventQueue   - Event coordination
 │
 ├── Shrinking (Tier 2)

@@ -499,21 +499,6 @@ defmodule MyApp.Projections.AuditInvariants do
 end
 ```
 
-## Relaxing Invariants During Faults
-
-When using nemesis (chaos engineering), some invariants may not apply:
-
-```elixir
-@check every: 1
-def assert_latency_within_sla(state, _cmd_or_event) do
-  # Skip SLA check during active network partition
-  partitioned? = Map.get(state.active_faults, :network_partition, false)
-
-  partitioned? or state.last_latency_ms < 100 or
-    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-end
-```
-
 ## Common Mistakes
 
 ### 1. Checking Implementation Details
@@ -640,5 +625,4 @@ The authoritative report is still the `{:ok, report}` return value;
 - [Coverage and Invariant Catalogs](coverage_and_catalogs.md) - The invariant catalog and `@invariant id:` coverage
 - [Differential Testing](differential_testing.md) - Comparing targets through `@compare`
 - [Path Equivalence Testing](path_equivalence_testing.md) - The same `@compare` observations across equivalent command sequences
-- [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis
 - See `PropertyDamage.Suggestions` for invariant recommendations

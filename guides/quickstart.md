@@ -276,11 +276,6 @@ PropertyDamage.run(
     duration: {2, :minutes},
     ramp_up: {:linear, {30, :seconds}}
   )
-
-# Chaos / fault injection: nemeses are added to the model's commands/0 list
-# (with low weights), not passed as a run option. See the Chaos Engineering guide.
-PropertyDamage.run(model: ChaosModel, targets: [A])
 ```
 
-The [Load Testing guide](load_testing.md) covers the load-test options, and the
-[Chaos Engineering guide](chaos_engineering.md) covers nemeses.
+The [Load Testing guide](load_testing.md) covers the load-test options.

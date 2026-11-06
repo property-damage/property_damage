@@ -49,7 +49,7 @@ mix pd.integration                 # Run integration tests against live services
 
 ## Architecture
 
-### Five core behaviours
+### Four core behaviours
 
 All user-facing contracts are defined as behaviours:
 
@@ -57,7 +57,8 @@ All user-facing contracts are defined as behaviours:
 - **Model** (`lib/property_damage/model.ex`) — Orchestrates which commands run and when. Required: `commands/0` (list of command specs with optional `weight:`, `when:`, `overrides:` options) and `command_sequence_projection/0`. Optional: `check_projections/0`, `simulator/0`, lifecycle hooks.
 - **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@check` attributes (`every: N`, `every: CommandModule`) for sync checks and `@eventually` for eventual consistency checks.
 - **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/2` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
-- **Nemesis** (`lib/property_damage/nemesis.ex`) — Fault injection. Callbacks: `inject/2`, `restore/2`, `precondition/1`. 10 built-in implementations under `PropertyDamage.Nemesis.*`.
+
+A **Target** (`lib/property_damage/target.ex`) is one system variant a run executes against.
 
 ### Execution flow
 
@@ -110,7 +111,7 @@ Redirect long output to a file instead. Judge `gh pr checks` by its own exit cod
 
 ## Specs and documentation
 
-- **OpenSpec** (`openspec/`) — Behavioral specifications across 14 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records in `docs/decisions/`. Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
+- **OpenSpec** (`openspec/`) — Behavioral specifications across 13 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records in `docs/decisions/`. Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
 - **Guides** (`guides/`) — User-facing guides wired into ex_doc via the `extras` in mix.exs. New features or behavior changes often need a corresponding guide update.
 
 ## Dependencies
