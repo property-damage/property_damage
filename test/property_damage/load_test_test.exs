@@ -1416,4 +1416,101 @@ defmodule PropertyDamage.LoadTestTest do
       end)
     end
   end
+
+  # ============================================================================
+  # Worker draws
+  # ============================================================================
+
+  defmodule WideDrawCommand do
+    defstruct [:n]
+
+    # A size-bounded generator: it draws from -size..size, so a draw at the
+    # smallest size stays in -1..1.
+    def generator(_overrides \\ %{}), do: StreamData.fixed_map(n: StreamData.integer())
+  end
+
+  defmodule WideDrawProjection do
+    @behaviour PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+  end
+
+  defmodule WideDrawModel do
+    use PropertyDamage.Model
+
+    @impl PropertyDamage.Model
+    def commands, do: [WideDrawCommand]
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: WideDrawProjection
+  end
+
+  defmodule RecordingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(command, %{recorder: recorder}, _runtime) do
+      Agent.update(recorder, &[command | &1])
+      {:ok, []}
+    end
+  end
+
+  # Runs `count` sequences on one worker and returns every command it executed,
+  # in execution order.
+  defp worker_commands(worker_opts, count) do
+    {:ok, recorder} = Agent.start_link(fn -> [] end)
+    {:ok, metrics} = Metrics.start_link()
+
+    {:ok, worker} =
+      Worker.start_link(
+        Keyword.merge(
+          [
+            model: WideDrawModel,
+            target: %PropertyDamage.Target{
+              adapter: RecordingAdapter,
+              config: %{recorder: recorder},
+              name: "adapter",
+              index: 0
+            },
+            metrics: metrics
+          ],
+          worker_opts
+        )
+      )
+
+    for _ <- 1..count, do: {:ok, _} = Worker.execute_sequence(worker)
+
+    Worker.stop(worker)
+    Metrics.stop(metrics)
+    recorder |> Agent.get(& &1) |> Enum.reverse()
+  end
+
+  describe "Worker generation" do
+    @describetag :known_defect
+
+    test "draws values from the whole range of a command's generator" do
+      commands = worker_commands([worker_id: 1, seed: 20_241_106], 200)
+
+      assert Enum.any?(commands, fn %WideDrawCommand{n: n} -> n < -1 or n > 1 end),
+             "every draw lay in -1..1 across #{length(commands)} commands"
+    end
+
+    test "two workers with the same seed and worker id execute the same commands" do
+      first = worker_commands([worker_id: 7, seed: 42], 20)
+      second = worker_commands([worker_id: 7, seed: 42], 20)
+
+      assert first != []
+      assert first == second
+    end
+  end
 end
