@@ -61,4 +61,84 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
       assert Validator.valid_sequence?(commands, ExecutorModel)
     end
   end
+
+  defmodule IdKeyedFixtures do
+    # State keyed by an id the system mints, with a command that needs two ids.
+    defmodule Created do
+      import PropertyDamage, only: [external: 0]
+      defstruct id: external()
+    end
+
+    defmodule Create do
+      @behaviour PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{})
+    end
+
+    defmodule Pair do
+      @behaviour PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{})
+    end
+
+    defmodule Ids do
+      @behaviour PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{ids: %{}}
+
+      @impl true
+      def apply(state, %Created{id: id}), do: put_in(state.ids[id], true)
+      def apply(state, _other), do: state
+    end
+
+    defmodule Model do
+      @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
+
+      @impl PropertyDamage.Model
+      def commands do
+        [Create, {Pair, when: fn state -> map_size(state.ids) >= 2 end}]
+      end
+
+      @impl PropertyDamage.Model
+      def command_sequence_projection, do: Ids
+
+      @impl PropertyDamage.Model
+      def simulator, do: __MODULE__
+
+      @impl PropertyDamage.Model.Simulator
+      def simulate(%Create{}, _state), do: [%Created{}]
+      def simulate(_command, _state), do: []
+    end
+  end
+
+  describe "valid_sequence?/3 over a state keyed by minted ids" do
+    @describetag :known_defect
+
+    test "accepts a generated sequence whose command needs two distinct ids" do
+      sequence =
+        1..40
+        |> Enum.map(fn seed ->
+          IdKeyedFixtures.Model
+          |> PropertyDamage.Generator.generate_sequence(max_commands: 8)
+          |> PropertyDamage.Generator.generate_value(seed)
+        end)
+        |> Enum.find(fn sequence ->
+          Enum.any?(sequence.prefix, &match?(%IdKeyedFixtures.Pair{}, &1))
+        end)
+
+      assert sequence, "no drawn sequence contains the dependent command"
+
+      assert Validator.valid_sequence?(
+               sequence.prefix,
+               IdKeyedFixtures.Model,
+               sequence.setup
+             )
+    end
+  end
 end
