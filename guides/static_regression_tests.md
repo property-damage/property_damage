@@ -310,7 +310,7 @@ Execute a fixed command sequence without a model.
   `{Module, config: map, injectors: [...]}`. `config:` is passed to
   `adapter.setup/1` (default: `%{}`). `execute/2` refuses `mocks:` on the entry and
   raises `NimbleOptions.ValidationError`; use `PropertyDamage.run/1` to run with
-  mocks. It takes no other options, so `refs:` is rejected as an unknown option.
+  mocks. It takes no other options.
   To supply a server-minted value to a later command, build a placeholder with
   `PropertyDamage.Placeholder.new_at(event_module, path, position, event_index)`,
   as in Approach 2.
