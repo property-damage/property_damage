@@ -946,7 +946,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   @doc false
   def strip_ansi(text), do: String.replace(text, ~r/\e\[[0-9;]*m/, "")
 
-  @label ~S"\[(?:setup \d+|teardown \d+|branch \d+\.\d+|\d+(?:\.\d+)?)\]"
+  @label ~S"\[(?:setup \d+|teardown \d+|\d+(?:\.\d+)?)\]"
 
   # An event or log line: indent, offset, badge, then the rest.
   @entry ~r/^(\s+)\+(\d+)\.(\d{2})s (\S+)\s+(.*)$/

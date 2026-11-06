@@ -208,19 +208,6 @@ defmodule PropertyDamage.RunTargetsTest do
 
       assert error.message =~ "concurrency"
     end
-
-    test "the removed parallel-branch option is an unknown option" do
-      # The key is built at run time so the retired option name appears in
-      # no source line.
-      removed = String.to_atom("branch" <> "ing")
-
-      error =
-        assert_raise NimbleOptions.ValidationError, fn ->
-          run([step("a"), step("b")], [{removed, []}])
-        end
-
-      assert error.message =~ "unknown options [:#{removed}]"
-    end
   end
 
   describe "failure kinds through run/1" do

@@ -99,7 +99,6 @@ defmodule PropertyDamage.MixProject do
         ],
         Execution: [
           PropertyDamage.Executor,
-          PropertyDamage.Linearization,
           PropertyDamage.Settle,
           PropertyDamage.EventQueue,
           PropertyDamage.EventLog.Entry,
