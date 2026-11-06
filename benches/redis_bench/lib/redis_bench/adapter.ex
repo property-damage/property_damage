@@ -1,6 +1,6 @@
 defmodule RedisBench.Adapter do
   @moduledoc """
-  Faithfully drives the Redis register over a direct connection (no faults).
+  Faithfully drives the Redis register over a direct connection.
 
   Each run gets its own Redix connection and a globally-unique key, so
   concurrent PropertyDamage runs never share register state. `INCR` is atomic,
