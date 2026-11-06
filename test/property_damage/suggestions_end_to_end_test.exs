@@ -139,4 +139,22 @@ defmodule PropertyDamage.SuggestionsEndToEndTest do
     end
   end
 
+  describe "vocabulary" do
+    test "detects domain-neutral names for amounts and references" do
+      assert Patterns.field_pattern_type(:committed_amount) == :numeric
+      assert Patterns.field_pattern_type(:grant_ref) == :reference
+      assert Patterns.field_pattern_type(:child_ref) == :reference
+      assert Patterns.field_pattern_type(:parent_ref) == :reference
+    end
+
+    test "lists no payment-specific field names" do
+      source = File.read!(@patterns_source)
+
+      # Built from parts so this file does not hold the names it forbids.
+      for parts <- [~w(captured amount), ~w(authorization ref), ~w(capture ref)] do
+        name = Enum.join(parts, "_")
+        refute source =~ name, "#{name} is a payment-specific name"
+      end
+    end
+  end
 end

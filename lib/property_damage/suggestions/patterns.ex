@@ -18,7 +18,7 @@ defmodule PropertyDamage.Suggestions.Patterns do
   # Field name patterns that suggest specific check types
   @numeric_patterns ~w(
     balance amount total count quantity price cost value
-    available_balance pending_amount captured_amount
+    available_balance pending_amount committed_amount
     credit debit deposit withdrawal fee tax discount
     min max limit threshold score rating
   )a
@@ -27,7 +27,7 @@ defmodule PropertyDamage.Suggestions.Patterns do
 
   @reference_patterns ~w(
     _ref _id account_ref user_ref order_ref transaction_ref
-    authorization_ref capture_ref parent_ref source_ref target_ref
+    grant_ref child_ref parent_ref source_ref target_ref
     owner_id user_id account_id customer_id
   )
 
