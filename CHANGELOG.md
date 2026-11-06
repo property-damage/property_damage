@@ -650,6 +650,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: failure files are written at format 17 (DR-062).** `.pd` and
+  `.pdtrace` files of format 16 and older are refused with
+  `{:error, {:unsupported_format_version, version, 17}}`. A file whose event log
+  names a source the engine does not produce is refused with
+  `{:error, {:unknown_event_source, source}}`. Capture the failure again.
 - **Breaking: `PropertyDamage.Mutation.run/1` stops when a baseline run fails
   a check.** A model whose property fails against the unmodified adapter, for
   example through a check, an invariant or a poll timeout, now gets
@@ -1310,6 +1315,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING: fault injection is removed (DR-062).** The
+  `PropertyDamage.Nemesis` behaviour, the built-in `NetworkLatency`,
+  `NetworkPartition` and `PacketLoss` modules, the Toxiproxy client, the
+  `:nemesis_error` failure kind (and `Failure.nemesis_error/1`), the `:nemesis`
+  event source with the `nemesis_module` field of `EventLog.Entry` (and
+  `Entry.from_nemesis/4` and `Entry.nemesis?/1`) and the chaos engineering guide
+  are gone. No replacement ships in this version. A model that lists a nemesis
+  in `commands/0` fails validation, because the module no longer exists.
 - **`PropertyDamage.Analysis.isolate_trigger/2` no longer special-cases a
   `CreateAccount` command.** The analysis named a currency mismatch when the
   trigger read `account_ref` from a command named `CreateAccount` with a
