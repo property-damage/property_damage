@@ -59,6 +59,11 @@ jobs:
       - if: matrix.lint
         run: mix credo --strict
 
+      # The count of compile-time dependency cycles may never rise. A change
+      # that removes cycles lowers the number in the same change.
+      - if: matrix.lint
+        run: mix xref graph --format cycles --fail-above 5
+
       - run: mix test
 
   # Runs the documentation gate (every runnable fence, in a consumer project
