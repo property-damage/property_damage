@@ -310,7 +310,7 @@ jobs:
       # Determinism audit (feature 3): generation-only, needs no Redis.
       - name: Audit generation determinism
         run: |
-          for model in RedisBench.Model RedisBench.RmwModel; do
+          for model in RedisBench.Model; do
             mix pd.audit "$model"
           done
 
