@@ -127,6 +127,18 @@ test.
 
 **Files:** `mix.exs`, `test/property_damage/run_targets_test.exs`, `test/support/log_fixtures.ex`
 
+### 2026-11-07T00:16 · commit · 8281410
+
+ci(redis_bench): audit only the models that remain
+
+The redis bench job runs the determinism audit over a hard-coded list of
+models. The list still named RedisBench.RmwModel, which was deleted with
+the linearization test, so the audit step failed before the suite ran.
+
+Audit RedisBench.Model only.
+
+**Files:** `.github/workflows/ci.yml`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
