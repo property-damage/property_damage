@@ -264,19 +264,6 @@ defmodule PropertyDamage.ReplayTest do
       failure = %FailureReport{model: CounterModel, targets: []}
       assert {:error, :missing_adapter} = Replay.start(failure)
     end
-
-    test "branching sequences are not steppable" do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-      failure = %FailureReport{
-        model: CounterModel,
-        targets: [{CounterAdapter, []}],
-        trace: PropertyDamage.RunTrace.new(plan: branching)
-      }
-
-      assert {:error, :branching_replay_unsupported} = Replay.start(failure)
-      assert {:error, :branching_replay_unsupported} = Replay.run(failure)
-    end
   end
 
   describe "formatting" do

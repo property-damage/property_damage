@@ -16,7 +16,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
     FailureReport,
     Forensics,
     Generator,
-    Linearization,
     Model,
     PlaceholderRegistry,
     Target,
@@ -28,7 +27,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   alias PropertyDamage.LoadTest.{Metrics, Worker}
   alias PropertyDamage.Model.Projection
   alias PropertyDamage.Test.CheckKindMatrix, as: Matrix
-  alias PropertyDamage.Test.CheckKindMatrix.Commands.{CreateWidget, UpdateWidget}
   alias PropertyDamage.Test.CheckKindMatrix.Events.{WidgetCreated, WidgetUpdated}
 
   @checks Matrix.Checks
@@ -45,7 +43,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
     failure.ex
     failure_report/context.ex
     forensics.ex
-    linearization.ex
     load_test/worker.ex
     model.ex
     model/projection.ex
@@ -393,24 +390,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
 
         assert name == "#{inspect(@checks)}.#{check.function_name}/2"
       end
-    end
-  end
-
-  describe "linearization.ex" do
-    test "an ordering of two branches passes every synchronous check" do
-      projections =
-        for projection <- Model.projection_modules(Matrix.Model), into: %{} do
-          {projection, projection.init()}
-        end
-
-      ordering = [{0, 0, %CreateWidget{n: 1}}, {1, 0, %UpdateWidget{n: 2}}]
-
-      observed = %{
-        {0, 0} => [%WidgetCreated{n: 1}],
-        {1, 0} => [%WidgetUpdated{n: 2}]
-      }
-
-      assert Linearization.verify(ordering, observed, projections, Matrix.Model)
     end
   end
 

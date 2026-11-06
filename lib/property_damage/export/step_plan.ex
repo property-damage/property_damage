@@ -207,7 +207,6 @@ defmodule PropertyDamage.Export.StepPlan do
         trace.event_log,
         trace.command_labels,
         report.failed_at_index,
-        branch_id: report.branch_id,
         executed: trace.executed,
         choices: choices
       )
@@ -363,9 +362,7 @@ defmodule PropertyDamage.Export.StepPlan do
   # `producers` is produced by the leaf its alias names, or by the command at
   # the position the reported sequence moved its producer to.
   #
-  # Linear (`:prefix`) roots, leaves, and setup and teardown commands are
-  # wired. Branch/suffix producers are omitted (standalone scripts are
-  # best-effort linear).
+  # Roots, leaves, and setup and teardown commands are wired.
   @spec producer_extractions([struct()], %{
           Placeholder.id() => {:alias, Placeholder.id()} | {:at, Position.t()}
         }) :: %{Position.t() => [{Placeholder.t(), String.t()}]}
@@ -402,8 +399,6 @@ defmodule PropertyDamage.Export.StepPlan do
   end
 
   defp position_suffix(%Position{section: :prefix, offset: i}), do: "_#{i}"
-  defp position_suffix(%Position{section: {:branch, b}, offset: i}), do: "_b#{b}_#{i}"
-  defp position_suffix(%Position{section: :suffix, offset: i}), do: "_s#{i}"
   defp position_suffix(%Position{section: :setup, offset: i}), do: "_setup#{i}"
   defp position_suffix(%Position{section: :teardown, offset: i}), do: "_teardown#{i}"
   defp position_suffix(%Position{section: {:leaf, root}, offset: l}), do: "_#{root}_leaf#{l}"

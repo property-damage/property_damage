@@ -59,26 +59,6 @@ defmodule PropertyDamage.AuditTest do
     end
   end
 
-  describe "branching generation is audited" do
-    test "a pure model passes under branching opts" do
-      assert :ok =
-               Audit.run(LinkModel,
-                 seeds: 50,
-                 max_commands: 20,
-                 branching: [branch_probability: 0.5, max_branches: 3]
-               )
-    end
-
-    test "an impure model is caught under branching opts" do
-      assert {:error, _} =
-               Audit.run(ImpureGeneratorModel,
-                 seeds: 20,
-                 max_commands: 20,
-                 branching: [branch_probability: 0.5]
-               )
-    end
-  end
-
   describe "seed selection" do
     test "accepts an explicit deterministic list of seeds" do
       assert :ok = Audit.run(FullModel, seeds: [1, 7, 42, 999], max_commands: 10)

@@ -251,13 +251,6 @@ defmodule PropertyDamage.InjectionTest do
       assert entry.injector_adapter == nil
     end
 
-    test "supports branch_id option" do
-      event = %ResourceCreated{resource_id: "123", name: "test"}
-      entry = Entry.from_injected(event, 2, branch_id: 1)
-
-      assert entry.branch_id == 1
-    end
-
     test "supports timestamp option" do
       event = %ResourceCreated{resource_id: "123", name: "test"}
       entry = Entry.from_injected(event, 0, timestamp: 12_345)

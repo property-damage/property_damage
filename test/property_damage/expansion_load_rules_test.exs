@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ExpansionLoadRulesTest do
   # Rules checked when a run starts, before any target is set up: a model
-  # with expansions compares at the end, lists only roots that are commands
-  # and not probes, and does not branch.
+  # with expansions compares at the end and lists only roots that are
+  # commands and not probes.
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport, only: [start_recorder: 0]
@@ -101,35 +101,6 @@ defmodule PropertyDamage.ExpansionLoadRulesTest do
       assert message =~ inspect(Look)
       assert message =~ "probe"
       assert Expansion.setups(recorder) == 0
-    end
-  end
-
-  describe "branching" do
-    test "with a model defining expansions/0 is an option error naming both" do
-      model = model!(Branches, expansions: expansions())
-      recorder = start_recorder()
-
-      message =
-        Expansion.error_message(fn ->
-          Expansion.run(model, one(recorder), branching: [], max_commands: 8)
-        end)
-
-      assert message =~ "branching"
-      assert message =~ "expansions/0"
-      assert Expansion.setups(recorder) == 0
-    end
-
-    test "with a model without expansions/0 still runs on one target" do
-      model = model!(BranchesPlain, [])
-      recorder = start_recorder()
-
-      assert {:ok, _stats} =
-               Expansion.run(model, one(recorder),
-                 branching: [branch_probability: 1.0, min_prefix_length: 1],
-                 max_commands: 8
-               )
-
-      assert Expansion.setups(recorder) == 1
     end
   end
 end

@@ -19,8 +19,8 @@ defmodule PropertyDamage.Placeholder do
   @typedoc """
   Structured position of the producing command in a sequence.
 
-  A `%PropertyDamage.Sequence.Position{}` (DR-039); branching-aware so two
-  branches producing the same event module do not collide (DR-021).
+  A `%PropertyDamage.Sequence.Position{}` (DR-039), so two commands producing
+  the same event module do not collide (DR-021).
   """
   @type position :: Position.t()
 
@@ -60,7 +60,7 @@ defmodule PropertyDamage.Placeholder do
   Create a new placeholder identified by a structured `position` (DR-021).
 
   Used by sequence generation when an `external()` marker is detected. The
-  producer is identified by a branching-aware `position`.
+  producer is identified by its `position`.
 
   ## Parameters
 
@@ -154,8 +154,6 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
   alias PropertyDamage.Sequence.Position
 
   defp loc(%Position{section: :prefix, offset: i}), do: "pre#{i}"
-  defp loc(%Position{section: {:branch, b}, offset: i}), do: "br#{b}.#{i}"
-  defp loc(%Position{section: :suffix, offset: i}), do: "suf#{i}"
   defp loc(%Position{section: :setup, offset: i}), do: "setup#{i}"
   defp loc(%Position{section: :teardown, offset: i}), do: "teardown#{i}"
   defp loc(%Position{section: {:leaf, r}, offset: i}), do: "leaf#{r}.#{i}"

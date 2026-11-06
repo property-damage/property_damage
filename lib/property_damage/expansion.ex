@@ -257,19 +257,6 @@ defmodule PropertyDamage.Expansion do
   defp reaches_end?(%{roots: :all}), do: true
   defp reaches_end?(_schedule), do: false
 
-  @doc false
-  # The run options a model with expansions cannot take: `branching:`.
-  @spec check_options!(module(), keyword()) :: :ok
-  def check_options!(model, opts) do
-    if opts[:branching] && defines?(model) do
-      raise ArgumentError,
-            "`branching:` cannot be used with #{inspect(model)}, which defines " <>
-              "expansions/0: a branching sequence runs on one target without expansions"
-    end
-
-    :ok
-  end
-
   # ==========================================================================
   # A run
   # ==========================================================================
@@ -1463,8 +1450,8 @@ defmodule PropertyDamage.Expansion do
   def short(module), do: module |> Module.split() |> List.last()
 
   @doc false
-  # The expansion of a run of a model without expansions, or of a branching
-  # run: every target runs the roots of `sequence`. `root_ids` holds the
+  # The expansion of a run of a model without expansions: every target runs
+  # the roots of `sequence`. `root_ids` holds the
   # generation id of each root (default: its index), as for a shrunk
   # sequence, whose roots keep the ids they were generated with.
   @spec identity(Sequence.t(), [PropertyDamage.Target.t()], [non_neg_integer()] | nil) :: t()

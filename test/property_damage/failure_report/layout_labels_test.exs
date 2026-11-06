@@ -1,7 +1,7 @@
 defmodule PropertyDamage.FailureReport.LayoutLabelsTest do
   # One label per step in every section of the report (DR-055 decision 5):
-  # roots [i], leaves [i.j] under their root, [setup i], [teardown i] and
-  # [branch b.i]. The Failure section's At, every line marked ► and the
+  # roots [i], leaves [i.j] under their root, [setup i] and [teardown i].
+  # The Failure section's At, every line marked ► and the
   # Projections heading carry the failing step's label.
   use ExUnit.Case, async: true
 
@@ -67,24 +67,6 @@ defmodule PropertyDamage.FailureReport.LayoutLabelsTest do
 
       assert [%{label: ^label}] =
                text |> L.section("Minimal Reproduction") |> L.steps() |> Enum.filter(& &1.marked?)
-    end
-  end
-
-  describe "a branching run" do
-    test "lists the prefix as [i], branch commands as [branch b.i] and the suffix as distinct [n]" do
-      # Every label is unique; the failing branch command carries ► and At names it.
-      report = L.report(:branching)
-      text = L.plain(report)
-      assert [labels] = listing_labels(text)
-
-      assert ["[0]", "[branch 0.0]", "[branch 0.1]", "[branch 1.0]", suffix] = labels
-      assert suffix =~ ~r/^\[\d+\]$/
-      assert Enum.uniq(labels) == labels, "labels repeat: #{inspect(labels)}"
-
-      assert [%{label: "[branch 0.1]"}] =
-               text |> L.section("Minimal Reproduction") |> L.steps() |> Enum.filter(& &1.marked?)
-
-      assert L.field_value(text, "At") =~ ~r/^\[branch 0\.1\] /
     end
   end
 

@@ -188,10 +188,6 @@ defmodule PropertyDamage.Model do
   `:setup_failed`). A teardown command never fails a run: an error or an
   unresolved placeholder is logged.
 
-  The sequence the setup commands form is unrelated to a branching sequence's
-  prefix (`PropertyDamage.Sequence`): it is the setup prefix of every run,
-  branching or not.
-
   ## Terminal States
 
   The `terminate_early?/3` callback runs during generation on simulator events

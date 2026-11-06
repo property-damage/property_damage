@@ -129,7 +129,6 @@ defmodule PropertyDamage.ResourcePoller do
 
   Optional:
   - `:on_timeout` - Timeout handling: `:ignore`, `:fail`, `{:error, reason}`, or function
-  - `:branch_id` - Branch identifier for parallel execution
   """
   @type start_opts :: [
           poll_fn: (-> term()),
@@ -138,8 +137,7 @@ defmodule PropertyDamage.ResourcePoller do
           timeout_ms: pos_integer(),
           event_queue: pid(),
           command_index: non_neg_integer(),
-          on_timeout: on_timeout_option(),
-          branch_id: non_neg_integer() | nil
+          on_timeout: on_timeout_option()
         ]
 
   @typedoc """
@@ -282,7 +280,6 @@ defmodule PropertyDamage.ResourcePoller do
     event_queue = Keyword.fetch!(opts, :event_queue)
     command_index = Keyword.fetch!(opts, :command_index)
     on_timeout = Keyword.get(opts, :on_timeout, :fail)
-    branch_id = Keyword.get(opts, :branch_id)
 
     # The poller sends its result to `caller` (consumed by await/await_all/check).
     # That consumer is the run process, but `start/1` may run in a short-lived
@@ -303,7 +300,6 @@ defmodule PropertyDamage.ResourcePoller do
       event_queue: event_queue,
       command_index: command_index,
       on_timeout: on_timeout,
-      branch_id: branch_id,
       poll_count: 0,
       last_poll_result: nil
     }
@@ -569,8 +565,7 @@ defmodule PropertyDamage.ResourcePoller do
         state.event_queue,
         state.id,
         state.command_index,
-        event,
-        state.branch_id
+        event
       )
     end
   end

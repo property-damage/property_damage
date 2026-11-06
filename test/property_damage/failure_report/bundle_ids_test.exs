@@ -48,7 +48,6 @@ defmodule PropertyDamage.FailureReport.BundleIdsTest do
     bundle
   end
 
-  defp report_for(:branching), do: B.branching_report()
   defp report_for(kind), do: RL.report(kind)
 
   describe "ids" do
@@ -207,25 +206,6 @@ defmodule PropertyDamage.FailureReport.BundleIdsTest do
     end
   end
 
-  describe "the steps of a branching run" do
-    test "keep the labels the page prints, branch labels and a name with a space" do
-      report = B.branching_report()
-
-      bundle = assert_ids(report)
-
-      assert bundle["ids"]
-             |> Enum.filter(&String.starts_with?(&1, "step:"))
-             |> Enum.sort() ==
-               Enum.sort([
-                 "step:my app:[0]",
-                 "step:my app:[branch 0.0]",
-                 "step:my app:[branch 0.1]",
-                 "step:my app:[branch 1.0]",
-                 "step:my app:[4]"
-               ])
-    end
-  end
-
   describe "the steps of an expanded root" do
     test "name the leaves of each side as the page prints them" do
       bundle = assert_ids(RL.report(:diverged_expanded))
@@ -297,10 +277,14 @@ defmodule PropertyDamage.FailureReport.BundleIdsTest do
     end
 
     test "keep the parenthesis and the inner spacing of a heading" do
-      ids = B.branching_report() |> B.build() |> Map.fetch!("ids")
+      ids = :check_failed |> RL.report() |> B.build() |> Map.fetch!("ids")
 
-      assert "section:Minimal Reproduction (5 roots)" in ids
-      assert "section:Projections at [branch 0.1]   (- before, + after)" in ids
+      assert Enum.any?(ids, &(&1 =~ ~r/^section:Minimal Reproduction \(\d+ roots?\)$/))
+
+      assert Enum.any?(
+               ids,
+               &(&1 =~ ~r/^section:Projections at \[\d+\]   \(- before, \+ after\)$/)
+             )
     end
 
     test "include the Setup section of a report with lines logged before the run" do

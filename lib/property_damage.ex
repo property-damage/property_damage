@@ -249,8 +249,6 @@ defmodule PropertyDamage do
   - `:regression` - Keyword list for automatic regression test management (see below)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
-  - `:branching` - Keyword list for branching sequences (see below); one
-    target only
   - `:stutter` - Keyword list for idempotency testing (see below)
   - `:check_mode` - How a failing check is handled: `:halt` (default),
     `:record`, `:log` or `:disabled`
@@ -305,8 +303,8 @@ defmodule PropertyDamage do
   the engine, in this order per run: its adapter's `setup/1`, the `@check at:
   :startup` checks, the setup commands, the roots, the final boundary, the
   `@check at: :teardown` checks, the teardown commands, and its adapter's
-  `teardown/1`. Every path that executes the run again (a branching run, each
-  shrink attempt, the reproduction, `shrink_further/2`, the seed-library
+  `teardown/1`. Every path that executes the run again (each shrink attempt,
+  the reproduction, `shrink_further/2`, the seed-library
   replay, `replay/2`) runs them the same way; the shrinker never removes or
   simplifies a setup command and draws the teardown commands again for each
   candidate. A failing setup command, a check that fails on a setup
@@ -351,22 +349,6 @@ defmodule PropertyDamage do
   run once more, and the report describes that reproduction; when it does not
   fail the same way, the report keeps the original run. A setup failure
   implicates no command and is reported unshrunk.
-
-  ## Branching Options
-
-  Pass `branching: [...]` to generate branching sequences, a prefix, two or
-  more branches and a suffix, run on one target:
-
-  - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of branches (default: 3)
-  - `:max_branch_length` - Maximum commands per branch (default: 5)
-  - `:min_prefix_length` - Minimum commands before branching (default: 3)
-
-  The branches execute one after another on the one adapter context, each from
-  the forked post-prefix state, and the linearization checker then asks whether
-  some ordering of the branch commands explains the observed events against
-  the model's simulator. The path detects no race (DR-053). `latency:` and a
-  `check_mode:` other than the default are option errors beside `branching:`.
 
   ## Stutter Options (Idempotency Testing)
 
@@ -488,9 +470,7 @@ defmodule PropertyDamage do
     # A model that still defines a removed lifecycle hook fails here, before
     # any target is set up.
     PropertyDamage.Model.check_lifecycle!(model)
-    # The rules for expansions/0, and the run options it rules out, fail here
-    # too, before any target is set up.
-    Expansion.check_options!(model, opts)
+    # The rules for expansions/0 fail here too, before any target is set up.
     Expansion.check_model!(model)
     [reference | _] = targets
     max_commands = opts[:max_commands]
@@ -547,7 +527,6 @@ defmodule PropertyDamage do
       shrinker_config: opts[:shrinker_config] || ShrinkerConfig.new(),
       on_failure: build_on_failure_callback(opts),
       reporter: reporter,
-      branching: opts[:branching],
       stutter: opts[:stutter],
       stutter_config: Stutter.parse_config(opts[:stutter]),
       keep_attempts: keep_attempts(opts),
@@ -652,11 +631,6 @@ defmodule PropertyDamage do
 
     # Generate sequences and run
     generator_opts = [max_commands: ctx.max_commands, external_markers: ctx.external_markers]
-
-    generator_opts =
-      if ctx.branching,
-        do: Keyword.put(generator_opts, :branching, ctx.branching),
-        else: generator_opts
 
     ctx = Map.put(ctx, :generator, Generator.generate_sequence(ctx.model, generator_opts))
 
@@ -974,8 +948,7 @@ defmodule PropertyDamage do
         phase: :run,
         run_number: run_number + 1,
         total_runs: ctx.max_runs,
-        command_count: command_count,
-        branch_count: Sequence.branch_count(sequence)
+        command_count: command_count
       }
     end)
 
@@ -984,8 +957,7 @@ defmodule PropertyDamage do
 
     Telemetry.sequence_start(%{
       run_number: run_number,
-      command_count: command_count,
-      branching: Sequence.branching?(sequence)
+      command_count: command_count
     })
 
     run = %{
@@ -997,12 +969,10 @@ defmodule PropertyDamage do
       start: seq_start_time
     }
 
-    if ctx.branching,
-      do: run_branching(ctx, run, acc),
-      else: run_lockstep(ctx, run, acc)
+    run_lockstep(ctx, run, acc)
   end
 
-  # A linear sequence runs on every target through the lockstep scheduler,
+  # A sequence runs on every target through the lockstep scheduler,
   # which owns each target's event queue, injectors, mocks, setup and teardown.
   defp run_lockstep(ctx, run, acc) do
     outcome = schedule(ctx, run)
@@ -1100,70 +1070,7 @@ defmodule PropertyDamage do
     outcome
   end
 
-  # A branching sequence runs on the one target through the linear engine.
-  defp run_branching(ctx, run, acc) do
-    fires_before = acc.fires
-
-    case execute_branching(ctx, run) do
-      {:ok, result} = run_result ->
-        Telemetry.sequence_stop(run.start, %{
-          run_number: run.run_number,
-          success: result.success,
-          commands_executed: Sequence.command_count(run.sequence),
-          variant: if(result.success, do: nil, else: variant_of(ctx.target))
-        })
-
-        acc = accumulate_coverage(acc, result, run.sequence, nil)
-
-        if result.success do
-          {:pass,
-           %{
-             acc
-             | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
-               setup_commands: acc.setup_commands + length(run.sequence.setup),
-               teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
-           }}
-        else
-          found = branching_found(ctx, run, run_result, acc.fires)
-          handle_failure(ctx, Map.put(found, :fires_before, fires_before))
-        end
-
-      # Executor.run_logged returns {:error, reason, logs} when the adapter's
-      # setup/1 fails: a setup failure of the one target, never shrunk, that
-      # keeps the lines its setup wrote (DR-054).
-      {:error, _reason, _logs} = run_result ->
-        handle_failure(ctx, branching_found(ctx, run, run_result, acc.fires))
-    end
-  end
-
-  defp execute_branching(ctx, run) do
-    target = ctx.target
-
-    RunServices.with_services_logged(target, fn event_queue, mock_registry ->
-      Executor.run_logged(run.sequence, ctx.model, target.adapter,
-        config: target.config,
-        event_queue: event_queue,
-        mock_registry: mock_registry,
-        stutter_config: ctx.stutter_config,
-        keep_attempts: ctx.keep_attempts,
-        external_markers: ctx.external_markers,
-        # Explicit stutter RNG base (DR-029): per-run seed so stutter
-        # decisions are decoupled from run count and seed-library replay
-        # drift, yet reproduce on the same campaign seed.
-        rng_seed: run.run_seed,
-        # Client-minted run-scoped values (DR-034): the exploration run is
-        # epoch 0; the nonce is constant across the campaign's runs.
-        run_nonce: ctx.run_nonce,
-        mint_epoch: 0,
-        telemetry: Telemetry.engine_context(variant_of(target), run.run_number),
-        setup_commands: run.sequence.setup,
-        teardown_commands: run.sequence.teardown
-      )
-    end)
-  end
-
-  # A failure a run found, in one shape for the lockstep and the branching path:
-  # the run that found it (sequence, effective seed, run number), the whole-run
+  # A failure a run found: the run that found it (sequence, effective seed, run number), the whole-run
   # check firings so far, the scheduler-shaped failure (`kind`, `variant`,
   # `root`, `reason`), and the failing target's finished result (nil when its
   # setup failed).
@@ -1180,44 +1087,6 @@ defmodule PropertyDamage do
       other_failures: outcome.other_failures,
       result: Enum.at(outcome.results, outcome.failure.variant.index),
       reference_result: Enum.at(outcome.results, 0)
-    }
-  end
-
-  defp branching_found(ctx, run, run_result, fires) do
-    {failure, result} =
-      case run_result do
-        {:ok, result} ->
-          {%{
-             kind: FailureReport.kind_of(result.failure_reason),
-             variant: variant_of(ctx.target),
-             root: result.failed_at_index,
-             reason: result.failure_reason,
-             stacktrace: result.stacktrace
-           }, result}
-
-        {:error, reason, logs} ->
-          {%{
-             kind: :setup_failed,
-             variant: variant_of(ctx.target),
-             root: nil,
-             reason: Failure.setup_failed(reason),
-             stacktrace: nil,
-             logs: logs
-           }, nil}
-      end
-
-    %{
-      sequence: run.sequence,
-      expansion: nil,
-      expansion_counts: %{},
-      run_seed: run.run_seed,
-      run_number: run.run_number,
-      fires: fires,
-      compare_counts: Comparison.zero_counts(ctx.model),
-      failure: failure,
-      other_failures: [],
-      result: result,
-      reference_result: nil
     }
   end
 
@@ -1277,11 +1146,8 @@ defmodule PropertyDamage do
   # The `:external_markers` option of the generator and expansion calls.
   defp markers(ctx), do: [external_markers: ctx.external_markers]
 
-  # Every target's concrete sequence for a generated linear sequence: the roots
-  # with each target's expansions realized, before any target is set up. A
-  # branching run has one target and runs its sequence as generated.
-  defp expand(%{branching: branching}, _sequence, _run_seed) when branching != nil, do: nil
-
+  # Every target's concrete sequence for a generated sequence: the roots with
+  # each target's expansions realized, before any target is set up.
   defp expand(ctx, sequence, run_seed) do
     if Expansion.defines?(ctx.model) do
       ctx.model
@@ -1494,8 +1360,7 @@ defmodule PropertyDamage do
   end
 
   # Replays one seed as run 0 of itself: the sequence, setup and teardown
-  # commands included, on every target (through the lockstep scheduler, or the
-  # linear engine for a branching run). A failure, when this seed is the
+  # commands included, on every target through the lockstep scheduler. A failure, when this seed is the
   # representative (`build_rep?`), goes through the run's failure path: shrunk,
   # reproduced and reported. A target's setup failure halts the replay with its
   # report.
@@ -1526,18 +1391,11 @@ defmodule PropertyDamage do
   # Replay is a pre-exploration phase; whole-run anti-vacuity coverage is an
   # exploration concern, so no firings are accumulated here.
   defp replay_run(ctx, run) do
-    if ctx.branching do
-      case execute_branching(ctx, run) do
-        {:ok, %{success: true}} -> :passed
-        run_result -> {:failed, branching_found(ctx, run, run_result, %{})}
-      end
-    else
-      outcome = schedule(ctx, run)
+    outcome = schedule(ctx, run)
 
-      if outcome.failure,
-        do: {:failed, lockstep_found(run, outcome, %{}, %{})},
-        else: :passed
-    end
+    if outcome.failure,
+      do: {:failed, lockstep_found(run, outcome, %{}, %{})},
+      else: :passed
   end
 
   defp replay_report(ctx, found, true) do
@@ -1773,9 +1631,8 @@ defmodule PropertyDamage do
     report_failure(ctx, report)
   end
 
-  # Runs the shrunk sequence once: a linear sequence on every target through
-  # the scheduler, a branching one on the one target through the linear engine,
-  # each with its own services. For a stutter failure, stutter is forced on
+  # Runs the shrunk sequence once on every target through the scheduler, each
+  # target with its own services. For a stutter failure, stutter is forced on
   # with the run's seed so the fresh state carries the reproduced violation
   # (DR-029). Returns `{:reproduced, failure, result, other_failures, counts}`
   # when its primary failure has the found failure's signature (kind, name,
@@ -1783,9 +1640,7 @@ defmodule PropertyDamage do
   # reproduction's `compare_counts` and the check `fires` of its reference
   # target; `{:setup_failed, reason}` when a target's setup failed, else
   # `:not_reproduced`.
-  defp reproduce(ctx, sequence, found, epoch, expansion)
-
-  defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch, expansion) do
+  defp reproduce(ctx, %Sequence{} = sequence, found, epoch, expansion) do
     {:ok, outcome} =
       Scheduler.run(
         model: ctx.model,
@@ -1823,57 +1678,6 @@ defmodule PropertyDamage do
     end
   end
 
-  defp reproduce(ctx, sequence, found, epoch, _expansion) do
-    target = ctx.target
-
-    run_result =
-      RunServices.with_services(target, fn event_queue, mock_registry ->
-        Executor.run(sequence, ctx.model, target.adapter,
-          config: target.config,
-          event_queue: event_queue,
-          mock_registry: mock_registry,
-          stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
-          keep_attempts: ctx.keep_attempts,
-          external_markers: ctx.external_markers,
-          rng_seed: found.run_seed,
-          run_nonce: ctx.run_nonce,
-          mint_epoch: epoch,
-          telemetry: Telemetry.engine_context(variant_of(target), found.run_number),
-          setup_commands: sequence.setup,
-          teardown_commands: sequence.teardown
-        )
-      end)
-
-    case run_result do
-      {:ok, %{success: false, failure_reason: %Failure{type: %Failure.Setup{}} = reason}} ->
-        {:setup_failed, reason}
-
-      {:ok, %{success: false, failure_reason: %Failure{} = reason} = result} ->
-        failure = %{
-          found.failure
-          | root: result.failed_at_index,
-            reason: reason,
-            stacktrace: result.stacktrace
-        }
-
-        counts = %{
-          compare_counts: Comparison.zero_counts(ctx.model),
-          fires: project_fires(Map.get(result, :check_counters, %{})),
-          reference_result: nil
-        }
-
-        if same_failure?(failure, found.failure),
-          do: {:reproduced, failure, result, [], counts},
-          else: :not_reproduced
-
-      {:error, reason} ->
-        {:setup_failed, Failure.setup_failed(reason)}
-
-      _passed ->
-        :not_reproduced
-    end
-  end
-
   # The compare counts of a lockstep reproduction and the check firings of
   # its reference target (DR-026: firings count what the reference ran).
   defp reproduction_counts(outcome) do
@@ -1893,8 +1697,7 @@ defmodule PropertyDamage do
   # What every target runs when the shrunk sequence is reproduced: the
   # failing run's choices, realized again for the shrunk sequence (the
   # shrinker carries them), or every root as itself for a model without
-  # expansions. A branching run has none.
-  defp reproduction_expansion(_ctx, _sequence, _shrunk, %{expansion: nil}), do: nil
+  # expansions.
   defp reproduction_expansion(_ctx, _sequence, %{} = shrunk, _found), do: shrunk
 
   defp reproduction_expansion(ctx, sequence, nil, _found),
@@ -1956,7 +1759,6 @@ defmodule PropertyDamage do
       # The reported run's log lines (DR-054); a target whose setup/1 failed
       # has no result, and its failure carries that setup's lines.
       logs: Map.get(result, :logs) || Map.get(failure, :logs, %{}),
-      linearization: Map.get(result, :linearization),
       stacktrace: failure.stacktrace,
       model: ctx.model,
       targets: ctx.target_entries,
@@ -1996,8 +1798,8 @@ defmodule PropertyDamage do
   defp ran_a_root?(result),
     do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
 
-  # The concrete sequences of the run the report describes; a branching run
-  # ran its one target's roots as generated.
+  # The concrete sequences of the run the report describes; a found failure
+  # that carries none ran the reference target's roots as generated.
   defp report_expansion(_ctx, %{expansion: %{} = expansion}, _sequence), do: expansion
   defp report_expansion(ctx, _found, sequence), do: Expansion.identity(sequence, [ctx.target])
 
@@ -2415,7 +2217,6 @@ defmodule PropertyDamage do
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,
             external_markers: ctx.external_markers,
-            linearization: Map.get(result, :linearization),
             logs: Map.get(result, :logs, %{}),
             stacktrace: failure.stacktrace,
             expansion: shrink_result.expansion,

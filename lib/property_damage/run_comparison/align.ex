@@ -2,7 +2,7 @@ defmodule PropertyDamage.RunComparison.Align do
   @moduledoc false
   # Alignment primitives for RunComparison (DR-035).
   #
-  # Command alignment is trivial: same-plan traces share branch-aware
+  # Command alignment is trivial: same-plan traces share
   # %Sequence.Position{} keys (DR-036), so commands align by position, total and
   # order-free. Events *within* a command align by longest-common-subsequence
   # keyed on the event struct module (or a model-supplied identity override), so

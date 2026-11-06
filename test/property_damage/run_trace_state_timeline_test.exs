@@ -1,8 +1,8 @@
 defmodule PropertyDamage.RunTraceStateTimelineTest do
   @moduledoc """
   DR-040: unit-level contracts for the derived per-step state timeline,
-  driven by hand-built traces so the fold-order and branch-merge semantics are
-  pinned precisely (independent of any live run).
+  driven by hand-built traces so the fold-order semantics are pinned
+  precisely (independent of any live run).
   """
   use ExUnit.Case, async: true
 
@@ -157,61 +157,6 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
 
       assert RunTrace.state_before(trace, Position.prefix(2))[Log] ==
                %{log: [{:cmd, :r0}, {:cmd, :r1}, {:cmd, :l0}, {:cmd, :l1}]}
-    end
-  end
-
-  describe "faithful timeline (branching) recovers the verified linearization order" do
-    test "the merged state folds branches in linearization order, not branch order" do
-      plan =
-        Sequence.branching([], [[%Cmd{op: :a}], [%Cmd{op: :b}]], [%Cmd{op: :sink}])
-
-      b0 = Position.branch(0, 0)
-      b1 = Position.branch(1, 0)
-      sfx = Position.suffix(0)
-
-      # Verified order is branch 1 THEN branch 0 -- the reverse of branch order.
-      trace =
-        RunTrace.new(
-          model: Model,
-          plan: plan,
-          executed: %{b0 => %Cmd{op: :a}, b1 => %Cmd{op: :b}, sfx => %Cmd{op: :sink}},
-          command_fold_ordinals: %{b0 => 0, b1 => 0, sfx => 1},
-          linearization: [{1, 0, %Cmd{op: :b}}, {0, 0, %Cmd{op: :a}}],
-          event_log: [],
-          outcome: :pass
-        )
-
-      assert RunTrace.state_at(trace, sfx)[Log] == %{log: [{:cmd, :b}, {:cmd, :a}, {:cmd, :sink}]}
-
-      # state_before the suffix is the merged state with no suffix folds yet.
-      assert RunTrace.state_before(trace, sfx)[Log] == %{log: [{:cmd, :b}, {:cmd, :a}]}
-    end
-
-    test "falls back to branch order when no linearization was verified" do
-      plan =
-        Sequence.branching([], [[%Cmd{op: :a}], [%Cmd{op: :b}]], [%Cmd{op: :sink}])
-
-      trace =
-        RunTrace.new(
-          model: Model,
-          plan: plan,
-          executed: %{
-            Position.branch(0, 0) => %Cmd{op: :a},
-            Position.branch(1, 0) => %Cmd{op: :b},
-            Position.suffix(0) => %Cmd{op: :sink}
-          },
-          command_fold_ordinals: %{
-            Position.branch(0, 0) => 0,
-            Position.branch(1, 0) => 0,
-            Position.suffix(0) => 1
-          },
-          linearization: nil,
-          event_log: [],
-          outcome: :pass
-        )
-
-      assert RunTrace.state_at(trace, Position.suffix(0))[Log] ==
-               %{log: [{:cmd, :a}, {:cmd, :b}, {:cmd, :sink}]}
     end
   end
 end

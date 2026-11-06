@@ -87,7 +87,6 @@ defmodule PropertyDamage.EventLog.Entry do
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
   - `trace_id` - Distributed trace ID (only for `:telemetry` source)
   - `span_id` - Span ID within the trace (only for `:telemetry` source)
-  - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
   - `stutter_attempt` - Attempt number for stutter retries (only for `:stutter` source)
   - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
   - `resource_poller_id` - Reference identifying the poller instance (only for `:resource_poller` source)
@@ -111,7 +110,6 @@ defmodule PropertyDamage.EventLog.Entry do
           telemetry_receiver: module() | nil,
           trace_id: String.t() | nil,
           span_id: String.t() | nil,
-          branch_id: non_neg_integer() | nil,
           stutter_attempt: pos_integer() | nil,
           stutter_comparison: :agree | {:disagree, Exception.t()} | nil,
           resource_poller_id: reference() | nil,
@@ -151,7 +149,6 @@ defmodule PropertyDamage.EventLog.Entry do
     :telemetry_receiver,
     :trace_id,
     :span_id,
-    :branch_id,
     :stutter_attempt,
     :stutter_comparison,
     :resource_poller_id,
@@ -277,7 +274,6 @@ defmodule PropertyDamage.EventLog.Entry do
   - `:timestamp` - Override timestamp (default: current monotonic time)
   - `:trace_id` - Distributed trace ID
   - `:span_id` - Span ID within the trace
-  - `:branch_id` - Branch identifier for parallel execution
 
   ## Examples
 
@@ -297,8 +293,7 @@ defmodule PropertyDamage.EventLog.Entry do
       injector_adapter: nil,
       telemetry_receiver: telemetry_receiver,
       trace_id: Keyword.get(opts, :trace_id),
-      span_id: Keyword.get(opts, :span_id),
-      branch_id: Keyword.get(opts, :branch_id)
+      span_id: Keyword.get(opts, :span_id)
     }
   end
 
@@ -331,7 +326,6 @@ defmodule PropertyDamage.EventLog.Entry do
   ## Options
 
   - `:timestamp` - Override timestamp (default: current monotonic time)
-  - `:branch_id` - Branch identifier for parallel execution
 
   ## Examples
 
@@ -352,7 +346,6 @@ defmodule PropertyDamage.EventLog.Entry do
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,
-      branch_id: Keyword.get(opts, :branch_id),
       stutter_attempt: attempt,
       stutter_comparison: comparison
     }
@@ -385,7 +378,6 @@ defmodule PropertyDamage.EventLog.Entry do
   ## Options
 
   - `:timestamp` - Override timestamp (default: current monotonic time)
-  - `:branch_id` - Branch identifier for parallel execution
 
   ## Examples
 
@@ -406,7 +398,6 @@ defmodule PropertyDamage.EventLog.Entry do
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,
-      branch_id: Keyword.get(opts, :branch_id),
       stutter_attempt: nil,
       stutter_comparison: nil
     }
@@ -443,7 +434,6 @@ defmodule PropertyDamage.EventLog.Entry do
   ## Options
 
   - `:timestamp` - Override timestamp (default: current monotonic time)
-  - `:branch_id` - Branch identifier for parallel execution
 
   ## Examples
 
@@ -464,7 +454,6 @@ defmodule PropertyDamage.EventLog.Entry do
         telemetry_receiver: nil,
         trace_id: nil,
         span_id: nil,
-        branch_id: Keyword.get(opts, :branch_id),
         stutter_attempt: nil,
         stutter_comparison: nil
       },
@@ -501,7 +490,6 @@ defmodule PropertyDamage.EventLog.Entry do
   ## Options
 
   - `:timestamp` - Override timestamp (default: current monotonic time)
-  - `:branch_id` - Branch identifier for parallel execution
 
   ## Examples
 
@@ -521,7 +509,6 @@ defmodule PropertyDamage.EventLog.Entry do
       telemetry_receiver: nil,
       trace_id: nil,
       span_id: nil,
-      branch_id: Keyword.get(opts, :branch_id),
       stutter_attempt: nil,
       stutter_comparison: nil,
       resource_poller_id: poller_id

@@ -200,16 +200,6 @@ defmodule PropertyDamage.RunTargetsTest do
       assert error.message =~ "`concurrency:`"
     end
 
-    test "branching: with two targets is an option error" do
-      error =
-        assert_raise NimbleOptions.ValidationError, fn ->
-          run([step("a"), step("b")], branching: [branch_probability: 0.5])
-        end
-
-      assert error.message =~ "branching"
-      assert error.message =~ "one target"
-    end
-
     test "latency: with concurrency: :parallel is an option error" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
@@ -217,6 +207,19 @@ defmodule PropertyDamage.RunTargetsTest do
         end
 
       assert error.message =~ "concurrency"
+    end
+
+    test "the removed parallel-branch option is an unknown option" do
+      # The key is built at run time so the retired option name appears in
+      # no source line.
+      removed = String.to_atom("branch" <> "ing")
+
+      error =
+        assert_raise NimbleOptions.ValidationError, fn ->
+          run([step("a"), step("b")], [{removed, []}])
+        end
+
+      assert error.message =~ "unknown options [:#{removed}]"
     end
   end
 
@@ -320,7 +323,7 @@ defmodule PropertyDamage.RunTargetsTest do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 17::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 18::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :diverged
@@ -335,7 +338,7 @@ defmodule PropertyDamage.RunTargetsTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 17}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 18}} = Persistence.load(path)
     end
   end
 

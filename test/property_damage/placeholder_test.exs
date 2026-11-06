@@ -46,11 +46,8 @@ defmodule PropertyDamage.PlaceholderTest do
       assert Placeholder.new_at(TestEvent, [:id], Position.prefix(5), 0).position ==
                Position.prefix(5)
 
-      assert Placeholder.new_at(TestEvent, [:id], Position.branch(1, 2), 0).position ==
-               Position.branch(1, 2)
-
-      assert Placeholder.new_at(TestEvent, [:id], Position.suffix(3), 0).position ==
-               Position.suffix(3)
+      assert Placeholder.new_at(TestEvent, [:id], Position.setup(3), 0).position ==
+               Position.setup(3)
     end
 
     test "stores event index" do
@@ -212,14 +209,6 @@ defmodule PropertyDamage.PlaceholderTest do
 
       assert inspected =~ "id@pre0/evt0"
       assert inspected =~ "-> \"order_123\">"
-    end
-
-    test "renders branch and suffix positions" do
-      assert inspect(Placeholder.new_at(TestEvent, [:id], Position.branch(1, 2), 0)) =~
-               "id@br1.2/evt0>"
-
-      assert inspect(Placeholder.new_at(TestEvent, [:id], Position.suffix(3), 1)) =~
-               "id@suf3/evt1>"
     end
 
     test "renders nested and list-index paths" do

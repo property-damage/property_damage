@@ -78,7 +78,6 @@ defmodule PropertyDamage.Executor.Stutter do
             stutter_config,
             adapter,
             adapter_context,
-            state.branch_id,
             {rng, sink}
           )
         end,
@@ -105,7 +104,6 @@ defmodule PropertyDamage.Executor.Stutter do
          stutter_config,
          adapter,
          adapter_context,
-         branch_id,
          {rng, sink}
        ) do
     {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
@@ -151,8 +149,7 @@ defmodule PropertyDamage.Executor.Stutter do
       resolved_command,
       index,
       event_log,
-      stutter_config,
-      branch_id
+      stutter_config
     )
   end
 
@@ -162,8 +159,7 @@ defmodule PropertyDamage.Executor.Stutter do
          command,
          index,
          event_log,
-         stutter_config,
-         branch_id
+         stutter_config
        ) do
     # Check for execution errors
     case Enum.find(retry_results, &match?({:error, _, _}, &1)) do
@@ -178,8 +174,7 @@ defmodule PropertyDamage.Executor.Stutter do
           command,
           index,
           event_log,
-          stutter_config,
-          branch_id
+          stutter_config
         )
     end
   end
@@ -190,8 +185,7 @@ defmodule PropertyDamage.Executor.Stutter do
          command,
          index,
          event_log,
-         stutter_config,
-         branch_id
+         stutter_config
        ) do
     # Compare each retry's events with original
     comparisons =
@@ -226,7 +220,7 @@ defmodule PropertyDamage.Executor.Stutter do
             # Record each retry event as a stutter entry
             Enum.reduce(retry_events, log, fn event, inner_log ->
               entry =
-                Entry.from_stutter(event, index, attempt, comparison, branch_id: branch_id)
+                Entry.from_stutter(event, index, attempt, comparison)
 
               [entry | inner_log]
             end)

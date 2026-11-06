@@ -249,7 +249,6 @@ defmodule PropertyDamage.IEx do
 
   - `:commands` - Number of commands to generate (default: 10)
   - `:seed` - Random seed for reproducibility
-  - `:branching` - Enable branching sequences (default: false)
   - `:verbose` - Show detailed command fields (default: false)
 
   ## Examples
@@ -274,17 +273,11 @@ defmodule PropertyDamage.IEx do
   def dry_run(model, opts \\ []) do
     max_commands = Keyword.get(opts, :commands, 10)
     seed = Keyword.get(opts, :seed, :rand.uniform(1_000_000_000))
-    branching = Keyword.get(opts, :branching, nil)
     verbose = Keyword.get(opts, :verbose, false)
 
     # Generate sequence (explicitly seeded; matches what run/1 generates
     # for run 0 of the same seed)
-    generator_opts = [max_commands: max_commands]
-
-    generator_opts =
-      if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
-
-    generator = Generator.generate_sequence(model, generator_opts)
+    generator = Generator.generate_sequence(model, max_commands: max_commands)
     sequence = Generator.generate_value(generator, seed) || Sequence.linear([])
 
     # Print sequence
@@ -296,7 +289,7 @@ defmodule PropertyDamage.IEx do
     :ok
   end
 
-  defp print_sequence(%Sequence{branches: nil} = seq, verbose) do
+  defp print_sequence(%Sequence{} = seq, verbose) do
     commands = seq.prefix
     IO.puts("Generated sequence (#{length(commands)} commands):")
     IO.puts(String.duplicate("─", 65))
@@ -310,68 +303,20 @@ defmodule PropertyDamage.IEx do
     IO.puts("")
   end
 
-  defp print_sequence(%Sequence{} = seq, verbose) do
-    total = Sequence.command_count(seq)
-    branch_count = length(seq.branches)
-
-    IO.puts("Generated branching sequence (#{total} commands, #{branch_count} branches):")
-    IO.puts(String.duplicate("─", 65))
-
-    # Print prefix
-    if seq.prefix != [] do
-      IO.puts("PREFIX:")
-
-      seq.prefix
-      |> Enum.with_index()
-      |> Enum.each(fn {cmd, idx} ->
-        print_command(cmd, idx, verbose, "  ")
-      end)
-    end
-
-    # Print branches
-    IO.puts("BRANCHES:")
-
-    seq.branches
-    |> Enum.with_index()
-    |> Enum.each(fn {branch, branch_idx} ->
-      IO.puts("  Branch #{branch_idx + 1}:")
-
-      branch
-      |> Enum.with_index()
-      |> Enum.each(fn {cmd, cmd_idx} ->
-        print_command(cmd, cmd_idx, verbose, "    ")
-      end)
-    end)
-
-    # Print suffix
-    if seq.suffix != [] do
-      IO.puts("SUFFIX:")
-      offset = length(seq.prefix) + Enum.sum(Enum.map(seq.branches, &length/1))
-
-      seq.suffix
-      |> Enum.with_index(offset)
-      |> Enum.each(fn {cmd, idx} ->
-        print_command(cmd, idx, verbose, "  ")
-      end)
-    end
-
-    IO.puts("")
-  end
-
-  defp print_command(cmd, idx, verbose, prefix \\ "") do
+  defp print_command(cmd, idx, verbose) do
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
     fields = Map.from_struct(cmd) |> Map.drop([:__struct__])
 
     if verbose do
-      IO.puts("#{prefix}[#{idx}] #{cmd_name}")
+      IO.puts("[#{idx}] #{cmd_name}")
 
       for {key, value} <- fields do
-        IO.puts("#{prefix}     #{key}: #{inspect(value)}")
+        IO.puts("     #{key}: #{inspect(value)}")
       end
     else
       # Compact format: show key fields inline
       fields_str = format_fields_compact(fields)
-      IO.puts("#{prefix}[#{idx}] #{cmd_name}{#{fields_str}}")
+      IO.puts("[#{idx}] #{cmd_name}{#{fields_str}}")
     end
   end
 

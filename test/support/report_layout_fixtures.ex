@@ -240,67 +240,6 @@ defmodule PropertyDamage.Test.ReportLayout do
     end
   end
 
-  defmodule Branch do
-    @moduledoc false
-    # A hand-built report of a branching run whose failure is localized to a
-    # branch command: the `branching:` run path judges branch commands by
-    # linearization, so such a report is built directly.
-
-    defmodule Tick do
-      @moduledoc false
-      use PropertyDamage.Command
-      defstruct [:n]
-
-      @impl true
-      def generator(_overrides \\ %{}), do: StreamData.constant(%{n: 0})
-    end
-
-    defmodule Count do
-      @moduledoc false
-      @behaviour PropertyDamage.Model.Projection
-
-      @impl true
-      def init, do: %{count: 0}
-
-      @impl true
-      def apply(%{count: c} = s, _), do: %{s | count: c + 1}
-    end
-
-    defmodule Model do
-      @moduledoc false
-      use PropertyDamage.Model
-
-      @impl true
-      def commands, do: [PropertyDamage.Test.ReportLayout.Branch.Tick]
-
-      @impl true
-      def command_sequence_projection, do: PropertyDamage.Test.ReportLayout.Branch.Count
-    end
-
-    @doc false
-    def report do
-      seq =
-        Sequence.branching(
-          [%Tick{n: 0}],
-          [[%Tick{n: 1}, %Tick{n: 2}], [%Tick{n: 3}]],
-          [%Tick{n: 4}]
-        )
-
-      FailureReport.new(
-        seed: 77,
-        run_number: 0,
-        original_sequence: seq,
-        shrunk_sequence: seq,
-        # The executor index 2 in branch 0 is the branch's second command.
-        failed_at_index: 2,
-        failure_reason: %{Failure.check_failed(:CountIsOdd, "count went even") | branch_id: 0},
-        model: Model,
-        projections_before: %{Count => %{count: 2}},
-        projections: %{Count => %{count: 3}}
-      )
-    end
-  end
-
   # ==========================================================================
   # Reports
   # ==========================================================================
@@ -315,7 +254,6 @@ defmodule PropertyDamage.Test.ReportLayout do
     :setup_failed_command,
     :execution_failed_timeout,
     :test_code_error,
-    :branching,
     :unshrunk,
     :shrunk_not_reproduced,
     :latency_exceeded
@@ -421,8 +359,6 @@ defmodule PropertyDamage.Test.ReportLayout do
 
   defp build(:test_code_error),
     do: R.run(model(CrashModel, CrashingCheck), [R.pay_target("a")])
-
-  defp build(:branching), do: {:error, Branch.report()}
 
   defp build(:unshrunk),
     do:
@@ -660,8 +596,7 @@ defmodule PropertyDamage.Test.ReportLayout do
     do: Keyword.fetch!(entry, :name)
 
   @doc false
-  # The label of the failing step (DR-055 decision 5), `:any` for a suffix command of a
-  # branching run (its offset rule is the renderer's), or nil when the
+  # The label of the failing step (DR-055 decision 5), or nil when the
   # failure is not localized to a step.
   def expected_label(%FailureReport{kind: kind, failed_at_index: i})
       when kind in [:diverged, :did_not_converge] and is_integer(i),
@@ -681,9 +616,7 @@ defmodule PropertyDamage.Test.ReportLayout do
   end
 
   defp step_label(%Position{section: :prefix, offset: i}, _root), do: "[#{i}]"
-  defp step_label(%Position{section: {:branch, b}, offset: i}, _root), do: "[branch #{b}.#{i}]"
   defp step_label(%Position{section: {:leaf, _id}, offset: j}, root), do: "[#{root}.#{j}]"
-  defp step_label(%Position{section: :suffix}, _root), do: :any
 
   # Projections prints unless neither compared side has state.
   defp projections?(report, true) do
@@ -726,11 +659,10 @@ defmodule PropertyDamage.Test.ReportLayout do
   # Parsing
   # ==========================================================================
 
-  @label ~S"\[(?:setup \d+|teardown \d+|branch \d+\.\d+|\d+(?:\.\d+)?)\]"
+  @label ~S"\[(?:setup \d+|teardown \d+|\d+(?:\.\d+)?)\]"
 
   @doc false
-  # The regex source of a step label: [i], [i.j], [setup i], [teardown i],
-  # [branch b.i].
+  # The regex source of a step label: [i], [i.j], [setup i], [teardown i].
   def label_source, do: @label
 
   @doc false

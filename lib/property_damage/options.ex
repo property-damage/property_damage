@@ -438,8 +438,7 @@ defmodule PropertyDamage.Options do
           form says the artifact reproduced; one that passes returns stats
           whose `:replay` is `:not_reproduced`.
 
-      `max_runs:` other than 1 and `branching:` are errors beside either
-      shape.
+      `max_runs:` other than 1 is an error beside either shape.
       """
     ],
     replay_dir: [
@@ -629,37 +628,6 @@ defmodule PropertyDamage.Options do
       ]
     ],
 
-    # Nested - Branching
-    branching: [
-      type: :keyword_list,
-      doc:
-        "Options for branching sequences: a prefix, branches run one after another " <>
-          "on one target, and a suffix, checked for linearizability afterward. " <>
-          "Not with `latency:` or a `check_mode:` other than the default.",
-      keys: [
-        branch_probability: [
-          type: :float,
-          default: 0.2,
-          doc: "Probability of creating a branch point (0.0-1.0)."
-        ],
-        max_branches: [
-          type: :pos_integer,
-          default: 3,
-          doc: "Maximum number of branches in one sequence."
-        ],
-        max_branch_length: [
-          type: :pos_integer,
-          default: 5,
-          doc: "Maximum commands per branch."
-        ],
-        min_prefix_length: [
-          type: :pos_integer,
-          default: 3,
-          doc: "Minimum commands before branching."
-        ]
-      ]
-    ],
-
     # Nested - Stutter (Idempotency Testing)
     stutter: [
       type: :keyword_list,
@@ -822,7 +790,6 @@ defmodule PropertyDamage.Options do
     reject_retired_stutter_keys!(opts)
 
     reject_only_option_conflicts!(opts)
-    reject_branching_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
 
     case Keyword.get(validated, :regression) do
@@ -832,10 +799,8 @@ defmodule PropertyDamage.Options do
 
     validated
     |> reject_only_variants!()
-    |> reject_multi_target_branching!()
     |> reject_timed_parallel!()
     |> reject_single_target_ratio!()
-    |> validate_branching_bounds!()
   end
 
   @doc false
@@ -986,9 +951,6 @@ defmodule PropertyDamage.Options do
       Keyword.get(raw, :max_runs, 1) != 1 &&
         "`max_runs:` #{inspect(Keyword.get(raw, :max_runs))} cannot be used with #{shape}, " <>
           "which runs one run: drop `max_runs:` or pass `max_runs: 1`",
-      Keyword.get(raw, :branching) != nil &&
-        "`branching:` cannot be used with #{shape}: a branching sequence runs on one target " <>
-          "and is not regenerated or replayed per target",
       (Keyword.has_key?(only, :replay) and not Keyword.has_key?(only, :run) and
          Keyword.has_key?(raw, :seed)) &&
         "`seed:` cannot be used with `only: [replay: ...]`: the replay artifact records " <>
@@ -1031,54 +993,6 @@ defmodule PropertyDamage.Options do
       end
 
     unknown ++ alone
-  end
-
-  # Branching sequences run their branches one after another inside one
-  # system and model the interleavings afterward (DR-053); the
-  # lockstep comparison steps every target one command at a time, so it has no
-  # boundary to compare at inside a branch.
-  defp reject_multi_target_branching!(opts) do
-    if is_list(opts[:branching]) and length(opts[:targets]) > 1 do
-      raise NimbleOptions.ValidationError,
-        key: :branching,
-        value: opts[:branching],
-        message:
-          "`branching:` sequences run against one target only; got " <>
-            "#{length(opts[:targets])} `targets:` entries"
-    end
-
-    opts
-  end
-
-  # A branching run executes one branch at a time on one target through the
-  # linear engine, which records no latency samples and runs its checks as
-  # `:halt` whatever `check_mode:` says. Both are refused beside `branching:`
-  # instead of accepted and ignored. Read from the raw options, because the
-  # schema fills `check_mode:` in, and the default is what the path does.
-  defp reject_branching_conflicts!(opts) do
-    if Keyword.get(opts, :branching) != nil do
-      if opts[:latency] do
-        raise NimbleOptions.ValidationError,
-          key: :latency,
-          value: opts[:latency],
-          message:
-            "`latency:` cannot be used with `branching:`: a branching run executes one " <>
-              "branch at a time on one target and records no latency samples"
-      end
-
-      mode = Keyword.get(opts, :check_mode, :halt)
-
-      if mode != :halt do
-        raise NimbleOptions.ValidationError,
-          key: :check_mode,
-          value: mode,
-          message:
-            "`check_mode: #{inspect(mode)}` cannot be used with `branching:`: a branching " <>
-              "run halts at the first failing check and ignores the option"
-      end
-    end
-
-    opts
   end
 
   # Latency measured while other targets execute at the same moment would mix
@@ -1363,24 +1277,6 @@ defmodule PropertyDamage.Options do
     case Keyword.get(opts, :regression) do
       regression when is_list(regression) -> reject_retired_targets!(regression)
       _ -> :ok
-    end
-  end
-
-  # Cross-field check NimbleOptions can't express: branching cannot begin until
-  # `min_prefix_length` commands have run, but the prefix is capped by
-  # `max_commands`. If min_prefix_length > max_commands the generator can never
-  # reach the branch point and prefix generation spins. Fail fast and clearly.
-  defp validate_branching_bounds!(opts) do
-    with branching when is_list(branching) <- Keyword.get(opts, :branching),
-         max_commands when is_integer(max_commands) <- Keyword.get(opts, :max_commands, 50),
-         min_prefix when is_integer(min_prefix) <- Keyword.get(branching, :min_prefix_length, 3),
-         true <- min_prefix > max_commands do
-      raise ArgumentError,
-            "Invalid branching options: min_prefix_length (#{min_prefix}) must be <= " <>
-              "max_commands (#{max_commands}); otherwise branching can never start and " <>
-              "generation would not terminate."
-    else
-      _ -> opts
     end
   end
 
@@ -1983,10 +1879,6 @@ defmodule PropertyDamage.Options do
     max_commands: [
       type: :pos_integer,
       doc: "Max commands per generated sequence."
-    ],
-    branching: [
-      type: :keyword_list,
-      doc: "Branching generation options (see `PropertyDamage.run/1`)."
     ],
     external_markers: [
       type: {:list, :atom},

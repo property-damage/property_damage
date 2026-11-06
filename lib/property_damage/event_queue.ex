@@ -24,14 +24,13 @@ defmodule PropertyDamage.EventQueue do
   - `adapter_module` - The injector adapter that received it
   - `timestamp` - Monotonic time when the event was pushed
 
-  An entry pushed by `push_from_poller/5` (a resource poller) has no
+  An entry pushed by `push_from_poller/4` (a resource poller) has no
   `adapter_module`. It contains:
 
   - `event` - The event struct
   - `source` - Always `:resource_poller`
   - `poller_id` - Reference identifying the poller instance
   - `command_index` - Index of the command that started the poller
-  - `branch_id` - The branch identifier, or `nil`
   - `timestamp` - Monotonic time when the event was pushed
 
   ## Example
@@ -52,7 +51,7 @@ defmodule PropertyDamage.EventQueue do
   @typedoc """
   Event entry with metadata.
 
-  `push/3` builds the injector shape and `push_from_poller/5` builds the
+  `push/3` builds the injector shape and `push_from_poller/4` builds the
   poller shape. See "Event Entries" for each key.
   """
   @type entry :: injector_entry() | poller_entry()
@@ -64,13 +63,12 @@ defmodule PropertyDamage.EventQueue do
           timestamp: integer()
         }
 
-  @typedoc "An entry pushed by a resource poller through `push_from_poller/5`."
+  @typedoc "An entry pushed by a resource poller through `push_from_poller/4`."
   @type poller_entry :: %{
           event: struct(),
           source: :resource_poller,
           poller_id: reference(),
           command_index: non_neg_integer(),
-          branch_id: non_neg_integer() | nil,
           timestamp: integer()
         }
 
@@ -157,21 +155,18 @@ defmodule PropertyDamage.EventQueue do
   - `poller_id` - Reference identifying the poller instance
   - `command_index` - Index of the command that started the poller
   - `event` - The event struct
-  - `branch_id` - Optional branch identifier for parallel execution
 
   ## Example
 
-      EventQueue.push_from_poller(queue, poller_ref, 5, %StatusChanged{id: "123"}, nil)
+      EventQueue.push_from_poller(queue, poller_ref, 5, %StatusChanged{id: "123"})
   """
-  @spec push_from_poller(pid(), reference(), non_neg_integer(), struct(), non_neg_integer() | nil) ::
-          :ok
-  def push_from_poller(queue, poller_id, command_index, event, branch_id \\ nil) do
+  @spec push_from_poller(pid(), reference(), non_neg_integer(), struct()) :: :ok
+  def push_from_poller(queue, poller_id, command_index, event) do
     entry = %{
       event: event,
       source: :resource_poller,
       poller_id: poller_id,
       command_index: command_index,
-      branch_id: branch_id,
       timestamp: System.monotonic_time(:millisecond)
     }
 
@@ -187,8 +182,8 @@ defmodule PropertyDamage.EventQueue do
   ## Returns
 
   List of event entries. Every entry has `:event` and `:timestamp`. An entry
-  from `push/3` also has `:adapter_module`; an entry from `push_from_poller/5`
-  has `:source`, `:poller_id`, `:command_index` and `:branch_id` instead (see
+  from `push/3` also has `:adapter_module`; an entry from `push_from_poller/4`
+  has `:source`, `:poller_id` and `:command_index` instead (see
   "Event Entries").
 
   ## Example

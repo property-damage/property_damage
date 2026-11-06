@@ -180,26 +180,6 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  defp format_failure(:linearization, failure, context) do
-    cmd_info = format_command_info(context)
-
-    """
-    Linearization Failed
-    #{cmd_info}
-    Details: #{format_message(PropertyDamage.Failure.detail(failure))}
-
-    The parallel execution results cannot be explained by any sequential ordering.
-    This indicates a race condition or concurrency bug in the SUT.
-
-    Suggestions:
-      - Look for missing locks or synchronization
-      - Check for read-modify-write races
-      - Verify transaction isolation levels
-      - Consider if operations should be serialized
-    """
-    |> String.trim()
-  end
-
   defp format_failure(:diverged, failure, context) do
     cmd_info = format_command_info(context)
     detail = PropertyDamage.Failure.detail(failure)

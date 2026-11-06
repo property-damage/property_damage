@@ -61,7 +61,7 @@ defmodule PropertyDamage.LoadTest do
   ## What a Worker Runs
 
   Each worker generates a sequence from the model's `commands/0` and runs the
-  prefix and suffix commands of that sequence. It does not run the model's
+  roots of that sequence. It does not run the model's
   `setup_each/0` or `teardown_each/0` commands, and it does not apply the
   model's `expansions/0`. A root is a command entry of the model's
   `commands/0`, as `PropertyDamage.Model` uses the word. If the model needs fixtures, create them in the

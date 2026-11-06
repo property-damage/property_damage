@@ -25,7 +25,7 @@ defmodule PropertyDamage.Progress.Printer do
   end
 
   defp render(%RunUpdate{phase: :run} = update, _model, _adapter, _opts) do
-    print_run(update.run_number, update.total_runs, update.command_count, update.branch_count)
+    print_run(update.run_number, update.total_runs, update.command_count)
   end
 
   defp render(%RunResult{outcome: :ok} = result, _model, targets, _opts) do
@@ -84,15 +84,12 @@ defmodule PropertyDamage.Progress.Printer do
   @doc """
   Print progress for the current run.
 
-  Shows the (1-based) run number, command count, and optional branch info.
-  `branch_count` is `0` for a linear sequence.
+  Shows the (1-based) run number and the command count.
   """
-  @spec print_run(pos_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
-  def print_run(run_number, total_runs, command_count, branch_count) do
-    branch_info = if branch_count > 0, do: " (#{branch_count} branches)", else: ""
-
+  @spec print_run(pos_integer(), non_neg_integer(), non_neg_integer()) :: :ok
+  def print_run(run_number, total_runs, command_count) do
     # Use carriage return to update in place for cleaner output
-    IO.write("\r  Run #{run_number}/#{total_runs}: #{command_count} commands#{branch_info}    ")
+    IO.write("\r  Run #{run_number}/#{total_runs}: #{command_count} commands    ")
     :ok
   end
 

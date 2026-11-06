@@ -44,7 +44,6 @@ defmodule PropertyDamage.Audit do
 
       PropertyDamage.audit(MyApp.Model)
       PropertyDamage.audit(MyApp.Model, seeds: 500, max_commands: 40)
-      PropertyDamage.audit(MyApp.Model, branching: [branch_probability: 0.3])
 
   `mix pd.audit MyApp.Model` wraps this for CI gating.
   """
@@ -80,8 +79,6 @@ defmodule PropertyDamage.Audit do
     `#{@default_seeds}`.
   - `:max_commands` — threaded into `generate_sequence/2` (default framework
     value applies otherwise).
-  - `:branching` — branching options threaded into `generate_sequence/2`, so
-    branch generation is exercised, not only the linear path.
   - `:external_markers` — threaded through for models relying on custom
     external markers.
 
@@ -93,7 +90,7 @@ defmodule PropertyDamage.Audit do
   def run(model, opts \\ []) do
     opts = PropertyDamage.Options.validate_audit!(opts)
     seeds = normalize_seeds(Keyword.get(opts, :seeds, @default_seeds))
-    gen_opts = Keyword.take(opts, [:max_commands, :branching, :external_markers])
+    gen_opts = Keyword.take(opts, [:max_commands, :external_markers])
 
     # Build the generator once (as a real run does) and reuse it across seeds;
     # it is a pure, lazy StreamData value, so reuse is correct.
@@ -126,7 +123,7 @@ defmodule PropertyDamage.Audit do
   def projection_purity(model, opts \\ []) do
     opts = PropertyDamage.Options.validate_audit!(opts)
     seeds = normalize_seeds(Keyword.get(opts, :seeds, @default_seeds))
-    gen_opts = Keyword.take(opts, [:max_commands, :branching, :external_markers])
+    gen_opts = Keyword.take(opts, [:max_commands, :external_markers])
     generator = Generator.generate_sequence(model, gen_opts)
 
     Enum.reduce_while(seeds, :ok, fn seed, :ok ->
@@ -219,22 +216,10 @@ defmodule PropertyDamage.Audit do
 
   # Flatten a sequence into ordered {position, command} pairs using the same
   # structured position scheme the generator mints against (DR-021).
-  defp flatten(%Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence) do
+  defp flatten(%Sequence{prefix: prefix} = sequence) do
     with_positions(sequence.setup, &Position.setup/1) ++
       with_positions(prefix, &Position.prefix/1) ++
-      branch_positions(branches) ++
-      with_positions(suffix, &Position.suffix/1) ++
       with_positions(sequence.teardown, &Position.teardown/1)
-  end
-
-  defp branch_positions(nil), do: []
-
-  defp branch_positions(branches) do
-    branches
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {branch, b} ->
-      with_positions(branch, &Position.branch(b, &1))
-    end)
   end
 
   defp with_positions(commands, pos_fun) do

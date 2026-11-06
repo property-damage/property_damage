@@ -25,7 +25,7 @@ defmodule PropertyDamage.RunComparison do
 
   ## What it aligns
 
-  Commands align by branch-aware `%Sequence.Position{}` (identical across
+  Commands align by `%Sequence.Position{}` (identical across
   same-plan runs). Events within a command align by longest-common-subsequence
   on the event struct module. Entries with no command attribution (injector /
   telemetry) are excluded from comparison in this version.
@@ -743,8 +743,6 @@ defmodule PropertyDamage.RunComparison do
 
   defp section_rank(:setup), do: {-1, 0}
   defp section_rank(:prefix), do: {0, 0}
-  defp section_rank({:branch, b}), do: {1, b}
-  defp section_rank(:suffix), do: {2, 0}
   defp section_rank(:teardown), do: {3, 0}
 
   # ---- Header ---------------------------------------------------------------

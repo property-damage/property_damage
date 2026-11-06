@@ -34,8 +34,8 @@ defmodule PropertyDamage.FailureReport do
   The printed report (DR-055, DR-056) opens with a banner and the seed, then
   has four sections. Failure names the failure, the step it happened at and
   the fields of its kind, in one aligned column. Minimal Reproduction lists
-  every step with its label (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
-  `[branch b.i]`) and its events under it, and lists both sides of a
+  every step with its label (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`)
+  and its events under it, and lists both sides of a
   comparison failure. Projections shows the projection state attribute by
   attribute, before against after the failing step, or the reference against
   the variant at the failing boundary. Reproduction binds `targets` once and
@@ -57,8 +57,8 @@ defmodule PropertyDamage.FailureReport do
   fine-grained `Failure.kind/1` (which stays inside `failure_reason`):
 
   - `:check_failed` - a check did not hold: a check at a command, an
-    `@eventually` timeout, a `:startup` or finalization check, an idempotency
-    or linearization violation.
+    `@eventually` timeout, a `:startup` or finalization check, or an
+    idempotency violation.
   - `:diverged` - a target's boundary observation (a `@compare` function)
     still differed from the reference's when the convergence bound expired.
   - `:setup_failed` - a target could not be brought up: its adapter `setup/1`
@@ -254,7 +254,7 @@ defmodule PropertyDamage.FailureReport do
     * `:refused` - not built: a command field holds a value no file can hold
       (`replay` names where)
     * `:unavailable` - no artifact can describe the run: a latency budget
-      judged over the whole campaign, or a branching sequence
+      judged over the whole campaign
     * `:reproduced` - the run replayed the artifact at `replay_path` and
       failed as it records
     * `:not_reproduced` - the run replayed the artifact at `replay_path` and
@@ -338,11 +338,6 @@ defmodule PropertyDamage.FailureReport do
           # State snapshots
           state_before_failure: %{atom() => any()} | nil,
           state_at_failure: %{atom() => any()} | nil,
-
-          # Parallel execution-specific
-          branch_id: non_neg_integer() | nil,
-          linearization: [struct()] | nil,
-          branch_events: %{non_neg_integer() => [Entry.t()]} | nil,
 
           # Shrinking stats
           shrink_iterations: non_neg_integer(),
@@ -447,9 +442,6 @@ defmodule PropertyDamage.FailureReport do
             failure_reason: nil,
             state_before_failure: nil,
             state_at_failure: nil,
-            branch_id: nil,
-            linearization: nil,
-            branch_events: nil,
             shrink_iterations: 0,
             shrink_time_ms: 0,
             shrink_stop: :done,
@@ -527,7 +519,6 @@ defmodule PropertyDamage.FailureReport do
   - `:latency` - The run's `latency:` option as given (default `false`)
   - `:metrics` - The latency metrics per target name measured so far (default
     `nil`, `latency:` off)
-  - `:linearization` - Selected linearization (parallel)
   - `:expansion` - What every target ran for the reported sequence
     (`PropertyDamage.Expansion.t()`); the report's `expansions` lists it up to
     the failing root, and its trace keeps the concrete commands
@@ -552,13 +543,9 @@ defmodule PropertyDamage.FailureReport do
     stacktrace = Keyword.get(opts, :stacktrace)
     targets = Keyword.get(opts, :targets, [])
 
-    # The failing check name (for invariant resolution) and the branch, derived
-    # straight from the structured %Failure{}.
+    # The failing check name (for invariant resolution), derived straight from
+    # the structured %Failure{}.
     check_name = failure_check_name(failure_reason)
-    branch_id = failure_branch_id(failure_reason)
-
-    # Extract branch events if parallel
-    branch_events = extract_branch_events(event_log)
 
     # Classify error origin
     classification = ErrorOrigin.classify(failure_reason, stacktrace)
@@ -597,7 +584,6 @@ defmodule PropertyDamage.FailureReport do
         # DR-040: the fold-order record so the trace can derive the per-step
         # state timeline and the report can run the projection-purity check.
         command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
-        linearization: Keyword.get(opts, :linearization),
         expansion: expansion_choices(Keyword.get(opts, :expansion)),
         outcome: {:fail, failure_reason},
         logs: Keyword.get(opts, :logs, %{})
@@ -636,9 +622,6 @@ defmodule PropertyDamage.FailureReport do
       failure_reason: failure_reason,
       state_before_failure: projections_before,
       state_at_failure: projections,
-      branch_id: branch_id,
-      linearization: Keyword.get(opts, :linearization),
-      branch_events: branch_events,
       shrink_iterations: Keyword.get(opts, :shrink_iterations, 0),
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
       shrink_stop: Keyword.get(opts, :shrink_stop, :done),
@@ -672,7 +655,6 @@ defmodule PropertyDamage.FailureReport do
       | executed: Map.get(result, :executed, %{}),
         event_log: Map.get(result, :event_log, []),
         command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-        linearization: nil,
         outcome: :pass,
         logs: Map.get(result, :logs, %{})
     }
@@ -704,11 +686,9 @@ defmodule PropertyDamage.FailureReport do
   # pre-state generation saw. The fold mirrors the generator's `update_state`
   # (`Generator.update_state/4`): apply the command, then each simulated event.
   #
-  # Commands are folded in flattened (`Sequence.to_list/1`) order, and labels are
-  # keyed by that flat index, so the displayed order a reader sees IS the order
-  # the pre-states were folded in. For a branching sequence this is a
-  # linearization (branch N's pre-state reflects earlier branches), matching the
-  # linear reproduction the report renders rather than any per-branch fork.
+  # Commands are folded in `Sequence.to_list/1` order, and labels are keyed by
+  # that index, so the displayed order a reader sees IS the order the
+  # pre-states were folded in.
   #
   # Best-effort and never load-bearing: a model without the callback, or any
   # error in user `label/2`/projection/simulator code, degrades to "no labels"
@@ -741,7 +721,7 @@ defmodule PropertyDamage.FailureReport do
   end
 
   # Call a command's optional `label/2` against its pre-state, guarding both the
-  # not-loaded-module case (see PropertyDamage.Linearization) and a raising user
+  # not-loaded-module case and a raising user
   # implementation.
   defp command_label(command, state) when is_struct(command) do
     module = command.__struct__
@@ -984,7 +964,6 @@ defmodule PropertyDamage.FailureReport do
       :stutter_execution_failed -> "Stutter Execution Failed"
       :retry_from_sync_command -> "Sync Command Returned Retry"
       :malformed_adapter_return -> "Malformed Adapter Return"
-      :linearization -> "Linearization Failed"
       :placeholder_resolution -> "Placeholder Resolution Error"
       :diverged -> "Divergence: #{format_name(check_name)}"
       :did_not_converge -> "Did Not Converge: #{format_name(check_name)}"
@@ -1049,16 +1028,6 @@ defmodule PropertyDamage.FailureReport do
   """
   @spec poll_timeout_failure?(t()) :: boolean()
   def poll_timeout_failure?(%__MODULE__{} = report), do: failure_type(report) == :poll_timeout
-
-  @doc """
-  Check if this is a parallel execution failure.
-  """
-  @spec parallel_failure?(t()) :: boolean()
-  def parallel_failure?(%__MODULE__{failure_reason: %Failure{} = f}) do
-    Failure.kind(f) == :linearization or Failure.branch_id(f) != nil
-  end
-
-  def parallel_failure?(%__MODULE__{}), do: false
 
   @doc """
   Check if this is an idempotency failure.
@@ -1268,10 +1237,9 @@ defmodule PropertyDamage.FailureReport do
 
   def steps(%__MODULE__{trace: %RunTrace{plan: %Sequence{} = plan} = trace} = report) do
     # Delegate to the trace's data and the shared grouping core (DR-033), adding
-    # the report's failure-localization overlay (`failed_at_index` / `branch_id`
-    # stay report-level). Output is identical to the pre-move behavior.
+    # the report's failure-localization overlay (`failed_at_index` stays
+    # report-level).
     RunTrace.build_steps(plan, trace.event_log, trace.command_labels, report.failed_at_index,
-      branch_id: report.branch_id,
       executed: trace.executed,
       logs: Map.get(trace, :logs, %{}),
       choices: traced_choices(report)
@@ -1322,11 +1290,11 @@ defmodule PropertyDamage.FailureReport do
 
   @doc """
   The `EventLog.Entry` structs observed for a single command, addressed by
-  flattened index or `Sequence.Position`.
+  index or `Sequence.Position`.
 
   Delegates to `RunTrace.event_entries_at/2` (entries are independent of failure
-  localization). Each entry carries its per-event provenance (`source`,
-  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when
+  localization). Each entry carries its per-event provenance (`source`); the
+  bare event struct is `entry.event`. Returns `[]` when
   nothing matches.
   """
   @spec event_entries_at(t(), non_neg_integer() | Sequence.Position.t()) :: [Entry.t()]
@@ -1339,8 +1307,8 @@ defmodule PropertyDamage.FailureReport do
   @doc """
   The `Step` where the failure was localized, or `nil`.
 
-  Returns `nil` for non-localized failures (teardown / whole-run / linearization
-  checks, where `failed_at_index` is `nil`). At most one step is ever the failure
+  Returns `nil` for non-localized failures (teardown and whole-run checks,
+  where `failed_at_index` is `nil`). At most one step is ever the failure
   step.
   """
   @spec failure_step(t()) :: Step.t() | nil
@@ -1349,15 +1317,12 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
-  The flattened (reading-order) index of the failing command, for reader-facing
-  display.
+  The index of the failing command, for reader-facing display.
 
   This is the ordinal into `steps/1` / `Sequence.to_list/1`, i.e. the number a
-  reader cross-references against the reproduction listing. It differs from the
-  raw `failed_at_index` field, which is the *executor* command index and diverges
-  from the flattened ordinal for parallel-branch failures. Falls back to
+  reader cross-references against the reproduction listing. Falls back to
   `failed_at_index` when the failure can't be localized to a step (typically
-  `nil`, e.g. a teardown / whole-run / linearization failure).
+  `nil`, e.g. a teardown or whole-run failure).
   """
   @spec failure_index(t()) :: non_neg_integer() | nil
   def failure_index(%__MODULE__{} = report) do
@@ -1466,9 +1431,6 @@ defmodule PropertyDamage.FailureReport do
   defp failure_check_name(%Failure{} = failure), do: Failure.name(failure)
   defp failure_check_name(_), do: nil
 
-  defp failure_branch_id(%Failure{} = failure), do: Failure.branch_id(failure)
-  defp failure_branch_id(_), do: nil
-
   # Human-readable message for each failure kind, mirroring the per-tag wording
   # the old parser produced.
   defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail} = check}) do
@@ -1484,9 +1446,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Check{kind: :idempotency_violation, detail: violation}}),
     do: format_idempotency_message(violation)
-
-  defp message_for(%Failure{type: %Check{kind: :linearization, detail: message}}),
-    do: to_string(message)
 
   defp message_for(%Failure{type: %Check{kind: :poll_timeout, detail: info}}),
     do: format_poll_timeout_message(info)
@@ -1594,16 +1553,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp format_idempotency_message(violation) do
     inspect(violation)
-  end
-
-  defp extract_branch_events(event_log) do
-    event_log
-    |> Enum.filter(fn entry -> entry.branch_id != nil end)
-    |> Enum.group_by(& &1.branch_id)
-    |> case do
-      empty when map_size(empty) == 0 -> nil
-      grouped -> grouped
-    end
   end
 end
 

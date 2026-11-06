@@ -424,50 +424,6 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   # ===========================================================================
-  # Cluster 7 — branching: persistent overshoot caught on the merged state
-  # ===========================================================================
-
-  test "a persistent overshoot across branches is caught at :teardown on the merged state" do
-    # Two independent branches each emit one Bumped; the merged settled state
-    # has max = 2, tripping the teardown safety check.
-    seq = %Sequence{prefix: [], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-    {:ok, result} = run_seq(seq, MaxCountModel, SingleBumpAdapter)
-
-    refute result.success
-
-    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
-             result.failure_reason
-  end
-
-  defmodule BumpSimulator do
-    @behaviour PropertyDamage.Model.Simulator
-    @impl true
-    def simulate(%Bump{}, _state), do: [%Bumped{}]
-  end
-
-  defmodule SimulatedMaxCountModel do
-    use PropertyDamage.Model
-    @impl true
-    def commands, do: [Bump]
-    @impl true
-    def command_sequence_projection, do: MaxCountProjection
-    @impl true
-    def simulator, do: BumpSimulator
-  end
-
-  test "a branching run with a simulator skips at: checks while it verifies orderings" do
-    # The ordering check runs the synchronous checks at each branch position;
-    # a lifecycle-boundary check has no step trigger and must not reach it.
-    seq = %Sequence{prefix: [], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-    {:ok, result} = run_seq(seq, SimulatedMaxCountModel, SingleBumpAdapter)
-
-    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
-             result.failure_reason
-  end
-
-  # ===========================================================================
   # Cluster 6 — check_mode for at: checks
   # ===========================================================================
 

@@ -65,7 +65,6 @@ defmodule PropertyDamage.Executor.Events do
         command_index,
         event_log,
         projections,
-        branch_id,
         fold_counter
       ) do
     Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
@@ -76,7 +75,6 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: source,
             injector_adapter: nil,
-            branch_id: branch_id,
             fold_index: fc
           },
           command_index
@@ -91,19 +89,17 @@ defmodule PropertyDamage.Executor.Events do
         event_queue,
         event_log,
         projections,
-        branch_id,
         fold_counter,
         matchers \\ []
       )
 
-  def process_injector_events(nil, event_log, projections, _branch_id, fold_counter, _matchers),
+  def process_injector_events(nil, event_log, projections, fold_counter, _matchers),
     do: {projections, event_log, fold_counter}
 
   def process_injector_events(
         event_queue,
         event_log,
         projections,
-        branch_id,
         fold_counter,
         matchers
       ) do
@@ -119,8 +115,7 @@ defmodule PropertyDamage.Executor.Events do
               queue_entry.event,
               queue_entry.command_index,
               queue_entry.poller_id,
-              timestamp: queue_entry.timestamp,
-              branch_id: queue_entry.branch_id || branch_id
+              timestamp: queue_entry.timestamp
             )
 
           _ ->
@@ -132,8 +127,7 @@ defmodule PropertyDamage.Executor.Events do
                 timestamp: queue_entry.timestamp,
                 event: queue_entry.event,
                 source: :injector,
-                injector_adapter: queue_entry.adapter_module,
-                branch_id: branch_id
+                injector_adapter: queue_entry.adapter_module
               },
               correlate(queue_entry.event, matchers)
             )
@@ -190,7 +184,7 @@ defmodule PropertyDamage.Executor.Events do
   # `{:mock_callback, reason}` or `{:projection, %ProjectionError{},
   # stacktrace}`, with the lines written up to then, so the caller can fail
   # the step and keep them.
-  def process_mock_events(nil, _command_index, event_log, projections, _branch_id, fold_counter),
+  def process_mock_events(nil, _command_index, event_log, projections, fold_counter),
     do: {projections, event_log, fold_counter, []}
 
   def process_mock_events(
@@ -198,7 +192,6 @@ defmodule PropertyDamage.Executor.Events do
         command_index,
         event_log,
         projections,
-        branch_id,
         fold_counter
       ) do
     case MockServiceRegistry.flush_events(mock_registry) do
@@ -212,8 +205,7 @@ defmodule PropertyDamage.Executor.Events do
               events,
               {mock_registry, PropertyDamage.Log.writer(sink, 1)},
               command_index,
-              {projections, event_log, fold_counter},
-              branch_id
+              {projections, event_log, fold_counter}
             )
           end)
 
@@ -227,7 +219,7 @@ defmodule PropertyDamage.Executor.Events do
     end
   end
 
-  # The folded mock events of `process_mock_events/6`, or a raise of
+  # The folded mock events of `process_mock_events/5`, or a raise of
   # `MockEventsError` carrying its error and lines, for a caller whose
   # failure path is a rescue.
   def folded_or_raise!({:error, error, lines}),
@@ -235,7 +227,7 @@ defmodule PropertyDamage.Executor.Events do
 
   def folded_or_raise!(folded), do: folded
 
-  defp fold_mock_events(events, {mock_registry, log}, command_index, folded, branch_id) do
+  defp fold_mock_events(events, {mock_registry, log}, command_index, folded) do
     Enum.reduce_while(events, {:ok, folded}, fn event, {:ok, {projs, log_entries, fc}} ->
       entry =
         Entry.attribute(
@@ -244,7 +236,6 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: :mock,
             injector_adapter: nil,
-            branch_id: branch_id,
             fold_index: fc
           },
           command_index

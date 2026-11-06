@@ -34,8 +34,8 @@ defmodule PropertyDamage.FailureReport.Bundle do
   A target is `{name, role, adapter, steps, adapter_setup, adapter_teardown,
   untied}`. `role` is `"variant"` or `"reference"`, and `adapter` is the
   module as `inspect/1` prints it. A step is `{id, label, command, ran_as,
-  failed, entries}`: `label` is the label the page prints (`[3]`, `[setup 0]`,
-  `[branch 0.1]`), `command` the module of the command, `ran_as` the note
+  failed, entries}`: `label` is the label the page prints (`[3]`, `[3.1]`,
+  `[setup 0]`), `command` the module of the command, `ran_as` the note
   that says what a root ran in place of a listed entry (else `null`), and
   `failed` marks the step the failure is reported at. An entry is `{id, n, event}`:
   `n` counts the events under the step from 1, in print order, after the log

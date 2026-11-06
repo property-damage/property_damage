@@ -18,16 +18,11 @@ defmodule Mix.Tasks.Pd.Audit do
 
       mix pd.audit MyApp.Model
       mix pd.audit MyApp.Model --seeds 500 --max-commands 40
-      mix pd.audit MyApp.Model --branching --branch-probability 0.3
 
   ## Options
 
       --seeds N               Number of seeds to audit (audits 0..N-1). Default 100.
       --max-commands N        Max commands per generated sequence.
-      --branching             Exercise branching generation (not just linear).
-      --branch-probability F  Branch-point probability (implies --branching).
-      --max-branches N        Maximum branches (implies --branching).
-      --max-branch-length N   Maximum commands per branch (implies --branching).
 
   See `guides/deterministic_generation.md` for the deterministic patterns that
   keep generation pure (seeded relative time offsets, `mint_per_run/1`,
@@ -55,11 +50,7 @@ defmodule Mix.Tasks.Pd.Audit do
       OptionParser.parse(args,
         strict: [
           seeds: :integer,
-          max_commands: :integer,
-          branching: :boolean,
-          branch_probability: :float,
-          max_branches: :integer,
-          max_branch_length: :integer
+          max_commands: :integer
         ]
       )
 
@@ -148,16 +139,10 @@ defmodule Mix.Tasks.Pd.Audit do
   end
 
   # Translate flat CLI flags into the keyword shape PropertyDamage.audit/2 wants.
-  # Any branching-related flag implies branching is on.
   defp build_audit_opts(opts) do
-    branching_keys = [:branch_probability, :max_branches, :max_branch_length]
-    branching_opts = Keyword.take(opts, branching_keys)
-    branching? = Keyword.get(opts, :branching, false) or branching_opts != []
-
     []
     |> maybe_put(:seeds, Keyword.get(opts, :seeds))
     |> maybe_put(:max_commands, Keyword.get(opts, :max_commands))
-    |> maybe_put(:branching, if(branching?, do: branching_opts, else: nil))
   end
 
   defp maybe_put(kw, _key, nil), do: kw
@@ -165,11 +150,6 @@ defmodule Mix.Tasks.Pd.Audit do
 
   defp report_gen_opts(audit_opts) do
     if max = Keyword.get(audit_opts, :max_commands), do: IO.puts("Max cmds: #{max}")
-
-    case Keyword.get(audit_opts, :branching) do
-      nil -> IO.puts("Mode:     linear")
-      branching -> IO.puts("Mode:     branching #{inspect(branching)}")
-    end
   end
 
   defp print_divergence(seed, divergence) do
@@ -241,15 +221,10 @@ defmodule Mix.Tasks.Pd.Audit do
     Options:
       --seeds N               Number of seeds to audit (0..N-1). Default 100.
       --max-commands N        Max commands per generated sequence.
-      --branching             Exercise branching generation.
-      --branch-probability F  Branch-point probability (implies --branching).
-      --max-branches N        Maximum branches (implies --branching).
-      --max-branch-length N   Maximum commands per branch (implies --branching).
 
     Examples:
       mix pd.audit MyApp.TestModel
       mix pd.audit MyApp.TestModel --seeds 500 --max-commands 40
-      mix pd.audit MyApp.TestModel --branching --branch-probability 0.3
     """)
   end
 end

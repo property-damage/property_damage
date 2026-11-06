@@ -3,10 +3,10 @@ defmodule PropertyDamage.Runtime.RunServices do
   # Per-run wiring of a target's injector adapters and mock services.
   #
   # A run brings up the injectors and mocks its target declares against that
-  # run's event queue, and tears them down when the run ends. The one-target
-  # branching path of `PropertyDamage.run/1`, its shrink attempts, and
-  # `PropertyDamage.Variant` all do this, so the wiring lives here once and all
-  # of them observe the same setup and teardown calls.
+  # run's event queue, and tears them down when the run ends. Every path that
+  # sets a target up (`PropertyDamage.Variant`, a trace capture, an analysis
+  # run) does this, so the wiring lives here once and all of them observe the
+  # same setup and teardown calls.
 
   alias PropertyDamage.{EventQueue, Log, MockServiceRegistry}
 

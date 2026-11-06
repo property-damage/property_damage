@@ -15,7 +15,6 @@ defmodule PropertyDamage.Failure.Check do
   @type kind ::
           :check_failed
           | :idempotency_violation
-          | :linearization
           | :poll_timeout
           | :settle_timeout
           | :projection_violation
@@ -250,13 +249,8 @@ defmodule PropertyDamage.Failure do
           | %Failure.Divergence{}
           | %Failure.Convergence{}
           | %Failure.Setup{}
-          | %Failure.Latency{},
-        branch_id: non_neg_integer() | nil
+          | %Failure.Latency{}
       }
-
-  The envelope holds the cross-class commons. `branch_id` absorbs the old
-  recursive `{:branch_failure, id, inner}` wrapper: a branch failure is just an
-  ordinary failure whose envelope records which branch produced it.
 
   Each class struct owns its `kind` (a closed, documented set), a `name` where
   one is meaningful, and a class-specific payload (`detail`, plus
@@ -274,7 +268,6 @@ defmodule PropertyDamage.Failure do
   |------|------|--------|
   | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` relation that raised | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
-  | `:linearization` | `nil` | a human message |
   | `:poll_timeout` | the eventually check name | the poll-timeout info map |
   | `:settle_timeout` | `nil` | the last settle error |
   | `:projection_violation` | the projection module | the raised exception |
@@ -362,7 +355,6 @@ defmodule PropertyDamage.Failure do
   @type kind ::
           :check_failed
           | :idempotency_violation
-          | :linearization
           | :poll_timeout
           | :settle_timeout
           | :projection_violation
@@ -387,11 +379,10 @@ defmodule PropertyDamage.Failure do
             | Divergence.t()
             | Convergence.t()
             | Setup.t()
-            | Latency.t(),
-          branch_id: non_neg_integer() | nil
+            | Latency.t()
         }
 
-  defstruct type: nil, branch_id: nil
+  defstruct type: nil
 
   # ==========================================================================
   # Accessors
@@ -455,14 +446,6 @@ defmodule PropertyDamage.Failure do
   def partial_events(%__MODULE__{type: %Execution{partial_events: events}}), do: events
   def partial_events(%__MODULE__{type: _}), do: nil
 
-  @doc "The branch id that produced this failure, or `nil` for a linear run."
-  @spec branch_id(t()) :: non_neg_integer() | nil
-  def branch_id(%__MODULE__{branch_id: id}), do: id
-
-  @doc "Record that `failure` occurred inside branch `branch_id`."
-  @spec in_branch(t(), non_neg_integer()) :: t()
-  def in_branch(%__MODULE__{} = failure, branch_id), do: %{failure | branch_id: branch_id}
-
   # ==========================================================================
   # Check constructors
   # ==========================================================================
@@ -504,12 +487,6 @@ defmodule PropertyDamage.Failure do
   @spec idempotency_violation(term()) :: t()
   def idempotency_violation(violation) do
     %__MODULE__{type: %Check{kind: :idempotency_violation, detail: violation}}
-  end
-
-  @doc "No sequential ordering explained the observed parallel results."
-  @spec linearization(term()) :: t()
-  def linearization(message) do
-    %__MODULE__{type: %Check{kind: :linearization, detail: message}}
   end
 
   @doc "A `@eventually` check timed out; `info` carries the details and the `:projection`."
@@ -661,7 +638,6 @@ defmodule PropertyDamage.Failure do
   @check_kinds [
     :check_failed,
     :idempotency_violation,
-    :linearization,
     :poll_timeout,
     :settle_timeout,
     :projection_violation
@@ -679,8 +655,9 @@ defmodule PropertyDamage.Failure do
   @doc """
   Build a minimal `%Failure{}` carrying only a kind and a name.
 
-  Used by the shrinker to reconstruct a comparable failure from the kind and
-  name of a failure signature; the `detail` is left `nil`. Names are retained
+  Reconstructs a comparable failure from the kind and name of a failure
+  signature (`PropertyDamage.Shrinker.failure_signature/2`); the `detail` is
+  left `nil`. Names are retained
   for `Check` kinds, `:diverged`, `:did_not_converge` and `:latency_exceeded`, so the rebuilt
   failure has the signature it was built from.
   """

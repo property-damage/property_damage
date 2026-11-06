@@ -71,7 +71,6 @@ defmodule PropertyDamage.RegressionTest do
       state_at_failure: %{TestProjection => %{}},
       model: TestModel,
       targets: [],
-      linearization: nil,
       timestamp: DateTime.utc_now()
     }
   end

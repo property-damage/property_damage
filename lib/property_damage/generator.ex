@@ -2,39 +2,17 @@ defmodule PropertyDamage.Generator do
   @moduledoc """
   Generates command sequences for stateful property-based testing.
 
-  This module produces `PropertyDamage.Sequence` structs that can be either:
-  - **Linear sequences**: Commands executed sequentially
-  - **Branching sequences**: Commands with branches that run one after another
-    from the same forked state (the framework models their interleavings
-    afterward)
-
-  ## Linear Sequence Generation
+  This module produces `PropertyDamage.Sequence` structs whose commands run
+  one after another:
 
       Generator.generate_sequence(MyModel, max_commands: 20)
-      # => StreamData producing %Sequence{prefix: [...], branches: nil}
+      # => StreamData producing %Sequence{prefix: [...]}
 
-  ## Branching Sequence Generation
+  ## Placeholders
 
-      Generator.generate_sequence(MyModel,
-        max_commands: 20,
-        branching: [
-          branch_probability: 0.3,  # 30% chance to create branch point
-          max_branches: 3,          # Up to 3 branches
-          max_branch_length: 5      # Each branch max 5 commands
-        ]
-      )
-      # => StreamData producing %Sequence{prefix: [...], branches: [[...], [...]], suffix: [...]}
-
-  ## Placeholder Dependency Rules
-
-  A value the system mints is a placeholder (see
-  `PropertyDamage.External`). When generating branching sequences, the
-  generator draws each branch from the same prefix state, so branches stay
-  isolated:
-  - Placeholders minted in `prefix` can be used in any branch
-  - Placeholders minted in one branch CANNOT be used in another branch
-  - Placeholders minted in branches CAN be used in `suffix`, because the
-    executor merges each branch's resolved values after the branches finish
+  A value the system mints is a placeholder (see `PropertyDamage.External`).
+  The generator simulates each command it draws, so a later command can use a
+  placeholder an earlier command minted.
 
   ## Setup and teardown commands
 
@@ -68,10 +46,6 @@ defmodule PropertyDamage.Generator do
 
   # Default options
   @default_max_commands 50
-  @default_branch_probability 0.2
-  @default_max_branches 3
-  @default_max_branch_length 5
-  @default_min_prefix_length 3
 
   # ============================================================================
   # Public API
@@ -85,21 +59,11 @@ defmodule PropertyDamage.Generator do
   - `model` - Model module defining commands and state projection
   - `opts` - Options:
     - `:max_commands` - Maximum total commands per sequence (default: 50)
-    - `:branching` - Keyword list for branching configuration (see below)
+    - `:external_markers` - Atom markers that stand for a minted value (see
+      `PropertyDamage.External`; default `[]`)
 
   Note: the returned generator is pure; reproducibility comes from consuming
   it with `generate_value/3` and an explicit seed.
-
-  ## Branching Options
-
-  Pass `branching: [...]` to generate branching sequences:
-
-  - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of branches (default: 3)
-  - `:max_branch_length` - Maximum commands per branch (default: 5)
-  - `:min_prefix_length` - Minimum commands before branching (default: 3)
-
-  If `:branching` is not provided, generates linear sequences.
 
   ## Returns
 
@@ -107,19 +71,11 @@ defmodule PropertyDamage.Generator do
 
   ## Examples
 
-      # Linear sequence
       Generator.generate_sequence(MyModel, max_commands: 20)
-
-      # Branching sequence with 30% branch probability
-      Generator.generate_sequence(MyModel,
-        max_commands: 30,
-        branching: [branch_probability: 0.3, max_branches: 2]
-      )
   """
   @spec generate_sequence(module(), keyword()) :: StreamData.t(PropertyDamage.Sequence.t())
   def generate_sequence(model, opts \\ []) do
     max_commands = Keyword.get(opts, :max_commands, @default_max_commands)
-    branching_opts = Keyword.get(opts, :branching, nil)
     markers = Keyword.get(opts, :external_markers, [])
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
     projection = model.command_sequence_projection()
@@ -127,26 +83,14 @@ defmodule PropertyDamage.Generator do
 
     StreamData.bind(StreamData.constant(nil), fn _ ->
       roots = fn initial_state ->
-        if branching_opts do
-          do_generate_branching_sequence(
-            commands,
-            projection,
-            model,
-            initial_state,
-            max_commands,
-            branching_opts,
-            markers
-          )
-        else
-          do_generate_linear_sequence(
-            commands,
-            projection,
-            model,
-            initial_state,
-            max_commands,
-            markers
-          )
-        end
+        do_generate_linear_sequence(
+          commands,
+          projection,
+          model,
+          initial_state,
+          max_commands,
+          markers
+        )
       end
 
       case setup do
@@ -170,8 +114,7 @@ defmodule PropertyDamage.Generator do
   carrying them.
 
   The setup commands and the roots are simulated again from the projection's
-  initial state (for a branching sequence: the prefix, the merged branches,
-  then the suffix, as the generator reached them), and each teardown entry is
+  initial state, as the generator reached them, and each teardown entry is
   generated in written order with its `overrides:` against that end state. The draw
   is seeded by `:erlang.phash2({run_seed, :teardown})`, so it is a pure
   function of the model, the sequence and the run seed, and it never changes
@@ -319,9 +262,7 @@ defmodule PropertyDamage.Generator do
 
   # Recursion threads two accumulators: `acc` (commands, reversed) and `acc_ph`
   # (placeholders minted so far). `pos_fun` maps a command's local 0-based index
-  # to its structured position (DR-021), so the same recursion serves the linear
-  # path (prefix positions), the branch-continuation suffix, and post-branch
-  # suffix.
+  # to its structured position (DR-021).
   defp generate_linear_recursive(_commands, _projection, _model, _state, 0, acc, acc_ph, _m, _pf) do
     StreamData.constant({Enum.reverse(acc), acc_ph})
   end
@@ -374,365 +315,6 @@ defmodule PropertyDamage.Generator do
           end)
         end)
     end
-  end
-
-  # ============================================================================
-  # Branching Sequence Generation
-  # ============================================================================
-
-  defp do_generate_branching_sequence(
-         commands,
-         projection,
-         model,
-         initial_state,
-         max_commands,
-         opts,
-         markers
-       ) do
-    branch_probability = Keyword.get(opts, :branch_probability, @default_branch_probability)
-    max_branches = Keyword.get(opts, :max_branches, @default_max_branches)
-    max_branch_length = Keyword.get(opts, :max_branch_length, @default_max_branch_length)
-    min_prefix_length = Keyword.get(opts, :min_prefix_length, @default_min_prefix_length)
-
-    # First, generate the prefix (before any branching)
-    generate_prefix(
-      commands,
-      projection,
-      model,
-      initial_state,
-      min_prefix_length,
-      max_commands,
-      [],
-      [],
-      markers
-    )
-    |> StreamData.bind(fn
-      {prefix, _state_after_prefix, _remaining, prefix_ph, true} ->
-        # DR-013: the model terminated the sequence during the prefix, so it
-        # stays linear with nothing appended (no branches, no suffix).
-        StreamData.constant(attach_registry(Sequence.linear(prefix), prefix_ph))
-
-      {prefix, state_after_prefix, remaining, prefix_ph, false} ->
-        prefix_len = length(prefix)
-
-        # Decide whether to branch
-        StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
-          if roll < branch_probability and remaining > max_branch_length do
-            # Generate branches
-            generate_with_branches(
-              commands,
-              projection,
-              model,
-              state_after_prefix,
-              prefix,
-              prefix_ph,
-              remaining,
-              max_branches,
-              max_branch_length,
-              markers
-            )
-          else
-            # Continue as linear sequence: the whole thing stays linear, so suffix
-            # positions continue the prefix's numbering.
-            generate_linear_recursive(
-              commands,
-              projection,
-              model,
-              state_after_prefix,
-              remaining,
-              [],
-              [],
-              markers,
-              &Position.prefix(prefix_len + &1)
-            )
-            |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
-              attach_registry(Sequence.linear(prefix ++ suffix_cmds), prefix_ph ++ suffix_ph)
-            end)
-          end
-        end)
-    end)
-  end
-
-  defp generate_prefix(
-         commands,
-         projection,
-         model,
-         state,
-         min_length,
-         max_total,
-         acc,
-         acc_ph,
-         markers
-       ) do
-    if length(acc) >= min_length do
-      # Met minimum, return what we have
-      remaining = max_total - length(acc)
-      StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph, false})
-    else
-      valid_commands = filter_valid_commands(commands, state)
-
-      case valid_commands do
-        [] ->
-          # No valid commands, end early
-          remaining = max_total - length(acc)
-          StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph, false})
-
-        _ ->
-          StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
-            generator = get_command_generator(cmd_module, opts, state)
-
-            StreamData.bind(generator, fn command ->
-              position = Position.prefix(length(acc))
-              command = reify_command_mints(command, position)
-              events = simulate_command(model, state, command)
-              {events, minted} = instantiate_placeholders(events, position, markers)
-              new_state = update_state(state, command, events, projection)
-              new_acc = [command | acc]
-              new_acc_ph = acc_ph ++ minted
-
-              if terminate_early?(model, new_state, command, events) do
-                # DR-013: terminate_early? stops the WHOLE sequence, not just the
-                # prefix. Signal it so no branches or suffix get appended.
-                remaining = max_total - length(new_acc)
-
-                StreamData.constant(
-                  {Enum.reverse(new_acc), new_state, remaining, new_acc_ph, true}
-                )
-              else
-                generate_prefix(
-                  commands,
-                  projection,
-                  model,
-                  new_state,
-                  min_length,
-                  max_total,
-                  new_acc,
-                  new_acc_ph,
-                  markers
-                )
-              end
-            end)
-          end)
-      end
-    end
-  end
-
-  defp generate_with_branches(
-         commands,
-         projection,
-         model,
-         state_at_branch,
-         prefix,
-         prefix_ph,
-         remaining,
-         max_branches,
-         max_branch_length,
-         markers
-       ) do
-    # Decide number of branches (at least 2)
-    num_branches = min(max_branches, max(2, div(remaining, max_branch_length)))
-
-    # Calculate max length per branch
-    per_branch_max = min(max_branch_length, div(remaining, num_branches))
-
-    # Generate each branch independently from the same state snapshot. Each
-    # branch mints with a `{:branch, b}` section position (b is the branch's
-    # index in the full generator list); empty branches are dropped below and
-    # surviving branch indices are remapped to match the executor's branch_id
-    # ordering.
-    branch_generators =
-      for b <- 0..(num_branches - 1)//1 do
-        generate_branch(
-          commands,
-          projection,
-          model,
-          state_at_branch,
-          per_branch_max,
-          [],
-          [],
-          markers,
-          fn i -> Position.branch(b, i) end
-        )
-      end
-
-    # combine_branches yields a list of {branch_commands, branch_placeholders}.
-    StreamData.bind(combine_branches(branch_generators), fn branch_results ->
-      branches = Enum.map(branch_results, fn {branch, _ph} -> branch end)
-
-      # Compute merged state after all branches
-      merged_state = merge_branch_states(state_at_branch, branches, projection, model)
-
-      # Remaining commands for suffix
-      branch_command_count = Enum.sum(Enum.map(branches, &length/1))
-      suffix_remaining = max(0, remaining - branch_command_count)
-
-      # Generate suffix
-      generate_linear_recursive(
-        commands,
-        projection,
-        model,
-        merged_state,
-        suffix_remaining,
-        [],
-        [],
-        markers,
-        &Position.suffix/1
-      )
-      |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
-        assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph)
-      end)
-    end)
-  end
-
-  # Drop empty branches and build the final sequence. Surviving branches are
-  # renumbered to a contiguous 0..k range (matching the executor's branch_id),
-  # and their placeholders' branch positions remapped accordingly. If fewer than
-  # 2 branches survive the sequence collapses to linear, so branch and suffix
-  # placeholders are remapped onto the continuing prefix space.
-  defp assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph) do
-    surviving = Enum.reject(branch_results, fn {branch, _ph} -> Enum.empty?(branch) end)
-
-    if length(surviving) >= 2 do
-      {branches, branch_ph} =
-        surviving
-        |> Enum.with_index()
-        |> Enum.map_reduce([], fn {{branch, ph}, new_idx}, acc ->
-          {branch, acc ++ rebranch(ph, new_idx)}
-        end)
-
-      attach_registry(
-        Sequence.branching(prefix, branches, suffix_cmds),
-        prefix_ph ++ branch_ph ++ suffix_ph
-      )
-    else
-      base = length(prefix)
-
-      {flattened, branch_ph, suffix_base} =
-        Enum.reduce(surviving, {[], [], base}, fn {branch, ph}, {cmds, acc, offset} ->
-          {cmds ++ branch, acc ++ to_prefix(ph, offset), offset + length(branch)}
-        end)
-
-      remapped_suffix_ph =
-        Enum.map(suffix_ph, fn
-          %Placeholder{position: %Position{section: :suffix, offset: i}} = p ->
-            %{p | position: Position.prefix(suffix_base + i)}
-
-          p ->
-            p
-        end)
-
-      attach_registry(
-        Sequence.linear(prefix ++ flattened ++ suffix_cmds),
-        prefix_ph ++ branch_ph ++ remapped_suffix_ph
-      )
-    end
-  end
-
-  defp rebranch(placeholders, new_idx) do
-    Enum.map(placeholders, fn
-      %Placeholder{position: %Position{section: {:branch, _old}, offset: i}} = p ->
-        %{p | position: Position.branch(new_idx, i)}
-
-      p ->
-        p
-    end)
-  end
-
-  defp to_prefix(placeholders, offset) do
-    Enum.map(placeholders, fn
-      %Placeholder{position: %Position{section: {:branch, _old}, offset: i}} = p ->
-        %{p | position: Position.prefix(offset + i)}
-
-      p ->
-        p
-    end)
-  end
-
-  defp generate_branch(_commands, _projection, _model, _state, 0, acc, acc_ph, _markers, _pos_fun) do
-    StreamData.constant({Enum.reverse(acc), acc_ph})
-  end
-
-  defp generate_branch(
-         commands,
-         projection,
-         model,
-         state,
-         remaining,
-         acc,
-         acc_ph,
-         markers,
-         pos_fun
-       ) do
-    valid_commands = filter_valid_commands(commands, state)
-
-    case valid_commands do
-      [] ->
-        StreamData.constant({Enum.reverse(acc), acc_ph})
-
-      _ ->
-        # 30% chance to end branch early (creates varied branch lengths)
-        StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
-          if roll < 0.3 and acc != [] do
-            StreamData.constant({Enum.reverse(acc), acc_ph})
-          else
-            StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
-              generator = get_command_generator(cmd_module, opts, state)
-
-              StreamData.bind(generator, fn command ->
-                position = pos_fun.(length(acc))
-                command = reify_command_mints(command, position)
-                events = simulate_command(model, state, command)
-
-                {events, minted} =
-                  instantiate_placeholders(events, position, markers)
-
-                new_state = update_state(state, command, events, projection)
-                new_acc = [command | acc]
-                new_acc_ph = acc_ph ++ minted
-
-                if terminate_early?(model, new_state, command, events) do
-                  StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
-                else
-                  generate_branch(
-                    commands,
-                    projection,
-                    model,
-                    new_state,
-                    remaining - 1,
-                    new_acc,
-                    new_acc_ph,
-                    markers,
-                    pos_fun
-                  )
-                end
-              end)
-            end)
-          end
-        end)
-    end
-  end
-
-  defp combine_branches([]), do: StreamData.constant([])
-
-  defp combine_branches([gen | rest]) do
-    StreamData.bind(gen, fn branch ->
-      StreamData.bind(combine_branches(rest), fn other_branches ->
-        StreamData.constant([branch | other_branches])
-      end)
-    end)
-  end
-
-  defp merge_branch_states(base_state, branches, projection, model) do
-    # Apply all branch commands to get merged state
-    # Note: This is a simplification - the executor models the interleavings
-    # of the branches afterward. For generation, we just need a plausible state.
-    all_branch_commands = List.flatten(branches)
-
-    Enum.reduce(all_branch_commands, base_state, fn command, state ->
-      # Simulate and apply
-      events = simulate_command(model, state, command)
-      update_state(state, command, events, projection)
-    end)
   end
 
   # ============================================================================
@@ -799,8 +381,7 @@ defmodule PropertyDamage.Generator do
     do: Enum.reduce(placeholders, registry, &PlaceholderRegistry.register(&2, &1))
 
   # The state the generator reached at the end of `sequence`: the setup
-  # commands and the roots simulated again from the initial state. A
-  # branching sequence's branches are merged as generation merged them.
+  # commands and the roots simulated again from the initial state.
   #
   # Each placeholder a simulated event introduces is the one the sequence's
   # registry links to the command's position, so a teardown command generated
@@ -824,15 +405,7 @@ defmodule PropertyDamage.Generator do
     end
 
     state = fold.(sequence.setup, &Position.setup/1, projection.init())
-    state = fold.(sequence.prefix, &Position.prefix/1, state)
-
-    state =
-      case sequence.branches do
-        nil -> state
-        branches -> merge_branch_states(state, branches, projection, model)
-      end
-
-    fold.(sequence.suffix, &Position.suffix/1, state)
+    fold.(sequence.prefix, &Position.prefix/1, state)
   end
 
   # The registry's placeholders for the command at `position`, in place of
@@ -1034,8 +607,8 @@ defmodule PropertyDamage.Generator do
   defp validate_override_keys!(_cmd_module, _overrides), do: :ok
 
   defp simulate_command(model, state, command) do
-    # See PropertyDamage.Linearization: ensure the module is loaded before
-    # function_exported?/3, which is false for a not-yet-loaded module.
+    # Ensure the module is loaded before function_exported?/3, which is false
+    # for a not-yet-loaded module.
     if Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0) do
       model.simulator().simulate(command, state)
     else
@@ -1091,7 +664,7 @@ defmodule PropertyDamage.Generator do
   # Reify any mint_per_run markers in a generated command with their generation
   # coordinates (DR-034/DR-036): the command's structured `position` and the
   # field path. Baking coordinates in here (rather than keying on the flat
-  # executor index) keeps sibling branches distinct and makes the minted value
+  # executor index) makes the minted value
   # stable under shrinking, since the marker travels inside the command struct.
   defp reify_command_mints(command, position) when is_struct(command) do
     reify_mints(command, position, [])

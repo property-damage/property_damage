@@ -26,10 +26,6 @@ defmodule PropertyDamage.Failure.Explain do
     do:
       "Repeating a command changed the outcome. The command is declared safe to repeat, so sending it twice must give the same result as sending it once. The Attempt fields show both outcomes."
 
-  def meaning(:linearization),
-    do:
-      "No linear order of the commands explains the results. The commands ran at the same time, and PropertyDamage found no one-at-a-time order (a linear order) that produces the results the system returned. Either the system lets concurrent commands interfere, or the model's rules for them are wrong."
-
   def meaning(:settle_timeout),
     do:
       "The system did not settle in time. PropertyDamage waits for the (eventually consistent) system to settle before it checks, and that wait ran out: no check saw a settled system."

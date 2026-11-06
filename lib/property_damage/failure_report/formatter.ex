@@ -85,7 +85,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     data = %{
       "type" => "property_damage_failure_report",
-      "version" => "1.0",
+      "version" => "2.0",
       "timestamp" => DateTime.to_iso8601(report.timestamp),
       "location" => %{
         "run_number" => report.run_number,
@@ -284,7 +284,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
       %{
         "source" => to_string(entry.source),
         "command_index" => entry.command_index,
-        "branch_id" => entry.branch_id,
         "event_type" => module_name(entry.event.__struct__),
         "event" => entry.event |> Map.from_struct() |> serialize_map()
       }

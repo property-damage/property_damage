@@ -66,7 +66,6 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         %PropertyDamage.EventLog.Entry{
           timestamp: 0,
           command_index: failed_at,
-          branch_id: nil,
           event: event,
           source: :command
         }
