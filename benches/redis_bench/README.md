@@ -6,8 +6,8 @@ a self-contained mix project (`{:property_damage, path: "../.."}`). This is the
 out-of-BEAM, network-attached SUT (6a/6c were in-process, 6b was
 Postgres-via-Ecto).
 
-The SUT is a Redis-backed atomic register. `INCR` is atomic and linearizable on
-a single instance, so a faithful adapter is always linearizable. That is the
+The SUT is a Redis-backed atomic register. `INCR` is atomic on
+a single instance, so a faithful adapter never loses an update. That is the
 same canonical register as the 6c ETS bench, but reached over a real socket.
 
 What it validates:
@@ -19,24 +19,6 @@ What it validates:
   increments faithfully but reports every read as the initial `0`. The first
   read after any increment is then inconsistent, and PropertyDamage shrinks it
   to the minimal `Increment -> ReadValue` pair.
-- **Branching + linearization** (`test/parallel_linearization_test.exs`): the
-  parallel-execution rung. A non-atomic `GetThenSet` (`GET`, compute `+1`, `SET`
-  -- two round-trips) is the racing command; atomic `INCR` is the safe contrast.
-  Two layers: (1) a *physical* race over two real connections with a barrier
-  that releases both writes only after both reads, so the non-atomic
-  read-modify-write leaves the register at 1 after two increments (a lost
-  update) while `INCR` under the identical schedule leaves it at 2; (2) the
-  framework's own detection under `branching:` -- atomic `Increment` branches
-  and faithful `GetThenSet` branches are never falsely flagged (across seeds),
-  while a `LostUpdateAdapter` that reports every write from a stale snapshot
-  produces lost-update events `PropertyDamage.Linearization` refutes, surfacing
-  a `:linearization_failed` failure that shrinks to the minimal two
-  `GetThenSet` commands. What layer 2 detects is a stale report under
-  sequential calls, not a race: the executor runs branches sequentially over one shared context
-  and checks linearizability of the observed events *analytically* (it does not
-  run branches concurrently), so the lost update is injected at the adapter
-  level -- the same technique as the framework's `ets_linearization_test.exs`;
-  layer (1) supplies the genuine physical race that grounds it.
 
 ## Infrastructure
 
@@ -87,10 +69,8 @@ Redis you provide; the container step is then skipped entirely.
 - `docker-compose.yml` — the dedicated Redis container
 - `config/config.exs` — endpoint resolution (reads the env vars above)
 - `lib/redis_bench.ex` — top module + `RedisBench.Conn` (connection helper)
-- `lib/redis_bench/commands.ex` — events + the `Increment` / `ReadValue` /
-  `GetThenSet` commands
+- `lib/redis_bench/commands.ex` — events + the `Increment` / `ReadValue`
+  commands
 - `lib/redis_bench/model.ex` — projection with the read-consistency invariant,
-  simulator, the atomic `RedisBench.Model`, and `RedisBench.RmwModel` (the
-  read-modify-write model for the branching + linearization suite)
-- `lib/redis_bench/adapter.ex` — the faithful adapter (drives `INCR` / `GET` /
-  `GET`+`SET`)
+  simulator and the atomic `RedisBench.Model`
+- `lib/redis_bench/adapter.ex` — the faithful adapter (drives `INCR` / `GET`)

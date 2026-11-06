@@ -1,6 +1,6 @@
 defmodule RedisBenchTest do
   @moduledoc """
-  Baseline: the register is linearizable against real Redis.
+  Baseline: the register stays consistent against real Redis.
 
   `INCR` is atomic, so a faithful adapter must never violate the read-consistency
   invariant.
