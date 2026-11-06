@@ -237,36 +237,6 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
     end
   end
 
-  describe "branching" do
-    test "re-shrinks a branching failure without a branching guard", %{dir: dir} do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-      {:ok, result} = Executor.run(branching, FailingModel, FailingAdapter, [])
-
-      failure =
-        FailureReport.new(
-          seed: 0,
-          run_number: 1,
-          original_sequence: branching,
-          shrunk_sequence: branching,
-          failed_at_index: result.failed_at_index,
-          failure_reason: result.failure_reason,
-          event_log: result.event_log,
-          projections: result.projections,
-          projections_before: result.projections_before,
-          model: FailingModel,
-          targets: [{FailingAdapter, []}]
-        )
-
-      {:ok, path} = Persistence.save(failure, dir)
-
-      {status, output} = with_output(fn -> Reshrink.exec([path]) end)
-
-      assert status == :ok
-      refute output =~ "branching"
-      refute output =~ "could not run"
-    end
-  end
-
   describe "a divergence report" do
     test "prints the comparison key in the summary instead of raising", %{dir: dir} do
       sequence = Sequence.linear([%Bump{}])

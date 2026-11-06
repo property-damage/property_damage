@@ -116,5 +116,4 @@ any Postgres you provide; the container step is then skipped entirely.
 
 The bench checks the **eventual-consistency** property (the effect lands within
 the window). Stronger value-level properties (exactly-once under retries, Oban
-`unique` deduplication, linearization under concurrent jobs) are a natural
-extension and belong with the parallel/linearization rung (6c).
+`unique` deduplication) are a natural extension.

@@ -360,9 +360,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{:tag, ...}` tuples. It carries a class struct under `type`
   (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`; `Failure.Assertion`
   was later renamed `Failure.Check`, see below) so illegal
-  class/kind combinations are unrepresentable, plus a `branch_id` on the envelope
-  that absorbs the old `{:branch_failure, id, inner}` wrapper. Kinds are globally
-  unique atoms; `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
+  class/kind combinations are unrepresentable, so a failure is one envelope. Kinds are globally
+  unique atoms; `Failure.class/1`, `kind/1`, `name/1`, `detail/1`
   and `partial_events/1` read a failure. See DR-041 for the full class/kind table
   and the `kind in [:poll_timeout, :settle_timeout]` "possibly tuning, not a bug"
   triage note (documented in `guides/debugging_failures.md`).
@@ -374,8 +373,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run actually had (async / injected events land where they folded);
   `canonical_state_timeline/1` is a timing-immune variant used by run comparison.
   The executor records the real fold order additively: `EventLog.Entry` gains a
-  `fold_index`, and `RunTrace` gains `command_fold_ordinals` and the verified
-  branch `linearization`. `PropertyDamage.FailureReport.verify_projections/1`
+  `fold_index`, and `RunTrace` gains `command_fold_ordinals`. `PropertyDamage.FailureReport.verify_projections/1`
   (and `RunTrace.verify_projections/4`) are the projection-purity check — the
   faithful-derived state at the failing step must equal the runtime snapshot; a
   mismatch names the non-pure projection module(s). Because it replays the real
@@ -430,7 +428,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UUID.uuid4/0`) is caught at dev/CI time before it breaks `seed: N`
   reproduction and `RunComparison`'s fingerprint guard. The audit is
   generation-only (no adapter/SUT, never resolves markers/placeholders), threads
-  `max_commands`/`branching`, and on divergence localizes the first differing
+  `max_commands`, and on divergence localizes the first differing
   command position and fields; `mix pd.audit` exits non-zero so CI gates on it. A
   new `guides/deterministic_generation.md` documents the three deterministic
   seams: a seeded relative time offset reified in the adapter (for
@@ -443,19 +441,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%FailureReport.Step{position, flattened_index, command, entries, label,
   failed?}` values in flattened reading order. Each step's `entries` are the full
   `EventLog.Entry` structs attributed to the command, in log order, so per-event
-  provenance (`source`, `branch_id`; the bare event is `entry.event`) is
+  provenance (`source`; the bare event is `entry.event`) is
   preserved — a mock / stutter event stays distinguishable from SUT
   output, and the "Command → Event Timeline" (with its CMD/MOC/STU source
   badges) is served from `steps/1` rather than a private `event_log` walk. Each
   step also carries a new shared
   `%PropertyDamage.Sequence.Position{section, offset}` (reifying the executor's
-  `current_position` tuple, DR-021) that identifies a command unambiguously
-  across parallel branches, plus its derived flattened index. New
+  `current_position` tuple, DR-021) that identifies a command unambiguously,
+  plus its derived flattened index. New
   `Sequence.indexed/1` owns the position ↔ flattened-index mapping and
   `Sequence.position_at/3` resolves an executor command index to a position.
   `failed?` is matched by position, not by comparing the flattened index to
-  `failed_at_index` (an executor index that diverges from the flattened ordinal
-  for branch failures); `failure_step/1` is `nil` for non-localized failures.
+  `failed_at_index`; `failure_step/1` is `nil` for non-localized failures.
   This is additive: the materialized `command_at_failure` / `events_at_failure`
   fields and the ~20 existing callers are unchanged (their migration is Phase B).
 - **Breaking: core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
@@ -521,8 +518,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `setup_commands` and `teardown_commands`, so a report reproduces without
   re-drawing; `stats` and the report count them apart from `total_commands`,
   which counts roots. `PropertyDamage.replay/2`, `RunTrace` and
-  `Analysis.isolate_trigger/2` execute them; a branching run executes the setup
-  commands before its own prefix segment; exported scripts list the setup steps
+  `Analysis.isolate_trigger/2` execute them; exported scripts list the setup steps
   first. Telemetry command events carry `phase: :setup | :root | :teardown`, and
   the coverage summary reports setup commands under a `setup` key.
 - **Persistence version 11 (DR-048).** Failure reports and traces store the setup
@@ -623,6 +619,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: failure files are written at format 18 (DR-063).** `.pd` and
+  `.pdtrace` files of format 17 and older are refused with
+  `{:error, {:unsupported_format_version, version, 18}}`, because the removed
+  parallel-branch fields no longer decode. The JSON export of a failure is
+  version `2.0`: its event entries carry no `branch_id`. The replay artifact
+  keeps its format. Capture the failure again.
 - **Breaking: failure files are written at format 17 (DR-062).** `.pd` and
   `.pdtrace` files of format 16 and older are refused with
   `{:error, {:unsupported_format_version, version, 17}}`. A file whose event log
@@ -720,8 +722,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary or before against after the failing step. Reproduction binds
   `targets = [...]` once, every call names `targets: targets`, and a line
   names each pid, reference, port or function the list holds. Every step has
-  one label in every section (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
-  `[branch b.i]`), from the new `Sequence.Position.label/2`. The markdown
+  one label in every section (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`), from the new `Sequence.Position.label/2`. The markdown
   report is the terminal text without color, each section's body in a fenced
   block. Anyone who parses the terminal output must change: Failure Location,
   What Failed, Run Number, Command Index, Timestamp, State Transition, Event
@@ -767,7 +768,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an `{:error, _}` tuple fails with the sentence "a verdict is truthy,
   `nil`/`false`, or `{:fail, reason}`". A raise is a failure in both.
   - A `@check` that returned `nil` or `false` used to pass; it now fails, in the
-    executor, forensics, the load-test worker and the linearization checker,
+    executor, forensics, the load-test worker,
     for `every:` and `at:` checks, with a message that names the check, shows
     the value and gives the three accepted forms: a predicate
     (`state.net >= state.fees`), `condition or fail!("...", ...)`, or a body
@@ -789,16 +790,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gone from the poll-timeout info. Rewrite a predicate that raised before the
     state caught up as a total one (`get_in/2`, `match?/2`, a `case` with a
     fallback).
-- **Breaking: `latency:` and a non-default `check_mode:` are refused beside
-  `branching:`.**
-  A branching run executes one branch at a time on one target through the
-  linear engine: it records no latency samples (`latency:` returned
-  `%{error: :no_data}`) and halts at the first failing check whatever
-  `check_mode:` said. Both combinations are option errors at run start. The
-  guides, the README, the option documentation and the concurrency
-  specification now say what the path does: branches run one after another,
-  the checker models the interleavings afterward, and no race is detected
-  (DR-053).
 - **BREAKING: persistence format version 14 becomes 15.** A report records the
   run's `check_mode`, the `campaign` a latency budget was judged over
   (`%{seed:, max_runs:}`, `nil` for every other kind),
@@ -849,8 +840,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the entry's key.
 - **Breaking: shrinking budget and candidate validity.** `max_iterations: 0` tries no
   candidate and reports 0 iterations (the check of the sequence cut after the
-  failing root counted 1). A branching candidate the model rejects is never
-  run, as on the linear path. A candidate whose expansions cannot be realized
+  failing root counted 1). A candidate the model rejects is never run.
+  A candidate whose expansions cannot be realized
   is realized and counted once, not again under the listed entry it equals.
 
 - **BREAKING (DR-047): `latency:` takes its options inside the keyword list, and
@@ -937,8 +928,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `reason` always a `%Failure{}`.
   - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
     traces (version 10 under DR-046, version 11 under DR-048, version 12 under DR-047, version 13 under DR-049). Loaders refuse version 8 files.
-  - `branching:` with two or more targets is an option error. Branching sequences,
-    `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
+  - `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
     one-target.
   - `check_mode:` now reaches the engine (it was accepted without effect).
     `teardown_each/1` runs at the end of each run, not after the last run. An
@@ -1023,8 +1013,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `mix pd.gen.model` now takes `--check-projections`.
 
 - **`failure_reason` is a `%PropertyDamage.Failure{}` everywhere it flowed as a
-  raw tuple (BREAKING, DR-041).** Every producer (the executor, branching,
-  finalization, linearization) now constructs a `%Failure{}`, and every
+  raw tuple (BREAKING, DR-041).** Every producer (the executor and
+  finalization) now constructs a `%Failure{}`, and every
   consumer reads one: `Shrinker.failure_signature/1` returns a `{kind, name}`
   tuple (was a `%{type:, check_name:}` map) and accepts only a `%Failure{}`;
   `FailureReport.classify_reason/1`, `ErrorOrigin.classify/2`, `Error.format/2`,
@@ -1033,8 +1023,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the old name referred to the long-deleted `%Ref{}` system), and the
   trigger/check failures unify under one assertion kind (first named
   `:assertion_failed`, later renamed `:check_failed`; see above), so
-  `FailureReport.failure_type/1` returns that kind, not a per-source kind,
-  and linearization failures report `:linearization`, not `:linearization_failed`).
+  `FailureReport.failure_type/1` returns that kind, not a per-source kind).
   The shrinker's failure-equivalence granularity is unchanged — the `{kind, name}`
   signature keeps a `:poll_timeout` of `:x` distinct from a check failure
   of `:x` (a class-based signature would have merged them).
@@ -1050,7 +1039,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Persisted-file format bumps to version `6`; pre-v6 files are refused
   (BREAKING, DR-040).** V6 records the per-run fold order (`EventLog.Entry`
-  `fold_index` + `RunTrace` `command_fold_ordinals` + verified `linearization`)
+  `fold_index` + `RunTrace` `command_fold_ordinals`)
   so the per-step state timeline and the projection-purity check can be derived.
   A `.pd` / `.pdtrace` file written under format version `1`–`5` now returns
   `{:error, {:unsupported_format_version, version, 6}}`; a pre-v6 file carries no
@@ -1059,8 +1048,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exist outside test fixtures).
 
 - **Command positions are now `%PropertyDamage.Sequence.Position{}` everywhere
-  (BREAKING, DR-039).** The raw position tuples `{:prefix, i}` / `{:branch, b,
-  i}` / `{:suffix, i}` are gone; the whole pipeline (generator minting, executor
+  (BREAKING, DR-039).** The raw position tuples such as `{:prefix, i}` are gone; the whole pipeline (generator minting, executor
   `current_position`, placeholder registry keys, shrinker remap, mint markers,
   the determinism audit, and the export step plan) speaks the struct. This
   finishes the single-position-vocabulary intent of DR-021. Placeholder ids stay
@@ -1079,8 +1067,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       now a struct, so their bytes change. This has no runtime consumers today
       (fingerprint continuity and minted-value stability had no dependents).
     - If you construct placeholders or mint markers by hand (e.g. in a static
-      regression test), use the new `Position.prefix/1`, `Position.branch/2`, and
-      `Position.suffix/1` constructors instead of raw tuples.
+      regression test), use the new `Position` constructors instead of raw tuples.
 
 - **Breaking: `PropertyDamage.Validator` renamed to `Sequence.Validator`.**
   The sequence-data validity check (`valid_sequence?/2`, run by the shrinker and
@@ -1119,9 +1106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and events at the failure" now goes through `FailureReport.steps/1` /
   `failure_step/1`: the terminal/markdown formatters and timeline, the ExUnit /
   script (curl/python/elixir) / Livebook exporters, `FailureIntelligence.Fingerprint`,
-  and `Analysis.explain/1` / `isolate_trigger/2`. This fixes latent branch bugs
-  where a flattened ordinal was compared to the executor `failed_at_index` (they
-  diverge for parallel-branch failures), so the failure marker, per-command event
+  and `Analysis.explain/1` / `isolate_trigger/2`. This fixes latent bugs
+  where a flattened ordinal was compared to the executor `failed_at_index`, so the failure marker, per-command event
   grouping, and dependency-graph trigger now land on the correct command;
   reader-facing "Command Index" text now shows the flattened (reading-order)
   ordinal. `Fingerprint` also now reports a correct `sequence_length` /
@@ -1215,8 +1201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New load errors, raised before any `Adapter.setup/1`: a model with
     `expansions/0` and no `@compare` whose schedule reaches the end of the run
     (`every: 1` or `:end`, one target included); a module in `expansions/0` that
-    is not in `commands/0`, is listed twice, or is an `execution: :probe` root;
-    `branching:` together with a model that defines `expansions/0`.
+    is not in `commands/0`, is listed twice, or is an `execution: :probe` root.
   - `Analysis.isolate_trigger/2` raises for a target that ran any root as
     leaves. `shrink_further/2` and `Replay` raise for a target whose choices the
     report does not record.
@@ -1272,6 +1257,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING: the parallel-branch execution mode is removed (DR-063).** A
+  sequence with a prefix, two or more branches and a suffix ran its branches
+  one after another on one target and detected no race, at the cost of a second
+  run driver. The `branching:` run option (with `branch_probability:`,
+  `max_branches:`, `max_branch_length:` and `min_prefix_length:`), the
+  `PropertyDamage.Linearization` and `PropertyDamage.Executor.Branching`
+  modules, the `:linearization` failure kind, the branch fields and functions
+  of `PropertyDamage.Sequence`, the `{:branch, _}` and `:suffix` sections of
+  `Sequence.Position`, the `branch_id` of `Failure`, `EventLog.Entry` and the
+  JSON export entries, the `branching` and `branch_count` keys of the sequence
+  start and stop telemetry metadata, the branching flags of `mix pd.audit`,
+  `mix pd.replay` and `PropertyDamage.IEx`, and the parallel testing guide are
+  gone. Every sequence is linear. A call that passes `branching:` now gets the
+  unknown-option error from `NimbleOptions`. The refusals that existed only
+  beside `branching:` are gone too: its conflicts with `latency:`, with a
+  `check_mode:` other than `:halt`, with several targets, with `only:` and with
+  a model that defines `expansions/0`, and the check of `min_prefix_length:`
+  against `max_commands:`. Run linear sequences instead. Failure files change
+  format (see Changed).
 - **BREAKING: fault injection is removed (DR-062).** The
   `PropertyDamage.Nemesis` behaviour, the built-in `NetworkLatency`,
   `NetworkPartition` and `PacketLoss` modules, the Toxiproxy client, the
@@ -1351,7 +1355,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `command_at_failure` / `events_at_failure` fields. They were redundant with the
   structural step interface added in Phase A; use
   `FailureReport.failure_step(report).command` and `.entries` instead (both
-  recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
+  recomputed from `event_log` + `shrunk_sequence`, `nil` for a
   non-localized failure; the bare event of an entry is `entry.event`). Existing
   `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
@@ -1556,13 +1560,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A projection that rejects a mock event keeps the mocks' lines.** The
   lines a mock's `on_event/2` wrote before a projection rejected the event
   were dropped with the step; they now print under that step.
-- **A branching run reports a failed target setup as the lockstep path does.**
-  An injector that refused to start crashed the branching path with a
-  `CaseClauseError`, and an adapter `setup/1` that raised propagated out of
-  `PropertyDamage.run/1`. Both are now `:setup_failed` reports carrying the
-  same detail and the same `adapter setup/1` and `adapter teardown/1` log
-  lines as a run on the lockstep path, the lines of the injectors set up
-  before the failing one included.
 - **`shrink_further/2` and `Replay.start/2` take `log: [keep_attempts: n]`.**
   A re-shrink always kept the default three last attempts of a retried step,
   because the report does not record the run's `log:` option and
@@ -1640,9 +1637,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   projection module that unimported the projection's own `@` and imported
   another one compiled with its `@compare` observation dropped; it now fails to
   compile with an error naming the module and `@compare`.
-- **A branching run whose model has a simulator runs its `@check at:` checks.**
-  Verifying an ordering passed the lifecycle-boundary checks to the step
-  trigger and raised `CaseClauseError`; they now run only at their boundary.
 - **A raise during finalization still runs the teardown commands.** A raise,
   throw or exit while `Executor.run/4` finalized a run skipped the teardown
   commands; they now run, then `Adapter.teardown/1`, and the raise propagates.
@@ -1718,9 +1712,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adapter or injector module now loads the module first.
 
 - **The reproduction of a found failure emits the found run's `run_number`.**
-  A linear reproduction used to emit `run_number: 0` in its command and check
-  telemetry while a branching one emitted the found run's number. Both now emit
-  the found run's number; shrink attempts keep `0`. The telemetry docs also
+  A reproduction used to emit `run_number: 0` in its command and check
+  telemetry. It now emits the found run's number; shrink attempts keep `0`. The telemetry docs also
   state that a root command's `index` counts across the whole run.
 
 - **`mix pd.bisect` reads the verdict of newer git.** It reported "did not
@@ -1729,11 +1722,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`mix pd.audit`, `pd.bisect`, `pd.replay` and `pd.reshrink` print no ANSI
   codes when color is off.** The generated model template emits the canonical
   `{Command, weight: n}` entry.
-- **Branching runs fix five defects.** The branching shrink remaps the
-  placeholder registry after a removal, branch fold ordinals no longer collide
-  and the fold counter sums them, an async assertion failure is attributed to
-  the offending command, a poller left by a sibling branch is stopped when
-  another branch fails, and a multi-byte binary value now shrinks.
 - **Replay, reproduction and re-shrink survive setup faults.** A setup failure
   in `Executor.run` is reported on those paths instead of crashing, an
   `EventQueue` no longer leaks when injector setup raises, and a failing
@@ -1806,7 +1794,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `shrink_further/2` shared the gap and now returns the incoming report unchanged
   when its re-execution fails to reproduce.
 - **`FailureReport.failed_at_index` typespec now admits `nil`.** The field is set
-  `nil` for non-localized failures (teardown / whole-run / linearization safety
+  `nil` for non-localized failures (teardown and whole-run safety
   checks), but the type declared `non_neg_integer()`. Corrected to
   `non_neg_integer() | nil` to match the code.
 - **Injector-adapter validation no longer spuriously raises.** When an injector

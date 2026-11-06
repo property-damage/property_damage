@@ -8,33 +8,11 @@ defmodule PropertyDamage.Executor do
 
   ## Sequence Execution
 
-  The Executor handles both linear and branching sequences:
+  Commands are executed one after another:
 
-  ### Linear Sequences
-
-  Commands are executed sequentially:
-
-      %Sequence{prefix: [cmd1, cmd2, cmd3], branches: nil, suffix: []}
+      %Sequence{prefix: [cmd1, cmd2, cmd3]}
 
   Execution: cmd1 → cmd2 → cmd3
-
-  ### Branching Sequences
-
-  Commands with branches:
-
-      %Sequence{
-        prefix: [cmd1],
-        branches: [[cmd2a, cmd3a], [cmd2b]],
-        suffix: [cmd4]
-      }
-
-  Execution:
-  1. Execute prefix: cmd1
-  2. Fork state at branch point
-  3. Execute branch A: cmd2a → cmd3a
-  4. Execute branch B: cmd2b
-  5. Verify linearizability of branch execution
-  6. Merge state, execute suffix: cmd4
 
   ## Execution Flow
 
@@ -61,7 +39,6 @@ defmodule PropertyDamage.Executor do
 
   - Command events: source = :command, command_index set
   - Injector events: source = :injector, injector_adapter set
-  - Branch ID for parallel execution tracking
 
   ## Results
 
@@ -72,7 +49,6 @@ defmodule PropertyDamage.Executor do
   - `:projections` - Final projection states
   - `:failed_at_index` - Index where check failed (nil if success)
   - `:failure_reason` - Check failure reason (nil if success)
-  - `:linearization` - Selected linearization (for branching sequences)
   """
 
   alias PropertyDamage.{
@@ -94,7 +70,6 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Log.Cap
 
-  alias PropertyDamage.Executor.Branching
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Phases
@@ -127,7 +102,6 @@ defmodule PropertyDamage.Executor do
           failed_at_index: non_neg_integer() | nil,
           failure_reason: term() | nil,
           stacktrace: Exception.stacktrace() | nil,
-          linearization: [struct()] | nil,
           check_failures: [map()] | nil,
           check_counters: map(),
           command_fold_ordinals: %{term() => non_neg_integer()},
@@ -142,7 +116,7 @@ defmodule PropertyDamage.Executor do
 
   ## Parameters
 
-  - `sequence` - Sequence struct to execute (linear or branching)
+  - `sequence` - Sequence struct to execute
   - `model` - Model module defining projections and checks
   - `adapter` - Adapter module for SUT interaction
   - `opts` - Options (see below)
@@ -169,8 +143,7 @@ defmodule PropertyDamage.Executor do
   ## Order
 
   The adapter's `setup/1`, the `@check at: :startup` checks, the setup
-  commands, the sequence (for a branching sequence its prefix, branches and
-  suffix), the finalization (pollers awaited, queue settled, `@check at:
+  commands, the sequence, the finalization (pollers awaited, queue settled, `@check at:
   :teardown` checks), the teardown commands, and the adapter's `teardown/1`.
 
   The teardown commands run whenever `setup/1` succeeded, whatever happened
@@ -205,8 +178,7 @@ defmodule PropertyDamage.Executor do
   @doc false
   # `run/4`, except that a failed adapter setup/1 returns
   # `{:error, reason, logs}`: the lines that setup wrote, under
-  # `:adapter_setup` (DR-054). The branching path of `PropertyDamage.run/1`
-  # puts them on its setup failure. A setup/1 that raises, exits or throws
+  # `:adapter_setup` (DR-054). A setup/1 that raises, exits or throws
   # fails the same way, with the exception (or `{kind, reason}`) as the
   # reason, as `PropertyDamage.Variant` reports it on the lockstep path.
   @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
@@ -433,7 +405,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   # One run against an adapter context that is already set up: the startup
-  # checks, the setup commands, the sequence (linear or branching), the
+  # checks, the setup commands, the sequence, the
   # finalization, then the teardown commands. `env` holds the run's inputs.
   defp execute_run(%Sequence{} = sequence, env) do
     initial_state =
@@ -465,16 +437,16 @@ defmodule PropertyDamage.Executor do
       target_name: env.telemetry && env.telemetry.variant.name
     }
 
-    {ended, linearization} =
+    ended =
       with {:ok, state} <- run_startup_checks(initial_state),
            {:ok, state} <- Phases.run_setup(env.setup_commands, state, ctx) do
         execute_body(sequence, state, env)
       else
-        {:failed, nil, _failure, _state} = failed -> {failed, nil}
-        {:failed, failure, failed_state} -> {{:failed, nil, failure, failed_state}, nil}
+        {:failed, nil, _failure, _state} = failed -> failed
+        {:failed, failure, failed_state} -> {:failed, nil, failure, failed_state}
       end
 
-    result = finalize_or_tear_down(ended, linearization, env, ctx)
+    result = finalize_or_tear_down(ended, env, ctx)
     {state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
     # The teardown commands' log lines join the result's (DR-054).
     %{
@@ -486,9 +458,9 @@ defmodule PropertyDamage.Executor do
 
   # A raise, throw or exit during finalization still runs the teardown
   # commands before it propagates, as `teardown/1` runs on that path too.
-  defp finalize_or_tear_down(ended, linearization, env, ctx) do
+  defp finalize_or_tear_down(ended, env, ctx) do
     ended
-    |> Finalization.finalize_result(linearization)
+    |> Finalization.finalize_result()
     |> Phases.attribute(env.setup_commands)
   catch
     kind, reason ->
@@ -500,26 +472,11 @@ defmodule PropertyDamage.Executor do
   defp ended_state(state), do: state
 
   # The sequence itself, from the state the setup phase left. Returns the
-  # state (or the failed tuple) to finalize and the linearization of a
-  # branching run.
-  defp execute_body(%Sequence{branches: nil} = sequence, state, env) do
-    ended =
-      sequence
-      |> Sequence.to_list()
-      |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
-
-    {ended, nil}
-  end
-
+  # state (or the failed tuple) to finalize.
   defp execute_body(%Sequence{} = sequence, state, env) do
-    Branching.execute_body(
-      sequence,
-      state,
-      env.model,
-      env.adapter,
-      env.adapter_context,
-      env.event_queue
-    )
+    sequence
+    |> Sequence.to_list()
+    |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
   end
 
   # ============================================================================
@@ -587,10 +544,9 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Build the executor's internal per-run state map. Shared by linear and
-  # branching execution (and exposed to the stepping shell via init_state/2)
-  # so the state shape lives in exactly one place.
-  # Shared with Branching. DR-029.
+  # Build the executor's internal per-run state map. Exposed to the stepping
+  # shell via init_state/2 so the state shape lives in exactly one place.
+  # DR-029.
   @doc false
   def build_initial_state(
         model,
@@ -627,7 +583,6 @@ defmodule PropertyDamage.Executor do
       check_counters: %{step: 0, command: 0, event: 0},
       check_failures: [],
       check_mode: check_mode,
-      branch_id: nil,
       stutter_config: stutter_config,
       mock_registry: mock_registry,
       active_pollers: [],
@@ -643,13 +598,10 @@ defmodule PropertyDamage.Executor do
   # The per-command stepping seam (init_state / step / drain / finalize /
   # stop_pollers) lives in PropertyDamage.Executor.Stepping, the documented
   # public interface. It builds on the engine primitives below
-  # (build_initial_state / execute_command_with_outcome); Executor.Branching
-  # shares them through execute_command (DR-029).
+  # (build_initial_state / execute_command_with_outcome) (DR-029).
 
   # Execute a single command
-  # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
-  @doc false
-  def execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
+  defp execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
     case execute_command_with_outcome(
            command,
            index,
@@ -811,7 +763,6 @@ defmodule PropertyDamage.Executor do
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
-          branch_id: state.branch_id,
           command: command,
           # DR-040: seed the fold counter so injected events folded during
           # adapter execution take real fold ordinals ahead of the command fold.
@@ -832,7 +783,6 @@ defmodule PropertyDamage.Executor do
                 Keyword.merge(opts,
                   event_queue: event_queue,
                   command_index: index,
-                  branch_id: state.branch_id,
                   caller: poller_owner
                 )
               )
@@ -1114,7 +1064,6 @@ defmodule PropertyDamage.Executor do
         index,
         base_event_log,
         projections,
-        state.branch_id,
         fold_counter
       )
 
@@ -1136,7 +1085,6 @@ defmodule PropertyDamage.Executor do
         event_queue,
         event_log,
         projections,
-        state.branch_id,
         fold_counter,
         state.await_matchers
       )
@@ -1145,7 +1093,7 @@ defmodule PropertyDamage.Executor do
     # lines go under this command's step (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
       mock_registry
-      |> Events.process_mock_events(index, event_log, projections, state.branch_id, fold_counter)
+      |> Events.process_mock_events(index, event_log, projections, fold_counter)
       |> Events.folded_or_raise!()
 
     state = %{
@@ -1223,7 +1171,6 @@ defmodule PropertyDamage.Executor do
           command_index: index,
           step_count: state.step_count + 1,
           projections: projections,
-          branch_id: state.branch_id,
           telemetry: state.telemetry,
           sampling: sampling?(index)
         }
@@ -1359,7 +1306,7 @@ defmodule PropertyDamage.Executor do
         # 2. Create entry with source :injected, stamping its fold ordinal
         #    (DR-040) from the sink's threaded counter.
         entry =
-          Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
+          Entry.from_injected(event, ctx.command_index)
           |> Map.put(:fold_index, ctx.fold_counter)
 
         # 3. Store the accumulated state. Injected events are accumulated in
@@ -1547,8 +1494,7 @@ defmodule PropertyDamage.Executor do
   # Record one firing of a check (DR-026). Per-check fire counts are
   # colocated as {:fired, projection, name} keys inside the existing
   # check_counters map: inert to should_run?/4 (which does only point
-  # lookups, never iterates) and carried for free by the additive branch merge
-  # in merge_branch_states/5.
+  # lookups, never iterates).
   defp bump_fired(counters, projection, name) do
     Map.update(counters, {:fired, projection, name}, 1, &(&1 + 1))
   end
@@ -1934,7 +1880,7 @@ defmodule PropertyDamage.Executor do
   # Spawn pollers for any @eventually checks triggered by the given events
   # DR-030: build and register the awaits matchers a command declares. Pure
   # correlation: each %Await{match} becomes a registry entry carrying the
-  # command's index + branch, appended in registration order (so first-registered
+  # command's index, appended in registration order (so first-registered
   # wins on overlap). A matcher persists for the rest of the run, so a late
   # injector event still correlates to the command that claimed it. Plain-map
   # commands (low-level/test usage) and commands without awaits/2 are no-ops.
@@ -1945,7 +1891,7 @@ defmodule PropertyDamage.Executor do
 
       new_matchers =
         for %PropertyDamage.Await{match: match} <- module.awaits(model_state, command) do
-          %{command_index: index, branch_id: state.branch_id, match: match}
+          %{command_index: index, match: match}
         end
 
       %{state | await_matchers: state.await_matchers ++ new_matchers}
@@ -2347,8 +2293,7 @@ defmodule PropertyDamage.Executor do
   # (DR-021). The command's structured `position` selects the placeholders it
   # produces (via the registry's producer_link); each is resolved by id with the
   # value found at its recorded path/event_index in the real events. This is
-  # position-driven, so it is correct under branching (distinct branch positions)
-  # and shrinking (the position is rebuilt per run, never a stale generation key).
+  # position-driven, so it is correct under shrinking (the position is rebuilt per run, never a stale generation key).
   defp capture_externals(events, position, registry) do
     PlaceholderRegistry.capture(registry, position, events)
   end

@@ -19,7 +19,6 @@ defmodule PropertyDamage.ErrorOrigin do
   - `:check_failed` - Invariant violations
   - `:poll_timeout` - Eventually check timeout
   - `:idempotency_violation` - SUT not idempotent
-  - `:linearization` - Race condition detected
 
   ### Test Code Errors (High Confidence)
 
@@ -71,21 +70,6 @@ defmodule PropertyDamage.ErrorOrigin do
 
   @spec classify(term(), list() | nil) :: classification()
   def classify(failure_reason, stacktrace \\ nil)
-
-  # Branch failures: classify the underlying failure, then note the branch.
-  def classify(%Failure{branch_id: branch_id} = failure, stacktrace)
-      when not is_nil(branch_id) do
-    inner = classify(%{failure | branch_id: nil}, stacktrace)
-
-    %{
-      inner
-      | details:
-          Map.merge(inner.details, %{
-            branch_id: branch_id,
-            context: "Failure occurred in branch #{branch_id}"
-          })
-    }
-  end
 
   def classify(%Failure{} = failure, stacktrace) do
     classify_kind(Failure.kind(failure), failure, stacktrace)
@@ -171,17 +155,6 @@ defmodule PropertyDamage.ErrorOrigin do
           attempts: Map.get(violation, :attempts),
           mismatch: Map.get(violation, :mismatch)
         },
-        confidence: :high
-      }
-    }
-  end
-
-  defp classify_kind(:linearization, failure, _stacktrace) do
-    %{
-      origin: :sut_error,
-      details: %{
-        reason: "Race condition - no valid linearization exists",
-        evidence: %{message: Failure.detail(failure)},
         confidence: :high
       }
     }

@@ -69,8 +69,7 @@ end
 defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   @moduledoc """
   Test model whose terminate_early?/3 fires after the first command. Used to prove
-  that a model-requested termination stops the whole sequence in branching mode
-  (no branches, no suffix appended after the prefix) per DR-013.
+  that a model-requested termination stops the whole sequence (DR-013).
   """
   @behaviour PropertyDamage.Model.Simulator
   use PropertyDamage.Model

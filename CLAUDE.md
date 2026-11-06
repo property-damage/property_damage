@@ -68,7 +68,7 @@ A **Target** (`lib/property_damage/target.ex`) is one system variant a run execu
 
 ### Key subsystems
 
-- **Executor** (`lib/property_damage/executor.ex`) — Runs command sequences, handles branching (parallel) execution, ref resolution, projection updates.
+- **Executor** (`lib/property_damage/executor.ex`) — Runs command sequences, handles placeholder resolution, projection updates.
 - **Shrinker** (`lib/property_damage/shrinker.ex`) — Hierarchical and linear shrinking strategies. Deterministic given seed.
 - **External / Placeholder** (`lib/property_damage/external.ex`, `lib/property_damage/placeholder.ex`) — Symbolic value system for server-generated data. `external()` (public) marks an event field the SUT mints; internally each such field becomes a `%PropertyDamage.Placeholder{}` that is created during simulation, resolved from real SUT events, and threaded into later commands.
 - **Settle** (`lib/property_damage/settle.ex`) — Retry logic for eventually consistent systems. Commands declare `:async` or `:probe` semantics.

@@ -58,7 +58,6 @@ Run the audit against your model in development and CI:
 ```bash
 mix pd.audit MyApp.Model
 mix pd.audit MyApp.Model --seeds 500 --max-commands 40
-mix pd.audit MyApp.Model --branching --branch-probability 0.3
 ```
 
 It realizes your model's generated sequence twice at each of N seeds and checks

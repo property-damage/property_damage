@@ -20,7 +20,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 #### Scenario: Sequence execution events
 
 - **WHEN** a command sequence starts execution
-- **THEN** the system SHALL emit `[:property_damage, :sequence, :start]` with run_number, command_count, and branching flag
+- **THEN** the system SHALL emit `[:property_damage, :sequence, :start]` with run_number and command_count
 - **AND** when the sequence completes, it SHALL emit `[:property_damage, :sequence, :stop]` with duration, success flag, commands_executed count and `variant`, the failing target (`nil` when the run passed) (DR-045)
 
 #### Scenario: Command execution events
@@ -29,7 +29,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 - **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, run_number and `variant` (`%{index, name}`)
 - **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, events_count and `variant`
 - **AND** shrink attempts SHALL use `run_number: 0` and the reproduction run SHALL use the `run_number` of the run that found the failure (DR-045)
-- **AND** a root command's `index` SHALL count across the whole run: a branching sequence numbers its prefix, then each branch from the index after the prefix, then its suffix from the index after every branch command
+- **AND** a root command's `index` SHALL count across the whole run
 
 #### Scenario: Check execution events
 

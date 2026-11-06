@@ -57,6 +57,28 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       assert decoded["failure"]["type"] == "check_failed"
     end
 
+    test ":json carries format version 2.0 and event entries without a branch field" do
+      seq = Sequence.linear([%CreateAccount{currency: :USD}])
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 0,
+          failed_at_index: 0,
+          failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
+          original_sequence: seq,
+          shrunk_sequence: seq,
+          event_log: [Entry.from_command(%Observed{tag: :a}, 0)]
+        )
+
+      decoded = report |> Formatter.format(:json) |> Jason.decode!()
+
+      assert decoded["version"] == "2.0"
+
+      assert [entry] = decoded["event_log"]
+      assert Map.keys(entry) |> Enum.sort() == ["command_index", "event", "event_type", "source"]
+    end
+
     test ":compact renders a single concise line/string" do
       out = Formatter.format(sut_failure(), :compact)
       # Formatter.format/2 is typed binary(), so an is_binary/1 guard here is

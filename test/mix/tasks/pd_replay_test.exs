@@ -197,7 +197,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     end
   end
 
-  # The "could-not-run" set (load error, branching, missing model/adapter) is
+  # The "could-not-run" set (load error, missing model/adapter) is
   # indeterminate: the bug's presence cannot be decided, so these map to
   # `:indeterminate` (exit 125 -> `git bisect` skip), NOT to `:reproduces`.
   # Marking an un-runnable ancestor "bad" would corrupt a bisect.
@@ -218,29 +218,6 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       assert status == :indeterminate
       assert output =~ "could not load failure file"
-    end
-
-    test "a branching (parallel) failure returns :indeterminate", %{dir: dir} do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-      failure =
-        FailureReport.new(
-          seed: 0,
-          run_number: 1,
-          original_sequence: branching,
-          shrunk_sequence: branching,
-          failed_at_index: 1,
-          failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
-          model: FailingModel,
-          targets: [{FailingAdapter, []}]
-        )
-
-      {:ok, path} = Persistence.save(failure, dir)
-
-      {status, output} = with_output(fn -> Replay.exec([path]) end)
-
-      assert status == :indeterminate
-      assert output =~ "parallel/branching execution"
     end
 
     test "an adapter whose setup/1 raises returns :indeterminate", %{dir: dir} do

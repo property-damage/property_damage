@@ -42,7 +42,7 @@ defmodule PropertyDamage.ExUnit do
   - `:seed` - Fixed seed for reproducibility
   - `:shrink` - Whether to shrink failures (default: true)
   - `:validate` - Whether to validate config (default: true)
-  - `:verbose`, `:check_mode`, `:branching`, `:stutter`,
+  - `:verbose`, `:check_mode`, `:stutter`,
     `:external_markers`, `:on_failure`, and the rest of the `run/1` surface
 
   Defaults are applied by `run/1` itself; a `nil` `:seed` is dropped so the
@@ -145,7 +145,7 @@ defmodule PropertyDamage.ExUnit do
 
   `:model` and `:targets` are required (a missing one raises `KeyError` with a
   clear message); every other option is forwarded verbatim, so the full
-  `run/1` surface (`verbose:`, `check_mode:`, `branching:`, `stutter:`,
+  `run/1` surface (`verbose:`, `check_mode:`, `stutter:`,
   `external_markers:`, `on_failure:`, ...) is reachable from the ExUnit macro.
   `run/1` validates the result and applies its own defaults for any omitted
   option, so this function deliberately does not re-specify them. A `nil`

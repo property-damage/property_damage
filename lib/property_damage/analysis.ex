@@ -115,8 +115,8 @@ defmodule PropertyDamage.Analysis do
 
     # The dependency graph is built over the flattened command list and indexed
     # by flattened (reading) order, so the failing node must be the flattened
-    # index. failed_at_index is an executor index and diverges from it for
-    # branch failures, so read it off the already-materialized failed step
+    # index. failed_at_index is an executor index and diverges from it when a
+    # root ran as an expansion's leaves, so read it off the already-materialized failed step
     # (nil for a non-localized failure).
     failed_at = Enum.find_value(steps, fn step -> step.failed? && step.flattened_index end)
 
@@ -225,8 +225,8 @@ defmodule PropertyDamage.Analysis do
           {:dependency, "Provides state or values required by the failing command"}
 
         not localized? ->
-          # The failure was not localized to a specific command (teardown /
-          # whole-run / linearization check), so no per-command role applies.
+          # The failure was not localized to a specific command (teardown or
+          # whole-run check), so no per-command role applies.
           {:unknown, "Failure not localized to a specific command"}
 
         true ->
@@ -282,7 +282,7 @@ defmodule PropertyDamage.Analysis do
     |> String.trim()
   end
 
-  # A non-localized failure (teardown / whole-run / linearization check) has no
+  # A non-localized failure (teardown or whole-run check) has no
   # failing node to trace a chain from, so there is nothing to build.
   defp build_dependency_chain(nil, _graph, _commands), do: []
 
@@ -321,7 +321,7 @@ defmodule PropertyDamage.Analysis do
   # registry's `producer_link` maps each CURRENT producer position to the
   # placeholder ids it produces (already remapped by the shrinker), and
   # `Sequence.indexed/1` is the single owner of the position -> flattened-index
-  # mapping (branching-aware). Positions absent from the plan (dropped
+  # mapping. Positions absent from the plan (dropped
   # producers) contribute nothing. Returns nil when there is no registry (an
   # unshrunk report, or a model without placeholders), so `Graph.build/2` falls
   # back to the embedded-position fallback, which is correct in that case.
@@ -417,14 +417,15 @@ defmodule PropertyDamage.Analysis do
     commands = Sequence.to_list(sequence)
     # `commands` is the flattened list the modified sequence is re-run against,
     # so the trigger is addressed by its step's flattened index (not the
-    # executor failed_at_index, which diverges for branch failures).
+    # executor failed_at_index, which diverges from it when a root ran as an
+    # expansion's leaves).
     step = FailureReport.failure_step(report)
     model = report.model
     reference = FailureReport.reference_target(report)
 
     cond do
       is_nil(step) ->
-        # Non-localized failure (teardown / whole-run / linearization): there is
+        # Non-localized failure (teardown or whole-run check): there is
         # no single trigger command to vary.
         {:error, :failure_not_localized}
 

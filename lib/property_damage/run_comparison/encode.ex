@@ -2,13 +2,13 @@ defmodule PropertyDamage.RunComparison.Encode do
   @moduledoc false
   # The defined, versioned JSON schema for a %RunComparison{} (DR-035).
   #
-  # %RunComparison{} holds atoms, tuples ({:branch, id} sections), DateTimes, and
+  # %RunComparison{} holds atoms, tuples, DateTimes, and
   # arbitrary command/event structs that Jason cannot encode as-is. `encode/1`
   # produces a pure JSON-able map (string keys, only strings/numbers/bools/lists/
   # maps) that round-trips through Jason exactly, so it is a stable
   # machine-readable source of truth embedded in the HTML report:
   #
-  #   - positions   -> %{"section" => "prefix" | "suffix" | %{"branch" => id},
+  #   - positions   -> %{"section" => "prefix" | "setup" | "teardown",
   #                       "offset" => n}
   #   - structs     -> %{"struct" => "Module", "fields" => %{...}}
   #   - tuples      -> %{"tuple" => [...]}
@@ -111,10 +111,8 @@ defmodule PropertyDamage.RunComparison.Encode do
   defp enc(other), do: %{"inspect" => inspect(other)}
 
   defp enc_section(:prefix), do: "prefix"
-  defp enc_section(:suffix), do: "suffix"
   defp enc_section(:setup), do: "setup"
   defp enc_section(:teardown), do: "teardown"
-  defp enc_section({:branch, id}), do: %{"branch" => id}
 
   defp enc_key(k) when is_atom(k), do: to_string(k)
   defp enc_key(k) when is_binary(k), do: k

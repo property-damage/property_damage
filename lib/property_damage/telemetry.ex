@@ -29,7 +29,7 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :sequence, :start]` - Sequence execution started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{run_number: integer(), command_count: integer(), branching: boolean()}`
+    - Metadata: `%{run_number: integer(), command_count: integer()}`
 
   - `[:property_damage, :sequence, :stop]` - Sequence execution completed
     - Measurements: `%{duration: integer()}`
@@ -57,10 +57,7 @@ defmodule PropertyDamage.Telemetry do
   sequence, and `:teardown` for a teardown command
   (`c:PropertyDamage.Model.teardown_each/0`). `index` is the command's offset
   within its phase: the position among the setup commands or the teardown
-  commands, and for a root its index across the whole run. A branching
-  sequence numbers its prefix first, then each branch from the index after the
-  prefix (so the first commands of two branches share an index), then its
-  suffix from the index after every branch command. `success` is whether the command completed (its adapter call,
+  commands, and for a root its index across the whole run. `success` is whether the command completed (its adapter call,
   events and checks) without failing the run; a teardown command never fails
   the run, so its `success` is whether its adapter call answered `{:ok, _}`.
   `variant()` is `%{index: non_neg_integer(), name: String.t()}`, the target's

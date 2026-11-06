@@ -32,8 +32,7 @@ defmodule Mix.Tasks.Pd.Bisect do
   - **0** — every command passed: the bug is *fixed* at this commit (good).
   - **1** — a command failed its check or errored: the bug *reproduces* (bad).
   - **125** — the replay could not run at all (the commit does not compile, the
-    model/adapter do not exist yet, the file fails to load, or the sequence is
-    branching): *indeterminate*, so `git bisect` **skips** it rather than blaming
+    model/adapter do not exist yet, or the file fails to load): *indeterminate*, so `git bisect` **skips** it rather than blaming
     it.
 
   The 125 = skip case is load-bearing. Commits older than the bug often predate

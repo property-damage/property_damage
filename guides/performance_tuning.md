@@ -133,7 +133,7 @@ defmodule CancellationHeavyModel do
 end
 ```
 
-### Transfers with Branching
+### Transfer-Heavy Models
 
 ```elixir
 defmodule TransferHeavyModel do
@@ -154,31 +154,8 @@ defmodule TransferHeavyModel do
 end
 ```
 
-Run the model with branching sequences:
-
-```elixir
-PropertyDamage.run(
-  model: TransferHeavyModel,
-  targets: [AccountAdapter],
-  branching: [max_branches: 3, max_branch_length: 5]
-)
-```
-
-A branching sequence has a prefix, two or more branches, and a suffix. The
-branches run one after another against the SUT, not at the same time, so this
-run does not detect a race. After the branches ran, the checker looks for an
-order of their commands that explains what the SUT returned, and judges the
-checks against it. Use branching to test that the model accepts a valid
-interleaving, not to find lost updates or dirty reads.
-
-PropertyDamage refuses `branching:` beside any of these, and raises when the
-run starts:
-
-- `latency:` (a branching run records no latency samples)
-- a `check_mode:` other than `:halt` (a branching run halts at the first
-  failing check)
-- a model that defines `expansions/0`
-- more than one target in `targets:`
+Weight `Transfer` above the other commands and gate it on two accounts, so
+generated sequences spend most of their length moving money between accounts.
 
 ## Conditional Generation with `overrides:`
 
@@ -295,7 +272,6 @@ defmodule OrderPropertyTest do
     targets: [OrderAdapter],
     max_commands: 50,
     max_runs: 100,
-    branching: [max_branches: 2, max_branch_length: 3],
     stutter: [probability: 0.1],
     shrinker_config:
       PropertyDamage.Shrinker.Config.new(

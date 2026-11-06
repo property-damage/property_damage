@@ -11,8 +11,6 @@ defmodule PropertyDamage.AnalysisTest do
 
   defmodule Alpha, do: defstruct(id: nil)
   defmodule Beta, do: defstruct(id: nil)
-  defmodule Gamma, do: defstruct(id: nil)
-  defmodule Delta, do: defstruct(id: nil)
 
   # A producing event whose external field is `:id`, and command structs that
   # can carry a consumed placeholder in `:ref`.
@@ -20,46 +18,6 @@ defmodule PropertyDamage.AnalysisTest do
   defmodule Producer, do: defstruct(id: nil)
   defmodule Decoy, do: defstruct(id: nil)
   defmodule Consumer, do: defstruct(ref: nil)
-
-  describe "explain/1 branch-aware trigger localization" do
-    # prefix [Alpha] ++ branches [[Beta], [Gamma]] ++ suffix [Delta].
-    # Flattened order: Alpha=0, Beta=1, Gamma=2, Delta=3. The executor numbers
-    # both branch commands from prefix_len (=1), so a branch-1 failure records
-    # failed_at_index: 1 (branch_id: 1) whose FLATTENED index is 2. Keying the
-    # dependency graph by the executor index would mislabel Beta as the trigger.
-    setup do
-      seq = Sequence.branching([%Alpha{}], [[%Beta{}], [%Gamma{}]], [%Delta{}])
-
-      report =
-        FailureReport.new(
-          seed: 1,
-          run_number: 1,
-          original_sequence: seq,
-          shrunk_sequence: seq,
-          failed_at_index: 1,
-          failure_reason: Failure.in_branch(Failure.check_failed(:TestCheck, "boom"), 1)
-        )
-
-      %{report: report}
-    end
-
-    test "reports the flattened index of the failing command", %{report: report} do
-      explanation = Analysis.explain(report)
-      assert explanation.failure.command_index == 2
-    end
-
-    test "labels the branch-1 command (Gamma) as the trigger, not the index collision",
-         %{report: report} do
-      explanation = Analysis.explain(report)
-      trigger = Enum.find(explanation.commands, &(&1.role == :trigger))
-
-      assert trigger.index == 2
-      assert trigger.command_name == "Gamma"
-
-      beta = Enum.find(explanation.commands, &(&1.command_name == "Beta"))
-      refute beta.role == :trigger
-    end
-  end
 
   describe "explain/1 over a shrunk sequence with a remapped registry" do
     # The shrinker deliberately leaves each surviving command's embedded
@@ -153,7 +111,7 @@ defmodule PropertyDamage.AnalysisTest do
     end
 
     test "non-localized failure (failed_at_index nil) returns without raising and empty chain" do
-      # A whole-run failure (e.g. a linearization check) localizes to no command,
+      # A whole-run failure (e.g. a teardown check) localizes to no command,
       # so failed_at_index is nil. explain/1 must not call Enum.at(commands, nil).
       seq = Sequence.linear([%Alpha{}, %Beta{}])
 
@@ -164,7 +122,7 @@ defmodule PropertyDamage.AnalysisTest do
           original_sequence: seq,
           shrunk_sequence: seq,
           failed_at_index: nil,
-          failure_reason: Failure.linearization("branches did not linearize")
+          failure_reason: Failure.check_failed(:TestCheck, "the teardown check failed")
         )
 
       explanation = Analysis.explain(report)

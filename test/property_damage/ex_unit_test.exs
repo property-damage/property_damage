@@ -89,12 +89,12 @@ defmodule PropertyDamage.ExUnitTest do
           targets: [SomeAdapter],
           verbose: true,
           check_mode: :record,
-          branching: [max_branches: 2]
+          external_markers: [:minted]
         )
 
       assert opts[:verbose] == true
       assert opts[:check_mode] == :record
-      assert opts[:branching] == [max_branches: 2]
+      assert opts[:external_markers] == [:minted]
     end
 
     test "requires :model and :adapter" do

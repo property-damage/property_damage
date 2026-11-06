@@ -13,8 +13,6 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
 - **Server-Generated Values**: Commands can reference `external()` results from earlier commands
-- **Branching Sequences**: Prefix, branches and suffix, run one branch at a time and checked for linearizability against the model (no race detection yet)
-- **Linearization Checking**: Verify branch results are explainable by some ordering of the branch commands
 - **Idempotency Testing**: Built-in stutter testing for retry safety
 - **Rich Failure Reports**: Comprehensive diagnostics when tests fail, with your own log lines attached
 - **HTML Failure Page**: One self-contained page per failing run, with one column per target
@@ -737,95 +735,6 @@ defmodule MyModel do
   def terminate_early?(state, command, events), do: false  # Custom termination
 end
 ```
-
-## Parallel Execution
-
-PropertyDamage supports branching sequences: a prefix, two or more branches and
-a suffix, run on one target with the branches executed one after another, then
-checked for linearizability against the model's simulator. The branches never
-overlap at the system under test, so this path does not detect races; see the
-limits in the [Parallel Testing](guides/parallel_testing.md) guide.
-
-### Enabling Branching Sequences
-
-```elixir
-PropertyDamage.run(
-  model: MyApp.TestModel,
-  targets: [MyApp.TestAdapter],
-  max_commands: 50,
-  max_runs: 100,
-  branching: [
-    branch_probability: 0.3,   # Probability of creating branch points
-    max_branches: 3,           # Max branches per branch point
-    max_branch_length: 5,      # Max commands per branch
-    min_prefix_length: 3       # Min commands before branching
-  ]
-)
-```
-
-### How It Works
-
-A branching sequence has three parts:
-
-1. **Prefix**: Commands executed sequentially before branching
-2. **Branches**: Command lists executed one branch at a time, each from the forked post-prefix state
-3. **Suffix**: Commands executed after branches merge
-
-```
-Prefix:  [cmd1, cmd2]
-                |
-       +--------+--------+
-       |                 |
-Branch A: [cmd3a, cmd4a] | Branch B: [cmd3b]
-       |                 |
-       +--------+--------+
-                |
-Suffix: [cmd5]
-```
-
-### Linearization Checking
-
-After the branches have run, PropertyDamage verifies that the observed events
-can be explained by some ordering of the branch commands that keeps each
-branch's own order, against the model's simulator. If no valid ordering exists,
-`PropertyDamage.run/1` returns `{:error, report}` whose failure kind is
-`:linearization`.
-
-```elixir
-alias PropertyDamage.Linearization
-
-# Check complexity before verification
-case Linearization.feasibility(branches) do
-  :ok -> IO.puts("Manageable linearization space")
-  {:warning, count} -> IO.puts("#{count} possible orderings")
-end
-
-# Count possible linearizations
-count = Linearization.linearization_count([[cmd1, cmd2], [cmd3]])
-# => 3 (possible orderings: [1,2,3], [1,3,2], [3,1,2])
-```
-
-### Shrinking Branching Sequences
-
-The shrinker handles branching sequences with special strategies:
-
-1. **Convert to linear**: If the failure does not need the branch structure
-2. **Remove branches**: Eliminate unnecessary parallel branches
-3. **Shrink branches**: Remove commands within individual branches
-4. **Shrink prefix/suffix**: Remove non-essential sequential commands
-
-### Placeholder Visibility in Parallel Execution
-
-A command takes an `external()` value from the event of an earlier command, as
-a placeholder. Branching sequences limit which placeholders a command sees:
-
-- A placeholder from the prefix is visible in any branch
-- A placeholder from one branch is **not** visible in another branch
-- A placeholder from a branch is visible in the suffix
-
-For example, a command in branch B cannot use the id that a `CreateItem` in
-branch A mints. The generator never builds such a sequence. See the
-[Parallel Testing](guides/parallel_testing.md#placeholder-scoping) guide.
 
 ## Eventual Consistency (Async Support)
 
@@ -1554,18 +1463,17 @@ PropertyDamage
 │   ├── Model        - Test model behaviour
 │   │   ├── Projection   - State reducer behaviour
 │   │   └── Simulator    - Symbolic execution behaviour
-│   └── Sequence     - Linear and branching command sequences
+│   └── Sequence     - Linear command sequences
 │
 ├── Execution (Tier 1)
 │   ├── Adapter      - SUT bridge behaviour
 │   │   └── Injector - External event injection behaviour
-│   ├── Executor     - Command execution (linear and parallel)
-│   ├── Linearization - Parallel execution verification
+│   ├── Executor     - Command execution
 │   ├── Settle       - Probe/async retry for eventual consistency
 │   └── EventQueue   - Event coordination
 │
 ├── Shrinking (Tier 2)
-│   ├── Shrinker     - Sequence minimization (supports branching)
+│   ├── Shrinker     - Sequence minimization
 │   ├── Sequence.Validator - Sequence validation
 │   └── Shrinker.Graph - Dependency analysis
 │

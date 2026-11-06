@@ -208,10 +208,8 @@ defmodule PropertyDamage.RunComparison.Html do
   end
 
   defp position_label(%Position{section: :prefix, offset: o}), do: "prefix[#{o}]"
-  defp position_label(%Position{section: :suffix, offset: o}), do: "suffix[#{o}]"
   defp position_label(%Position{section: :setup, offset: o}), do: "setup[#{o}]"
   defp position_label(%Position{section: :teardown, offset: o}), do: "teardown[#{o}]"
-  defp position_label(%Position{section: {:branch, b}, offset: o}), do: "branch#{b}[#{o}]"
 
   defp path_label([]), do: ""
   defp path_label(path), do: "." <> Enum.map_join(path, ".", &to_string/1)

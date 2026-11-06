@@ -257,12 +257,11 @@ A model MAY implement `expansions/0`, returning `[{Root, fun}]` with one pair pe
 
 ### Requirement: Expansion Load Rules (DR-049)
 
-At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and `mix pd.validate`, the framework SHALL enforce four rules.
+At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and `mix pd.validate`, the framework SHALL enforce three rules.
 
 1. A model that defines `expansions/0` SHALL declare at least one `@compare` whose schedule reaches the final boundary (`every: 1`, the default, or a schedule that names `:end`), with one target too.
 2. A module that `expansions/0` lists SHALL be in `commands/0`, SHALL NOT be listed twice, and SHALL NOT be a root with `execution: :probe`.
-3. A model that defines `expansions/0` SHALL NOT be run with the `branching:` option.
-4. An `expansions/0` function SHALL have arity 2.
+3. An `expansions/0` function SHALL have arity 2.
 
 #### Scenario: No comparison reaches the end
 - **WHEN** a model defines `expansions/0` and declares no `@compare` that reaches the end
@@ -281,10 +280,6 @@ At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and 
 #### Scenario: A module listed twice
 - **WHEN** `expansions/0` lists one module in two pairs
 - **THEN** the run SHALL fail with an error that names the module
-
-#### Scenario: Branching with expansions
-- **WHEN** a run passes `branching:` for a model that defines `expansions/0`
-- **THEN** the run SHALL fail with an option error that names both
 
 ### Requirement: Arity-2 Overrides Only Inside Expansion Sequences (DR-049)
 

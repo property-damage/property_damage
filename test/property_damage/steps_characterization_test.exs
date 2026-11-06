@@ -43,56 +43,6 @@ defmodule PropertyDamage.StepsCharacterizationTest do
     )
   end
 
-  defp branched_report do
-    seq =
-      Sequence.branching(
-        [%Cmd{id: :p0}],
-        [[%Cmd{id: :b0a}, %Cmd{id: :b1a}], [%Cmd{id: :b0b}, %Cmd{id: :b1b}]],
-        [%Cmd{id: :s0}]
-      )
-
-    FailureReport.new(
-      seed: 1,
-      run_number: 1,
-      original_sequence: seq,
-      shrunk_sequence: seq,
-      failed_at_index: 2,
-      failure_reason: Failure.in_branch(Failure.check_failed(:Inv, "boom"), 1),
-      event_log: [
-        %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :p0}, source: :command},
-        %Entry{
-          timestamp: 2,
-          command_index: 1,
-          branch_id: 0,
-          event: %Ev{tag: :b0a},
-          source: :command
-        },
-        %Entry{
-          timestamp: 3,
-          command_index: 2,
-          branch_id: 0,
-          event: %Ev{tag: :b1a},
-          source: :command
-        },
-        %Entry{
-          timestamp: 4,
-          command_index: 1,
-          branch_id: 1,
-          event: %Ev{tag: :b0b},
-          source: :command
-        },
-        %Entry{
-          timestamp: 5,
-          command_index: 2,
-          branch_id: 1,
-          event: %Ev{tag: :b1b},
-          source: :command
-        },
-        %Entry{timestamp: 6, command_index: 5, event: %Ev{tag: :s0}, source: :command}
-      ]
-    )
-  end
-
   defp teardown_report do
     FailureReport.new(
       seed: 1,
@@ -126,23 +76,6 @@ defmodule PropertyDamage.StepsCharacterizationTest do
              ]
     end
 
-    test "branched report" do
-      assert Enum.map(FailureReport.steps(branched_report()), &shape/1) == [
-               {%Position{section: :prefix, offset: 0}, 0, %Cmd{id: :p0}, [%Ev{tag: :p0}], nil,
-                false},
-               {%Position{section: {:branch, 0}, offset: 0}, 1, %Cmd{id: :b0a}, [%Ev{tag: :b0a}],
-                nil, false},
-               {%Position{section: {:branch, 0}, offset: 1}, 2, %Cmd{id: :b1a}, [%Ev{tag: :b1a}],
-                nil, false},
-               {%Position{section: {:branch, 1}, offset: 0}, 3, %Cmd{id: :b0b}, [%Ev{tag: :b0b}],
-                nil, false},
-               {%Position{section: {:branch, 1}, offset: 1}, 4, %Cmd{id: :b1b}, [%Ev{tag: :b1b}],
-                nil, true},
-               {%Position{section: :suffix, offset: 0}, 5, %Cmd{id: :s0}, [%Ev{tag: :s0}], nil,
-                false}
-             ]
-    end
-
     test "teardown (non-localized) report marks no failed step" do
       steps = FailureReport.steps(teardown_report())
       refute Enum.any?(steps, & &1.failed?)
@@ -151,7 +84,7 @@ defmodule PropertyDamage.StepsCharacterizationTest do
   end
 
   describe "entries are full EventLog.Entry structs with provenance" do
-    test "linear entries carry source and branch_id" do
+    test "linear entries carry their source" do
       entries = FailureReport.steps(linear_report()) |> Enum.flat_map(& &1.entries)
       assert Enum.all?(entries, &match?(%Entry{}, &1))
       assert Enum.map(entries, & &1.source) == [:command, :command, :command]
@@ -160,13 +93,12 @@ defmodule PropertyDamage.StepsCharacterizationTest do
 
   describe "event_entries_at/2 lock" do
     test "by flattened index and by position" do
-      report = branched_report()
+      report = linear_report()
 
-      assert [%Entry{branch_id: 1, event: %Ev{tag: :b1b}}] =
-               FailureReport.event_entries_at(report, 4)
+      assert [%Entry{event: %Ev{tag: :e2}}] = FailureReport.event_entries_at(report, 2)
 
-      assert [%Entry{event: %Ev{tag: :s0}}] =
-               FailureReport.event_entries_at(report, %Position{section: :suffix, offset: 0})
+      assert [%Entry{event: %Ev{tag: :e1}}] =
+               FailureReport.event_entries_at(report, %Position{section: :prefix, offset: 1})
 
       assert FailureReport.event_entries_at(report, 99) == []
     end
@@ -176,11 +108,6 @@ defmodule PropertyDamage.StepsCharacterizationTest do
     test "linear" do
       assert FailureReport.failure_index(linear_report()) == 1
       assert FailureReport.failure_step(linear_report()).command == %Cmd{id: 1}
-    end
-
-    test "branch: flattened index, not executor index" do
-      assert FailureReport.failure_index(branched_report()) == 4
-      assert FailureReport.failure_step(branched_report()).command == %Cmd{id: :b1b}
     end
 
     test "non-localized: nil" do

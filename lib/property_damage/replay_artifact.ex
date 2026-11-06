@@ -128,8 +128,7 @@ defmodule PropertyDamage.ReplayArtifact do
 
   @doc false
   # The artifact term of the run `report` describes, or nil when the report
-  # records no target's choices (a latency report) or a branching sequence,
-  # which an artifact cannot hold.
+  # records no target's choices (a latency report).
   @spec build(FailureReport.t()) :: t() | nil
   def build(
         %FailureReport{
@@ -140,7 +139,7 @@ defmodule PropertyDamage.ReplayArtifact do
       when map_size(traced) > 0 do
     targets = targets(report)
 
-    if Sequence.linear?(plan) and Enum.all?(targets, &Map.has_key?(traced, &1.name)) do
+    if Enum.all?(targets, &Map.has_key?(traced, &1.name)) do
       reference = hd(targets).name
       roots = Sequence.to_list(plan)
       ids = Enum.map(Map.fetch!(traced, reference), & &1.root_id)

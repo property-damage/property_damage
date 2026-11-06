@@ -23,7 +23,6 @@ defmodule PropertyDamage.Test.BundleSupport do
   alias PropertyDamage.{Docs, Failure, FailureReport, Sequence}
   alias PropertyDamage.FailureReport.HTML
   alias PropertyDamage.Test.{ContextSection, DocsHelpers, TmpPath}
-  alias PropertyDamage.Test.ReportLayout
 
   # ==========================================================================
   # The modules under test
@@ -113,7 +112,7 @@ defmodule PropertyDamage.Test.BundleSupport do
   @marker "\u25BA"
   @arrow "\u25C4\u2500\u2500"
   @step Regex.compile!(
-          "^(?:#{@marker} |  )\\s*(\\[(?:setup |teardown |branch )?\\d+(?:\\.\\d+)*\\])(.*)$",
+          "^(?:#{@marker} |  )\\s*(\\[(?:setup |teardown )?\\d+(?:\\.\\d+)*\\])(.*)$",
           "u"
         )
   @event ~r/^\s+\+[\d.]+s event (.*)$/
@@ -256,16 +255,6 @@ defmodule PropertyDamage.Test.BundleSupport do
     for line <- listing_lines(lines),
         Regex.match?(@step, line) or Regex.match?(@event, line),
         do: String.trim(line)
-  end
-
-  @doc """
-  The hand-built branching report, given one target whose name holds a space
-  (the report as built names no target).
-  """
-  def branching_report do
-    report = ReportLayout.report(:branching)
-
-    %{report | targets: [{PropertyDamage.Test.Compare.PayAdapter, [name: "my app", config: %{}]}]}
   end
 
   @doc "The name a listing without a header carries: the failing target's."

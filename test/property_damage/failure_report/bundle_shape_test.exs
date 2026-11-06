@@ -125,13 +125,6 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       assert_key_sets(bundle)
     end
 
-    test "holds every key for a branching run" do
-      bundle = B.build(B.branching_report())
-
-      assert_top_level(bundle)
-      assert_key_sets(bundle)
-    end
-
     test "builds the same bundle twice" do
       report = RL.report(:diverged)
 
@@ -192,26 +185,12 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
   end
 
   describe "the listing" do
-    for kind <- @kinds -- [:branching] do
+    for kind <- @kinds do
       test "describes the listing the page prints for the #{kind} report" do
         report = RL.report(unquote(kind))
 
         assert_listing(B.build(report), report)
       end
-    end
-
-    test "describes the branching listing, with the branch labels as printed" do
-      report = B.branching_report()
-      bundle = B.build(report)
-
-      assert_listing(bundle, report)
-
-      assert [%{"name" => "my app", "role" => "variant", "steps" => steps}] = bundle["listing"]
-
-      assert Enum.map(steps, & &1["label"]) ==
-               ["[0]", "[branch 0.0]", "[branch 0.1]", "[branch 1.0]", "[4]"]
-
-      assert Enum.map(steps, & &1["failed"]) == [false, false, true, false, false]
     end
 
     test "lists the reference before the variant of a comparison" do

@@ -19,7 +19,6 @@ defmodule PropertyDamage.Runtime.Sink do
         event_log: event_log,          # newest-first; injected entries prepended
         injected_events: [],           # injection order (for external() capture, DR-021)
         command_index: index,
-        branch_id: branch_id,
         command: command
       }
 

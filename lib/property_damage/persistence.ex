@@ -30,6 +30,11 @@ defmodule PropertyDamage.Persistence do
   - Erlang term-encoded FailureReport struct
   - Checksum for integrity verification
 
+  A file of an older format version is refused with
+  `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
+  failure under the current version. Format 18 dropped the fields of the
+  removed parallel-branch mode from the saved sequence, trace and event log.
+
   ## Naming Convention
 
   Auto-generated filenames follow the pattern:
@@ -58,7 +63,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 17
+  @version 18
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -496,6 +501,10 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V18 format: a sequence holds only its roots (`prefix`), setup and teardown
+  # commands; a trace records no branch interleaving; an event-log entry and a
+  # failure name no branch, and the check kind for a parallel-branch ordering
+  # is gone.
   # V17 format: the fault-injection event source and failure kind are gone, and
   # a loaded file whose event log names a source the engine does not produce is
   # refused.
@@ -556,7 +565,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-16 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-17 are refused (DR-041, following DR-039/DR-040).
+  # A v17 sequence, trace or event-log entry may carry the parallel-branch
+  # fields v18 dropped, and no longer decodes into the current structs.
   # A v16 file may carry the fault-injection event source or failure kind,
   # which v17 dropped.
   # A v15 report does not record the run's `external_markers`, so a replay or

@@ -14,9 +14,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
   minimal-length checks fail. That is the regression-tested metric this
   suite exists to provide.
 
-  Scope: intentionally linear. Branching/parallel shrink quality is the subject
-  of the dedicated 6c bench (and `shrinker_test.exs`); `external()` shrink
-  quality lives in `external_shrink_test.exs` and the 6b Oban bench. Seeds are
+  Scope: `external()` shrink quality lives in `external_shrink_test.exs` and the 6b Oban bench. Seeds are
   pinned empirically: each adapter's bug is reliably discovered AND shrinks to
   its minimal repro at the recorded seed.
   """

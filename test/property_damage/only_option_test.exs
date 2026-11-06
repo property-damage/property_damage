@@ -230,21 +230,6 @@ defmodule PropertyDamage.OnlyOptionTest do
       assert_names(message, ["seed:", "replay:"])
     end
 
-    test "branching: beside either shape names both" do
-      targets = [F.target("solo")]
-
-      for only <- [[run: 1], [replay: missing_artifact()]] do
-        message =
-          option_error(
-            [only: only, branching: [max_branches: 2]],
-            targets,
-            F.PlainModel
-          )
-
-        assert_names(message, ["branching:", "only:"])
-      end
-    end
-
     test "a shape that is neither run/variants nor replay" do
       assert_names(option_error(only: [foo: 1]), ["only:", "foo"])
       assert_names(option_error(only: [run: 1, replay: "x"]), ["only:", "run:", "replay:"])

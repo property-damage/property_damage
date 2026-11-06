@@ -167,7 +167,6 @@ section of the report:
 | `[i]` | root `i`, counted from 0 in reading order |
 | `[i.j]` | leaf `j` of root `i`, listed under that root |
 | `[setup i]`, `[teardown i]` | a setup or teardown command |
-| `[branch b.i]` | command `i` of branch `b` in a branching run |
 
 `►` marks the failing step and `◄── failed` names the outcome (`diverged` and
 `did not converge` for comparison failures). Under each step, the events the
@@ -324,7 +323,7 @@ branch (if any) on the envelope:
 There are seven **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 
 - `:check`: a property or invariant did not hold (`:check_failed`,
-  `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
+  `:idempotency_violation`, `:poll_timeout`, `:settle_timeout`,
   `:projection_violation`). This is the class you usually want: it means the SUT
   misbehaved.
 - `:execution`: the machinery around the SUT failed to run a command
@@ -510,7 +509,7 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "se
 ```
 
 `with_reference: false` is legal only with exactly one non-reference name.
-`only:` takes `max_runs: 1` at most, no `branching:`, and `seed:` is not allowed
+`only:` takes `max_runs: 1` at most, and `seed:` is not allowed
 beside `replay:`.
 
 ## Step 2: Understand the Shrunk Sequence
@@ -595,7 +594,7 @@ with three shapes:
   name (an atom, e.g. `:balance_non_negative`) and `exception` is the exception
   struct the check raised. Only `:check_failed` failures take this shape.
 - `{:error, reason}` — any other failure: an adapter/execution error, or a
-  non-check failure (a poll/settle timeout, linearization, framework error).
+  non-check failure (a poll/settle timeout, framework error).
   `reason` is the underlying value.
 
 So the failing step is the one whose `result` is not `:ok`:
@@ -625,7 +624,7 @@ It prints each step and exits non-zero while the bug still reproduces (zero once
 it is fixed), so the same command doubles as a regression check. Concretely it
 exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
 replay could not run at all (the project does not compile, its applications do
-not start, the file fails to load, it records no model/adapter, the sequence is branching, or the target's setup or
+not start, the file fails to load, it records no model/adapter, or the target's setup or
 a setup command fails). That third
 case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
 needs to treat as "skip".
@@ -981,8 +980,7 @@ Verbose mode prints progress and configuration, nothing per step:
   `max_commands:` is set very low
 - A "PropertyDamage Test Run" header with the model, each target (index, name,
   adapter), the run and command limits, and the seed if you gave one
-- One line per run: the run number, the command count and, for a branching
-  sequence, the branch count
+- One line per run: the run number, the command count
 - A final summary: the run totals and seed on success, or the failure summary
   on failure
 

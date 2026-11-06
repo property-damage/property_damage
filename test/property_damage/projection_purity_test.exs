@@ -5,7 +5,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
   Done-gates exercised here:
 
-    * a pure projection re-derives to the runtime snapshot (linear AND branching)
+    * a pure projection re-derives to the runtime snapshot
     * a deliberately-impure projection (reads a process counter in apply/2) fires
       the purity detector
     * a pure-but-async projection (an event folded outside command attribution)
@@ -144,7 +144,6 @@ defmodule PropertyDamage.ProjectionPurityTest do
       projections: result.projections,
       projections_before: result.projections_before,
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      linearization: result.linearization,
       model: model,
       targets: [{Adapter, []}]
     )
@@ -273,31 +272,6 @@ defmodule PropertyDamage.ProjectionPurityTest do
                PropertyDamage.audit_projections(GenImpureModel, seeds: 20)
 
       assert ImpureEventProj in modules
-    end
-  end
-
-  describe "faithful derivation equals the runtime snapshot (branching)" do
-    test "a branching run failing in the suffix re-derives through the branch merge" do
-      # prefix Add 10, two branches each Add 10, suffix Add 85 -> sum 115 at the
-      # suffix command. Branch checks are disabled; the suffix re-enables them
-      # and Sum fires there, on the merged-then-suffix state.
-      seq =
-        Sequence.branching(
-          [%Add{amount: 10}],
-          [[%Add{amount: 10}], [%Add{amount: 10}]],
-          [%Add{amount: 85}]
-        )
-
-      report = report(PureModel, seq)
-
-      assert %Sequence.Position{section: :suffix} =
-               pos = FailureReport.failure_step(report).position
-
-      assert report.state_at_failure[Sum] == %{sum: 115}
-
-      assert RunTrace.state_at(report.trace, pos) == report.state_at_failure
-      assert RunTrace.state_before(report.trace, pos) == report.state_before_failure
-      assert FailureReport.verify_projections(report) == :ok
     end
   end
 end

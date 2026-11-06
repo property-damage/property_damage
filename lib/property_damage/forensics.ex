@@ -229,8 +229,7 @@ defmodule PropertyDamage.Forensics do
       events: [event],
       command_index: nil,
       step_count: index + 1,
-      projections: new_projections,
-      branch_id: nil
+      projections: new_projections
     }
 
     case run_checks(model, projection_modules, new_projections, check_ctx) do

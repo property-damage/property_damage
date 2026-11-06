@@ -276,10 +276,6 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
       assert projection(Failure.idempotency_violation(%{command: :bump})) == nil
     end
 
-    test "a linearization failure has no projection" do
-      assert projection(Failure.linearization("no order explains the results")) == nil
-    end
-
     test "a settle timeout has no projection" do
       assert projection(Failure.settle_timeout(:not_yet)) == nil
     end

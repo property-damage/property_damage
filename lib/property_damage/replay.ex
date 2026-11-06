@@ -70,12 +70,6 @@ defmodule PropertyDamage.Replay do
 
   ## Limitations
 
-  - **Branching sequences are not steppable.** Interactive stepping is linear by
-    nature; the fork/merge semantics of a parallel sequence cannot be reproduced
-    one command at a time. `start/2` and `run/2` return
-    `{:error, :branching_replay_unsupported}` for a branching `shrunk_sequence`.
-    Inspect a branching failure via the `FailureReport` fields or re-run it
-    through `PropertyDamage.Executor.run/4`.
   - **Replay does not apply stutter.** The `FailureReport` records the run's
     normalized `stutter:` option, but no replay option re-applies it, and
     `start/2` and `run/2` reject a `stutter_config:` option. A run derives its
@@ -246,9 +240,6 @@ defmodule PropertyDamage.Replay do
 
       is_nil(adapter) ->
         {:error, :missing_adapter}
-
-      branching?(FailureReport.shrunk_sequence(failure)) ->
-        {:error, :branching_replay_unsupported}
 
       true ->
         do_start(failure, model, target, opts)
@@ -674,7 +665,4 @@ defmodule PropertyDamage.Replay do
         {Enum.map(steps, &elem(&1, 0)), Enum.map(steps, &elem(&1, 1)), variant.registry}
     end
   end
-
-  defp branching?(%Sequence{} = seq), do: not Sequence.linear?(seq)
-  defp branching?(_), do: false
 end

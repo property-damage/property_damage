@@ -52,29 +52,11 @@ defmodule PropertyDamage.Progress.PrinterTest do
     test "prints run progress (run_number is 1-based)" do
       output =
         capture_io(fn ->
-          Printer.print_run(1, 10, 1, 0)
+          Printer.print_run(1, 10, 1)
         end)
 
       assert output =~ "Run 1/10"
       assert output =~ "1 commands"
-    end
-
-    test "shows branch info when branch_count > 0" do
-      output =
-        capture_io(fn ->
-          Printer.print_run(1, 10, 4, 2)
-        end)
-
-      assert output =~ "2 branches"
-    end
-
-    test "omits branch info when branch_count is 0" do
-      output =
-        capture_io(fn ->
-          Printer.print_run(3, 10, 5, 0)
-        end)
-
-      refute output =~ "branches"
     end
   end
 
@@ -102,8 +84,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
               phase: :run,
               run_number: 2,
               total_runs: 10,
-              command_count: 4,
-              branch_count: 0
+              command_count: 4
             })
           )
         end)

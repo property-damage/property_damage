@@ -4,13 +4,13 @@ defmodule RedisBench.Adapter do
 
   Each run gets its own Redix connection and a globally-unique key, so
   concurrent PropertyDamage runs never share register state. `INCR` is atomic,
-  so this adapter is always linearizable.
+  so a faithful read always matches the tally of increments.
   """
   use PropertyDamage.Adapter
 
-  alias RedisBench.Commands.{GetThenSet, Increment, ReadValue}
+  alias RedisBench.Commands.{Increment, ReadValue}
   alias RedisBench.Conn
-  alias RedisBench.Events.{Incremented, ValueRead, Written}
+  alias RedisBench.Events.{Incremented, ValueRead}
 
   @impl true
   def setup(_config) do
@@ -28,20 +28,6 @@ defmodule RedisBench.Adapter do
   def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
     {:ok, to} = Conn.command(conn, ["INCR", key])
     {:ok, [%Incremented{from: to - 1, to: to}]}
-  end
-
-  def execute(%GetThenSet{}, %{conn: conn, key: key}, _runtime) do
-    # Non-atomic read-modify-write: GET the value, compute +1, SET it back. The
-    # executor runs branches one after another over this single connection, so
-    # each GetThenSet observes the previous one's write -- a faithful RMW is
-    # therefore always linearizable. (A lost update requires an adapter that
-    # reports a stale read; see the parallel_linearization test's
-    # LostUpdateAdapter.)
-    {:ok, raw} = Conn.command(conn, ["GET", key])
-    from = to_int(raw)
-    to = from + 1
-    {:ok, _} = Conn.command(conn, ["SET", key, Integer.to_string(to)])
-    {:ok, [%Written{from: from, to: to}]}
   end
 
   def execute(%ReadValue{}, %{conn: conn, key: key}, _runtime) do

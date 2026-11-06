@@ -53,9 +53,8 @@ defmodule PropertyDamage.Executor.Stepping do
   caller may want it at a different point: `@check at: :startup` checks
   before the first command. `PropertyDamage.Variant` does it.
 
-  Stepping assumes a **linear** sequence: each command's position is
-  `Position.prefix(index)` (DR-021), where `index` is its 0-based offset. Do not
-  use this API for branching/parallel sequences.
+  Each command's position is `Position.prefix(index)` (DR-021), where `index`
+  is its 0-based offset.
 
   ## Setup and teardown commands
 
@@ -471,7 +470,6 @@ defmodule PropertyDamage.Executor.Stepping do
         ctx.event_queue,
         log_before,
         projections_before,
-        state.branch_id,
         state.fold_counter,
         state.await_matchers
       )
@@ -484,7 +482,6 @@ defmodule PropertyDamage.Executor.Stepping do
         state.last_command_index,
         event_log,
         projections,
-        state.branch_id,
         fold_counter
       )
       |> Events.folded_or_raise!()

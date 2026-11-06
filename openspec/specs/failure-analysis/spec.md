@@ -14,17 +14,15 @@ A run's `failure_reason` SHALL be a single structured type,
 `%PropertyDamage.Failure{}` (DR-041), not a loose family of `{:tag, ...}` tuples.
 It SHALL nest one class struct under `type`: `Failure.Check`,
 `Failure.Execution`, or `Failure.Framework`, so that illegal class/kind
-combinations are unrepresentable, and SHALL record the producing branch (if any)
-as `branch_id` on the envelope (absorbing the former `{:branch_failure, id,
-inner}` wrapper). Each class struct SHALL own a `kind` from a closed, documented
+combinations are unrepresentable. Each class struct SHALL own a `kind` from a closed, documented
 set; kinds SHALL be globally unique atoms across the three classes. The framework
-SHALL expose `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
+SHALL expose `Failure.class/1`, `kind/1`, `name/1`, `detail/1`,
 and `partial_events/1` accessors.
 
 #### Scenario: Kinds partition into three classes
 
 - **WHEN** a run fails
-- **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
+- **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
 - **AND** `:execution` for a command-execution failure (`:adapter_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
 - **AND** `:framework` for a framework-level failure (`:placeholder_resolution`, `:unknown`)
 
@@ -194,7 +192,7 @@ The system SHALL classify each failure as originating from the SUT, the test cod
 
 #### Scenario: SUT error with high confidence
 
-- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:check_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization`
+- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:check_failed`, `:poll_timeout`, or `:idempotency_violation`
 - **THEN** the origin SHALL be classified as `:sut_error` with confidence `:high`
 
 #### Scenario: Test code error with high confidence
@@ -297,10 +295,10 @@ The system SHALL produce structured failure reports containing location (run num
 
 - **WHEN** a `FailureReport` is inspected structurally
 - **THEN** `FailureReport.steps/1` SHALL delegate to `RunTrace.steps/1` (DR-033) on the report's embedded trace, returning the run as an ordered list of `%RunTrace.Step{position, flattened_index, command, executed_command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order; `command` is the plan's symbolic command (unchanged semantics for existing consumers) and `executed_command` is the concrete resolved command actually sent (`nil` when not captured, e.g. a command that never executed)
-- **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
-- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
-- **AND** at most one step SHALL have `failed?: true`: the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
-- **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
+- **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `{:leaf, n}`, `:setup` or `:teardown`) and its offset within that section, giving each command an identity
+- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `command_index` resolves to that step's position, in log order, preserving each event's provenance (`source`; the bare event is `entry.event`) so a mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
+- **AND** at most one step SHALL have `failed?: true`: the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index`
+- **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run, where `failed_at_index` is `nil`)
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
 - **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
 
@@ -311,7 +309,7 @@ The `:terminal` and `:markdown` formats SHALL print one layout, built once from 
 #### Scenario: One label per step in every section
 
 - **WHEN** a report is printed
-- **THEN** every listed command SHALL carry the label `Sequence.Position.label/2` gives it: `[i]` for a root, `[i.j]` for a leaf listed under root `[i]` (never the root's generated id), `[branch b.i]`, `[setup i]`, `[teardown i]`, and for a suffix command its reading-order index
+- **THEN** every listed command SHALL carry the label `Sequence.Position.label/2` gives it: `[i]` for a root, `[i.j]` for a leaf listed under root `[i]` (never the root's generated id), `[setup i]`, `[teardown i]`
 - **AND** the Failure section's `At` field, every line marked `►` and the Projections heading SHALL carry the failing step's label, and every `►` line SHALL end with `◄── diverged`, `◄── did not converge` or `◄── failed`
 - **AND** a failure tied to no step SHALL print no `►` and no `At` field
 - **AND** a command that prints over several lines SHALL start on the line after its label, so the notes and the `◄──` mark end the label's line and never split the printed value
@@ -422,7 +420,7 @@ Each item SHALL print its label at column 2 and its name (a module, `Module.func
 
 ### Requirement: Replay Artifact Generation (DR-050)
 
-A failing run SHALL write one replay artifact after shrinking, in the format the persistence requirement "Replay Artifact File (DR-050)" specifies, into `replay_dir:`. With `shrink: false` it SHALL hold the unshrunk run and the footer SHALL say so. The run SHALL refuse to build the artifact when a command field (inside lists, tuples and maps, map keys included) holds a function, pid, reference, port, improper list or non-binary bitstring. A refusal SHALL set `replay` to `{:refused, where}` and `replay_status` to `:refused`, SHALL name the target, the root, the leaf and the field path (a refused map key marked `{:key, text}`), and SHALL leave the failure reported and reproducible from its seed. A latency budget failure and a branching sequence SHALL have no artifact (`replay_status: :unavailable`).
+A failing run SHALL write one replay artifact after shrinking, in the format the persistence requirement "Replay Artifact File (DR-050)" specifies, into `replay_dir:`. With `shrink: false` it SHALL hold the unshrunk run and the footer SHALL say so. The run SHALL refuse to build the artifact when a command field (inside lists, tuples and maps, map keys included) holds a function, pid, reference, port, improper list or non-binary bitstring. A refusal SHALL set `replay` to `{:refused, where}` and `replay_status` to `:refused`, SHALL name the target, the root, the leaf and the field path (a refused map key marked `{:key, text}`), and SHALL leave the failure reported and reproducible from its seed. A latency budget failure SHALL have no artifact (`replay_status: :unavailable`).
 
 #### Scenario: A function in a command is refused
 - **GIVEN** a command whose field holds an anonymous function
@@ -477,13 +475,13 @@ Every path that executes a failure again SHALL take each target's concrete comma
 
 ### Requirement: Run Trace as the Execution Record (DR-033)
 
-The framework SHALL model the complete record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `mint_epoch` (DR-034), `model`, `adapter`, UTC `timestamp`, and best-effort `source_revision`), the plan (`plan`, the `%Sequence{}` this run executed; deliberately NOT named `original_sequence`, whose report-level meaning is the generated plan of the failing exploration run), a `plan_source` of `:generated` (a pure function of the effective seed) or `:shrunk` (a shrinker product, not regenerable from the seed), the canonical `plan_fingerprint` (DR-036), the concrete executed commands with their resolved and minted values keyed branch-aware by `%Sequence.Position{}`, the complete `EventLog` with per-entry provenance, the `command_labels`, and an `outcome` of `:pass` or `{:fail, reason}`. The executor SHALL always accumulate the resolved concrete command per position (including within branch workers, merged with branch state) so the executed record exists whenever a trace is materialized. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same branch-aware `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of the run the report describes: the shrunk minimal reproduction when its re-execution reproduced the failure, otherwise the original failing run (the existing non-reproduction fallback), and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs the trace's plan), and the failure classification. Deep execution-record structures SHALL live once, on the trace: the report SHALL NOT carry `event_log` or `shrunk_sequence` struct fields; `FailureReport.event_log/1` and `FailureReport.shrunk_sequence/1` SHALL be accessors over the embedded trace, while scalar identity (`seed`, `run_number`, `model`, `adapter`, `timestamp`) MAY remain duplicated on the report as its locator surface. Full `RunTrace` capture SHALL be on demand (`RunTrace.capture/1`, DR-035), not retained for every exploration run.
+The framework SHALL model the complete record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `mint_epoch` (DR-034), `model`, `adapter`, UTC `timestamp`, and best-effort `source_revision`), the plan (`plan`, the `%Sequence{}` this run executed; deliberately NOT named `original_sequence`, whose report-level meaning is the generated plan of the failing exploration run), a `plan_source` of `:generated` (a pure function of the effective seed) or `:shrunk` (a shrinker product, not regenerable from the seed), the canonical `plan_fingerprint` (DR-036), the concrete executed commands with their resolved and minted values keyed by `%Sequence.Position{}`, the complete `EventLog` with per-entry provenance, the `command_labels`, and an `outcome` of `:pass` or `{:fail, reason}`. The executor SHALL always accumulate the resolved concrete command per position so the executed record exists whenever a trace is materialized. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of the run the report describes: the shrunk minimal reproduction when its re-execution reproduced the failure, otherwise the original failing run (the existing non-reproduction fallback), and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs the trace's plan), and the failure classification. Deep execution-record structures SHALL live once, on the trace: the report SHALL NOT carry `event_log` or `shrunk_sequence` struct fields; `FailureReport.event_log/1` and `FailureReport.shrunk_sequence/1` SHALL be accessors over the embedded trace, while scalar identity (`seed`, `run_number`, `model`, `adapter`, `timestamp`) MAY remain duplicated on the report as its locator surface. Full `RunTrace` capture SHALL be on demand (`RunTrace.capture/1`, DR-035), not retained for every exploration run.
 
 #### Scenario: Trace captured for a passing run
 
 - **WHEN** a run is executed on an on-demand capture path (run comparison or flakiness investigation) and passes
 - **THEN** the framework SHALL produce a `RunTrace` with `outcome: :pass`, `plan_source: :generated`, the full unshrunk executed plan, and its complete event log
-- **AND** `RunTrace.steps/1` SHALL return one step per command in `Sequence.to_list/1` reading order, with the same branch-aware position identity used for failing runs
+- **AND** `RunTrace.steps/1` SHALL return one step per command in `Sequence.to_list/1` reading order, with the same position identity used for failing runs
 
 #### Scenario: FailureReport composes a RunTrace
 
@@ -506,12 +504,12 @@ The framework SHALL model the complete record of a single run as a `PropertyDama
 
 ### Requirement: Per-Step State Timeline and Projection Purity (DR-040)
 
-Per-command projection state SHALL be DERIVED from a `RunTrace`, never captured per step. The executor SHALL record the run's real fold order additively: each `EventLog.Entry` SHALL carry a `fold_index` stamped when its event folds into projections (`nil` for entries that are recorded but never folded, i.e. `:stutter` retries and `:telemetry` spans), and the trace SHALL carry `command_fold_ordinals` (each command's own fold ordinal by position) and the verified branch `linearization`. From this record the framework SHALL derive two state views: a FAITHFUL view (`RunTrace.state_at/2`, `state_before/2`, `state_timeline/1`) that replays the real fold order so async / injected events land where they folded, and a CANONICAL view (`RunTrace.canonical_state_timeline/1`) that folds each step's command then its attributed events in flattened order and is therefore fold-order-independent. Branching faithful replay SHALL mirror the executor's branch merge: branch steps fold branch-locally from the post-prefix state, and suffix steps fold the merged state (branches replayed in verified `linearization` order when recorded, else branch order) then the suffix. The framework SHALL provide a projection-purity check (`FailureReport.verify_projections/1`, `RunTrace.verify_projections/4`): the faithful-derived state at the failing step MUST equal the runtime `state_at_failure` snapshot (and `state_before_failure` at its step), and a mismatch SHALL be reported as `{:non_pure_projections, [module]}` naming the projection module(s) whose `apply/2` is not a pure function of `(state, event)`. Because the faithful view replays the real fold order, a pure-but-async projection SHALL NOT be reported as non-pure. This is a two-point sample (before + at the failing step), an explicitly partial coverage. A generation-side companion (`PropertyDamage.audit_projections/2`, run by `mix pd.audit`) SHALL fold each generated plan twice and name any projection whose two folds disagree.
+Per-command projection state SHALL be DERIVED from a `RunTrace`, never captured per step. The executor SHALL record the run's real fold order additively: each `EventLog.Entry` SHALL carry a `fold_index` stamped when its event folds into projections (`nil` for entries that are recorded but never folded, i.e. `:stutter` retries and `:telemetry` spans), and the trace SHALL carry `command_fold_ordinals` (each command's own fold ordinal by position). From this record the framework SHALL derive two state views: a FAITHFUL view (`RunTrace.state_at/2`, `state_before/2`, `state_timeline/1`) that replays the real fold order so async / injected events land where they folded, and a CANONICAL view (`RunTrace.canonical_state_timeline/1`) that folds each step's command then its attributed events in flattened order and is therefore fold-order-independent. The framework SHALL provide a projection-purity check (`FailureReport.verify_projections/1`, `RunTrace.verify_projections/4`): the faithful-derived state at the failing step MUST equal the runtime `state_at_failure` snapshot (and `state_before_failure` at its step), and a mismatch SHALL be reported as `{:non_pure_projections, [module]}` naming the projection module(s) whose `apply/2` is not a pure function of `(state, event)`. Because the faithful view replays the real fold order, a pure-but-async projection SHALL NOT be reported as non-pure. This is a two-point sample (before + at the failing step), an explicitly partial coverage. A generation-side companion (`PropertyDamage.audit_projections/2`, run by `mix pd.audit`) SHALL fold each generated plan twice and name any projection whose two folds disagree.
 
 #### Scenario: Faithful state matches the runtime snapshot
 
 - **WHEN** the faithful per-step state is derived at the failing step of a report built from a real run
-- **THEN** it SHALL equal the runtime `state_at_failure` snapshot (and `state_before_failure` at that step) for a model whose projections are pure, on both linear and branching runs
+- **THEN** it SHALL equal the runtime `state_at_failure` snapshot (and `state_before_failure` at that step) for a model whose projections are pure
 
 #### Scenario: Impure projection is detected
 
@@ -577,7 +575,7 @@ The `:terminal` and `:markdown` reports SHALL print every log line of the report
 
 #### Scenario: A setup failure shows the adapter's setup lines
 - **WHEN** the adapter's `setup/1` logs and then fails
-- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note, on the lockstep and the branching path alike
+- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note
 - **AND** the lines of the target's injector and mock setup and teardown SHALL print once each, under the `adapter setup/1` and `adapter teardown/1` notes
 
 #### Scenario: A shrunk report shows the reported run's lines only

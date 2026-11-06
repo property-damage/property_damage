@@ -56,13 +56,13 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
     test "can register multiple placeholders at distinct positions" do
       reg = PlaceholderRegistry.new()
       p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.branch(1, 0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.prefix(1), 0)
 
       reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
       assert map_size(reg.placeholders) == 2
       assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p1.id]
-      assert PlaceholderRegistry.ids_at_position(reg, Position.branch(1, 0)) == [p2.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(1)) == [p2.id]
     end
   end
 

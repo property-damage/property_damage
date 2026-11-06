@@ -41,9 +41,9 @@ defmodule Mix.Tasks.Pd.Replay do
   - **1** when the failure reproduces: a command failed its check or errored
     during execution (*bad*).
   - **125** when the replay could not run at all: the project does not compile,
-    its applications do not start, the file fails to load, it records no model or target, the sequence is
-    branching, or the target's setup failed (the target's `setup/1`, or one of
-    the setup commands the replay runs before the first step). The outcome is *indeterminate*, not a reproduction, so `git bisect`
+    its applications do not start, the file fails to load, it records no model or
+    target, or the target's setup failed (the target's `setup/1`, or one of the
+    setup commands the replay runs before the first step). The outcome is *indeterminate*, not a reproduction, so `git bisect`
     treats it as *skip* rather than wrongly blaming the commit (*skip*). 125 is
     still non-zero, so the headline "non-zero means not-confirmed-fixed" contract
     holds.
@@ -360,14 +360,6 @@ defmodule Mix.Tasks.Pd.Replay do
 
     print_hint(
       "Replay needs the adapter that produced the failure; this file cannot be replayed."
-    )
-  end
-
-  def print_replay_error(:branching_replay_unsupported) do
-    print_color(:red, "ERROR: this failure used parallel/branching execution\n")
-
-    print_hint(
-      "Stepping replay cannot reproduce fork/merge semantics. Use the exported ExUnit test instead."
     )
   end
 

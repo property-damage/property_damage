@@ -232,17 +232,6 @@ PropertyDamage.run(model: M, targets: [A])
 # Seeded (reproducible)
 PropertyDamage.run(model: M, targets: [A], seed: 42)
 
-# Branching sequences (one branch at a time, linearization-checked)
-PropertyDamage.run(
-  model: M,
-  targets: [A],
-  branching: [
-    branch_probability: 0.3,
-    max_branches: 3,
-    max_branch_length: 5
-  ]
-)
-
 # Stutter / idempotency testing. NOTE: this needs an *idempotent* SUT. The
 # in-memory AccountAdapter above mints a fresh id per call, so re-execution is
 # not idempotent and this run reports an idempotency violation -- that is

@@ -27,8 +27,8 @@ defmodule PropertyDamage.Failure.ExplainTest do
   test "every kind of the kind type has a non-empty meaning" do
     kinds = kinds()
 
-    assert length(kinds) == 18
-    assert length(Enum.uniq(kinds)) == 18
+    assert length(kinds) == 17
+    assert length(Enum.uniq(kinds)) == 17
 
     for kind <- kinds do
       meaning = explain().meaning(kind)
@@ -57,11 +57,6 @@ defmodule PropertyDamage.Failure.ExplainTest do
   test "the meaning of idempotency_violation is the agreed text" do
     assert Explain.meaning(:idempotency_violation) ==
              "Repeating a command changed the outcome. The command is declared safe to repeat, so sending it twice must give the same result as sending it once. The Attempt fields show both outcomes."
-  end
-
-  test "the meaning of linearization is the agreed text" do
-    assert Explain.meaning(:linearization) ==
-             "No linear order of the commands explains the results. The commands ran at the same time, and PropertyDamage found no one-at-a-time order (a linear order) that produces the results the system returned. Either the system lets concurrent commands interfere, or the model's rules for them are wrong."
   end
 
   test "the meaning of settle_timeout is the agreed text" do

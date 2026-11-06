@@ -69,7 +69,7 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 
 ### Requirement: Finalize-Chain Ordering and Precedence (DR-029)
 
-After the last command of a run (linear or merged-branch), the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@eventually` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@check at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@check every:` violation observed during the `@eventually` await drain, then a `@eventually` poll timeout/error, then an async `@check every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@check at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
+After the last command of a run, the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@eventually` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@check at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@check every:` violation observed during the `@eventually` await drain, then a `@eventually` poll timeout/error, then an async `@check every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@check at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
 
 #### Scenario: An async drain violation preempts a concurrent poll timeout
 - **WHEN** an async `@check every:` check trips on an event folded during the `@eventually` await drain while a `@eventually` poller is also timing out
@@ -266,7 +266,7 @@ The executor SHALL evaluate `@check every:` checks on every observed event, incl
 
 ### Requirement: Per-Check Firing and Whole-Run Coverage Accumulation (DR-026)
 
-The executor SHALL record how many times each check actually fired during a run, keyed by its owning projection and name. a check counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Per-check firing counts SHALL merge across parallel branches the same way the existing check counters do. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.check_fires`.
+The executor SHALL record how many times each check actually fired during a run, keyed by its owning projection and name. a check counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.check_fires`.
 
 #### Scenario: Firing recorded at every evaluation site
 - **WHEN** a check is evaluated via `every:`, an `at:` boundary, an asynchronously-observed event, or a spawned `@eventually` poller
@@ -279,10 +279,6 @@ The executor SHALL record how many times each check actually fired during a run,
 #### Scenario: Firing accumulates across the whole run
 - **WHEN** a run executes multiple generated sequences
 - **THEN** `result.check_fires` SHALL reflect firing counts summed across all sequences, not a single representative sequence
-
-#### Scenario: Per-check firing merges across branches
-- **WHEN** execution branches in parallel and checks fire in different branches
-- **THEN** the per-check firing counts SHALL merge by the same delta-from-prefix rule as the existing check counters
 
 ### Requirement: Pre-Run Validation
 
@@ -329,11 +325,6 @@ The adapter, its setup configuration, its injector adapters and its mock service
 #### Scenario: More than one target
 - **WHEN** an entry point other than `PropertyDamage.run/1` (for example `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` or `RunTrace.capture/1`) is called with a `targets:` list of two entries
 - **THEN** the system SHALL raise `NimbleOptions.ValidationError` stating that exactly one `targets:` entry is expected
-- **AND** no command SHALL execute
-
-#### Scenario: Branching with several targets (DR-045)
-- **WHEN** `PropertyDamage.run/1` is called with `branching:` and two or more `targets:` entries
-- **THEN** the system SHALL raise `NimbleOptions.ValidationError` naming `:branching` and stating that branching sequences run against one target only
 - **AND** no command SHALL execute
 
 #### Scenario: Empty or missing targets
@@ -536,7 +527,7 @@ Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce
 
 ### Requirement: Deterministic Symbolic Identity (DR-036)
 
-Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the branch-structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
+Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
 
 #### Scenario: Same plan generates equal
 
@@ -561,7 +552,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 #### Scenario: A pure model passes the audit
 
 - **WHEN** `PropertyDamage.audit/2` runs against a model whose generation is a pure function of the seed, including one using `external/0` or `mint_per_run/1`
-- **THEN** it SHALL return `:ok` for every audited seed, under both linear and branching generation options
+- **THEN** it SHALL return `:ok` for every audited seed
 
 #### Scenario: An impure generator is rejected
 
@@ -596,10 +587,6 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 - **AND** `PropertyDamage.execute/2`, `Replay.start/2` and `PropertyDamage.shrink_further/2` SHALL return `{:error, %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}}}`
 - **AND** `mix pd.replay` SHALL print it
 - **AND** no `{:adapter_setup_failed, _}` result SHALL exist
-
-#### Scenario: Branching keeps the linear engine
-- **WHEN** a branching sequence runs (one target only)
-- **THEN** its run, shrink and reproduction SHALL use the linear engine
 
 ### Requirement: Active Set of Variants and the Stop Rule (DR-046)
 
@@ -745,7 +732,7 @@ The engine SHALL run a variant's teardown commands after every execution of that
 
 ### Requirement: Setup and Teardown Commands in Reports and Replay (DR-048)
 
-`FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. A branching run SHALL execute the setup commands before its own prefix segment and the teardown commands after its suffix segment. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
+`FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
 
 #### Scenario: A report reproduces without re-drawing
 - **WHEN** `PropertyDamage.replay/2` runs a report
@@ -892,7 +879,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 
 `PropertyDamage.run/1` SHALL accept `only:` in exactly one of two shapes. `only: [run: n, variants: names, with_reference: boolean]` SHALL run run `n` (default 1, counted from 1) of the seed and nothing else, on the targets `variants:` names (default: every target) plus the reference unless `with_reference: false`. `with_reference: false` SHALL be legal only for exactly one named target other than the reference; that target SHALL run alone with the model's checks and no `@compare` function, and its sequence SHALL be the one `PropertyDamage.Expansion.for/5` regenerates for its name. `only: [replay: path]`, optionally with `variants:` and `with_reference:` under the same rules, SHALL load the replay artifact at `path` and execute the recorded setup commands and the commands each target ran at each recorded root, with no draw, ignoring each target's `expansion:`. Its `targets:` SHALL name exactly the targets the artifact records. Its `shrink:` SHALL default to `false`.
 
-`only:` SHALL be an option error naming the rule when: it holds both `run:` and `replay:` or an unknown key; `max_runs:` other than 1 or `branching:` is given beside it; `seed:` is given beside `replay:` (the artifact records its seed); `variants:` names a target that `targets:` lacks; `with_reference: false` names anything other than one non-reference target; or `replay:` is not a string. An `only:` run SHALL NOT replay the seed library.
+`only:` SHALL be an option error naming the rule when: it holds both `run:` and `replay:` or an unknown key; `max_runs:` other than 1 is given beside it; `seed:` is given beside `replay:` (the artifact records its seed); `variants:` names a target that `targets:` lacks; `with_reference: false` names anything other than one non-reference target; or `replay:` is not a string. An `only:` run SHALL NOT replay the seed library.
 
 `replay_dir:` SHALL be a non-empty string (default `"property_damage_replays"`) or `false`. A failing run SHALL write its replay artifact into that directory, creating it when missing, and `false` SHALL write none.
 
@@ -918,8 +905,8 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** `only: [variants: ["nope"]]` names a target `targets:` lacks
 - **THEN** `run/1` SHALL raise an option error that names "nope"
 
-#### Scenario: only beside max_runs or branching
-- **WHEN** `only:` is given with `max_runs: 3` or with `branching:`
+#### Scenario: only beside max_runs
+- **WHEN** `only:` is given with `max_runs: 3`
 - **THEN** `run/1` SHALL raise an option error that names both options
 
 #### Scenario: A replay that reproduces
@@ -982,10 +969,6 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 #### Scenario: Lines leave the event log and the projections unchanged
 - **WHEN** an adapter logs during a run
 - **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces
-
-#### Scenario: A failed target setup keeps its lines on the branching path
-- **WHEN** a branching run's target fails its setup, because an injector refuses to start after another one started or because the adapter's `setup/1` raises
-- **THEN** the run SHALL report `:setup_failed` with the detail, the `adapter setup/1` lines and the `adapter teardown/1` lines a run of the same target on the lockstep path reports, and SHALL NOT raise
 
 ### Requirement: Log.capture/1 Scopes Code Outside a Run (DR-054)
 

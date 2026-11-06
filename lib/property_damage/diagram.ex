@@ -112,7 +112,7 @@ defmodule PropertyDamage.Diagram do
 
     opts = Keyword.put(opts, :title, title)
 
-    # `steps/1` attributes events and the failure point by branch-aware position;
+    # `steps/1` attributes events and the failure point by position;
     # each Step carries its command, entries, and failed? flag.
     report |> FailureReport.steps() |> render(format, opts)
   end
@@ -138,7 +138,7 @@ defmodule PropertyDamage.Diagram do
 
     # No report here, so labels are empty; the failure point (if any) is passed
     # through opts. RunTrace owns the grouping so both diagram entry points
-    # share one branch-aware step timeline.
+    # share one step timeline.
     sequence
     |> RunTrace.build_steps(event_log, %{}, Keyword.get(opts, :failed_at_index))
     |> render(format, opts)

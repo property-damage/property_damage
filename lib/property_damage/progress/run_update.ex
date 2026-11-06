@@ -8,8 +8,8 @@ defmodule PropertyDamage.Progress.RunUpdate do
 
   - `:start` — emitted once before the first run (`run_number` is `0`); signals
     the campaign has begun and carries `total_runs`.
-  - `:run` — emitted per sequence with the 1-based `run_number`, the
-    `command_count`, and `branch_count` (`0` for a linear sequence).
+  - `:run` — emitted per sequence with the 1-based `run_number` and the
+    `command_count`.
   - `:shrink` — reserved for per-iteration shrink progress (`shrink_iteration`).
   """
 
@@ -20,8 +20,7 @@ defmodule PropertyDamage.Progress.RunUpdate do
           total_runs: pos_integer(),
           command_count: non_neg_integer() | nil,
           phase: phase(),
-          shrink_iteration: non_neg_integer() | nil,
-          branch_count: non_neg_integer()
+          shrink_iteration: non_neg_integer() | nil
         }
 
   @enforce_keys [:run_number, :total_runs]
@@ -30,7 +29,6 @@ defmodule PropertyDamage.Progress.RunUpdate do
     :total_runs,
     :command_count,
     :shrink_iteration,
-    phase: :run,
-    branch_count: 0
+    phase: :run
   ]
 end

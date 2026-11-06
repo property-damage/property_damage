@@ -5,8 +5,8 @@ defmodule RedisBench do
 
   This is the first out-of-BEAM, network-attached SUT (6a/6c were in-process,
   6b was Postgres-via-Ecto). The SUT is a Redis-backed atomic register: `INCR`
-  is atomic and linearizable on a single instance, so a faithful adapter is
-  always linearizable. That is the same canonical register as the 6c ETS bench,
+  is atomic on a single instance, so a faithful adapter never loses an update.
+  That is the same canonical register as the 6c ETS bench,
   but reached over a real socket.
 
   See `RedisBench.Conn` for endpoint resolution.

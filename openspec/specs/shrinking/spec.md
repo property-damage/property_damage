@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
+Defines the shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification.
 
 Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
 
@@ -124,23 +124,6 @@ In argument simplification, the system SHALL simplify argument values in remaini
 - **WHEN** a command contains a placeholder for a server-generated value
 - **THEN** that placeholder SHALL NOT be modified during argument shrinking
 
-### Requirement: Branching Sequence Shrinking
-
-For branching sequences, the shrinker SHALL additionally attempt to remove entire branches, shrink individual branches, and convert the sequence to linear form.
-
-#### Scenario: Remove entire branch
-- **WHEN** a branching sequence has multiple branches
-- **THEN** the shrinker SHALL attempt removing each branch entirely
-- **AND** accept the removal if the failure is still reproduced
-
-#### Scenario: Shrink individual branches
-- **WHEN** branches remain after branch removal attempts
-- **THEN** the shrinker SHALL apply command removal within each branch independently
-
-#### Scenario: Convert to linear
-- **WHEN** the failure does not require parallel execution to reproduce
-- **THEN** the shrinker SHALL attempt converting the branching sequence to a linear sequence
-
 ### Requirement: Deterministic Shrinking
 
 Given the same seed and the same initial failure, shrinking SHALL produce the same shrunk result, provided the SUT behaves deterministically.
@@ -204,7 +187,7 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 - **THEN** the signature SHALL contain the failure kind, the check name and the variant index
 
 #### Scenario: Non-check failure signature
-- **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error, linearization failure)
+- **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error)
 - **THEN** the signature SHALL contain the failure kind, nil for the check name and the variant index
 
 #### Scenario: Divergence signature names the observation
@@ -253,10 +236,6 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 - **WHEN** a run fails with kind `:setup_failed`
 - **THEN** the framework SHALL report the original sequence without shrinking (DR-048)
 
-#### Scenario: Branching sequences keep the linear engine
-- **WHEN** a branching sequence fails (one target only)
-- **THEN** its run, shrink and reproduction SHALL use the linear engine
-
 #### Scenario: Re-shrink with several targets
 - **WHEN** `shrink_further/2` is called
 - **THEN** it SHALL use `report.targets` by default
@@ -267,7 +246,7 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 ### Requirement: Invalid Candidates Are Not Counterexamples (DR-045)
 
-Before running a shrink candidate, linear or branching, the shrinker SHALL validate it against the model (a branching candidate with its commands in reading order): fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
+Before running a shrink candidate, the shrinker SHALL validate it against the model: fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
 
 #### Scenario: A candidate the model cannot simulate is not a counterexample
 - **GIVEN** a model whose projection raises when it folds an event that references an entity the state does not hold
