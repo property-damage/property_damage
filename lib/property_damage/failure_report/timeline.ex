@@ -349,7 +349,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     """
 
     # This is the entry-level view: unlike the plain command timeline it renders
-    # each event's source badge (CMD/NEM/MOC/STU/INJ) and branch. It reads the
+    # each event's source badge (see `FailureReport.SourceBadge`) and branch. It reads the
     # command-attributed entries straight off `FailureReport.steps/1` — each
     # `Step.entries` is the full, branch-aware-grouped `EventLog.Entry` list, so
     # the per-event provenance (source, branch_id) and the failure marker

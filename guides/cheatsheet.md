@@ -1,6 +1,6 @@
 # PropertyDamage Cheatsheet
 
-Compact syntax reference for all five core behaviours, run options, and common patterns.
+Compact syntax reference for all four core behaviours, run options, and common patterns.
 
 ## Command Template
 
