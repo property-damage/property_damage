@@ -389,4 +389,80 @@ defmodule PropertyDamage.ForensicsTest do
       :code.delete(TestModel.RegressionTest)
     end
   end
+
+  defmodule EventuallyInvariants do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{order_amounts: %{}}
+
+    @impl true
+    def apply(state, %OrderCreated{order_id: id, amount: amount}) do
+      %{state | order_amounts: Map.put(state.order_amounts, id, amount)}
+    end
+
+    def apply(state, _), do: state
+
+    @eventually after: OrderCreated, timeout: {1, :second}, interval: {10, :milliseconds}
+    def assert_orders_visible(_state, %OrderCreated{order_id: id}) do
+      fn state -> Map.has_key?(state.order_amounts, id) end
+    end
+  end
+
+  defmodule EventuallyModel do
+    use PropertyDamage.Model
+
+    def commands, do: []
+    def command_sequence_projection, do: OrderState
+    def check_projections, do: [EventuallyInvariants]
+  end
+
+  defmodule BoundaryInvariants do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{order_amounts: %{}}
+
+    @impl true
+    def apply(state, %OrderCreated{order_id: id, amount: amount}) do
+      %{state | order_amounts: Map.put(state.order_amounts, id, amount)}
+    end
+
+    def apply(state, _), do: state
+
+    @check at: :teardown
+    def assert_final_amounts_non_negative(state, _cmd_or_event) do
+      Enum.all?(state.order_amounts, fn {_id, amount} -> amount >= 0 end)
+    end
+  end
+
+  defmodule BoundaryModel do
+    use PropertyDamage.Model
+
+    def commands, do: []
+    def command_sequence_projection, do: OrderState
+    def check_projections, do: [BoundaryInvariants]
+  end
+
+  describe "analyze/1 over checks that are not per-event samples" do
+    @describetag :known_defect
+
+    test "replays events through a model that declares an @eventually check" do
+      events = [
+        %OrderCreated{order_id: "o1", amount: 10, currency: "USD"},
+        %OrderShipped{order_id: "o1", tracking_number: "T1"}
+      ]
+
+      assert {:ok, _result} = Forensics.analyze(events: events, model: EventuallyModel)
+    end
+
+    test "replays events through a model that declares an at: :teardown check" do
+      events = [
+        %OrderCreated{order_id: "o1", amount: 10, currency: "USD"},
+        %OrderShipped{order_id: "o1", tracking_number: "T1"}
+      ]
+
+      assert {:ok, _result} = Forensics.analyze(events: events, model: BoundaryModel)
+    end
+  end
 end
