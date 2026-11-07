@@ -97,7 +97,7 @@ defmodule PropertyDamage.ShrinkReplayableTest do
 
   defp identity(report),
     do:
-      {report.kind, Failure.name(report.failure_reason), report.variant.name,
+      {report.report_kind, Failure.name(report.failure_reason), report.variant.name,
        report.failed_at_index}
 
   defp failing do

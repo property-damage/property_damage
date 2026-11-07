@@ -87,7 +87,7 @@ defmodule PropertyDamage.CompareRecordRereadTest do
       assert reads == {5, 5}
 
       # The sides agreed; the recorded check failure is the run's failure.
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
       assert Failure.name(run.failure.reason) == :sane_balance
       assert run.other_failures == []
 

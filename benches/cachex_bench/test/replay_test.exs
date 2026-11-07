@@ -58,7 +58,7 @@ defmodule CachexBench.ReplayTest do
   end
 
   defp identity(report),
-    do: {report.kind, Failure.name(report.failure_reason), report.variant.index}
+    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
 
   defp ran(report, name),
     do: report.trace.expansion |> Map.fetch!(name) |> Enum.at(report.failed_at_index)

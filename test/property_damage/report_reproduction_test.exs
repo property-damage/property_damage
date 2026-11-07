@@ -184,7 +184,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   end
 
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.kind == Failure.report_kind(report.failure_reason)
+    assert report.report_kind == Failure.report_kind(report.failure_reason)
   end
 
   defp reproduce(report) do
@@ -214,7 +214,7 @@ defmodule PropertyDamage.ReportReproductionTest do
         assert %Failure{type: %Failure.Execution{kind: :resource_poller_error}} =
                  report.failure_reason
 
-        assert report.kind == :execution_failed
+        assert report.report_kind == :execution_failed
         assert_kind_agrees(report)
       end
     end
@@ -236,7 +236,7 @@ defmodule PropertyDamage.ReportReproductionTest do
       # reference and "val" diverges.
       assert {:error, report} = run(skewed_targets(), seed: seed)
       assert_kind_agrees(report)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant.index == 2
       assert report.compare == [converge_within: @converge_within]
       assert report.max_commands == @max_commands
@@ -247,7 +247,7 @@ defmodule PropertyDamage.ReportReproductionTest do
 
       assert {:error, repro} = reproduce(report)
       assert_kind_agrees(repro)
-      assert repro.kind == :diverged
+      assert repro.report_kind == :diverged
       assert repro.variant.index == 2
 
       assert {:error, unshrunk} = run(skewed_targets(), seed: seed, shrink: false)

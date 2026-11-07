@@ -97,7 +97,7 @@ defmodule PropertyDamage.MockCallbackFailureTest do
   end
 
   defp assert_fails_at_one(report, mock, callback) do
-    assert report.kind == :execution_failed
+    assert report.report_kind == :execution_failed
     assert report.failed_at_index == 1
 
     assert {^mock, ^callback, %RuntimeError{}} = report.failure_reason.type.detail
@@ -120,7 +120,7 @@ defmodule PropertyDamage.MockCallbackFailureTest do
   test "a projection that rejects a mock event keeps the on_event/2 lines under the step" do
     report = F.report!(RejectingModel, [P.mocked_target("alice", %{})])
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert report.failed_at_index == 1
 
     lines = report |> F.plain() |> F.listing(nil)

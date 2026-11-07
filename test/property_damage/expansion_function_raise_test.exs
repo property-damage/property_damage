@@ -73,7 +73,7 @@ defmodule PropertyDamage.ExpansionFunctionRaiseTest do
     amounts = for {:amount, n} <- drain(), do: n
     assert Enum.any?(amounts, &(&1 < 2))
 
-    assert {report.kind, report.variant} == {found.kind, found.variant}
+    assert {report.report_kind, report.variant} == {found.report_kind, found.variant}
     assert report.variant == %{index: 1, name: "beta"}
 
     at_failure =

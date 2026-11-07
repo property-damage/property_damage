@@ -150,7 +150,7 @@ defmodule PropertyDamage.FailureReport.ContextSectionItemsTest do
     test "a framework kind prints the model and the command of the marked step", %{u: u} do
       real = U.check_failed(u)
       failure = Failure.unknown(:weird_term)
-      report = %{real | failure_reason: failure, kind: Failure.report_kind(failure)}
+      report = %{real | failure_reason: failure, report_kind: Failure.report_kind(failure)}
 
       assert %{command: %{__struct__: pay}} = FailureReport.failure_step(report)
       assert pay == u.pay

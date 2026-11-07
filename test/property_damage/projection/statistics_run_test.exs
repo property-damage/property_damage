@@ -103,7 +103,7 @@ defmodule PropertyDamage.Model.Projection.StatisticsRunTest do
   test "a user check over compute_metrics/1 fails the run past its threshold" do
     assert {:error, report} = run(BudgetModel, SlowAdapter)
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert %Failure{type: %Failure.Check{name: :p99_under_budget}} = report.failure_reason
   end
 end

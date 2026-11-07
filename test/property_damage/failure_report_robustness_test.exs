@@ -179,9 +179,9 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     end
   end
 
-  describe "failure_type_summary totality" do
-    test "does not crash on a hand-built struct with nil failure_type" do
-      assert is_binary(FailureReport.failure_type_summary(%FailureReport{}))
+  describe "kind_summary totality" do
+    test "does not crash on a hand-built struct with nil failure" do
+      assert is_binary(FailureReport.kind_summary(%FailureReport{}))
     end
 
     test "renders the new failure types" do
@@ -192,7 +192,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
             Failure.projection_violation(SomeEvent, %RuntimeError{message: "bad transition"})
           ] do
         rep = report(failure_reason: reason)
-        assert is_binary(FailureReport.failure_type_summary(rep))
+        assert is_binary(FailureReport.kind_summary(rep))
         assert is_binary(Formatter.format(rep, :compact))
       end
     end

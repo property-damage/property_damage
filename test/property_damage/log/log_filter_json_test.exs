@@ -131,7 +131,7 @@ defmodule PropertyDamage.Log.LogFilterJsonTest do
     ]
 
     report = F.report!(F.Model, targets, log: [only: [:headers]])
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     logs = json(report)["logs"]
 
     assert logs["reference"]["name"] == "alice"

@@ -94,7 +94,7 @@ defmodule ObanBench.CompareTest do
     assert {:error, report} =
              run(Model, targets, max_commands: 2, compare: [converge_within: 500])
 
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert report.variant == %{index: 1, name: "double"}
 
     divergence = Failure.detail(report.failure_reason)
@@ -126,7 +126,7 @@ defmodule ObanBench.CompareTest do
 
     elapsed = System.monotonic_time(:millisecond) - started
 
-    assert report.kind == :did_not_converge
+    assert report.report_kind == :did_not_converge
     assert report.variant == %{index: 1, name: "noop"}
 
     convergence = Failure.detail(report.failure_reason)

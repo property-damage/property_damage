@@ -125,7 +125,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     assert {:ok, run} =
              Scheduler.run(run_opts(StartupModel, targets, [%Step{value: 1}, %Step{value: 2}]))
 
-    assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, root: nil} = run.failure
+    assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, root: nil} = run.failure
     assert entered(recorder, "a") == []
     assert entered(recorder, "b") == []
   end
@@ -141,7 +141,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
     assert {:ok, run} = Scheduler.run(run_opts(StepModel, targets, commands))
 
-    assert %{kind: :execution_failed, variant: %{index: 1, name: "b"}, run: 0, root: 1} =
+    assert %{report_kind: :execution_failed, variant: %{index: 1, name: "b"}, run: 0, root: 1} =
              run.failure
 
     assert %Failure{} = run.failure.reason
@@ -277,7 +277,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       assert {:error, report} =
                run_routing(seed, [mint_target("a", true), mint_target("b", true)])
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == first_create
       assert Failure.detail(report.failure_reason) == :refused
@@ -297,7 +297,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     test "when only a non-reference producer errored, that variant fails at the producer" do
       {seed, _commands, first_create} = routing_seed()
 
-      assert {:error, %FailureReport{kind: :execution_failed} = report} =
+      assert {:error, %FailureReport{report_kind: :execution_failed} = report} =
                run_routing(seed, [mint_target("a", false), mint_target("b", true)])
 
       assert report.variant == %{index: 1, name: "b"}

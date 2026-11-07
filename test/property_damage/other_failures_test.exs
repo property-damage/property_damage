@@ -103,7 +103,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       ]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 2, name: "c"}
       assert report.failed_at_index == 1
 
@@ -137,7 +137,7 @@ defmodule PropertyDamage.OtherFailuresTest do
 
       assert {:error, shrunk} = run(ctx, targets, max_commands: 8, shrink: true)
       assert shrunk.variant == %{index: 2, name: "c"}
-      assert shrunk.kind == :execution_failed
+      assert shrunk.report_kind == :execution_failed
       assert shrunk.failed_at_index <= 5
       assert length(others(shrunk)) < length(others(unshrunk))
     end
@@ -158,7 +158,7 @@ defmodule PropertyDamage.OtherFailuresTest do
 
       assert {:error, shrunk} = run(ctx, targets, max_commands: 8, shrink: true)
       assert shrunk.variant == %{index: 1, name: "b"}
-      assert shrunk.kind == :execution_failed
+      assert shrunk.report_kind == :execution_failed
 
       numbers = for %Book{n: n} <- Sequence.to_list(FailureReport.shrunk_sequence(shrunk)), do: n
       assert 3 in numbers

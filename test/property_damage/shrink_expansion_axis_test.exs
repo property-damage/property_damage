@@ -50,7 +50,7 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
   end
 
   defp identity(report),
-    do: {report.kind, Failure.name(report.failure_reason), report.variant.index}
+    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
 
   defp roots(report), do: report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
 
@@ -90,8 +90,8 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     {:error, report} = run(A.StateModel, parts_bug(), opts)
     F.drain()
 
-    assert {report.kind, Failure.name(report.failure_reason), report.variant.name} ==
-             {unshrunk.kind, Failure.name(unshrunk.failure_reason), "second"}
+    assert {report.report_kind, Failure.name(report.failure_reason), report.variant.name} ==
+             {unshrunk.report_kind, Failure.name(unshrunk.failure_reason), "second"}
 
     assert length(roots(report)) == 1
     assert report.failed_at_index == 0

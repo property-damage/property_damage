@@ -81,7 +81,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       external_markers: [],
       targets: [%{name: "ref", expansion: :random}, %{name: "second", expansion: :random}],
       failure: %{
-        kind: report.kind,
+        kind: report.report_kind,
         name: Failure.name(report.failure_reason),
         variant_index: report.variant.index,
         root_index: report.failed_at_index
@@ -312,7 +312,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
         F.drain()
 
         # The run's result is the same as without the value.
-        assert report.kind == :diverged
+        assert report.report_kind == :diverged
         assert report.variant.name == "second"
         assert report.failed_at_index == 0
 
@@ -366,7 +366,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
                )
 
       F.drain()
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       leaves = Enum.flat_map(report.trace.expansion["second"], & &1.commands)
       assert Enum.any?(leaves, &match?(%R.Credit{account_id: %PropertyDamage.Placeholder{}}, &1))
     end

@@ -330,7 +330,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: Reporting a divergence
 
 - **WHEN** a boundary observation differs across ready sides at the bound
-- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :diverged`
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.report_kind == :diverged`
 - **AND** `report.variant` SHALL be `%{index, name}` of the first differing variant in target order
 - **AND** `report.failed_at_index` SHALL be the 0-based index of the root
 - **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `key`, `root`, `command` (the root command), `reference_value`, `variant_value` and `mismatch`
@@ -339,7 +339,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: Reporting a failure to converge
 
 - **WHEN** a side is still pending at the bound
-- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :did_not_converge`
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.report_kind == :did_not_converge`
 - **AND** the failure reason SHALL be of type `Failure.Convergence` carrying `key`, `root`, `command`, `reason`, the time waited and the bound
 - **AND** `Failure.name/1` SHALL be the `@compare` key
 
@@ -376,7 +376,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 
 - **WHEN** a target's `setup/1` returns `{:error, reason}` or raises
 - **THEN** the framework SHALL end the run with a failure of kind `:setup_failed` that names that variant
-- **AND** `run/1` SHALL return `{:error, report}` with `report.kind == :setup_failed`, `report.variant` naming that variant and `report.failed_at_index` equal to `nil`
+- **AND** `run/1` SHALL return `{:error, report}` with `report.report_kind == :setup_failed`, `report.variant` naming that variant and `report.failed_at_index` equal to `nil`
 - **AND** SHALL tear down the variants that were already set up
 - **AND** SHALL NOT call `teardown/1` of the variant whose setup failed
 - **AND** no command SHALL execute

@@ -754,7 +754,7 @@ defmodule PropertyDamage.Test.ContextSection do
   end
 
   @doc "The kind of a report, as an atom."
-  def kind(%FailureReport{} = report), do: FailureReport.failure_type(report)
+  def kind(%FailureReport{} = report), do: FailureReport.kind(report)
 
   @doc "Lines printed between two items are exactly one blank line."
   def assert_item_separation(body) do

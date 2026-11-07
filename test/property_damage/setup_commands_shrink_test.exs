@@ -320,7 +320,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       assert {:error, %FailureReport{} = report} =
                run(CountedModel, flip_targets(ref, cand), seed: seed)
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
 
       assert Failure.signature(report.failure_reason, 1) ==
@@ -375,7 +375,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
         end)
 
       assert_received {:report, report}
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       shrunk = FailureReport.shrunk_sequence(report)
       assert shrunk |> Sequence.to_list() |> Enum.map(& &1.__struct__) == [MakeThing, MakeThing]
 
@@ -415,7 +415,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       assert {:error, %FailureReport{} = report} =
                run(model, [SetupCommands.target("a", start_recorder())], seed: seed)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
 
       assert report
              |> FailureReport.shrunk_sequence()

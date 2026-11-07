@@ -23,7 +23,7 @@ defmodule PropertyDamage.PersistenceReferenceFieldsTest do
     model = R.pay_model(Module.concat(__MODULE__, LedgerModel), R.Ledger)
     targets = [R.pay_target("a"), R.pay_target("b", %{at: %{1 => {:sync, 1}}})]
 
-    assert {:error, %FailureReport{kind: :diverged} = report} = R.run(model, targets)
+    assert {:error, %FailureReport{report_kind: :diverged} = report} = R.run(model, targets)
 
     dir = TmpPath.unique("pd_reference_fields")
     on_exit(fn -> File.rm_rf(dir) end)

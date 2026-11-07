@@ -323,7 +323,7 @@ defmodule PropertyDamage.Test.ReportLayout do
       ]
 
       case R.run(model, targets, seed: seed, max_commands: 6, shrink: true) do
-        {:error, %FailureReport{kind: :diverged} = report} = found ->
+        {:error, %FailureReport{report_kind: :diverged} = report} = found ->
           if generated_root(report) not in [nil, report.failed_at_index], do: found
 
         _other ->
@@ -455,7 +455,7 @@ defmodule PropertyDamage.Test.ReportLayout do
       targets = [ExpansionRun.target("a", VariantSupport.start_recorder())]
 
       case R.run(model, targets, seed: seed, max_commands: 6, shrink: true) do
-        {:error, %FailureReport{kind: :check_failed}} = found -> found
+        {:error, %FailureReport{report_kind: :check_failed}} = found -> found
         _other -> nil
       end
     end)
@@ -560,14 +560,14 @@ defmodule PropertyDamage.Test.ReportLayout do
   @doc false
   def facts(%FailureReport{} = report) do
     label = expected_label(report)
-    comparison? = report.kind in [:diverged, :did_not_converge]
+    comparison? = report.report_kind in [:diverged, :did_not_converge]
 
     %{
       seed: report.seed,
       banner:
         if(report.error_origin == :test_code_error, do: "TEST CODE ERROR", else: "BUG DETECTED!"),
       label: label,
-      outcome: outcome(report.kind),
+      outcome: outcome(report.report_kind),
       marks: marks(label, comparison?),
       roots: roots(report),
       sides: if(comparison?, do: {reference_name(report), report.variant.name}),
@@ -598,7 +598,7 @@ defmodule PropertyDamage.Test.ReportLayout do
   @doc false
   # The label of the failing step (DR-055 decision 5), or nil when the
   # failure is not localized to a step.
-  def expected_label(%FailureReport{kind: kind, failed_at_index: i})
+  def expected_label(%FailureReport{report_kind: kind, failed_at_index: i})
       when kind in [:diverged, :did_not_converge] and is_integer(i),
       do: "[#{i}]"
 

@@ -28,7 +28,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
   defp diverged_report(extra) do
     targets = [F.target("alice", quiet()), F.target("bob", quiet(%{skew_at: 1}))]
     report = F.report!(F.Model, targets, extra)
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     report
   end
 

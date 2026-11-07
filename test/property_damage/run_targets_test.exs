@@ -78,7 +78,7 @@ defmodule PropertyDamage.RunTargetsTest do
                    concurrency: unquote(concurrency)
                  )
 
-        assert report.kind == :diverged
+        assert report.report_kind == :diverged
         assert report.variant == %{index: 1, name: "b"}
         assert report.failed_at_index == 0
         # Shrunk to the divergent root alone, in the same target.
@@ -99,7 +99,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "after root 0 reports that root as failed_at_index" do
       assert {:error, report} = run([step("a"), step("b", %{bad_at: 1})])
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.failed_at_index == 1
       assert Failure.detail(report.failure_reason).root == 1
     end
@@ -162,7 +162,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "a planted check failure is a :check_failed report naming variant 0" do
       assert {:error, report} = run([step("solo", %{bad_at: 1})], model: GuardedStepModel)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 0, name: "solo"}
       assert report.failed_at_index == 1
       assert Failure.kind(report.failure_reason) == :check_failed
@@ -175,7 +175,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "an adapter {:error, _} at a command is an :execution_failed report" do
       assert {:error, report} = run([step("solo", %{behavior: :error})])
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "solo"}
       assert report.failed_at_index == 0
 
@@ -217,7 +217,7 @@ defmodule PropertyDamage.RunTargetsTest do
                  model: GuardedStepModel
                )
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
 
@@ -229,7 +229,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert {:error, report} =
                run([step("a", %{poll: :deliver}), step("b", %{poll: :never})], model: PolledModel)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert Failure.kind(report.failure_reason) == :poll_timeout
     end
@@ -238,7 +238,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert {:error, report} =
                run([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == nil
     end
@@ -249,7 +249,7 @@ defmodule PropertyDamage.RunTargetsTest do
                  max_runs: 3
                )
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == nil
       assert report.shrink_iterations == 0
@@ -264,7 +264,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "a raise at a command in variant 1 is :execution_failed" do
       assert {:error, report} = run([step("a"), step("b", %{behavior: :raise})])
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 0
       assert Failure.kind(report.failure_reason) == :adapter_error
@@ -274,7 +274,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert {:error, report} =
                run([step("a", %{behavior: :error}), step("b", %{behavior: :error})], max_runs: 2)
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == 0
       assert Failure.kind(report.failure_reason) == :adapter_error
@@ -291,14 +291,14 @@ defmodule PropertyDamage.RunTargetsTest do
                run([step("a"), step("b", %{behavior: :shift})], on_progress: on_progress)
 
       assert %Progress{data: %RunResult{outcome: :error} = result} = last_progress()
-      assert result.kind == :diverged
+      assert result.report_kind == :diverged
       assert result.variant == %{index: 1, name: "b"}
       assert result.failure == report
 
       assert {:error, _report} =
                run([step("solo", %{behavior: :error})], on_progress: on_progress)
 
-      assert %Progress{data: %RunResult{kind: :execution_failed, variant: %{index: 0}}} =
+      assert %Progress{data: %RunResult{report_kind: :execution_failed, variant: %{index: 0}}} =
                last_progress()
     end
   end
@@ -313,7 +313,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert {:ok, <<"PD", 18::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
-      assert loaded.kind == :diverged
+      assert loaded.report_kind == :diverged
       assert loaded.variant == report.variant
       assert loaded.targets == report.targets
       assert loaded.failure_reason == report.failure_reason
@@ -379,14 +379,14 @@ defmodule PropertyDamage.RunTargetsTest do
     test "a fail!/2 check on one target" do
       assert {:error, report} = run([step("solo", %{bad_at: 1})], model: GuardedStepModel)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert_split(report, PropertyDamage.CheckFailed)
     end
 
     test "an adapter raise on one target" do
       assert {:error, report} = run([step("solo", %{behavior: :raise})])
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert Failure.kind(report.failure_reason) == :adapter_error
       assert_split(report, RuntimeError)
     end
@@ -417,7 +417,7 @@ defmodule PropertyDamage.RunTargetsTest do
                  check_mode: :record
                )
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert_split(report, PropertyDamage.CheckFailed)
     end
   end
@@ -435,7 +435,7 @@ defmodule PropertyDamage.RunTargetsTest do
                  shrink: false
                )
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.failed_at_index == 1
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =

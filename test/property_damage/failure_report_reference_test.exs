@@ -65,7 +65,9 @@ defmodule PropertyDamage.FailureReportReferenceTest do
     test "a divergence names the reference trace, keeps each side's events and adds the reference's projections" do
       # The JSON carries the reference's trace and state beside the variant's.
       report = failure!(R.run(ledger(), diverging()))
-      assert %{kind: :diverged, variant: %{index: 1, name: "b"}, failed_at_index: 1} = report
+
+      assert %{report_kind: :diverged, variant: %{index: 1, name: "b"}, failed_at_index: 1} =
+               report
 
       json = json(report)
       settled = settled_through(report, 1)
@@ -92,7 +94,11 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       # The JSON of a :did_not_converge carries the reference side too.
       report = failure!(R.run(ledger(), stalling()))
 
-      assert %{kind: :did_not_converge, variant: %{index: 1, name: "b"}, failed_at_index: 1} =
+      assert %{
+               report_kind: :did_not_converge,
+               variant: %{index: 1, name: "b"},
+               failed_at_index: 1
+             } =
                report
 
       json = json(report)
@@ -117,9 +123,9 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       setup = failure!(R.run(Compare.PayModel, [{R.NoBackendAdapter, name: "s", config: %{}}]))
       timeout = failure!(R.run(Compare.PayModel, [{R.TimeoutAdapter, name: "t", config: %{}}]))
 
-      assert check.kind == :check_failed
-      assert setup.kind == :setup_failed
-      assert timeout.kind == :execution_failed
+      assert check.report_kind == :check_failed
+      assert setup.report_kind == :setup_failed
+      assert timeout.report_kind == :execution_failed
 
       assert Compare.deep_find(
                timeout.failure_reason,
@@ -128,9 +134,14 @@ defmodule PropertyDamage.FailureReportReferenceTest do
 
       for report <- [check, setup, timeout] do
         json = json(report)
-        assert Map.fetch!(json, "reference_trace") == nil, "#{report.kind}: reference_trace"
-        assert Map.fetch!(json, "reference_projections") == nil, "#{report.kind}: projections"
-        assert get_in(json, ["shrinking", "stop"]) == "done", "#{report.kind}: stop"
+
+        assert Map.fetch!(json, "reference_trace") == nil,
+               "#{report.report_kind}: reference_trace"
+
+        assert Map.fetch!(json, "reference_projections") == nil,
+               "#{report.report_kind}: projections"
+
+        assert get_in(json, ["shrinking", "stop"]) == "done", "#{report.report_kind}: stop"
         assert reference_trace(report) == nil
         assert reference_state(report) == nil
       end
@@ -160,7 +171,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       # A failed reproduction falls back to the original run for both targets.
       entries = [R.pay_target("a"), R.first_execution_target("b", %{1 => {:sync, 1}})]
       report = failure!(R.run(ledger(), entries, shrink: true))
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.shrink_iterations > 0
       original = RunTrace.plan_fingerprint(report.original_sequence)
 
@@ -189,7 +200,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       ]
 
       report = failure!(R.run(model, targets))
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
 
       assert Enum.any?(
                reference_trace(report).event_log,
@@ -214,7 +225,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
 
       report = failure!(R.run(model, targets))
       root = report.failed_at_index
-      assert {report.kind, root} == {:diverged, 1}
+      assert {report.report_kind, root} == {:diverged, 1}
       assert root < length(roots(report)) - 1, "the failing root must not be the last"
 
       reference = reference_trace(report)
@@ -244,7 +255,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
           ]
 
           case R.run(model, targets, seed: seed, max_commands: 6) do
-            {:error, %FailureReport{kind: :diverged} = report} -> report
+            {:error, %FailureReport{report_kind: :diverged} = report} -> report
             _other -> nil
           end
         end) || flunk("no seed in 1..10 diverges")
@@ -306,7 +317,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       # shrink_further/2 rebuilds the reference side from its own reproduction.
       report = failure!(R.run(ledger(), diverging()))
       assert {:ok, further} = PropertyDamage.shrink_further(report, max_iterations: 1)
-      assert further.kind == :diverged
+      assert further.report_kind == :diverged
       assert further.shrink_iterations == 1
       refute further.trace.mint_epoch == report.trace.mint_epoch
       assert further.trace.plan_source == :shrunk

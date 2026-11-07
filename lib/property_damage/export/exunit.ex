@@ -44,7 +44,7 @@ defmodule PropertyDamage.Export.ExUnit do
   defp generate_moduledoc(metadata) do
     failure_desc =
       case metadata.check_name do
-        nil -> to_string(metadata.failure_type)
+        nil -> to_string(metadata.kind)
         check -> "#{Common.check_label(check)} check failed"
       end
 
@@ -305,7 +305,7 @@ defmodule PropertyDamage.Export.ExUnit do
   end
 
   defp generate_expect_fail_assertion(report) do
-    failure_type = FailureReport.failure_type(report)
+    kind = FailureReport.kind(report)
 
     check_match =
       case FailureReport.check_name(report) do
@@ -326,7 +326,7 @@ defmodule PropertyDamage.Export.ExUnit do
 
           {:error, failure} ->
             # Confirm we get the same type of failure
-            assert PropertyDamage.FailureReport.failure_type(failure) == #{inspect(failure_type)}#{check_match}
+            assert PropertyDamage.FailureReport.kind(failure) == #{inspect(kind)}#{check_match}
         end
     """
   end
@@ -341,7 +341,7 @@ defmodule PropertyDamage.Export.ExUnit do
 
   defp generate_test_name(metadata) do
     case metadata.check_name do
-      nil -> "reproduces #{metadata.failure_type} failure (seed #{metadata.seed})"
+      nil -> "reproduces #{metadata.kind} failure (seed #{metadata.seed})"
       check -> "reproduces #{Common.check_label(check)} violation (seed #{metadata.seed})"
     end
   end

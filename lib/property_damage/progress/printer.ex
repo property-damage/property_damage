@@ -108,7 +108,7 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("")
 
     # Basic failure info
-    if report.kind, do: IO.puts("  Kind:         #{report.kind}")
+    if report.report_kind, do: IO.puts("  Kind:         #{report.report_kind}")
 
     if variant = report.variant do
       IO.puts("  Target:       [#{variant.index}] #{variant.name}")
@@ -201,7 +201,7 @@ defmodule PropertyDamage.Progress.Printer do
   another kind.
   """
   @spec print_latency_verdicts(FailureReport.t()) :: :ok
-  def print_latency_verdicts(%FailureReport{kind: :latency_exceeded} = report) do
+  def print_latency_verdicts(%FailureReport{report_kind: :latency_exceeded} = report) do
     breaches =
       [{report.variant, report.failure_reason}] ++
         Enum.map(report.other_failures, &{&1.variant, &1.failure})

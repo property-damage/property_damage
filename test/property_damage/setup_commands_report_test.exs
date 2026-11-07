@@ -113,7 +113,10 @@ defmodule PropertyDamage.SetupCommandsReportTest do
       )
 
     target = {SetupCommands.FixtureAdapter, name: "a", config: Map.merge(%{name: "a"}, config)}
-    assert {:error, %FailureReport{kind: :setup_failed} = report} = run(model, [target], seed: 3)
+
+    assert {:error, %FailureReport{report_kind: :setup_failed} = report} =
+             run(model, [target], seed: 3)
+
     report
   end
 
@@ -267,7 +270,7 @@ defmodule PropertyDamage.SetupCommandsReportTest do
 
       target = {HttpAdapter, name: "a", config: %{name: "a"}}
 
-      assert {:error, %FailureReport{kind: :check_failed} = report} =
+      assert {:error, %FailureReport{report_kind: :check_failed} = report} =
                run(model, [target], seed: 1, shrink: false)
 
       {:ok, report: report}

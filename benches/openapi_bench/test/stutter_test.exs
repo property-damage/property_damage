@@ -49,7 +49,7 @@ defmodule OpenapiBench.StutterTest do
              )
 
     assert PropertyDamage.FailureReport.idempotency_failure?(report),
-           "expected an idempotency violation, got #{inspect(PropertyDamage.FailureReport.failure_type(report))}"
+           "expected an idempotency violation, got #{inspect(PropertyDamage.FailureReport.kind(report))}"
 
     # The violation must record more than one attempt (the retry actually ran).
     assert length(PropertyDamage.FailureReport.idempotency_violation(report).attempts) >= 2

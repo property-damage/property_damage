@@ -191,7 +191,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
     ids = fields |> Enum.map(fn {:field, label, _parts} -> label end) |> with_ordinals()
 
     %{
-      "kind" => report |> FailureReport.failure_type() |> to_string(),
+      "kind" => report |> FailureReport.kind() |> to_string(),
       "meaning" => meaning.text |> String.split() |> Enum.join(" "),
       "fields" =>
         for {{:field, label, parts}, id} <- Enum.zip(fields, ids) do

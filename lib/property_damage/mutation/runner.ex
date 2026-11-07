@@ -300,7 +300,7 @@ defmodule PropertyDamage.Mutation.Runner do
     end
   end
 
-  defp kill_outcome(%FailureReport{kind: :execution_failed}), do: :killed_by_error
+  defp kill_outcome(%FailureReport{report_kind: :execution_failed}), do: :killed_by_error
   defp kill_outcome(_failure), do: :killed
 
   # A failed run returns a failure report; its message names the failing check.

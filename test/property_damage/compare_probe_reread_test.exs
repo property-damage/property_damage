@@ -88,7 +88,7 @@ defmodule PropertyDamage.CompareProbeRereadTest do
                compare: [converge_within: 500]
              )
 
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert report.variant == %{index: 1, name: "b"}
     assert {_projection, :totals} = Failure.name(report.failure_reason)
 

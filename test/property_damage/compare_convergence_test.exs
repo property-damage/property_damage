@@ -203,7 +203,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       key = key(ctx, :ledger, :totals)
 
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
       assert Failure.name(report.failure_reason) == key
@@ -238,7 +238,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       # Sides that differ are re-evaluated until the bound expires.
       assert elapsed >= 300
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
 
@@ -263,7 +263,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert {:error, report} =
                Compare.run(model!(ctx, :ledger), targets, compare: [converge_within: 100])
 
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       assert Failure.name(report.failure_reason) == key(ctx, :ledger, :totals)
     end
 
@@ -274,7 +274,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert {:error, report} =
                Compare.run(model!(ctx, :stale), targets, compare: [converge_within: 100])
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == key(ctx, :stale, :totals)
     end
 
@@ -286,7 +286,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
                Compare.run(model!(ctx, :keyed), targets, compare: [converge_within: 100])
 
       # The first disagreeing key in key order names the failure.
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == key(ctx, :keyed, :settled)
 
       # The agreeing key is not listed; the pending one is, with its target.
@@ -314,7 +314,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       # The check recorded at root 0 is primary; the divergence at root 1 is
       # listed among the others and carries the pending key.
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
 
       [diverged] = Enum.filter(report.other_failures, &(Failure.kind(&1.failure) == :diverged))
       assert [%{failure: pending}] = Map.fetch!(diverged.failure.type, :other_keys)
@@ -342,7 +342,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       assert {:error, report} = result
       assert elapsed < 2_000
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert Failure.name(report.failure_reason) == :settled_nonneg
     end

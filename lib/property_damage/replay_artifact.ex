@@ -152,7 +152,7 @@ defmodule PropertyDamage.ReplayArtifact do
         external_markers: report.external_markers,
         targets: targets,
         failure: %{
-          kind: report.kind,
+          kind: report.report_kind,
           name: Failure.name(report.failure_reason),
           variant_index: report.variant && report.variant.index,
           root_index: report.failed_at_index
@@ -1075,7 +1075,7 @@ defmodule PropertyDamage.ReplayArtifact do
     recorded_name =
       term.targets |> Enum.at(term.failure.variant_index || 0, %{}) |> Map.get(:name)
 
-    report.kind == term.failure.kind and
+    report.report_kind == term.failure.kind and
       Failure.name(report.failure_reason) == term.failure.name and
       (report.variant && report.variant.name) == recorded_name and
       report.failed_at_index == term.failure.root_index

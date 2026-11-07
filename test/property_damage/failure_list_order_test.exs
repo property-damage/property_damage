@@ -127,7 +127,7 @@ defmodule PropertyDamage.FailureListOrderTest do
   end
 
   defp summary(failure),
-    do: {failure.variant.name, failure.root, failure.kind, Failure.name(failure.reason)}
+    do: {failure.variant.name, failure.root, failure.report_kind, Failure.name(failure.reason)}
 
   defp others(run), do: Enum.map(run.other_failures, &summary/1)
 

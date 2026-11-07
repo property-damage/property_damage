@@ -166,7 +166,7 @@ defmodule PropertyDamage.ComparePredicateTest do
     assert {:error, report} =
              Compare.run(model!(ctx, name), targets(delta), compare: [converge_within: 30])
 
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert Failure.name(report.failure_reason) == key(ctx, name)
     divergence = report.failure_reason.type
 
@@ -267,7 +267,7 @@ defmodule PropertyDamage.ComparePredicateTest do
       ]
 
       assert {:error, report} = Compare.run(model, targets, compare: [converge_within: 30])
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 2, name: "c"}
     end
 
@@ -400,7 +400,7 @@ defmodule PropertyDamage.ComparePredicateTest do
       assert {:error, report} = result
       # The run ends at once; the default bound of 5 s is never waited.
       assert elapsed < 2_000
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert Failure.name(report.failure_reason) == key(ctx, :raising_observation)
 
@@ -414,7 +414,7 @@ defmodule PropertyDamage.ComparePredicateTest do
 
       assert {:error, report} = result
       assert elapsed < 2_000
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert Failure.name(report.failure_reason) == key(ctx, :raising_predicate)
       assert %ArgumentError{message: "predicate exploded"} = Failure.detail(report.failure_reason)

@@ -59,7 +59,7 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       targets = [t(ctx, "a", %{fail: %{1 => :error}}), t(ctx, "b", %{fail: %{1 => :error}})]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == 1
 
@@ -74,7 +74,7 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       targets = [t(ctx, "a", %{fail: %{1 => :raise}}), t(ctx, "b")]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == 1
 
@@ -111,7 +111,7 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       targets = [t(ctx, "a"), t(ctx, "b"), t(ctx, "c", %{fail: %{2 => :error}})]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 2, name: "c"}
       assert report.failed_at_index == 2
 
@@ -141,7 +141,7 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       targets = [t(ctx, "a"), t(ctx, "b", %{fail: %{1 => :error}})]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
 

@@ -396,7 +396,7 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
       Enum.find(1..80, fn seed ->
         case run.(seed, shrink: false) do
           {:error, report} ->
-            report.kind == :check_failed and entry.(report, "ref", 0) == "Open[0]" and
+            report.report_kind == :check_failed and entry.(report, "ref", 0) == "Open[0]" and
               entry.(report, "copy", 0) == "Open[1]"
 
           {:ok, _stats} ->
@@ -405,7 +405,7 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
       end) || flunk("no seed in 1..80 fails with the reserving entry in the reference only")
 
     assert {:error, report} = run.(seed, [])
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
 
     ref = choice.(report, "ref", 0)
     copy = choice.(report, "copy", 0)

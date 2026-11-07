@@ -236,6 +236,24 @@ defmodule PropertyDamage.Failure do
   (`Failure.signature/2`, `FailureReport`, the formatter, the exporters,
   `FailureIntelligence`) now reads a `%Failure{}`.
 
+  ## Three levels of name
+
+  A failure carries three names, each coarser than the one before. Each has
+  one accessor and one word, used the same way in reports, saved files and
+  JSON exports:
+
+  | level | accessor | values | answers |
+  |-------|----------|--------|---------|
+  | class | `class/1` | 7 | which struct family the failure belongs to |
+  | kind | `kind/1` | about 20 | the globally unique fine-grained kind |
+  | report kind | `report_kind/1` | 6 | the outcome a `FailureReport` describes |
+
+  An idempotency violation has class `:check`, kind `:idempotency_violation`
+  and report kind `:check_failed`. `FailureReport.kind/1` reads the kind of a
+  report's failure and `FailureReport.report_kind` is its outcome. Two failures
+  are the same failure when `signature/2` agrees: the kind, the name and the
+  index of the target.
+
   ## Shape
 
   The type is nested so that illegal class/kind combinations cannot be

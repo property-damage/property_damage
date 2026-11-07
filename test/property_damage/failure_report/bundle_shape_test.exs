@@ -145,7 +145,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       report = RL.report(:check_failed)
       bundle = B.build(report)
 
-      kind = report |> FailureReport.failure_type() |> to_string()
+      kind = report |> FailureReport.kind() |> to_string()
       assert bundle["failure"]["kind"] in [kind, String.replace(kind, "_", " ")]
 
       [first | _] =

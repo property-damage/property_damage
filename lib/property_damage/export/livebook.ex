@@ -52,7 +52,7 @@ defmodule PropertyDamage.Export.LiveBook do
   defp generate_header(title, metadata, steps_note) do
     failure_desc =
       case metadata.check_name do
-        nil -> to_string(metadata.failure_type)
+        nil -> to_string(metadata.kind)
         check -> "#{Common.check_label(check)} check failed"
       end
 
@@ -372,7 +372,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
   defp generate_title(metadata) do
     case metadata.check_name do
-      nil -> "Failure Investigation: #{metadata.failure_type}"
+      nil -> "Failure Investigation: #{metadata.kind}"
       check -> "Failure Investigation: #{Common.check_label(check)}"
     end
   end

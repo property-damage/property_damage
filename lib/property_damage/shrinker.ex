@@ -1205,7 +1205,7 @@ defmodule PropertyDamage.Shrinker do
       is_nil(run.failure) ->
         :passed
 
-      Enum.any?([run.failure | run.other_failures], &(&1.kind == :setup_failed)) ->
+      Enum.any?([run.failure | run.other_failures], &(&1.report_kind == :setup_failed)) ->
         :setup_failed
 
       true ->

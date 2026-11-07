@@ -149,7 +149,7 @@ defmodule PropertyDamage.Analysis do
       summary: build_summary(command_explanations, report),
       commands: command_explanations,
       failure: %{
-        type: FailureReport.failure_type(report),
+        type: FailureReport.kind(report),
         check: FailureReport.check_name(report),
         message: FailureReport.failure_message(report),
         command_index: failed_at
@@ -279,7 +279,7 @@ defmodule PropertyDamage.Analysis do
     Shrunk to #{length(command_explanations)} commands.
     #{if trigger, do: "Failure triggered by: #{trigger.command_name} at index #{trigger.index}", else: ""}
     #{if deps != [], do: "Dependencies: #{length(deps)} command(s) required to set up state", else: ""}
-    Failure type: #{FailureReport.failure_type_summary(report)}
+    Failure type: #{FailureReport.kind_summary(report)}
     """
     |> String.trim()
   end
@@ -439,7 +439,7 @@ defmodule PropertyDamage.Analysis do
         target =
           Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
-        case {report.kind, reference_leaves(report, model, target)} do
+        case {report.report_kind, reference_leaves(report, model, target)} do
           # A divergence takes two targets; every variation runs one.
           {kind, _leaves} when kind in [:diverged, :did_not_converge] -> {:error, :not_applicable}
           {_kind, nil} -> isolate_in_roots(report, model, target, {sequence, commands, step})
@@ -819,7 +819,7 @@ defmodule PropertyDamage.Analysis do
 
     ## Failure Details
 
-    - **Type**: #{FailureReport.failure_type(report)}
+    - **Type**: #{FailureReport.kind(report)}
     - **Check**: #{if FailureReport.check_name(report), do: failure_label(report), else: "N/A"}
     - **Message**: #{FailureReport.failure_message(report) || "N/A"}
     - **Command Index**: #{FailureReport.failure_index(report)}
@@ -866,7 +866,7 @@ defmodule PropertyDamage.Analysis do
   # The failing check or observation as text, else the failure's kind.
   defp failure_label(report) do
     case FailureReport.check_name(report) do
-      nil -> to_string(FailureReport.failure_type(report))
+      nil -> to_string(FailureReport.kind(report))
       name -> Naming.format_name(name)
     end
   end

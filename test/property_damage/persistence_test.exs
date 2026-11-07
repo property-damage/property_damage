@@ -51,7 +51,7 @@ defmodule PropertyDamage.PersistenceTest do
       {:ok, loaded} = Persistence.load(path)
 
       assert loaded.seed == report.seed
-      assert FailureReport.failure_type(loaded) == FailureReport.failure_type(report)
+      assert FailureReport.kind(loaded) == FailureReport.kind(report)
       assert FailureReport.check_name(loaded) == FailureReport.check_name(report)
     end
 

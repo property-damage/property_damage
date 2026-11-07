@@ -96,12 +96,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "failure" =>
         Map.merge(
           %{
-            "type" => to_string(FailureReport.failure_type(report)),
+            "type" => to_string(FailureReport.kind(report)),
             "check_name" =>
               FailureReport.check_name(report) &&
                 Naming.format_name(FailureReport.check_name(report)),
             "message" => FailureReport.failure_message(report),
-            "summary" => FailureReport.failure_type_summary(report)
+            "summary" => FailureReport.kind_summary(report)
           },
           projection_entry(report)
         ),
@@ -345,7 +345,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   # ============================================================================
 
   defp format_compact(report) do
-    type = FailureReport.failure_type_summary(report)
+    type = FailureReport.kind_summary(report)
     cmd_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
     origin_tag =

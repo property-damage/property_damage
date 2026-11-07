@@ -176,7 +176,7 @@ true = stats.compare_counts[{Bank.Projections.Ledger, :balance}].compared_at > 0
     seed: 1
   )
 
-:diverged = report.kind
+:diverged = report.report_kind
 "candidate" = report.variant.name
 {Bank.Projections.Ledger, :balance} = PropertyDamage.Failure.name(report.failure_reason)
 ```
@@ -552,7 +552,7 @@ case PropertyDamage.run(model: MyModel, targets: [ReferenceAdapter, NewAdapter],
     # stats.targets is a list of %{index: i, name: n}; the first is the reference
     IO.puts("#{stats.runs} runs agreed across #{length(stats.targets)} targets")
 
-  {:error, %PropertyDamage.FailureReport{kind: :diverged} = report} ->
+  {:error, %PropertyDamage.FailureReport{report_kind: :diverged} = report} ->
     %{index: _, name: name} = report.variant
     IO.puts("#{name} diverged at root #{report.failed_at_index}")
 
@@ -562,7 +562,7 @@ case PropertyDamage.run(model: MyModel, targets: [ReferenceAdapter, NewAdapter],
 
     IO.puts(PropertyDamage.FailureReport.reproduction_command(report))
 
-  {:error, %PropertyDamage.FailureReport{kind: kind, variant: variant}} ->
+  {:error, %PropertyDamage.FailureReport{report_kind: kind, variant: variant}} ->
     IO.puts("#{kind} in #{variant.name}")
 end
 ```
@@ -596,14 +596,14 @@ with `kind: :did_not_converge`. Both carry:
 
 ```elixir
 case PropertyDamage.run(model: MyModel, targets: [Reference, Candidate]) do
-  {:error, %PropertyDamage.FailureReport{kind: :diverged} = report} ->
+  {:error, %PropertyDamage.FailureReport{report_kind: :diverged} = report} ->
     %PropertyDamage.Failure.Divergence{key: {projection, function}, mismatch: mismatch} =
       report.failure_reason.type
 
     IO.puts("#{report.variant.name} diverged on #{inspect(projection)}.#{function}")
     IO.puts(Exception.message(mismatch))
 
-  {:error, %PropertyDamage.FailureReport{kind: :did_not_converge} = report} ->
+  {:error, %PropertyDamage.FailureReport{report_kind: :did_not_converge} = report} ->
     IO.puts("#{report.variant.name} did not converge at root #{report.failed_at_index}")
 
   _ ->
@@ -734,7 +734,7 @@ runs. It is never judged per run or at a boundary. If a run fails for another
 reason (a check, a divergence, a setup or execution failure), that failure
 ends the campaign and the budget is not judged.
 
-A breach returns `{:error, report}` with `report.kind == :latency_exceeded`.
+A breach returns `{:error, report}` with `report.report_kind == :latency_exceeded`.
 The report names the target, the statistic, the measured value and the limit,
 and for a ratio the reference's value. It also carries `metrics` and
 `latency`:
@@ -948,12 +948,12 @@ defmodule MigrationTest do
           IO.puts("#{name}: p50=#{metrics.p50}µs, p99=#{metrics.p99}µs")
         end
 
-      {:error, %PropertyDamage.FailureReport{kind: kind} = report}
+      {:error, %PropertyDamage.FailureReport{report_kind: kind} = report}
       when kind in [:diverged, :did_not_converge] ->
         IO.puts("#{kind} in #{report.variant.name}!")
         IO.puts(PropertyDamage.FailureReport.reproduction_command(report))
 
-      {:error, %PropertyDamage.FailureReport{kind: kind, variant: variant}} ->
+      {:error, %PropertyDamage.FailureReport{report_kind: kind, variant: variant}} ->
         IO.puts("#{kind} in #{variant.name} before the comparison finished.")
     end
   end

@@ -66,7 +66,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
 
     %__MODULE__{
       seed: report.seed,
-      failure_type: FailureReport.failure_type(report),
+      failure_type: FailureReport.kind(report),
       check_name: FailureReport.check_name(report),
       command_type: extract_command_type(command),
       command_shape: extract_command_shape(command),
@@ -239,7 +239,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   # ============================================================================
 
   defp categorize_error(%FailureReport{} = report) do
-    kind = FailureReport.failure_type(report)
+    kind = FailureReport.kind(report)
 
     cond do
       kind == :check_failed and FailureReport.check_name(report) != nil ->

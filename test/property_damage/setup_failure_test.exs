@@ -1,5 +1,5 @@
 defmodule PropertyDamage.SetupFailureTest do
-  # A setup failure (`kind: :setup_failed`) follows the rule an execution
+  # A setup failure (`report_kind: :setup_failed`) follows the rule an execution
   # failure follows: in the reference it ends the run before root 0; in
   # another target it retires that target, which runs its teardown commands
   # and `Adapter.teardown/1` before any target starts root 0, and the others
@@ -65,7 +65,7 @@ defmodule PropertyDamage.SetupFailureTest do
                  SetupCommands.target("b", recorder, %{fail_setup: true})
                ])
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == nil
       assert report.shrink_iterations == 0
@@ -89,7 +89,7 @@ defmodule PropertyDamage.SetupFailureTest do
                  SetupCommands.target("b", recorder, %{fail: %{Login => :error}})
                ])
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == nil
 
@@ -120,7 +120,7 @@ defmodule PropertyDamage.SetupFailureTest do
                  SetupCommands.target("b", recorder)
                ])
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.variant == %{index: 0, name: "a"}
 
       assert %Failure{type: %Failure.Setup{cause: :command, setup_index: 0}} =
@@ -149,7 +149,7 @@ defmodule PropertyDamage.SetupFailureTest do
                    concurrency: unquote(concurrency)
                  )
 
-        assert report.kind == :setup_failed
+        assert report.report_kind == :setup_failed
         assert report.variant == %{index: 2, name: "c"}
         assert report.other_failures == []
 
@@ -184,7 +184,7 @@ defmodule PropertyDamage.SetupFailureTest do
                  SetupCommands.target("c", recorder, %{fail_setup: true})
                ])
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.variant == %{index: 2, name: "c"}
       assert report.other_failures == []
 

@@ -192,7 +192,7 @@ defmodule PropertyDamage.CompareScheduleTest do
                  compare: [converge_within: 50]
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == {roots, :at_root}
 
       divergence = report.failure_reason.type
@@ -220,7 +220,7 @@ defmodule PropertyDamage.CompareScheduleTest do
                  compare: [converge_within: 30]
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == {end_only, :totals}
 
       assert Failure.signature(report.failure_reason, report.variant.index) ==

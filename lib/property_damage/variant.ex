@@ -112,16 +112,16 @@ defmodule PropertyDamage.Variant do
       `:async` command, its settled events)
 
   Anything that ends the variant returns `{:failed, failure}`, where `failure`
-  is `%{kind: kind, root: index | nil, reason: reason}`:
+  is `%{report_kind: report_kind, root: index | nil, reason: reason}`:
 
-    * `kind: :execution_failed` - the adapter raised (`reason` is the exception),
+    * `report_kind: :execution_failed` - the adapter raised (`reason` is the exception),
       or answered `{:error, _}`, or the command could not be executed (`reason`
       is the `%PropertyDamage.Failure{}`)
-    * `kind: :check_failed` - a check failed (`reason` is the
+    * `report_kind: :check_failed` - a check failed (`reason` is the
       `%PropertyDamage.Failure{}`); `root` is `nil` for a `:startup` check, and
       for a check that failed on a drained event it is the command that event
       belongs to, as `finish/1` reports it in `failed_at_index`
-    * `kind: :setup_failed` - a setup command failed, a check failed on a
+    * `report_kind: :setup_failed` - a setup command failed, a check failed on a
       setup command's event (wherever it was detected, an `@eventually` window
       opened during setup included), or the completion rule failed; `root` is
       `nil` and `reason` a `%PropertyDamage.Failure{}` of class `:setup`
@@ -156,7 +156,7 @@ defmodule PropertyDamage.Variant do
 
   @typedoc "Why a variant stopped stepping."
   @type failure :: %{
-          kind: :check_failed | :execution_failed | :setup_failed,
+          report_kind: :check_failed | :execution_failed | :setup_failed,
           root: non_neg_integer() | nil,
           reason: Failure.t() | Exception.t()
         }
@@ -243,7 +243,7 @@ defmodule PropertyDamage.Variant do
   Each one goes through `Stepping.step_setup/4`; then the event queue is
   drained, and every placeholder a setup command produces must be resolved in
   this variant's registry. Returns `:ok`, or `{:failed, failure}` with
-  `kind: :setup_failed` (see the module doc); a failed variant steps nothing
+  `report_kind: :setup_failed` (see the module doc); a failed variant steps nothing
   more.
   """
   @spec run_setup(pid()) :: :ok | {:failed, failure()}
@@ -720,7 +720,7 @@ defmodule PropertyDamage.Variant do
           | phase: :halted,
             exec: exec,
             halted: failed,
-            failure: %{kind: :check_failed, root: nil, reason: failure}
+            failure: %{report_kind: :check_failed, root: nil, reason: failure}
         }
     end
   end
@@ -754,7 +754,7 @@ defmodule PropertyDamage.Variant do
       | phase: :halted,
         exec: failed,
         halted: {:failed, nil, reason, failed},
-        failure: %{kind: :setup_failed, root: nil, reason: reason}
+        failure: %{report_kind: :setup_failed, root: nil, reason: reason}
     })
   end
 
@@ -1036,7 +1036,7 @@ defmodule PropertyDamage.Variant do
 
         state =
           halt(state, {:failed, root, failure, exec}, %{
-            kind: :check_failed,
+            report_kind: :check_failed,
             root: root,
             reason: failure
           })
@@ -1081,7 +1081,7 @@ defmodule PropertyDamage.Variant do
       case attributed_root(failed_state, failure.root) do
         {:setup, offset} ->
           %{
-            kind: :setup_failed,
+            report_kind: :setup_failed,
             root: nil,
             reason: Phases.check_failure(state.setup_commands, offset, failure.reason)
           }
@@ -1134,16 +1134,16 @@ defmodule PropertyDamage.Variant do
   end
 
   defp failure_of(index, _failure, {:raised, exception}),
-    do: %{kind: :execution_failed, root: index, reason: exception}
+    do: %{report_kind: :execution_failed, root: index, reason: exception}
 
   defp failure_of(index, failure, {:error, _reason}),
-    do: %{kind: :execution_failed, root: index, reason: failure}
+    do: %{report_kind: :execution_failed, root: index, reason: failure}
 
   defp failure_of(index, %Failure{type: %Failure.Check{}} = failure, _outcome),
-    do: %{kind: :check_failed, root: index, reason: failure}
+    do: %{report_kind: :check_failed, root: index, reason: failure}
 
   defp failure_of(index, failure, _outcome),
-    do: %{kind: :execution_failed, root: index, reason: failure}
+    do: %{report_kind: :execution_failed, root: index, reason: failure}
 
   defp not_steppable(%{phase: :new}), do: :not_set_up
   defp not_steppable(%{phase: :setup_failed}), do: :not_set_up

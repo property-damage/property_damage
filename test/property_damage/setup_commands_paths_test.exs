@@ -229,7 +229,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
       assert {:error, %FailureReport{} = report} =
                run(model, [SetupCommands.target("a", recorder)], seed: 1, shrink: false)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       before = length(executions(recorded(recorder), "a"))
 
       assert {:ok, isolation} = Analysis.isolate_trigger(report)
@@ -286,7 +286,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
       assert {:error, %FailureReport{} = report} =
                run(model, [{SlowAdapter, name: "a", config: %{name: "a"}}], seed: seed)
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.failed_at_index == nil
 
       assert %Failure.Setup{cause: :check, setup_index: 1, command: %Login{}} =
@@ -316,7 +316,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
                  shrink: false
                )
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
 
       assert %Failure.Setup{cause: :check, setup_index: 1, command: %Login{}} =
                report.failure_reason.type

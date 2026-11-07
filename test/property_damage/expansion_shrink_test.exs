@@ -86,7 +86,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
 
     test "shrinks to a failure at or before its root with the same identity, still on the rewrite",
          %{report: report, entries: entries} do
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "beta"}
       assert signature(report) == {:diverged, {Totals, :totals}, 1}
 
@@ -210,7 +210,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
       ]
 
       assert {:error, report} = run(model, targets, seed: seed, max_commands: 6)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "beta"}
 
       %Pay{tag: pay} =

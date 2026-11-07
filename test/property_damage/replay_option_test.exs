@@ -50,7 +50,7 @@ defmodule PropertyDamage.ReplayOptionTest do
   end
 
   defp identity(report) do
-    {report.kind, Failure.name(report.failure_reason), report.variant.name}
+    {report.report_kind, Failure.name(report.failure_reason), report.variant.name}
   end
 
   # The message of the option error a replay with `targets` raises. Fails
@@ -197,7 +197,7 @@ defmodule PropertyDamage.ReplayOptionTest do
                )
 
       F.drain()
-      assert %FailureReport{kind: :diverged, variant: %{name: "second"}} = report
+      assert %FailureReport{report_kind: :diverged, variant: %{name: "second"}} = report
 
       assert %{entry: "Refund[1]"} =
                Enum.at(report.expansions["second"], report.failed_at_index)

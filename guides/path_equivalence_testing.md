@@ -374,7 +374,7 @@ The run also wrote the shrunk failure to
     only: [replay: "property_damage_replays/Model_seed42.replay.exs"]
   )
 
-IO.inspect({replayed.kind, replayed.variant, replayed.replay_status}, label: "replayed")
+IO.inspect({replayed.report_kind, replayed.variant, replayed.replay_status}, label: "replayed")
 ```
 
 ```bash
@@ -534,7 +534,7 @@ function is called.
 
 A failure report names its kind and the target it happened in:
 
-| `report.kind` | Meaning |
+| `report.report_kind` | Meaning |
 |---------------|---------|
 | `:diverged` | a target's observation differed from the reference's |
 | `:did_not_converge` | a target's observation was still pending at the bound |

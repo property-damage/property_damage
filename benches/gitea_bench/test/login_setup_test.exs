@@ -122,7 +122,7 @@ defmodule LoginSetupTest do
                seed: 1
              )
 
-    assert report.kind == :setup_failed
+    assert report.report_kind == :setup_failed
     assert report.variant == %{index: 1, name: "ui"}
     assert report.failed_at_index == nil
 

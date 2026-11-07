@@ -29,7 +29,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
     ]
 
     report = F.report!(F.Model, targets)
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert F.plain(report) =~ F.sentinel(), "control: the report prints the sentinel"
     report
   end

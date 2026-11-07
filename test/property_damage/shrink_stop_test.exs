@@ -18,7 +18,7 @@ defmodule PropertyDamage.ShrinkStopTest do
   defp diverging, do: [R.pay_target("a"), R.pay_target("b", %{at: %{1 => {:sync, 1}}})]
 
   defp shrunk!(config) do
-    assert {:error, %FailureReport{kind: :diverged} = report} =
+    assert {:error, %FailureReport{report_kind: :diverged} = report} =
              R.run(ledger(), diverging(), shrink: true, shrinker_config: config)
 
     report
@@ -39,7 +39,7 @@ defmodule PropertyDamage.ShrinkStopTest do
 
   test "a report the shrinker never ran on, a setup failure, stops :done" do
     # A setup failure is reported unshrunk.
-    assert {:error, %FailureReport{kind: :setup_failed} = report} =
+    assert {:error, %FailureReport{report_kind: :setup_failed} = report} =
              R.run(Compare.PayModel, [{R.NoBackendAdapter, name: "s", config: %{}}], shrink: true)
 
     assert stop(report) == :done
@@ -78,7 +78,7 @@ defmodule PropertyDamage.ShrinkStopTest do
     # 300 ms time budget, however late it starts within that budget.
     config = Config.new(max_iterations: 1, max_time_ms: 300)
 
-    assert {:error, %FailureReport{kind: :diverged} = report} =
+    assert {:error, %FailureReport{report_kind: :diverged} = report} =
              R.run(ledger(), diverging(),
                shrink: true,
                shrinker_config: config,

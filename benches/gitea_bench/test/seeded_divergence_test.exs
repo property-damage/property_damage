@@ -51,7 +51,7 @@ defmodule SeededDivergenceTest do
     divergent =
       Enum.find_value(1..8, fn seed ->
         case oracle(seed, seed_bug: true) do
-          {:error, %FailureReport{kind: :diverged} = report} -> report
+          {:error, %FailureReport{report_kind: :diverged} = report} -> report
           _ -> nil
         end
       end)

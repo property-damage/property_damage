@@ -263,14 +263,14 @@ defmodule PropertyDamage.TargetsEngineTest do
 
   describe "the first target is the reference" do
     test "a divergent second target is reported by name" do
-      assert {:error, %FailureReport{kind: :diverged} = report} =
+      assert {:error, %FailureReport{report_kind: :diverged} = report} =
                PropertyDamage.run(diff_opts([PlainAdapter, ShiftedAdapter]))
 
       assert report.variant == %{index: 1, name: "ShiftedAdapter"}
     end
 
     test "reversing the order moves the reference with the position" do
-      assert {:error, %FailureReport{kind: :diverged} = report} =
+      assert {:error, %FailureReport{report_kind: :diverged} = report} =
                PropertyDamage.run(diff_opts([ShiftedAdapter, PlainAdapter]))
 
       assert report.variant == %{index: 1, name: "PlainAdapter"}

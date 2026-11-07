@@ -83,7 +83,7 @@ defmodule CachexBench.LatencyTest do
     assert {:error, %FailureReport{} = report} =
              run(pair(CachexBench.CountingAdapter), latency: [p95: [max_ratio: 1.0e-9]])
 
-    assert report.kind == :latency_exceeded
+    assert report.report_kind == :latency_exceeded
     assert report.shrink_iterations == 0
     assert report.variant.name == "b"
     assert Enum.sort(Map.keys(report.metrics)) == ["a", "b"]

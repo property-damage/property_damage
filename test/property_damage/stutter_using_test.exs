@@ -24,7 +24,7 @@ defmodule PropertyDamage.StutterUsingTest do
 
   defp violation!(retry, stutter) do
     assert {:error, report} = run(retry, stutter)
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert Failure.kind(report.failure_reason) == :idempotency_violation
     report
   end

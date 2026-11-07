@@ -35,7 +35,7 @@ defmodule PropertyDamage.ReplayArtifactAppModulesTest do
           replay_dir: false
         )
 
-      IO.puts("REPLAYED kind=\#{report.kind}")
+      IO.puts("REPLAYED kind=\#{report.report_kind}")
     rescue
       e in ArgumentError -> IO.puts("RAISED " <> Exception.message(e))
     end

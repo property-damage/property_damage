@@ -31,7 +31,7 @@ defmodule PropertyDamage.VariantFailureTest do
 
     assert {:ok, [{0, {:ok, [%Stepped{value: 1}]}}]} = Variant.advance_to(v, 0)
 
-    assert {:failed, %{kind: :check_failed, root: 1, reason: reason} = failure} =
+    assert {:failed, %{report_kind: :check_failed, root: 1, reason: reason} = failure} =
              Variant.advance_to(v, 2)
 
     assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} = reason
@@ -47,7 +47,7 @@ defmodule PropertyDamage.VariantFailureTest do
     v = start(target(%{fail_startup: true, test_pid: self()}), StartupModel, [%Step{value: 1}])
     :ok = Variant.setup(v)
 
-    assert {:failed, %{kind: :check_failed, root: nil}} = Variant.advance_to(v, 0)
+    assert {:failed, %{report_kind: :check_failed, root: nil}} = Variant.advance_to(v, 0)
     refute_received {:executed, _, _, _}
     :ok = Variant.stop(v)
   end
@@ -58,7 +58,7 @@ defmodule PropertyDamage.VariantFailureTest do
     v = start(target(%{}), StepModel, commands)
     :ok = Variant.setup(v)
 
-    assert {:failed, %{kind: :execution_failed, root: 0, reason: %Failure{}} = failure} =
+    assert {:failed, %{report_kind: :execution_failed, root: 0, reason: %Failure{}} = failure} =
              Variant.advance_to(v, 1)
 
     assert Variant.advance_to(v, 1) == {:failed, failure}
@@ -87,7 +87,7 @@ defmodule PropertyDamage.VariantFailureTest do
     v = start(target(%{behavior: :raise}), StepModel, [%Step{value: 1}])
     :ok = Variant.setup(v)
 
-    assert {:failed, %{kind: :execution_failed, root: 0, reason: %RuntimeError{}}} =
+    assert {:failed, %{report_kind: :execution_failed, root: 0, reason: %RuntimeError{}}} =
              Variant.advance_to(v, 0)
 
     :ok = Variant.stop(v)

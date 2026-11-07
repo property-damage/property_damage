@@ -121,7 +121,7 @@ defmodule PropertyDamage.Test.SeedCharacterization do
         |> FailureReport.event_log()
         |> Enum.map(&render_event(&1.source, &1.event)),
       failure: %{
-        kind: FailureReport.failure_type(report),
+        kind: FailureReport.kind(report),
         root_index: report.failed_at_index,
         check: report |> FailureReport.check_name() |> norm(),
         message: FailureReport.failure_message(report)

@@ -110,7 +110,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                Compare.run(model!(ctx, :ledger), targets, compare: [converge_within: 50])
 
       key = key(ctx, :ledger)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "ledger-new"}
       assert Failure.kind(report.failure_reason) == :diverged
       assert Failure.name(report.failure_reason) == key
@@ -148,7 +148,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                  compare: [converge_within: 30]
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       using = {PropertyDamage.Test.Compare, :settled_within, [1]}
       assert Map.fetch!(report.failure_reason.type, :using) == using
       assert Compare.text(report) =~ ~r/^Compared\s+using #{Regex.escape(inspect(using))}, /m
@@ -196,7 +196,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                )
 
       assert length(Sequence.to_list(report.original_sequence)) == 12
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.failed_at_index <= 7
 
       assert Failure.signature(report.failure_reason, report.variant.index) ==
@@ -215,7 +215,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                  compare: [converge_within: 30]
                )
 
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       assert report.failed_at_index <= 7
 
       assert Failure.signature(report.failure_reason, report.variant.index) ==
@@ -240,12 +240,12 @@ defmodule PropertyDamage.CompareDivergenceTest do
         end)
 
       assert {:error, report} = result
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       # One re-run at the 5 s default would exceed this on its own.
       assert elapsed < 4_000
 
       assert_received {:on_failure, reported}
-      assert reported.kind == :did_not_converge
+      assert reported.report_kind == :did_not_converge
       assert Map.fetch!(reported.failure_reason.type, :waited_ms) < 1_000
 
       assert FailureReport.reproduction_command(report) =~ "compare: [converge_within: 100]"
@@ -259,7 +259,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                    compare: [converge_within: bound]
                  )
 
-        assert report.kind == :check_failed
+        assert report.report_kind == :check_failed
         command = FailureReport.reproduction_command(report)
 
         if printed? do
@@ -285,12 +285,12 @@ defmodule PropertyDamage.CompareDivergenceTest do
         assert {:error, report} =
                  Compare.run(model!(ctx, :ledger), b_at(1, mode), compare: [converge_within: 30])
 
-        assert report.kind == kind
+        assert report.report_kind == kind
 
         assert {:ok, path} = Persistence.save(report, Path.join(dir, Atom.to_string(kind)))
         assert File.exists?(path)
         assert {:ok, loaded} = Persistence.load(path)
-        assert loaded.kind == kind
+        assert loaded.report_kind == kind
         assert Failure.name(loaded.failure_reason) == key
         assert loaded.failure_reason == report.failure_reason
 

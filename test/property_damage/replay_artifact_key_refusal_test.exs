@@ -65,7 +65,7 @@ defmodule PropertyDamage.ReplayArtifactKeyRefusalTest do
 
     F.drain()
 
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert report.variant.name == "second"
     assert report.replay_path == nil
     assert R.files(dir) == []

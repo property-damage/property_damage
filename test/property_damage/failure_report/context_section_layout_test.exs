@@ -30,7 +30,7 @@ defmodule PropertyDamage.FailureReport.ContextSectionLayoutTest do
   end
 
   defp with_failure(report, failure),
-    do: %{report | failure_reason: failure, kind: Failure.report_kind(failure)}
+    do: %{report | failure_reason: failure, report_kind: Failure.report_kind(failure)}
 
   describe "columns" do
     test "every line starts at column 2 or column 16, and items sit one blank line apart", %{

@@ -224,7 +224,7 @@ defmodule PropertyDamage.Export.StepPlan do
     match?(
       %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{setup_index: ^offset}},
       report.failure_reason
-    ) and report.kind == :setup_failed
+    ) and report.report_kind == :setup_failed
   end
 
   @doc """

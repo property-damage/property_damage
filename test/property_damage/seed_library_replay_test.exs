@@ -307,7 +307,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
           seed_library: path
         )
 
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} = result
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} = result
       assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
       assert report.seed == 4242
     end
@@ -317,7 +317,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
       path = tmp_path("replay_leak")
       preseed(path, 4242, model: "M")
 
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} =
                PropertyDamage.run(
                  model: Model,
                  targets: [{Adapter, injectors: [LeakProbeInjector]}],
@@ -360,7 +360,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
                )
 
       assert report.seed == 7
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
 
       assert [
                :setup,

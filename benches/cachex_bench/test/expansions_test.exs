@@ -71,7 +71,7 @@ defmodule CachexBench.ExpansionsTest do
       assert {:error, %FailureReport{} = report} =
                run(targets: targets(%{incr_bug: true}), max_runs: 1, seed: @bug_seed)
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "second"}
 
       signature = {:diverged, {CachexBench.Projection, :expected_contents}, 1}
