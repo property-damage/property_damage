@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PropertyDamage.Model.Projection.Check` and `Checks`.** A projection's
+  checks are now `Check` structs with a `kind` (`:step`, `:phase` or
+  `:eventually`), read through `Checks.list/1`.
 - **`mix pd.validate` warns when the model defines no `simulator/0`.** Without a
   simulator no placeholders are minted during generation, so a command whose
   `when:` depends on a value the system mints (an `external()` field) is never
@@ -1384,6 +1387,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
 ### Fixed
+
+- **Forensics replay and the load-test worker no longer crash on a projection
+  with an `at:` or `@eventually` check.** Both ran every entry of the check
+  list as a per-step sample and raised a `CaseClauseError`. They now run only
+  the step checks. A load-test step records at most one failure per projection:
+  the first failing check.
 
 - **Shrinking keeps a command whose precondition depends on ids the system
   mints.** The validity check of a shrink candidate folded one unresolved

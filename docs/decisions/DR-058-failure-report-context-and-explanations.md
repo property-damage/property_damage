@@ -43,7 +43,7 @@ The items below ship with this record.
 
    | Kind | Subject, then supporting items |
    |------|--------------------------------|
-   | `check_failed`, `poll_timeout` | `Check` (found by the check name in the projection's `__checks__/0`, through the `projection` field of the failure; left out when not found), `Projection`, `Property` (the description of the `@invariant` the check validates, when it has one) |
+   | `check_failed`, `poll_timeout` | `Check` (found by the check name in the projection's check list, through the `projection` field of the failure; left out when not found), `Projection`, `Property` (the description of the `@invariant` the check validates, when it has one) |
    | `projection_violation` | `Projection` |
    | `diverged`, `did_not_converge` | `Observation` (the `{projection, function}` key), `Relation` (the function `using:` names, only when it names a module function), one `Also differed` item for each other observation that differed, `Projection` |
    | `adapter_error`, `nemesis_error`, `stutter_execution_failed`, `resource_poller_error`, `retry_from_sync_command`, `malformed_adapter_return` | `Command` is the subject and is the only item after `Model` |
