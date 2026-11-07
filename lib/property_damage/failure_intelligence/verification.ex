@@ -3,8 +3,8 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   Fix verification: replays the shrunk sequence of a failure report and says
   whether the same failure still occurs.
 
-  The replay artifact of the report (see `PropertyDamage.ReplayArtifact`)
-  holds the shrunk commands, the targets and the signature of the failure
+  The replay artifact of the report (its `replay` field) holds the shrunk
+  commands, the targets and the signature of the failure
   (`PropertyDamage.Failure.signature/2`). Verification runs those commands
   through `PropertyDamage.run(only: [replay: path])` and compares the
   signature of what happens with the recorded one. It never draws a plan from
