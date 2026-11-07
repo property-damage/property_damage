@@ -39,13 +39,13 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   # turns `the reader list` red until this list and its tests follow.
   @readers ~w(
     error.ex
-    executor.ex
     failure.ex
     failure_report/context.ex
     forensics.ex
     load_test/worker.ex
     model.ex
     model/projection.ex
+    model/projection/checks.ex
     suggestions/analyzer.ex
     validation.ex
     variant.ex
