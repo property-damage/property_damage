@@ -788,8 +788,8 @@ defmodule PropertyDamage.Scheduler do
   #
   # A variant whose failure halted it during the lockstep reports that same
   # failure again when it finalizes. A finalize-time failure is that same
-  # failure when the lockstep already found one in the same variant, at the
-  # same root, of the same kind and with the same name (see `identity/1`);
+  # failure when the lockstep already found one at the same root with the
+  # same `Failure.signature/2` (kind, name and target; see `identity/1`);
   # it is listed once.
   defp run_failures(config, run, finished, results) do
     found =
@@ -818,7 +818,7 @@ defmodule PropertyDamage.Scheduler do
   end
 
   defp identity(failure),
-    do: {failure.variant.index, failure.root, failure.report_kind, Failure.name(failure.reason)}
+    do: {failure.root, Failure.signature(failure.reason, failure.variant.index)}
 
   # A variant's finalize-time failures and when each happened: a check that
   # `check_mode: :record` recorded failed while its root was stepped
