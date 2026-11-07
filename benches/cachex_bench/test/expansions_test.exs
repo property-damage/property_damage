@@ -15,7 +15,7 @@ defmodule CachexBench.ExpansionsTest do
   import ExUnit.CaptureIO
 
   alias CachexBench.Commands.{GetKey, Incr, PutKey}
-  alias PropertyDamage.{FailureReport, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
 
   # A seed whose run, with the second target's `incr_bug:` on, diverges at a
   # root where "second" ran the two-step rewrite, and whose shrink keeps
@@ -75,7 +75,7 @@ defmodule CachexBench.ExpansionsTest do
       assert report.variant == %{index: 1, name: "second"}
 
       signature = {:diverged, {CachexBench.Projection, :expected_contents}, 1}
-      assert Shrinker.failure_signature(report.failure_reason, report.variant.index) == signature
+      assert Failure.signature(report.failure_reason, report.variant.index) == signature
 
       roots = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
       assert length(roots) < length(Sequence.to_list(report.original_sequence))

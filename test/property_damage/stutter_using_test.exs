@@ -7,7 +7,7 @@ defmodule PropertyDamage.StutterUsingTest do
   # reason. `&==/2` when absent. The `comparison:` modes are gone.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Failure, Shrinker}
+  alias PropertyDamage.Failure
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.Compare.{AcceptableModel, Paid, PayModel, StutterAdapter}
 
@@ -209,7 +209,7 @@ defmodule PropertyDamage.StutterUsingTest do
     test "a violation keeps its shrinker identity" do
       report = violation!(:different, [])
 
-      assert Shrinker.failure_signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(report.failure_reason, report.variant.index) ==
                {:idempotency_violation, nil, 0}
     end
   end

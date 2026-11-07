@@ -9,6 +9,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
   import PropertyDamage.Test.VariantSupport
 
   alias PropertyDamage.{
+    Failure,
     FailureReport,
     Generator,
     Placeholder,
@@ -322,7 +323,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       assert report.kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
 
-      assert Shrinker.failure_signature(report.failure_reason, 1) ==
+      assert Failure.signature(report.failure_reason, 1) ==
                {:diverged, {Answers, :flips}, 1}
 
       shrunk = FailureReport.shrunk_sequence(report)

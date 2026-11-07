@@ -7,7 +7,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
   # that still differ diverged.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Failure, Shrinker}
+  alias PropertyDamage.Failure
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.Compare.Pay
 
@@ -207,7 +207,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
       assert Failure.name(report.failure_reason) == key
-      assert Shrinker.failure_signature(report.failure_reason, 1) == {:did_not_converge, key, 1}
+      assert Failure.signature(report.failure_reason, 1) == {:did_not_converge, key, 1}
 
       failure = report.failure_reason.type
       assert Map.fetch!(failure, :key) == key

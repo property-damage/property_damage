@@ -7,7 +7,7 @@ defmodule PropertyDamage.ExpansionPathsTest do
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{FailureReport, RunTrace, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.Test.ExpansionRun, as: X
   alias PropertyDamage.Test.ExpansionRun.{Credit, Refund, SecondCreditFails, Totals}
 
@@ -69,7 +69,7 @@ defmodule PropertyDamage.ExpansionPathsTest do
   defp shrunk(report), do: report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
 
   defp signature(report),
-    do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(report.failure_reason, report.variant.index)
 
   describe "PropertyDamage.shrink_further/2" do
     test "shrinks with each target's entries carried, never picked again" do

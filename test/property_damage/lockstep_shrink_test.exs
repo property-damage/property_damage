@@ -7,7 +7,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.{Failure, FailureReport, Generator, Options, Scheduler, SeedLibrary}
-  alias PropertyDamage.{Sequence, Shrinker}
+  alias PropertyDamage.Sequence
   alias PropertyDamage.Test.TmpPath
 
   @probe :pd_lockstep_shrink_probe
@@ -342,7 +342,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   end
 
   defp signature(%FailureReport{} = report),
-    do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(report.failure_reason, report.variant.index)
 
   defp drain_probe(message \\ :unarmed_flip, count \\ 0) do
     receive do
@@ -514,7 +514,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
         )
 
       assert %{reason: reason, variant: %{index: index}} = rerun.failure
-      assert Shrinker.failure_signature(reason, index) == signature(report)
+      assert Failure.signature(reason, index) == signature(report)
       assert signature(report) == {:diverged, {Answers, :flips}, 1}
     end
   end

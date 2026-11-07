@@ -233,7 +233,7 @@ defmodule PropertyDamage.Failure do
   A `%Failure{}` is the single public vocabulary for *why* a run stopped. It
   replaces the loose family of `{:tag, ...}` tuples that earlier versions used as
   `failure_reason`. Every consumer that once matched a raw tuple
-  (`Shrinker.failure_signature/2`, `FailureReport`, the formatter, the exporters,
+  (`Failure.signature/2`, `FailureReport`, the formatter, the exporters,
   `FailureIntelligence`) now reads a `%Failure{}`.
 
   ## Shape
@@ -681,11 +681,54 @@ defmodule PropertyDamage.Failure do
     :malformed_adapter_return
   ]
 
+  @typedoc """
+  Failure signature for equivalence checking: `{kind, name, variant_index}`.
+
+  The three properties that must match for two failures to count as the
+  "same" failure. `kind` is the failure's globally-unique kind (`kind/1`,
+  `:diverged` for a divergence), so two failures of different *classes* can
+  never collide; `name` is `name/1`: the check/projection name for a check, the
+  `{projection, function}` key of the boundary observation for a divergence or
+  a failure to converge, `nil` where no name is meaningful; and
+  `variant_index` is the index of the target the failure happened in (`0` for a
+  run with one target).
+
+  Keying on `kind` rather than the coarser class is load-bearing: a
+  `:poll_timeout` of check `:x` and an `:check_failed` of `:x` share a
+  name but are different bugs, so their signatures must differ. A class-based
+  signature (`{:check, :x}` for both) would let the shrinker swap one bug's
+  identity for the other's. Keying on the target is load-bearing for the same
+  reason: a check that fails in the reference target is a different failure
+  from a divergence found in another target. Keying a divergence on its
+  observation keeps a divergence of one `@compare` function from standing in
+  for a divergence of another; the mismatch itself is detail, not identity.
+  """
+  @type signature :: {kind(), name(), non_neg_integer()}
+
+  @doc """
+  Extract a failure signature from a failure reason and the index of the target
+  the failure happened in.
+
+  The signature captures the essential properties for equivalence checking.
+  A `%Failure{}` carries its (globally-unique) kind and, for named kinds, its
+  name; the name keeps distinct checks from being conflated, and keeps an
+  async-observed check failure equivalent to a teardown failure of the same
+  check. A reason that is not a `%Failure{}` signs as `{:unknown, nil, index}`.
+  """
+  @spec signature(t() | term(), non_neg_integer()) :: signature()
+  def signature(%__MODULE__{} = failure, variant_index) do
+    {kind(failure), name(failure), variant_index}
+  end
+
+  def signature(_other, variant_index) do
+    {:unknown, nil, variant_index}
+  end
+
   @doc """
   Build a minimal `%Failure{}` carrying only a kind and a name.
 
   Reconstructs a comparable failure from the kind and name of a failure
-  signature (`PropertyDamage.Shrinker.failure_signature/2`); the `detail` is
+  signature (`PropertyDamage.Failure.signature/2`); the `detail` is
   left `nil`. Names are retained
   for `Check` kinds, `:diverged`, `:did_not_converge` and `:latency_exceeded`, so the rebuilt
   failure has the signature it was built from.

@@ -393,7 +393,7 @@ defmodule PropertyDamage do
   every shrink attempt runs the candidate sequence on every target through the
   scheduler (each target set up and torn down per attempt), and a candidate
   counts only if it fails with the same kind, check name and failing target
-  (`PropertyDamage.Shrinker.failure_signature/2`). The shrunk sequence is then
+  (`PropertyDamage.Failure.signature/2`). The shrunk sequence is then
   run once more, and the report describes that reproduction; when it does not
   fail the same way, the report keeps the original run. A setup failure
   implicates no command and is reported unshrunk.
@@ -1752,8 +1752,8 @@ defmodule PropertyDamage do
     do: Expansion.identity(sequence, ctx.targets)
 
   defp same_failure?(failure, found_failure) do
-    Shrinker.failure_signature(failure.reason, failure.variant.index) ==
-      Shrinker.failure_signature(found_failure.reason, found_failure.variant.index)
+    Failure.signature(failure.reason, failure.variant.index) ==
+      Failure.signature(found_failure.reason, found_failure.variant.index)
   end
 
   # The report of a found failure. `:found` reports it as the run found it (no

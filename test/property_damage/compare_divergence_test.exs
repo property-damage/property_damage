@@ -5,7 +5,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
   # that identity through shrinking, reproduction and persistence.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence}
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.Compare.Pay
 
@@ -114,7 +114,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert report.variant == %{index: 1, name: "ledger-new"}
       assert Failure.kind(report.failure_reason) == :diverged
       assert Failure.name(report.failure_reason) == key
-      assert Shrinker.failure_signature(report.failure_reason, 1) == {:diverged, key, 1}
+      assert Failure.signature(report.failure_reason, 1) == {:diverged, key, 1}
 
       divergence = report.failure_reason.type
       assert Map.fetch!(divergence, :key) == key
@@ -178,10 +178,10 @@ defmodule PropertyDamage.CompareDivergenceTest do
       mismatch = fn report -> Map.fetch!(report.failure_reason.type, :mismatch) end
       assert Exception.message(mismatch.(first)) != Exception.message(mismatch.(second))
 
-      assert Shrinker.failure_signature(first.failure_reason, 1) ==
-               Shrinker.failure_signature(second.failure_reason, 1)
+      assert Failure.signature(first.failure_reason, 1) ==
+               Failure.signature(second.failure_reason, 1)
 
-      assert Shrinker.failure_signature(first.failure_reason, 1) ==
+      assert Failure.signature(first.failure_reason, 1) ==
                {:diverged, key(ctx, :tagged), 1}
     end
   end
@@ -199,7 +199,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert report.kind == :diverged
       assert report.failed_at_index <= 7
 
-      assert Shrinker.failure_signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(report.failure_reason, report.variant.index) ==
                {:diverged, key(ctx, :ledger), 1}
 
       shrunk = Sequence.to_list(FailureReport.shrunk_sequence(report))
@@ -218,7 +218,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert report.kind == :did_not_converge
       assert report.failed_at_index <= 7
 
-      assert Shrinker.failure_signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(report.failure_reason, report.variant.index) ==
                {:did_not_converge, key(ctx, :ledger), 1}
 
       shrunk = Sequence.to_list(FailureReport.shrunk_sequence(report))

@@ -10,7 +10,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{FailureReport, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.Test.ExpansionRun, as: X
 
   alias PropertyDamage.Test.ExpansionRun.{
@@ -68,7 +68,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
   end
 
   defp signature(report),
-    do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(report.failure_reason, report.variant.index)
 
   # `%{tag => [command]}`: the commands each root ran in one execution.
   defp ran(segment), do: Map.new(X.by_root(segment))
