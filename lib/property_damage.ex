@@ -53,8 +53,10 @@ defmodule PropertyDamage do
   `PropertyDamage.Variant` process per target and advances them in lockstep.
   Each variant executes one command at a time through
   `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
-  observations after each root. A root is a top-level generated command; an
-  expansion is a command that unfolds into child commands under a root.
+  observations after each root. The shrinker's candidates and the
+  reproduction of a failure run through the same run driver. A root is a
+  top-level generated command; an expansion is a command that unfolds into
+  child commands under a root.
 
   ## Symbolic Values
 
@@ -1621,20 +1623,13 @@ defmodule PropertyDamage do
             variant_index: found.failure.variant.index,
             model: ctx.model,
             targets: ctx.targets,
-            concurrency: ctx.concurrency,
-            compare: ctx.compare,
-            check_mode: ctx.check_mode,
+            # Stutter failures are shrinkable (DR-029): the oracle runs every
+            # candidate of one with stutter forced on (probability 1.0), so it
+            # minimizes to the offending command rather than being skipped.
+            oracle: shrink_oracle(ctx, found),
             config: ctx.shrinker_config,
-            # Stutter failures are shrinkable (DR-029): the shrinker reproduces
-            # them with stutter forced on (probability 1.0), so they minimize to
-            # the offending command rather than being skipped.
-            stutter_config: ctx.stutter_config,
-            keep_attempts: ctx.keep_attempts,
             external_markers: ctx.external_markers,
-            # The run's effective seed: every attempt runs as run 0 of it, so
-            # the per-target RNG and the stutter base track the original run.
             rng_seed: found.run_seed,
-            run_nonce: ctx.run_nonce,
             mint_epoch_counter: mint_epoch_counter,
             # Every target runs each candidate root as it ran the failing run:
             # the entries are carried, with no new draw.
@@ -1688,6 +1683,27 @@ defmodule PropertyDamage do
       end
 
     report_failure(ctx, report)
+  end
+
+  # The oracle every shrink candidate runs through: the run driver with the
+  # run's options, every candidate as run 0 of the failing run's effective
+  # seed, so the per-target RNG and the stutter base track the original run.
+  defp shrink_oracle(ctx, found) do
+    Runner.shrink_oracle(
+      %Runner.Context{
+        model: ctx.model,
+        targets: ctx.targets,
+        seed: found.run_seed,
+        run_number: 0,
+        run_nonce: ctx.run_nonce,
+        concurrency: ctx.concurrency,
+        compare: ctx.compare,
+        stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
+        check_mode: ctx.check_mode
+      },
+      Failure.signature(found.failure.reason, found.failure.variant.index)
+    )
   end
 
   # Runs the shrunk sequence once on every target through the run driver, each
@@ -2196,14 +2212,10 @@ defmodule PropertyDamage do
         variant_index: found.failure.variant.index,
         model: ctx.model,
         targets: targets,
-        concurrency: ctx.concurrency,
-        compare: ctx.compare,
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
-        stutter_config: ctx.stutter_config,
-        keep_attempts: ctx.keep_attempts,
+        oracle: shrink_oracle(ctx, found),
         external_markers: ctx.external_markers,
-        check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
             max_iterations: strategy_iterations(strategy, opts),
@@ -2213,7 +2225,6 @@ defmodule PropertyDamage do
           ),
         # The report's seed is the run's effective seed.
         rng_seed: report.seed,
-        run_nonce: ctx.run_nonce,
         mint_epoch_counter: mint_epoch_counter,
         expansion: traced,
         root_ids: Expansion.root_ids(traced)

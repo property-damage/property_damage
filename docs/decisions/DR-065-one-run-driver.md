@@ -32,7 +32,9 @@ explained it.
    reference target with the injectors and mocks its report recorded.
 4. `Executor.run/4` stays as a one-target seam that does not drain per root.
    It is not how a run executes. The executor's own tests use it.
-5. The shrinker's candidate runs go through the runner in a later change.
+5. The shrinker's candidate runs go through the runner. Status: done; the
+   shrinker hands each candidate to an oracle that `Runner.shrink_oracle/2`
+   builds, and no longer calls the scheduler.
 
 ## Alternatives
 

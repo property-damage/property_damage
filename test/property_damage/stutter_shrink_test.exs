@@ -18,8 +18,9 @@ defmodule PropertyDamage.StutterShrinkTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Failure, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Sequence}
   alias PropertyDamage.Stutter.Config
+  alias PropertyDamage.Test.ShrinkSupport
 
   # --- Commands ---------------------------------------------------------------
 
@@ -131,7 +132,7 @@ defmodule PropertyDamage.StutterShrinkTest do
     assert result.failed_at_index == 3
 
     shrink_result =
-      Shrinker.shrink(Sequence.linear(commands),
+      ShrinkSupport.shrink(Sequence.linear(commands),
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,

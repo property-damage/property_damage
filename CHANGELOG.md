@@ -631,6 +631,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `Shrinker.shrink/2` takes an oracle and runs no candidate
+  itself.** A test of the shrinker needed a whole system to run, because the
+  shrinker ran each candidate through the scheduler. Now it hands each
+  candidate's plan and a fresh mint epoch to the required `oracle:` option, a
+  function `(plan, mint_epoch) -> %PropertyDamage.Shrinker.Outcome{}`, and
+  adopts the candidate on a `:failed` outcome with the original signature at
+  the same or an earlier root. `PropertyDamage.Runner.shrink_oracle/2` builds
+  the oracle that runs a candidate on every target through
+  `Runner.execute/2`, and `PropertyDamage.run/1` and `shrink_further/2` use
+  it. A candidate the shrinker rejects before it runs never reaches the
+  oracle. The old options, and what became of each:
+  - `concurrency:`, `compare:`, `check_mode:`, `keep_attempts:` and
+    `run_nonce:` are fields of the `PropertyDamage.Runner.Context` passed to
+    `Runner.shrink_oracle/2`.
+  - `stutter_config:` is the context's `stutter_config`; the oracle forces
+    stutter on when the signature passed to `Runner.shrink_oracle/2` is a
+    stutter failure, as the shrinker did.
+  - `rng_seed:` stays, for the teardown commands and the expansions of each
+    candidate; the oracle's context carries the same seed as `seed`, with
+    `run_number: 0`.
+  - `mint_epoch_counter:` stays: the shrinker draws an epoch from it for each
+    candidate that reaches the oracle.
+  - `failed_at_index:`, `failure_reason:`, `variant_index:`, `model:`,
+    `targets:`, `expansion:`, `root_ids:`, `external_markers:` and `config:`
+    are unchanged.
 - **Breaking: a trace's step events include the boundary drain.**
   `RunTrace.Capture.capture/1` runs the plan through `PropertyDamage.Runner`,
   so the events a run folds at the end of each root are step events of the

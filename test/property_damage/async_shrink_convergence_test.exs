@@ -13,7 +13,8 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence, Shrinker}
+  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence}
+  alias PropertyDamage.Test.ShrinkSupport
 
   defmodule Bumped, do: defstruct([])
 
@@ -132,7 +133,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     shrunk =
       try do
-        Shrinker.shrink(seq,
+        ShrinkSupport.shrink(seq,
           failed_at_index: result.failed_at_index,
           failure_reason: result.failure_reason,
           model: Model,

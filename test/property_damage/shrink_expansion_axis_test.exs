@@ -10,10 +10,10 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
 
   alias PropertyDamage.{Expansion, Failure, FailureReport, Generator, Placeholder, Sequence}
   alias PropertyDamage.Options
-  alias PropertyDamage.Shrinker
   alias PropertyDamage.Shrinker.Config
   alias PropertyDamage.Test.ExpansionFor, as: F
   alias PropertyDamage.Test.ShrinkAxis, as: A
+  alias PropertyDamage.Test.ShrinkSupport
 
   defp run(model, targets, opts) do
     PropertyDamage.run(
@@ -230,7 +230,7 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     ]
 
     expansion = Expansion.expand(F.Model, sequence, targets, found.seed)
-    result = Shrinker.shrink(sequence, opts ++ [expansion: expansion])
+    result = ShrinkSupport.shrink(sequence, opts ++ [expansion: expansion])
     F.drain()
 
     assert result.cycles >= 2
@@ -240,7 +240,7 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     traced = Map.new(result.expansion.variants, fn {name, variant} -> {name, variant.choices} end)
 
     again =
-      Shrinker.shrink(
+      ShrinkSupport.shrink(
         result.sequence,
         Keyword.merge(opts,
           failed_at_index: length(Sequence.to_list(result.sequence)) - 1,
@@ -285,7 +285,7 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
                expansion.variants["ref"].choices |> hd() |> Map.take([:entry, :leaves?])
 
       result =
-        Shrinker.shrink(sequence,
+        ShrinkSupport.shrink(sequence,
           failed_at_index: 1,
           failure_reason: Failure.check_failed(:probe_before_branch, ""),
           model: G.Model,

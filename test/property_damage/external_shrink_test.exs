@@ -13,7 +13,8 @@ defmodule PropertyDamage.ExternalShrinkTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.Test.ShrinkSupport
 
   defmodule Created do
     import PropertyDamage, only: [external: 0]
@@ -117,7 +118,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
            )
 
     shrunk =
-      Shrinker.shrink(full,
+      ShrinkSupport.shrink(full,
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
@@ -170,7 +171,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
            )
 
     shrunk =
-      Shrinker.shrink(full,
+      ShrinkSupport.shrink(full,
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
@@ -216,7 +217,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
            )
 
     shrunk =
-      Shrinker.shrink(full,
+      ShrinkSupport.shrink(full,
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
