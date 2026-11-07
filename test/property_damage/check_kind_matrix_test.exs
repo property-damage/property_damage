@@ -294,14 +294,12 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   end
 
   describe "forensics.ex" do
-    @tag :known_defect
     test "analyzes events through a projection that declares every check form" do
       assert {:ok, _result} = Forensics.analyze(events: fixture_events(), model: Matrix.Model)
     end
   end
 
   describe "load_test/worker.ex" do
-    @tag :known_defect
     test "a worker that records check failures runs sequences of the model" do
       {:ok, metrics} = Metrics.start_link()
 
@@ -360,7 +358,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   end
 
   describe "suggestions/analyzer.ex" do
-    @tag :known_defect
     test "analyzes the model and lists every check as existing" do
       analysis = PropertyDamage.Suggestions.analyze(Matrix.Model)
 
