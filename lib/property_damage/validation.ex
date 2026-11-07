@@ -2,6 +2,7 @@ defmodule PropertyDamage.Validation do
   @moduledoc false
 
   alias PropertyDamage.Error
+  alias PropertyDamage.Model.Projection.Checks
 
   @doc """
   Validate test configuration.
@@ -309,12 +310,7 @@ defmodule PropertyDamage.Validation do
     IO.puts(io, "Extra Projections (#{length(extra_projs)}):")
 
     for proj <- extra_projs do
-      checks =
-        if PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0) do
-          proj.__checks__()
-        else
-          []
-        end
+      checks = Checks.list(proj)
 
       IO.puts(io, "  - #{inspect(proj)} (#{length(checks)} checks)")
     end
@@ -618,8 +614,7 @@ defmodule PropertyDamage.Validation do
         else: []
 
     for proj <- projections,
-        PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
-        check <- proj.__checks__(),
+        check <- Checks.list(proj),
         mod <- check_handled_modules(check),
         uniq: true do
       mod
@@ -648,8 +643,7 @@ defmodule PropertyDamage.Validation do
 
     handled_events =
       for proj <- extra_projs,
-          PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
-          check <- proj.__checks__(),
+          check <- Checks.list(proj),
           mod <- check_handled_modules(check) do
         mod
       end
