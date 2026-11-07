@@ -29,6 +29,15 @@ defmodule PropertyDamage.Model.Projection.Checks do
   end
 
   @doc """
+  True when `projection` has a check list, even an empty one.
+
+  A module has one when it uses `PropertyDamage.Model.Projection`. The state
+  projection of a model may be a plain module without it.
+  """
+  @spec declared?(module()) :: boolean()
+  def declared?(projection), do: ModuleCheck.exports?(projection, :__checks__, 0)
+
+  @doc """
   The `:phase` checks of `projection` that run at the lifecycle boundary `phase`
   (`:startup` or `:teardown`).
 
