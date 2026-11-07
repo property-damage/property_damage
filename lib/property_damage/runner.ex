@@ -4,10 +4,8 @@ defmodule PropertyDamage.Runner do
   the run did.
 
   `PropertyDamage.run/1` runs every generated sequence of a campaign through
-  `execute/2`. The driver is meant to carry every run that executes a plan:
-  a campaign run, the reproduction of a found failure, and the run a trace
-  capture records. The shrinker's candidate runs move onto it in a later
-  change.
+  `execute/2`, and reproduces a found failure through it. Trace capture and
+  the shrinker's candidate runs do not use it yet.
 
   A plan is the symbolic sequence of one run (see `t:plan/0`). How the plan
   runs, on which targets and with which options, is a

@@ -1093,13 +1093,7 @@ defmodule PropertyDamage do
   # Runs a generated linear sequence on every target through the run driver.
   # `run.seed` and `run.run_number` derive the run's effective seed.
   defp schedule(ctx, run) do
-    plan = %{
-      commands: Sequence.to_list(run.sequence),
-      variants: Expansion.schedule(ctx.targets, run.expansion),
-      setup_commands: run.sequence.setup,
-      teardown_commands: run.sequence.teardown,
-      placeholder_registry: run.sequence.registry
-    }
+    plan = plan(run.sequence, Expansion.schedule(ctx.targets, run.expansion))
 
     context = %Runner.Context{
       model: ctx.model,
@@ -1120,6 +1114,19 @@ defmodule PropertyDamage do
 
     {:ok, outcome} = Runner.execute(plan, context)
     outcome
+  end
+
+  # The plan of `sequence`: its roots and the setup and teardown commands every
+  # target runs, with `variants` per target (nil when every target runs every
+  # root as itself).
+  defp plan(%Sequence{} = sequence, variants) do
+    %{
+      commands: Sequence.to_list(sequence),
+      variants: variants,
+      setup_commands: sequence.setup,
+      teardown_commands: sequence.teardown,
+      placeholder_registry: sequence.registry
+    }
   end
 
   # A failure a run found: the run that found it (sequence, effective seed, run number), the whole-run
@@ -1683,7 +1690,7 @@ defmodule PropertyDamage do
     report_failure(ctx, report)
   end
 
-  # Runs the shrunk sequence once on every target through the scheduler, each
+  # Runs the shrunk sequence once on every target through the run driver, each
   # target with its own services. For a stutter failure, stutter is forced on
   # with the run's seed so the fresh state carries the reproduced violation
   # (DR-029). Returns `{:reproduced, failure, result, other_failures, counts}`
@@ -1693,26 +1700,24 @@ defmodule PropertyDamage do
   # target; `{:setup_failed, reason}` when a target's setup failed, else
   # `:not_reproduced`.
   defp reproduce(ctx, %Sequence{} = sequence, found, epoch, expansion) do
-    {:ok, outcome} =
-      Scheduler.run(
-        model: ctx.model,
-        targets: ctx.targets,
-        commands: Sequence.to_list(sequence),
-        variants: expansion && Expansion.schedule(ctx.targets, expansion),
-        setup_commands: sequence.setup,
-        teardown_commands: sequence.teardown,
-        placeholder_registry: sequence.registry,
-        seed: found.run_seed,
-        run_number: found.run_number,
-        run_seed: found.run_seed,
-        run_nonce: ctx.run_nonce,
-        mint_epoch: epoch,
-        concurrency: ctx.concurrency,
-        compare: ctx.compare,
-        stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
-        keep_attempts: ctx.keep_attempts,
-        check_mode: ctx.check_mode
-      )
+    plan = plan(sequence, expansion && Expansion.schedule(ctx.targets, expansion))
+
+    context = %Runner.Context{
+      model: ctx.model,
+      targets: ctx.targets,
+      seed: found.run_seed,
+      run_number: found.run_number,
+      run_seed: found.run_seed,
+      run_nonce: ctx.run_nonce,
+      mint_epoch: epoch,
+      concurrency: ctx.concurrency,
+      compare: ctx.compare,
+      stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
+      keep_attempts: ctx.keep_attempts,
+      check_mode: ctx.check_mode
+    }
+
+    {:ok, outcome} = Runner.execute(plan, context)
 
     case outcome.failure do
       nil ->
