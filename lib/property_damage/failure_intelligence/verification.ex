@@ -1,349 +1,170 @@
 defmodule PropertyDamage.FailureIntelligence.Verification do
   @moduledoc """
-  Fix verification mode for confirming that fixes are robust.
+  Fix verification: replays the shrunk sequence of a failure report and says
+  whether the same failure still occurs.
 
-  Runs the original failing seed and variations to ensure:
-  1. The original failure no longer reproduces
-  2. Similar command sequences also pass
-  3. The fix is robust across different conditions
+  The replay artifact of the report (see `PropertyDamage.ReplayArtifact`)
+  holds the shrunk commands, the targets and the signature of the failure
+  (`PropertyDamage.Failure.signature/2`). Verification runs those commands
+  through `PropertyDamage.run(only: [replay: path])` and compares the
+  signature of what happens with the recorded one. It never draws a plan from
+  a seed, so a change to generation cannot hide a failing sequence.
+
+  A report with no replay artifact cannot be verified. Neighbouring seeds are
+  a separate question, answered by
+  `PropertyDamage.FailureIntelligence.Exploration`.
   """
 
-  alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns}
-  alias PropertyDamage.{FailureReport, Options}
+  alias PropertyDamage.{Failure, FailureReport, Options, ReplayArtifact, Target}
+
+  @type status :: :verified | :still_failing | :different_failure
 
   @type verification_result :: %{
-          status: :verified | :still_failing | :partially_fixed | :flaky,
-          original_seed: integer(),
-          original_passes: boolean(),
-          variations_run: non_neg_integer(),
-          variations_passed: non_neg_integer(),
-          variations_failed: non_neg_integer(),
-          failed_variations: [integer()],
-          similar_failures: [FailureReport.t()],
-          confidence: float(),
-          summary: String.t()
+          required(:status) => status(),
+          required(:signature) => Failure.signature(),
+          required(:failure) => FailureReport.t() | nil,
+          required(:summary) => String.t(),
+          optional(:new_signature) => Failure.signature()
         }
 
-  @type options :: [
-          targets: [module() | {module(), keyword()}],
-          max_variations: non_neg_integer(),
-          variation_range: integer(),
-          include_similar: boolean(),
-          similar_threshold: float()
-        ]
-
-  @default_max_variations 10
-  @default_variation_range 1000
+  @type options :: [targets: [module() | {module(), keyword()}]]
 
   @doc """
-  Verifies that a fix is robust by testing the original seed and variations.
+  Verifies a fix by replaying the shrunk sequence of `report` against the
+  fixed system.
+
+  Returns a map whose `:status` is one of:
+
+  - `:verified`: the replay runs to completion with no failure.
+  - `:still_failing`: a failure with the recorded signature recurs.
+  - `:different_failure`: a failure with another signature occurs. The map
+    carries it as `:new_signature`.
+
+  Every result carries `:signature` (the recorded one), `:failure` (the report
+  of the recurring or new failure, `nil` when verified) and a one-line
+  `:summary`.
+
+  Returns `{:error, :no_replay_artifact}` when `report.replay` is `nil` or
+  `{:refused, _}`. A setup problem, such as a model or targets that do not
+  match the artifact, raises as `PropertyDamage.run/1` does.
 
   ## Options
 
-  - `:targets` - A list with exactly one entry (required): the adapter to re-run
-    against, as a module or `{AdapterModule, config: map, ...}`; see
-    `PropertyDamage.Target`
-  - `:max_variations` - Maximum number of seed variations to test (default: 10)
-  - `:variation_range` - Range for generating seed variations (default: 1000)
-  - `:include_similar` - Whether to test similar failure patterns (default: true)
-  - `:similar_threshold` - Threshold for similarity matching (default: 0.80)
+  - `:targets` - A list with exactly one entry (required): the adapter to
+    replay against, as a module or `{AdapterModule, config: map, ...}`; see
+    `PropertyDamage.Target`. Its name must match the target the artifact
+    records.
   """
-  @spec verify_fix(FailureReport.t(), module(), options()) :: verification_result()
-  def verify_fix(%FailureReport{} = failure, model, opts \\ []) do
+  @spec verify_fix(FailureReport.t(), module(), options()) ::
+          verification_result() | {:error, :no_replay_artifact}
+  def verify_fix(%FailureReport{replay: %{failure: %{signature: signature}} = term}, model, opts)
+      when is_map(term) do
     target = Options.required_target!(opts)
-    max_variations = Keyword.get(opts, :max_variations, @default_max_variations)
-    variation_range = Keyword.get(opts, :variation_range, @default_variation_range)
 
-    # Test original seed
-    original_result = run_seed(failure.seed, model, target)
+    case replay(term, model, target) do
+      {:ok, _stats} ->
+        %{
+          status: :verified,
+          signature: signature,
+          failure: nil,
+          summary: "Fix verified. The shrunk sequence replays without a failure."
+        }
 
-    # Generate and test variations
-    variations = generate_variations(failure.seed, max_variations, variation_range)
-
-    variation_results =
-      Enum.map(variations, fn seed ->
-        {seed, run_seed(seed, model, target)}
-      end)
-
-    # Collect similar failures if any variations fail
-    similar_failures =
-      variation_results
-      |> Enum.filter(fn {_seed, result} -> match?({:error, _}, result) end)
-      |> Enum.map(fn {_seed, {:error, report}} -> report end)
-
-    # Calculate results
-    passed_variations =
-      Enum.count(variation_results, fn {_seed, result} -> result == :ok end)
-
-    failed_variations =
-      Enum.filter(variation_results, fn {_seed, result} -> match?({:error, _}, result) end)
-      |> Enum.map(fn {seed, _} -> seed end)
-
-    build_result(
-      failure.seed,
-      original_result,
-      passed_variations,
-      failed_variations,
-      similar_failures,
-      length(variations)
-    )
-  end
-
-  @doc """
-  Verifies multiple fixes at once, useful for batch verification.
-  """
-  @spec verify_fixes([FailureReport.t()], module(), options()) :: [
-          {FailureReport.t(), verification_result()}
-        ]
-  def verify_fixes(failures, model, opts \\ []) do
-    Enum.map(failures, fn failure ->
-      {failure, verify_fix(failure, model, opts)}
-    end)
-  end
-
-  @doc """
-  Quick check if a single seed still fails.
-  """
-  @spec still_fails?(integer(), module(), module(), map()) :: boolean()
-  def still_fails?(seed, model, adapter, config \\ %{}) do
-    case run_seed(seed, model, seed_target(adapter, config)) do
-      :ok -> false
-      {:error, _} -> true
+      {:error, %FailureReport{} = failure} ->
+        failed(signature, failure)
     end
   end
 
-  @doc false
-  # The target a single-seed re-run executes against: the adapter with the
-  # default name every other entry point gives a bare adapter.
-  @spec seed_target(module(), map()) :: PropertyDamage.Target.t()
-  def seed_target(adapter, config) do
-    %PropertyDamage.Target{
-      adapter: adapter,
-      config: config,
-      name: PropertyDamage.Target.default_name(adapter),
-      index: 0
-    }
-  end
+  def verify_fix(%FailureReport{}, _model, _opts), do: {:error, :no_replay_artifact}
 
   @doc """
-  Runs verification against a cluster of similar failures.
+  Verifies several fixes, one report at a time.
 
-  Each clustered fingerprint that carries a `seed` is re-run against `model` and
-  the adapter given in `opts` (reusing the same single-run machinery as
-  `verify_fix/3`). A member is `fixed` when its seed no longer reproduces a
-  failure, `remaining` when it still fails, and `unknown` when the fingerprint
-  carries no seed (nothing to re-run) or no adapter was supplied.
-
-  If the fix addresses the root cause, every seeded member should now pass and the
-  status is `:fully_fixed`.
-
-  ## Options
-
-  - `:targets` - A list with exactly one entry: the adapter to re-run members
-    against (required to re-run them); see `PropertyDamage.Target`
+  Returns `[{report, result_or_error}]`, each element the outcome of
+  `verify_fix/3` for that report. To verify a cluster of failures, pass the
+  reports of its members.
   """
-  @spec verify_cluster(Patterns.cluster(), module(), options()) :: %{
-          cluster_id: String.t(),
-          total: non_neg_integer(),
-          fixed: non_neg_integer(),
-          remaining: non_neg_integer(),
-          unknown: non_neg_integer(),
-          status: :fully_fixed | :partially_fixed | :not_fixed | :unknown,
-          remaining_failures: [Fingerprint.t()]
-        }
-  def verify_cluster(cluster, model, opts \\ []) do
-    target = Options.override_target!(opts, nil, "verify_cluster/3", [])
-
-    results =
-      Enum.map(cluster.fingerprints, fn fp ->
-        {fp, verify_member(fp, model, target)}
-      end)
-
-    fixed = Enum.count(results, fn {_, status} -> status == :fixed end)
-    remaining = Enum.count(results, fn {_, status} -> status == :remaining end)
-    unknown = Enum.count(results, fn {_, status} -> status == :unknown end)
-
-    status =
-      cond do
-        fixed == 0 and remaining == 0 -> :unknown
-        remaining == 0 and unknown == 0 -> :fully_fixed
-        fixed == 0 -> :not_fixed
-        true -> :partially_fixed
-      end
-
-    remaining_fps =
-      results
-      |> Enum.filter(fn {_, status} -> status == :remaining end)
-      |> Enum.map(fn {fp, _} -> fp end)
-
-    %{
-      cluster_id: cluster.id,
-      total: cluster.size,
-      fixed: fixed,
-      remaining: remaining,
-      unknown: unknown,
-      status: status,
-      remaining_failures: remaining_fps
-    }
-  end
-
-  # A member can only be re-run when it carries a seed and an adapter was given.
-  defp verify_member(%Fingerprint{seed: nil}, _model, _target), do: :unknown
-  defp verify_member(_fp, _model, %{adapter: nil}), do: :unknown
-
-  defp verify_member(%Fingerprint{seed: seed}, model, target) do
-    if run_seed(seed, model, target) == :ok, do: :fixed, else: :remaining
+  @spec verify_fixes([FailureReport.t()], module(), options()) :: [
+          {FailureReport.t(), verification_result() | {:error, :no_replay_artifact}}
+        ]
+  def verify_fixes(reports, model, opts \\ []) do
+    Enum.map(reports, fn report -> {report, verify_fix(report, model, opts)} end)
   end
 
   @doc """
-  Generates a verification report for display.
+  Formats a verification result for display.
   """
   @spec format_result(verification_result()) :: String.t()
-  def format_result(result) do
-    status_icon =
-      case result.status do
+  def format_result(%{status: status} = result) do
+    icon =
+      case status do
         :verified -> "✓"
         :still_failing -> "✗"
-        :partially_fixed -> "⚠"
-        :flaky -> "?"
+        :different_failure -> "⚠"
       end
 
     """
-    #{status_icon} Verification Result: #{result.status}
+    #{icon} Verification Result: #{status}
     ─────────────────────────────────────────────
-    Original seed: #{result.original_seed}
-    Original passes: #{result.original_passes}
-
-    Variations tested: #{result.variations_run}
-    Passed: #{result.variations_passed}
-    Failed: #{result.variations_failed}
-
-    Confidence: #{Float.round(result.confidence * 100, 1)}%
-
+    Recorded failure: #{inspect(result.signature)}
+    #{new_signature_line(result)}
     #{result.summary}
     """
+    |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
   end
+
+  defp new_signature_line(%{new_signature: new_signature}),
+    do: "New failure: #{inspect(new_signature)}\n"
+
+  defp new_signature_line(_result), do: ""
 
   # ============================================================================
   # Private Implementation
   # ============================================================================
 
-  defp run_seed(seed, model, target) do
-    result =
+  defp failed(signature, %FailureReport{} = failure) do
+    case Failure.signature(failure.failure_reason, variant_index(failure)) do
+      ^signature ->
+        %{
+          status: :still_failing,
+          signature: signature,
+          failure: failure,
+          summary: "Fix NOT verified. The recorded failure still occurs."
+        }
+
+      new_signature ->
+        %{
+          status: :different_failure,
+          signature: signature,
+          new_signature: new_signature,
+          failure: failure,
+          summary:
+            "Fix NOT verified. The recorded failure is gone, but the sequence now fails " <>
+              "with another failure."
+        }
+    end
+  end
+
+  defp variant_index(%FailureReport{variant: %{index: index}}), do: index
+  defp variant_index(%FailureReport{}), do: 0
+
+  # Replays the artifact from a fresh temporary directory, removed afterwards.
+  defp replay(term, model, %Target{} = target) do
+    dir = Path.join(System.tmp_dir!(), "pd_verify_#{System.unique_integer([:positive])}")
+
+    try do
+      {:ok, path} = ReplayArtifact.write(term, dir)
+
       PropertyDamage.run(
         model: model,
-        targets: [PropertyDamage.Target.to_entry(target)],
-        seed: seed,
-        max_runs: 1,
+        targets: [Target.to_entry(target)],
+        only: [replay: path],
+        replay_dir: false,
         verbose: false
       )
-
-    case result do
-      {:ok, _stats} -> :ok
-      {:error, %FailureReport{} = report} -> {:error, report}
-      {:error, reason} -> {:error, %{reason: reason}}
-    end
-  rescue
-    e ->
-      {:error, %{exception: e}}
-  end
-
-  defp generate_variations(original_seed, count, range) do
-    # Generate seeds around the original
-    half_range = div(range, 2)
-
-    nearby =
-      for offset <- -half_range..half_range//1,
-          offset != 0,
-          seed = original_seed + offset,
-          seed > 0 do
-        seed
-      end
-
-    # Also include some random variations
-    random_count = div(count, 2)
-
-    random =
-      for _ <- 1..random_count//1 do
-        :rand.uniform(1_000_000_000)
-      end
-
-    (nearby ++ random)
-    |> Enum.uniq()
-    |> Enum.take(count)
-  end
-
-  defp build_result(
-         original_seed,
-         original_result,
-         passed_count,
-         failed_seeds,
-         similar_failures,
-         total_variations
-       ) do
-    original_passes = original_result == :ok
-    failed_count = length(failed_seeds)
-
-    status =
-      cond do
-        not original_passes ->
-          :still_failing
-
-        failed_count == 0 ->
-          :verified
-
-        failed_count <= div(total_variations, 4) ->
-          # Less than 25% failure rate
-          :flaky
-
-        true ->
-          :partially_fixed
-      end
-
-    confidence = calculate_confidence(original_passes, passed_count, total_variations)
-
-    summary = generate_summary(status, original_passes, passed_count, failed_count)
-
-    %{
-      status: status,
-      original_seed: original_seed,
-      original_passes: original_passes,
-      variations_run: total_variations,
-      variations_passed: passed_count,
-      variations_failed: failed_count,
-      failed_variations: failed_seeds,
-      similar_failures: similar_failures,
-      confidence: confidence,
-      summary: summary
-    }
-  end
-
-  defp calculate_confidence(original_passes, passed_count, total_variations) do
-    if total_variations == 0 do
-      if original_passes, do: 0.5, else: 0.0
-    else
-      pass_rate = passed_count / total_variations
-      base = if original_passes, do: 0.3, else: 0.0
-      base + 0.7 * pass_rate
-    end
-  end
-
-  defp generate_summary(status, original_passes, passed_count, failed_count) do
-    case status do
-      :verified ->
-        "Fix verified! Original seed and all #{passed_count} variations pass."
-
-      :still_failing ->
-        "Fix NOT verified. Original failure still reproduces."
-
-      :flaky ->
-        "Fix may be incomplete. Original passes but #{failed_count} variations still fail. " <>
-          "This could indicate a timing issue or incomplete fix."
-
-      :partially_fixed ->
-        "Fix is partial. Original #{if original_passes, do: "passes", else: "fails"} " <>
-          "but #{failed_count} of #{passed_count + failed_count} variations fail."
+    after
+      File.rm_rf!(dir)
     end
   end
 end

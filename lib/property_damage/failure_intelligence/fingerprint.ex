@@ -7,8 +7,9 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   clustering of similar failures.
 
   The fingerprint also carries the originating `seed` (when known). Similarity and
-  clustering ignore the seed, but it lets `Verification.verify_cluster/3` re-run a
-  clustered failure to confirm whether a fix actually resolves it.
+  clustering ignore the seed. A fingerprint holds no replay artifact, so it
+  cannot be verified; verify the reports of a cluster with
+  `Verification.verify_fixes/3`.
   """
 
   alias PropertyDamage.{FailureReport, Sequence}

@@ -6,7 +6,8 @@ defmodule PropertyDamage.FailureIntelligence do
   - **Fingerprinting**: Extract comparable features from failures
   - **Similarity**: Compare failures and identify duplicates
   - **Pattern Detection**: Cluster similar failures to find root causes
-  - **Fix Verification**: Confirm fixes are robust with seed variations
+  - **Fix Verification**: Replay the shrunk sequence of a failure against a fix
+  - **Exploration**: Sample plans from seeds near a failure's seed
 
   ## Quick Start
 
@@ -17,7 +18,7 @@ defmodule PropertyDamage.FailureIntelligence do
       # Check if two failures are similar
       similar? = PropertyDamage.FailureIntelligence.similar?(failure1, failure2)
 
-      # Verify a fix is robust
+      # Verify a fix by replaying the shrunk sequence
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
         targets: [{MyAdapter, config: %{}}]
       )
@@ -35,22 +36,31 @@ defmodule PropertyDamage.FailureIntelligence do
 
   ## Fix Verification
 
-  When you believe a bug is fixed, verify it:
+  When you believe a bug is fixed, replay the shrunk sequence of its report:
 
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
-        targets: [MyAdapter],
-        max_variations: 20
+        targets: [MyAdapter]
       )
 
-      case result.status do
-        :verified -> "Fix confirmed with high confidence"
-        :still_failing -> "Original failure still reproduces"
-        :partially_fixed -> "Some variations still fail"
-        :flaky -> "Intermittent failures detected"
+      case result do
+        {:error, :no_replay_artifact} -> "The report holds no replay artifact"
+        %{status: :verified} -> "The shrunk sequence no longer fails"
+        %{status: :still_failing} -> "The recorded failure still occurs"
+        %{status: :different_failure} -> "The sequence fails with another failure"
       end
+
+  Verification never draws a plan from a seed, so a change to generation cannot
+  hide a failing sequence.
   """
 
-  alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns, Similarity, Verification}
+  alias PropertyDamage.FailureIntelligence.{
+    Exploration,
+    Fingerprint,
+    Patterns,
+    Similarity,
+    Verification
+  }
+
   alias PropertyDamage.FailureReport
 
   @type analysis :: Patterns.analysis()
@@ -263,63 +273,62 @@ defmodule PropertyDamage.FailureIntelligence do
   # ============================================================================
 
   @doc """
-  Verifies that a fix is robust by testing the original seed and variations.
+  Verifies a fix by replaying the shrunk sequence of a failure report.
 
-  This helps ensure that:
-  1. The original failure no longer reproduces
-  2. Similar command sequences also pass
-  3. The fix is robust across different conditions
+  The replay artifact in `report.replay` holds the shrunk commands and the
+  signature of the failure. This function replays those commands against the
+  fixed system and compares the signature of what happens with the recorded
+  one. It never draws a plan from a seed.
 
   ## Options
 
-  - `:targets` - A list with exactly one entry (required): the adapter to re-run
-    against, as a module or `{AdapterModule, config: map}`; see
+  - `:targets` - A list with exactly one entry (required): the adapter to
+    replay against, as a module or `{AdapterModule, config: map}`; see
     `PropertyDamage.Target`
-  - `:max_variations` - Maximum number of seed variations to test (default: 10)
-  - `:variation_range` - Range for generating seed variations (default: 1000)
 
   ## Example
 
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
-        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}],
-        max_variations: 20
+        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}]
       )
 
-      case result.status do
-        :verified ->
-          IO.puts("Fix verified with \#{result.confidence * 100}% confidence")
+      case result do
+        {:error, :no_replay_artifact} ->
+          IO.puts("This report has no replay artifact. Capture the failure again.")
 
-        :still_failing ->
-          IO.puts("Original failure still reproduces!")
+        %{status: :verified} ->
+          IO.puts("The shrunk sequence no longer fails")
 
-        :partially_fixed ->
-          IO.puts("Fix incomplete. \#{result.variations_failed} variations still fail")
+        %{status: :still_failing} ->
+          IO.puts("The recorded failure still occurs")
 
-        :flaky ->
-          IO.puts("Intermittent failures detected. May be timing-related.")
+        %{status: :different_failure, new_signature: signature} ->
+          IO.puts("The fix moved the failure: \#{inspect(signature)}")
       end
 
   ## Return Value
 
+  A report whose `replay` is `nil` or `{:refused, _}` returns
+  `{:error, :no_replay_artifact}`. Any other report returns:
+
       %{
-        status: :verified | :still_failing | :partially_fixed | :flaky,
-        original_seed: 12345,
-        original_passes: true,
-        variations_run: 20,
-        variations_passed: 18,
-        variations_failed: 2,
-        failed_variations: [12346, 12400],
-        confidence: 0.95,
-        summary: "Fix verified! Original seed and all 18 variations pass."
+        status: :verified | :still_failing | :different_failure,
+        signature: {:check_failed, :balance_valid, 0},
+        failure: nil | %PropertyDamage.FailureReport{},
+        summary: "Fix verified. The shrunk sequence replays without a failure."
       }
+
+  A `:different_failure` result also carries `new_signature`.
   """
-  @spec verify_fix(FailureReport.t(), module(), keyword()) :: verification_result()
-  defdelegate verify_fix(failure, model, opts \\ []), to: Verification
+  @spec verify_fix(FailureReport.t(), module(), keyword()) ::
+          verification_result() | {:error, :no_replay_artifact}
+  defdelegate verify_fix(report, model, opts \\ []), to: Verification
 
   @doc """
-  Verifies multiple fixes at once.
+  Verifies several fixes at once.
 
-  Useful for batch verification after a series of bug fixes.
+  Returns `[{report, result_or_error}]`. To verify a cluster, pass the reports
+  of its members.
 
   ## Example
 
@@ -327,26 +336,49 @@ defmodule PropertyDamage.FailureIntelligence do
         targets: [MyAdapter]
       )
 
-      Enum.each(results, fn {failure, result} ->
-        IO.puts("Seed \#{failure.seed}: \#{result.status}")
+      Enum.each(results, fn
+        {failure, %{status: status}} -> IO.puts("Seed \#{failure.seed}: \#{status}")
+        {failure, {:error, reason}} -> IO.puts("Seed \#{failure.seed}: \#{reason}")
       end)
   """
   @spec verify_fixes([FailureReport.t()], module(), keyword()) :: [
-          {FailureReport.t(), verification_result()}
+          {FailureReport.t(), verification_result() | {:error, :no_replay_artifact}}
         ]
-  defdelegate verify_fixes(failures, model, opts \\ []), to: Verification
+  defdelegate verify_fixes(reports, model, opts \\ []), to: Verification
 
   @doc """
-  Quick check if a single seed still fails.
+  Runs plans drawn from seeds near the seed of a failure report.
+
+  This samples other plans and gives no verification verdict: a passing seed
+  says nothing about the shrunk sequence. Use `verify_fix/3` to check a fix.
+
+  ## Options
+
+  - `:targets` - A list with exactly one entry (required); see
+    `PropertyDamage.Target`
+  - `:max_seeds` - Maximum number of seeds to run (default: 10)
+  - `:seed_range` - Width of the range of seeds around the original seed
+    (default: 1000)
 
   ## Example
 
-      if PropertyDamage.FailureIntelligence.still_fails?(12345, MyModel, MyAdapter) do
-        IO.puts("Bug not fixed yet!")
-      end
+      result = PropertyDamage.FailureIntelligence.explore_neighbouring_seeds(failure, MyModel,
+        targets: [MyAdapter],
+        max_seeds: 20
+      )
+
+      Enum.each(result.failures, fn %{seed: seed, report: report} ->
+        IO.puts("Seed \#{seed} fails: \#{inspect(report.failure_reason)}")
+      end)
+
+  ## Return Value
+
+  A map with `original_seed`, `seeds_run`, `passed` and `failures`, a list of
+  `%{seed: seed, report: report}` for each seed whose run fails.
   """
-  @spec still_fails?(integer(), module(), module(), map()) :: boolean()
-  defdelegate still_fails?(seed, model, adapter, config \\ %{}), to: Verification
+  @spec explore_neighbouring_seeds(FailureReport.t(), module(), keyword()) ::
+          Exploration.result()
+  defdelegate explore_neighbouring_seeds(report, model, opts \\ []), to: Exploration
 
   @doc """
   Formats a verification result for display.

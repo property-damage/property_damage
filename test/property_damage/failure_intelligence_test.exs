@@ -709,51 +709,40 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   describe "FailureIntelligence.Verification" do
     alias PropertyDamage.FailureIntelligence.Verification
 
+    @signature {:check_failed, :balance_non_negative, 0}
+
     test "format_result generates readable output" do
       result = %{
         status: :verified,
-        original_seed: 12_345,
-        original_passes: true,
-        variations_run: 10,
-        variations_passed: 10,
-        variations_failed: 0,
-        failed_variations: [],
-        similar_failures: [],
-        confidence: 1.0,
-        summary: "Fix verified!"
+        signature: @signature,
+        failure: nil,
+        summary: "Fix verified."
       }
 
       output = Verification.format_result(result)
 
       assert output =~ "verified"
-      assert output =~ "12345"
-      assert output =~ "100"
+      assert output =~ inspect(@signature)
+      assert output =~ "Fix verified."
     end
 
-    test "format_result shows status icon" do
-      verified = %{
-        status: :verified,
-        original_seed: 1,
-        original_passes: true,
-        variations_run: 1,
-        variations_passed: 1,
-        variations_failed: 0,
-        failed_variations: [],
-        similar_failures: [],
-        confidence: 1.0,
-        summary: ""
-      }
-
+    test "format_result shows a status icon and the new signature of a different failure" do
+      verified = %{status: :verified, signature: @signature, failure: nil, summary: ""}
       assert Verification.format_result(verified) =~ "✓"
 
       failing = %{verified | status: :still_failing}
       assert Verification.format_result(failing) =~ "✗"
 
-      partial = %{verified | status: :partially_fixed}
-      assert Verification.format_result(partial) =~ "⚠"
+      new_signature = {:adapter_error, :boom, 0}
 
-      flaky = %{verified | status: :flaky}
-      assert Verification.format_result(flaky) =~ "?"
+      different =
+        verified
+        |> Map.put(:status, :different_failure)
+        |> Map.put(:new_signature, new_signature)
+
+      output = Verification.format_result(different)
+      assert output =~ "⚠"
+      assert output =~ "New failure: #{inspect(new_signature)}"
     end
   end
 
@@ -912,207 +901,109 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   end
 
   # ============================================================================
-  # Fix verification (behavioral) — drives PropertyDamage.run against the
-  # seeded-bug fixture in test/support/failure_intelligence_support.ex.
+  # Fix verification and exploration (behavioral): drives PropertyDamage.run
+  # against the seeded-bug fixture in test/support/failure_intelligence_support.ex.
   # ============================================================================
 
-  describe "FailureIntelligence.Verification.verify_fix/3 (behavioral)" do
-    alias PropertyDamage.FailureIntelligence.Verification
+  defp fi_report(seed) do
+    %FailureReport{
+      seed: seed,
+      run_number: 0,
+      failure_reason: Failure.check_failed(:balance_non_negative, "Balance -100 is negative")
+    }
+  end
 
-    # Minimal report: verify_fix keys only on the seed; the model and adapter
-    # come from the call, not the report.
-    defp fi_report(seed) do
-      %FailureReport{
-        seed: seed,
-        run_number: 0,
-        failure_reason: Failure.check_failed(:balance_non_negative, "Balance -100 is negative")
-      }
-    end
+  defp fi_failure do
+    {:error, %FailureReport{replay: replay} = report} =
+      PropertyDamage.run(
+        model: FI.Model,
+        targets: [{FI.Adapter, config: %{bug: :always}}],
+        seed: 100_000,
+        max_runs: 1,
+        replay_dir: false,
+        verbose: false
+      )
 
-    test ":verified when the bug is fixed and every variation passes" do
-      result =
-        Verification.verify_fix(fi_report(100_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :off}}]
-        )
-
-      assert result.status == :verified
-      assert result.original_passes
-      assert result.variations_run == 10
-      assert result.variations_failed == 0
-      assert result.confidence == 1.0
-    end
-
-    test "a one-variation budget and a zero range run no variation" do
-      result =
-        Verification.verify_fix(fi_report(100_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :off}}],
-          max_variations: 1,
-          variation_range: 0
-        )
-
-      assert result.variations_run == 0
-    end
-
-    test "a negative variation range runs only the random variations" do
-      result =
-        Verification.verify_fix(fi_report(100_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :off}}],
-          max_variations: 5,
-          variation_range: -4
-        )
-
-      assert result.variations_run == 2
-    end
-
-    test ":still_failing when the original seed still reproduces" do
-      result =
-        Verification.verify_fix(fi_report(100_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :always}}]
-        )
-
-      assert result.status == :still_failing
-      refute result.original_passes
-    end
-
-    test ":flaky when the original passes but a small fraction of variations fail" do
-      # amount(100_000) == 29, so the original passes at threshold 20; exactly one
-      # nearby variation seed draws amount <= 20 -> 1 failure (<= 25%).
-      result =
-        Verification.verify_fix(fi_report(100_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 20}}}]
-        )
-
-      assert result.status == :flaky
-      assert result.original_passes
-      assert result.variations_failed == 1
-    end
-
-    test ":partially_fixed when the original passes but many variations fail" do
-      # amount(200_000) == 45, so the original passes at threshold 44 while 6 of
-      # its nearby variation seeds draw amount <= 44 -> > 25% failures.
-      result =
-        Verification.verify_fix(fi_report(200_000), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 44}}}]
-        )
-
-      assert result.status == :partially_fixed
-      assert result.original_passes
-      assert result.variations_failed == 6
-      assert result.failed_variations != []
-    end
+    assert is_map(replay)
+    report
   end
 
   describe "FailureIntelligence.Verification.verify_fixes/3" do
     alias PropertyDamage.FailureIntelligence.Verification
 
-    test "verifies each failure independently and pairs results with inputs" do
-      f1 = fi_report(100_000)
-      f2 = fi_report(200_000)
+    test "pairs each report with its own result or refusal" do
+      with_replay = fi_failure()
+      without_replay = %{with_replay | replay: nil}
 
       results =
-        Verification.verify_fixes([f1, f2], FI.Model,
+        Verification.verify_fixes([with_replay, without_replay], FI.Model,
           targets: [{FI.Adapter, config: %{bug: :off}}]
         )
 
-      assert [{^f1, r1}, {^f2, r2}] = results
-      assert r1.status == :verified
-      assert r2.status == :verified
+      assert [{^with_replay, %{status: :verified}}, {^without_replay, refused}] = results
+      assert refused == {:error, :no_replay_artifact}
+    end
+
+    test "refuses a replay the artifact writer refused" do
+      report = %{fi_failure() | replay: {:refused, %{field: :amount}}}
+
+      assert Verification.verify_fix(report, FI.Model,
+               targets: [{FI.Adapter, config: %{bug: :off}}]
+             ) == {:error, :no_replay_artifact}
     end
   end
 
-  describe "FailureIntelligence.Verification.still_fails?/4" do
-    alias PropertyDamage.FailureIntelligence.Verification
-
-    test "returns true when the seed still reproduces the failure" do
-      assert Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :always})
-    end
-
-    test "returns false when the seed no longer fails" do
-      refute Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :off})
-    end
-
-    test "re-runs the adapter under its default target name" do
-      target = Verification.seed_target(FI.Adapter, %{bug: :off})
-
-      assert target.name == "Adapter"
-      assert target.config == %{bug: :off}
-    end
-  end
-
-  describe "FailureIntelligence.Verification.verify_cluster/3" do
-    alias PropertyDamage.FailureIntelligence.Verification
-
-    # A cluster of similar failures carrying real seeds. Clustering ignores the
-    # seed, but each fingerprint retains it so the cluster can be re-run.
-    defp seeded_cluster do
-      [cluster] =
-        Patterns.cluster_failures([
-          fi_report(100_000),
-          fi_report(200_000),
-          fi_report(300_000)
-        ])
-
-      cluster
-    end
-
-    test ":fully_fixed when every seeded member now passes (RED against the old stub)" do
-      # The pre-fix stub mapped every fingerprint to :unknown and reported
-      # fixed: 0 / status: :not_fixed regardless of the actual outcome. With the
-      # bug fixed, real verification must report all three members fixed.
+  describe "FailureIntelligence.Exploration.explore_neighbouring_seeds/3" do
+    test "lists the failing seeds with their reports against the buggy adapter" do
       result =
-        Verification.verify_cluster(seeded_cluster(), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :off}}]
+        FailureIntelligence.explore_neighbouring_seeds(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :always}}],
+          max_seeds: 4
         )
 
-      assert result.status == :fully_fixed
-      assert result.total == 3
-      assert result.fixed == 3
-      assert result.remaining == 0
-      assert result.unknown == 0
-      assert result.remaining_failures == []
+      assert result.original_seed == 100_000
+      assert result.seeds_run == 4
+      assert result.passed == 0
+      assert length(result.failures) == 4
+
+      assert Enum.all?(result.failures, fn %{seed: seed, report: report} ->
+               match?(%FailureReport{seed: ^seed}, report)
+             end)
     end
 
-    test ":not_fixed when every seeded member still fails" do
+    test "lists no failure against the correct adapter and gives no verdict" do
       result =
-        Verification.verify_cluster(seeded_cluster(), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :always}}]
+        FailureIntelligence.explore_neighbouring_seeds(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_seeds: 4
         )
 
-      assert result.status == :not_fixed
-      assert result.fixed == 0
-      assert result.remaining == 3
-      assert length(result.remaining_failures) == 3
+      assert result.seeds_run == 4
+      assert result.passed == 4
+      assert result.failures == []
+      refute Map.has_key?(result, :status)
     end
 
-    test ":partially_fixed when only some seeded members still fail" do
-      # amount: 100_000 -> 29 (fails at t=44), 200_000 -> 45, 300_000 -> 54 (pass).
+    test "a one-seed budget and a zero range run no seed" do
       result =
-        Verification.verify_cluster(seeded_cluster(), FI.Model,
-          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 44}}}]
+        FailureIntelligence.explore_neighbouring_seeds(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_seeds: 1,
+          seed_range: 0
         )
 
-      assert result.status == :partially_fixed
-      assert result.fixed == 2
-      assert result.remaining == 1
-      assert length(result.remaining_failures) == 1
+      assert result.seeds_run == 0
     end
 
-    test ":unknown for members that carry no seed" do
-      [cluster] =
-        Patterns.cluster_failures([
-          create_failure_report(seed: nil),
-          create_failure_report(seed: nil)
-        ])
-
+    test "a negative seed range runs only the random seeds" do
       result =
-        Verification.verify_cluster(cluster, FI.Model,
-          targets: [{FI.Adapter, config: %{bug: :off}}]
+        FailureIntelligence.explore_neighbouring_seeds(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_seeds: 5,
+          seed_range: -4
         )
 
-      assert result.status == :unknown
-      assert result.unknown == 2
-      assert result.fixed == 0
-      assert result.remaining == 0
+      assert result.seeds_run == 2
     end
   end
 end
