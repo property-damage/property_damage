@@ -11,6 +11,10 @@ defmodule PropertyDamage.Analysis do
   - **Trigger Isolation**: Find the minimal change that eliminates the failure
   - **Test Generation**: Generate reproducible test code from failures
 
+  Trigger isolation reruns the reference's commands through
+  `PropertyDamage.Runner`, so each rerun runs the boundary drain the original
+  run ran.
+
   ## Roles
 
   `explain/1` infers a command's role from the placeholders alone. The failing
@@ -39,17 +43,18 @@ defmodule PropertyDamage.Analysis do
   alias PropertyDamage.Failure.Naming
 
   alias PropertyDamage.{
-    Executor,
     Expansion,
     FailureReport,
     Options,
     Placeholder,
     PlaceholderRegistry,
     ReplayArtifact,
+    Runner,
     RunTrace,
-    Scheduler,
     Sequence
   }
+
+  alias PropertyDamage.Runner.Context
 
   alias PropertyDamage.Sequence.Validator
   alias PropertyDamage.Shrinker.Graph
@@ -375,9 +380,9 @@ defmodule PropertyDamage.Analysis do
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to re-execute
-    against (default: the report's reference target: its adapter, name and
-    `config:`); see
-    `PropertyDamage.Target`
+    against (default: the report's reference target: its adapter, name, `config:`,
+    `injectors:` and `mocks:`; an entry given here may not set `injectors:` or
+    `mocks:`); see `PropertyDamage.Target`
 
   The re-execution simulates the report's commands with the atom markers the
   run named through `external_markers:`, which the report records.
@@ -437,7 +442,11 @@ defmodule PropertyDamage.Analysis do
       true ->
         # The target comes from opts, else the report's reference target
         target =
-          Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
+          Options.override_target!(
+            opts,
+            recorded_resources(report, reference),
+            "PropertyDamage.Analysis.isolate_trigger/2"
+          )
 
         case {report.report_kind, reference_leaves(report, model, target)} do
           # A divergence takes two targets; every variation runs one.
@@ -446,6 +455,16 @@ defmodule PropertyDamage.Analysis do
           {_kind, leaves} -> isolate_in_leaves(report, model, target, leaves)
         end
     end
+  end
+
+  # The report's reference target with the injectors and mocks its entry
+  # declared, so a rerun brings up the same resources the run did.
+  defp recorded_resources(%{targets: [{_adapter, entry} | _]}, reference) do
+    %{
+      reference
+      | injectors: Keyword.get(entry, :injectors, reference.injectors),
+        mocks: Keyword.get(entry, :mocks, reference.mocks)
+    }
   end
 
   # The trigger among the roots, each run as itself on the linear engine.
@@ -460,6 +479,7 @@ defmodule PropertyDamage.Analysis do
     run = %{
       model: model,
       target: target,
+      seed: report.seed,
       registry: sequence.registry,
       setup_commands: report.setup_commands,
       teardown_commands: report.teardown_commands
@@ -587,21 +607,15 @@ defmodule PropertyDamage.Analysis do
         {%{choice | commands: ran}, rest}
       end)
 
-    {:ok, outcome} =
-      Scheduler.run(
-        model: run.model,
-        targets: [%{run.target | index: 0}],
-        commands: Sequence.to_list(sequence),
-        variants: [%{roots: Expansion.steps(choices), registry: variant.registry}],
-        setup_commands: run.setup_commands,
-        teardown_commands: run.teardown_commands,
-        placeholder_registry: sequence.registry,
-        seed: run.seed,
-        run_number: 0,
-        concurrency: :serial
-      )
+    plan = %{
+      commands: Sequence.to_list(sequence),
+      variants: [%{roots: Expansion.steps(choices), registry: variant.registry}],
+      setup_commands: run.setup_commands,
+      teardown_commands: run.teardown_commands,
+      placeholder_registry: sequence.registry
+    }
 
-    is_nil(outcome.failure)
+    passes?(plan, run)
   end
 
   defp eliminates?(commands, run) do
@@ -614,17 +628,35 @@ defmodule PropertyDamage.Analysis do
     if Validator.valid_sequence?(candidate, run.model) do
       sequence = Sequence.with_registry(Sequence.linear(regenerate_keys(commands)), run.registry)
 
-      case Executor.run(sequence, run.model, run.target.adapter,
-             config: run.target.config,
-             setup_commands: run.setup_commands,
-             teardown_commands: run.teardown_commands
-           ) do
-        {:ok, result} -> result.success
-        {:error, _} -> false
-      end
+      passes?(
+        %{
+          commands: Sequence.to_list(sequence),
+          variants: Expansion.schedule([run.target], Expansion.identity(sequence, [run.target])),
+          setup_commands: run.setup_commands,
+          teardown_commands: run.teardown_commands,
+          placeholder_registry: sequence.registry
+        },
+        run
+      )
     else
       false
     end
+  end
+
+  # Runs the plan on the reference's target alone, through the runner. A
+  # target that cannot be set up does not run the plan, so it eliminates
+  # nothing.
+  defp passes?(plan, run) do
+    context = %Context{
+      model: run.model,
+      targets: [%{run.target | index: 0}],
+      seed: run.seed,
+      run_number: 0,
+      concurrency: :serial
+    }
+
+    {:ok, outcome} = Runner.execute(plan, context)
+    is_nil(outcome.failure)
   end
 
   defp generate_variations(field, original, commands, failed_at) when is_binary(original) do

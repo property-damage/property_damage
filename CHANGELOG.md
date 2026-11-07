@@ -631,6 +631,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: a trace's step events include the boundary drain.**
+  `RunTrace.Capture.capture/1` runs the plan through `PropertyDamage.Runner`,
+  so the events a run folds at the end of each root are step events of the
+  trace, as they are in the run it explains.
 - **Breaking: `Shrinker.failure_signature/2` is `PropertyDamage.Failure.signature/2`.**
   The type `Shrinker.failure_signature` is `Failure.signature`. The tuple is
   unchanged: `{kind, name, variant_index}`. The function sits beside
@@ -1463,6 +1467,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Traces and trigger isolation run the boundary drain that a run runs.**
+  `RunTrace.Capture.capture/1` and `Analysis.isolate_trigger/2` rerun their
+  plan through `PropertyDamage.Runner`, as a run does. A trace's step events
+  now equal the events of the run it explains, and the amounts that
+  isolation lists as passing are the ones that pass when the commands run as
+  the campaign ran them. Isolation also brings up the injectors and mocks
+  the report's reference target declared.
 - **`FailureIntelligence.similarity_score/2` scores a failure against itself
   as exactly `1.0`.** The weighted sum came to `0.9999999999999999`, so
   `similar?/3` with a threshold of `1.0` was false for a failure and itself.

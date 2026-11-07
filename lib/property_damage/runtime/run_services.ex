@@ -4,8 +4,8 @@ defmodule PropertyDamage.Runtime.RunServices do
   #
   # A run brings up the injectors and mocks its target declares against that
   # run's event queue, and tears them down when the run ends. Every path that
-  # sets a target up (`PropertyDamage.Variant`, a trace capture, an analysis
-  # run) does this, so the wiring lives here once and all of them observe the
+  # sets a target up (`PropertyDamage.Variant`, through which every run goes)
+  # does this, so the wiring lives here once and all of them observe the
   # same setup and teardown calls.
 
   alias PropertyDamage.{EventQueue, Log, MockServiceRegistry}

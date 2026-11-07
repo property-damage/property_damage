@@ -117,8 +117,6 @@ defmodule PropertyDamage.RunTrace.CaptureFidelityTest do
   end
 
   describe "RunTrace.Capture.capture/1" do
-    # Unbuilt until the trace is captured through the driver a campaign runs.
-    @tag :known_defect
     test "records the events of the run it explains, boundary folds included" do
       {boundary, _outcome} = scheduled(Drain.QuietModel, @with_injector)
       trace = traced(Drain.QuietModel, @with_injector)
@@ -127,8 +125,6 @@ defmodule PropertyDamage.RunTrace.CaptureFidelityTest do
       assert RunnerSupport.log(trace.event_log) == boundary
     end
 
-    # Unbuilt until the trace is captured through the driver a campaign runs.
-    @tag :known_defect
     test "records the events and failure of a failing run as the campaign sees them" do
       {boundary, outcome} = scheduled(Drain.Model, @with_injector)
       trace = traced(Drain.Model, @with_injector)

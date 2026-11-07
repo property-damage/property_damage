@@ -96,8 +96,6 @@ defmodule PropertyDamage.AnalysisFidelityTest do
   end
 
   describe "isolate_trigger/2" do
-    # Unbuilt until the reruns go through the driver a campaign runs.
-    @tag :known_defect
     test "lists the amounts that pass when the commands run as the campaign ran them", %{
       report: report
     } do
