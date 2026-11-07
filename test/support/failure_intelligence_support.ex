@@ -119,7 +119,7 @@ defmodule PropertyDamage.Test.FI.Adapter do
     * `{:overdraw_when_amount_lte, t}` — overdraws only when the seed-derived
       `amount` is `<= t`. Because `amount` is a deterministic function of the run
       seed, this makes each seed deterministically pass or fail, which is the
-      intermittent switch used to drive `:partially_fixed`/`:flaky` outcomes.
+      intermittent switch used to drive seed-dependent outcomes.
   """
   use PropertyDamage.Adapter
 
