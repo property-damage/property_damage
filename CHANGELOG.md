@@ -1387,6 +1387,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:neutral`, and an `execution: :async` on the listing was not seen when the
   shrinker protected async commands. Every lookup now reads
   `PropertyDamage.Model.spec_table/1`, the table the executor already used.
+- **A command the model does not list keeps its own `command_spec/1` under
+  stutter and in teardown.** The stutter retries and the teardown step read a
+  missing spec for such a command (a hand-built sequence, a leaf an expansion
+  generates), so its `idempotent: false` was ignored and it was re-sent. Both
+  now resolve it through `PropertyDamage.Model.spec_for/2`.
 - **Listing a module twice in `commands/0` is an error.** The second entry
   silently replaced the first. `PropertyDamage.run/1` and `mix pd.validate`
   now raise, naming both entries; merge them into one.

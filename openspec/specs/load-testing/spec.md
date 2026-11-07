@@ -195,6 +195,20 @@ The load test SHALL use the same Model, Adapter, and Projection stack as propert
 - **WHEN** a load test is configured with a model module
 - **THEN** the framework SHALL use the same `commands/0`, weights, preconditions, and projections as property-based testing
 
+### Requirement: Reproducible Worker Sequences
+
+Each worker SHALL draw its sequences from a seed derived from the load test's `seed`, its worker id and the sequence number, through the same sized and seeded generation path a property run uses. The load test SHALL take a positive integer `seed:` option, SHALL draw one at random when the option is absent, and SHALL record it as `config.seed` in the report and in its terminal, markdown and JSON formats.
+
+#### Scenario: The same seed sends the same commands
+- **GIVEN** two load tests with the same model, `seed:` and `run_nonce`
+- **WHEN** each worker draws its nth sequence
+- **THEN** both tests SHALL draw the same commands for each worker and sequence number
+
+#### Scenario: A default seed is recorded
+- **WHEN** a load test starts without a `seed:` option
+- **THEN** the load test SHALL draw a seed at random
+- **AND** the report SHALL record it as `config.seed`
+
 ### Requirement: External Value Capture Per Worker
 
 The load test SHALL capture `external()` server-generated values and resolve them into downstream commands within a worker's sequence (DR-021), maintaining a separate placeholder registry per worker so concurrent arrivals do not share captured values.

@@ -248,11 +248,30 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 Before running a shrink candidate, the shrinker SHALL validate it against the model: fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
 
+The validation SHALL mint placeholders for the fields the system mints (`external()`), as generation does, so a candidate is folded through the same states the generator saw. A candidate that keeps a command whose `when:` reads a minted value SHALL NOT be rejected because the validation lacked that value.
+
+#### Scenario: Validation mints placeholders like generation
+- **GIVEN** a command whose `when:` reads a value an earlier command's event carries in an `external()` field
+- **AND** a failing sequence that generation produced with that predicate true
+- **WHEN** the shrinker validates a candidate that keeps both commands
+- **THEN** the validation SHALL mint the placeholder for that field
+- **AND** the candidate SHALL be valid
+
 #### Scenario: A candidate the model cannot simulate is not a counterexample
 - **GIVEN** a model whose projection raises when it folds an event that references an entity the state does not hold
 - **WHEN** a shrink candidate keeps a command that references an entity whose creating command was removed
 - **THEN** the candidate's validation SHALL raise
 - **AND** the shrinker SHALL treat the candidate as invalid and SHALL NOT accept it as a reproduction
+
+### Requirement: Shrink Priority Reads The Model Spec Table
+
+The shrinker SHALL read each command's shrink hint from the model's spec table, so a `shrink:` option set on a `commands/0` listing applies during shrinking as it does everywhere else the spec is read. A command the table does not hold SHALL use the hint of its own `command_spec/1`.
+
+#### Scenario: A listing option sets the shrink priority
+- **GIVEN** a command whose own `command_spec/1` declares `shrink: :neutral`
+- **AND** a model that lists it as `{Command, shrink: :prefer_keep}`
+- **WHEN** the shrinker orders removal candidates
+- **THEN** it SHALL treat the command as `:prefer_keep`
 
 ### Requirement: Setup and Teardown Commands Under Shrinking (DR-048)
 

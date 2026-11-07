@@ -136,6 +136,12 @@ Models MAY define a simulator module that predicts expected events for each comm
 - **WHEN** a model does not implement `simulator/0`
 - **THEN** the framework operates without event prediction during generation
 
+#### Scenario: No simulator and a placeholder-dependent predicate
+- **GIVEN** a model that defines no `simulator/0`
+- **WHEN** `mix pd.validate` checks the model
+- **THEN** it SHALL warn that no placeholders are minted during generation
+- **AND** the warning SHALL say that a command whose `when:` depends on a value the system mints (an `external()` field) is never generated
+
 ### Requirement: Setup and Teardown Commands
 
 Models MAY implement `setup_each/0` and `teardown_each/0`, both defaulting to `[]`. Each SHALL return command specs in the grammar of `commands/0` (`Module` or `{Module, opts}`, with `overrides:`), typed `PropertyDamage.Model.sequence`. The model MUST NOT perform side effects for fixtures: a fixture is a command, so only the adapter realizes it (DR-048).
@@ -390,6 +396,26 @@ The framework SHALL resolve command specs by calling `command_spec/1` when avail
 - **WHEN** a command module does not export `command_spec/1`
 - **THEN** the framework builds a spec from the framework defaults
 - **AND** merges Model-provided overrides on top of the default-derived spec
+
+#### Scenario: One spec table serves every reader
+- **GIVEN** a model that lists `{Charge, shrink: :prefer_keep, execution: :async}` in `commands/0`
+- **WHEN** the framework builds the model's spec table with `Model.spec_table/1`
+- **THEN** the table SHALL hold the setup commands, the teardown commands and the `commands/0` entries, each resolved with the options its entry carries
+- **AND** a module listed in `commands/0` and also in a setup or teardown list SHALL take the `commands/0` entry
+- **AND** execution, settle, stutter, shrinking and sequence validation SHALL all read that one table, so the `shrink:` and `execution:` set on the listing apply in each
+
+#### Scenario: A command the table does not hold
+- **GIVEN** a command module the model does not name, such as a leaf an expansion generates or a command in a hand-built sequence
+- **WHEN** the framework looks it up with `Model.spec_for/2`
+- **THEN** the lookup SHALL resolve the module through its own `command_spec/1`, or the framework defaults when it has none, as an entry with no options
+- **AND** a plain map, which is not a command module, SHALL resolve to the framework defaults and run `:sync`
+
+#### Scenario: A module listed twice in commands/0
+- **WHEN** `commands/0` lists one module more than once, with different options or with identical ones
+- **THEN** building the spec table SHALL raise an `ArgumentError` that names both listings and asks for one merged entry
+- **AND** `PropertyDamage.run/1` SHALL reject the model with the same message before any `Adapter.setup/1`
+- **AND** `mix pd.validate` SHALL report the same message as an error
+- **AND** a setup or teardown list MAY repeat a module
 
 ### Requirement: Declared Docs Capture (DR-058)
 

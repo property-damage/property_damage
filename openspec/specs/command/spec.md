@@ -109,6 +109,16 @@ Commands SHALL declare a shrinking priority via the `:shrink` field. The valid v
 - **THEN** the shrinker avoids removing this command from failing sequences
 - **AND** this is appropriate for commands that are likely essential to reproducing a failure
 
+### Requirement: Spec Lookup For Commands Off The Model Table
+
+Every execution path (the step, its stutter retries, the teardown commands and settling) SHALL read a command's spec through `Model.spec_for/2`. A command module the model's spec table does not hold SHALL keep the metadata its own `command_spec/1` declares.
+
+#### Scenario: An unlisted command that declares idempotent: false
+- **GIVEN** a command that declares `idempotent: false` and that the model does not list
+- **AND** a run with stutter enabled for all commands
+- **WHEN** a hand-built sequence runs that command
+- **THEN** the framework SHALL NOT re-send it
+
 ### Requirement: Settle Configuration
 
 Commands with `:probe` or `:async` execution semantics SHALL support a settle configuration controlling retry behavior for eventually consistent systems.
