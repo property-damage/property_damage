@@ -23,6 +23,7 @@ defmodule Mix.Tasks.Pd.Validate do
   - All command modules exist and implement required callbacks
   - All projection modules exist
   - Injectable events are covered by injector adapters
+  - `commands/0` lists no module twice: merge the entries into one
   - The model defines no removed lifecycle hook (`setup_each/1`,
     `teardown_each/1`, `setup_once`, `teardown_once`); setup and teardown
     entries are valid commands
@@ -358,7 +359,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp validate_loaded_model_only(model, verbose, strict) do
-    case missing_required_callbacks(model) ++ lifecycle_errors(model) do
+    case missing_required_callbacks(model) ++ lifecycle_errors(model) ++ listing_errors(model) do
       [] ->
         report_model_only(model, verbose, strict)
 
@@ -379,6 +380,14 @@ defmodule Mix.Tasks.Pd.Validate do
   # A removed lifecycle hook.
   defp lifecycle_errors(model) do
     PropertyDamage.Model.check_lifecycle!(model)
+    []
+  rescue
+    e in ArgumentError -> [e.message]
+  end
+
+  # A module listed twice in commands/0.
+  defp listing_errors(model) do
+    PropertyDamage.Model.check_listings!(model)
     []
   rescue
     e in ArgumentError -> [e.message]

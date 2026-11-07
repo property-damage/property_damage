@@ -50,6 +50,10 @@ defmodule PropertyDamage.Validation do
     # A removed lifecycle hook fails here as it fails PropertyDamage.run/1.
     PropertyDamage.Model.check_lifecycle!(model)
 
+    # A module listed twice in commands/0 fails here as it fails
+    # PropertyDamage.run/1.
+    PropertyDamage.Model.check_listings!(model)
+
     # The shape of expansions/0 and the @compare it needs fail here as they
     # fail PropertyDamage.run/1.
     PropertyDamage.Expansion.check_model!(model)

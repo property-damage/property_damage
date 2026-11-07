@@ -37,25 +37,40 @@ defmodule PropertyDamage.SettleTest do
     # No command_spec/1 - should resolve to the framework default (:sync)
   end
 
+  defmodule TableModel do
+    use PropertyDamage.Model
+
+    @impl true
+    def commands, do: [SyncCommand, ProbeCommand, AsyncCommand, NoSemanticsCommand]
+
+    @impl true
+    def command_sequence_projection, do: PropertyDamage.Test.Projections.ModelState
+  end
+
+  # A command's spec as the model's table holds it.
+  defp spec(command) do
+    PropertyDamage.Model.spec_for(PropertyDamage.Model.spec_table(TableModel), command)
+  end
+
   describe "get_semantics/1" do
     test "returns :sync for sync commands" do
-      assert Settle.get_semantics(%SyncCommand{id: 1}) == :sync
-      assert Settle.get_semantics(SyncCommand) == :sync
+      assert Settle.get_semantics(spec(%SyncCommand{id: 1})) == :sync
+      assert Settle.get_semantics(spec(SyncCommand)) == :sync
     end
 
     test "returns :probe for probe commands" do
-      assert Settle.get_semantics(%ProbeCommand{id: 1}) == :probe
-      assert Settle.get_semantics(ProbeCommand) == :probe
+      assert Settle.get_semantics(spec(%ProbeCommand{id: 1})) == :probe
+      assert Settle.get_semantics(spec(ProbeCommand)) == :probe
     end
 
     test "returns :async for async commands" do
-      assert Settle.get_semantics(%AsyncCommand{id: 1}) == :async
-      assert Settle.get_semantics(AsyncCommand) == :async
+      assert Settle.get_semantics(spec(%AsyncCommand{id: 1})) == :async
+      assert Settle.get_semantics(spec(AsyncCommand)) == :async
     end
 
     test "returns :sync for commands without semantics/0" do
-      assert Settle.get_semantics(%NoSemanticsCommand{id: 1}) == :sync
-      assert Settle.get_semantics(NoSemanticsCommand) == :sync
+      assert Settle.get_semantics(spec(%NoSemanticsCommand{id: 1})) == :sync
+      assert Settle.get_semantics(spec(NoSemanticsCommand)) == :sync
     end
 
     test "returns :sync for plain maps" do
@@ -65,7 +80,7 @@ defmodule PropertyDamage.SettleTest do
 
   describe "get_config/1" do
     test "returns command's settle_config when implemented" do
-      config = Settle.get_config(%ProbeCommand{id: 1})
+      config = Settle.get_config(spec(%ProbeCommand{id: 1}))
 
       assert config.timeout_ms == 500
       assert config.interval_ms == 50
@@ -73,15 +88,15 @@ defmodule PropertyDamage.SettleTest do
     end
 
     test "returns defaults when settle_config not implemented" do
-      config = Settle.get_config(%SyncCommand{id: 1})
+      config = Settle.get_config(spec(%SyncCommand{id: 1}))
 
       assert config.timeout_ms == 2_000
       assert config.interval_ms == 300
       assert config.backoff == :linear
     end
 
-    test "works with module directly" do
-      config = Settle.get_config(AsyncCommand)
+    test "works with a command module" do
+      config = Settle.get_config(spec(AsyncCommand))
 
       assert config.timeout_ms == 1000
       assert config.backoff == :exponential
@@ -90,19 +105,19 @@ defmodule PropertyDamage.SettleTest do
 
   describe "requires_settling?/1" do
     test "returns true for probes" do
-      assert Settle.requires_settling?(%ProbeCommand{id: 1})
+      assert Settle.requires_settling?(spec(%ProbeCommand{id: 1}))
     end
 
     test "returns true for async" do
-      assert Settle.requires_settling?(%AsyncCommand{id: 1})
+      assert Settle.requires_settling?(spec(%AsyncCommand{id: 1}))
     end
 
     test "returns false for sync" do
-      refute Settle.requires_settling?(%SyncCommand{id: 1})
+      refute Settle.requires_settling?(spec(%SyncCommand{id: 1}))
     end
 
     test "returns false for commands without semantics" do
-      refute Settle.requires_settling?(%NoSemanticsCommand{id: 1})
+      refute Settle.requires_settling?(spec(%NoSemanticsCommand{id: 1}))
     end
   end
 
@@ -265,7 +280,7 @@ defmodule PropertyDamage.SettleTest do
 
       result =
         Settle.execute_with_settle(
-          %ProbeCommand{id: 1},
+          spec(%ProbeCommand{id: 1}),
           fn ->
             attempt = Agent.get_and_update(agent, fn n -> {n + 1, n + 1} end)
 
@@ -284,7 +299,7 @@ defmodule PropertyDamage.SettleTest do
     test "executes directly for sync commands" do
       result =
         Settle.execute_with_settle(
-          %SyncCommand{id: 1},
+          spec(%SyncCommand{id: 1}),
           fn -> {:ok, :direct_result} end
         )
 
@@ -297,7 +312,7 @@ defmodule PropertyDamage.SettleTest do
 
       result =
         Settle.execute_with_settle(
-          %ProbeCommand{id: 1},
+          spec(%ProbeCommand{id: 1}),
           fn -> {:retry, :always} end
         )
 

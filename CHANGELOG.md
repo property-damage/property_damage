@@ -619,6 +619,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.Settle.get_semantics/1`, `get_config/1`,
+  `requires_settling?/1` and `execute_with_settle/3` take a command spec map.**
+  They no longer accept a command module or struct. Look the spec up with
+  `PropertyDamage.Model.spec_for(PropertyDamage.Model.spec_table(model), command)`.
+
 - **Breaking: failure files are written at format 18 (DR-063).** `.pd` and
   `.pdtrace` files of format 17 and older are refused with
   `{:error, {:unsupported_format_version, version, 18}}`, because the removed
@@ -1366,6 +1371,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marker for every minted id, so a state keyed by minted ids collapsed to one
   key and a command whose `when:` needs two ids rejected every candidate that
   held it. The check now mints placeholders as generation does.
+- **A `shrink:` or `execution:` set on a command's listing applies to
+  shrinking.** The shrinker and `PropertyDamage.Settle` read each command's own
+  `command_spec/1` and ignored the options of its entry in `commands/0`, so a
+  model that listed `{Cmd, shrink: :prefer_keep}` had `Cmd` shrunk as
+  `:neutral`, and an `execution: :async` on the listing was not seen when the
+  shrinker protected async commands. Every lookup now reads
+  `PropertyDamage.Model.spec_table/1`, the table the executor already used.
+- **Listing a module twice in `commands/0` is an error.** The second entry
+  silently replaced the first. `PropertyDamage.run/1` and `mix pd.validate`
+  now raise, naming both entries; merge them into one.
 - **`mix pd.integration --hunt` honors `--commands`.** A hunt ran every
   sequence with up to 50 commands, whatever `--commands` said.
   `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by

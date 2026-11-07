@@ -791,6 +791,7 @@ defmodule PropertyDamage.Options do
 
     reject_only_option_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
+    PropertyDamage.Model.check_listings!(Keyword.fetch!(validated, :model))
 
     case Keyword.get(validated, :regression) do
       regression when is_list(regression) -> validate_single_target!(regression)

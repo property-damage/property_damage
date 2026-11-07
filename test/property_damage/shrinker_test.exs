@@ -572,8 +572,13 @@ defmodule PropertyDamage.ShrinkerTest do
 
     test "probe commands have :probe semantics" do
       # Verify our test command has the expected semantics
-      assert Settle.get_semantics(%ProbeItem{}) == :probe
-      assert Settle.get_semantics(%CreateItem{}) == :sync
+      table = PropertyDamage.Model.spec_table(ProbeModel)
+
+      assert table |> PropertyDamage.Model.spec_for(%ProbeItem{}) |> Settle.get_semantics() ==
+               :probe
+
+      assert table |> PropertyDamage.Model.spec_for(%CreateItem{}) |> Settle.get_semantics() ==
+               :sync
     end
 
     test "probe commands are removed before sync commands when both are unnecessary" do

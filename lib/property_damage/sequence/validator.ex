@@ -50,11 +50,8 @@ defmodule PropertyDamage.Sequence.Validator do
   """
   @spec valid_sequence?(Sequence.t(), module(), keyword()) :: boolean()
   def valid_sequence?(%Sequence{} = sequence, model, opts \\ []) do
-    # Normalize the model's commands to get when: options
-    lookup =
-      model.commands()
-      |> Model.normalize_commands()
-      |> build_command_lookup()
+    # The model's spec table carries each command's `when:` as listed.
+    table = Model.spec_table(model)
 
     state = Generator.setup_state(model, sequence, opts)
 
@@ -63,7 +60,7 @@ defmodule PropertyDamage.Sequence.Validator do
     |> Enum.reduce_while(state, fn {root, index}, state ->
       position = Position.prefix(index)
 
-      if precondition_passes?(lookup, root, state) do
+      if precondition_passes?(table, root, state) do
         {:cont, Generator.simulate_root(model, root, position, state, sequence.registry, opts)}
       else
         {:halt, :invalid}
@@ -72,15 +69,8 @@ defmodule PropertyDamage.Sequence.Validator do
     |> Kernel.!=(:invalid)
   end
 
-  # Build a lookup map from command module to its spec map
-  defp build_command_lookup(normalized_commands) do
-    Map.new(normalized_commands, fn {_weight, module, spec} ->
-      {module, spec}
-    end)
-  end
-
-  defp precondition_passes?(lookup, command, state) do
-    case lookup |> Map.get(command.__struct__, %{}) |> Map.get(:when) do
+  defp precondition_passes?(table, command, state) do
+    case table |> Model.spec_for(command) |> Map.get(:when) do
       nil -> true
       pred when is_function(pred, 1) -> pred.(state)
     end

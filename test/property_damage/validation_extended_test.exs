@@ -15,6 +15,13 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def events(_cmd, _response), do: []
   end
 
+  defmodule OtherValidCommand do
+    defstruct [:id]
+
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 2})
+    def events(_cmd, _response), do: []
+  end
+
   defmodule InvalidCommand do
     # Missing required callbacks
     defstruct [:id]
@@ -361,7 +368,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def commands do
       [
         {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 100},
-        {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 1}
+        {PropertyDamage.ValidationExtendedTest.OtherValidCommand, weight: 1}
       ]
     end
 

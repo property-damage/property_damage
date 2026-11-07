@@ -590,7 +590,7 @@ defmodule PropertyDamage.Executor do
       model: model,
       external_markers: external_markers,
       event_queue: event_queue,
-      command_specs: build_command_specs(model),
+      command_specs: PropertyDamage.Model.spec_table(model),
       telemetry: telemetry
     }
   end
@@ -810,10 +810,7 @@ defmodule PropertyDamage.Executor do
 
         # 3. Execute via adapter (with settle logic for probes/async).
         # Commands may be plain maps in low-level/test usage, hence the guard.
-        command_spec =
-          if is_struct(command) do
-            Map.get(state.command_specs, command.__struct__)
-          end
+        command_spec = PropertyDamage.Model.spec_for(state.command_specs, command)
 
         # The adapter's wall-clock, every settle attempt and the waits between
         # them included, is timed here and nothing after it answered.
@@ -1250,41 +1247,6 @@ defmodule PropertyDamage.Executor do
             {:error, Failure.check_failed(check_name, reason, projection), failed_state}
         end
     end
-  end
-
-  # Build a %{command_module => resolved_spec} lookup so execution-time
-  # settle/stutter behaviour comes from the single resolved command spec (DR-028),
-  # which honors `use PropertyDamage.Command, execution: :probe` and model-level
-  # overrides.
-  defp build_command_specs(model) do
-    # A setup or teardown command's module gets its spec from its own entry,
-    # unless commands/0 lists the module too.
-    sequences =
-      PropertyDamage.Model.setup_commands(model) ++ PropertyDamage.Model.teardown_commands(model)
-
-    (sequences ++ PropertyDamage.Model.normalize_commands(model.commands()))
-    |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
-  rescue
-    # Never swallow a misconfigured model into an empty spec map: that silently
-    # dropped every command's settle/stutter semantics and turned a config bug
-    # into confusing downstream behaviour. Re-raise loudly with fix-forward
-    # guidance, preserving the original cause (B4).
-    e ->
-      reraise ArgumentError, [message: build_command_specs_error(model, e)], __STACKTRACE__
-  end
-
-  defp build_command_specs_error(model, error) do
-    """
-    Could not build command specs for model #{inspect(model)}: #{Exception.message(error)}
-
-    Suggestions:
-      - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
-    {module, opts} tuples (such as {module, weight: 3}), or %{command: module, ...} maps.
-      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
-    overrides have the expected shape.
-      - Verify every listed command module is defined and uses `PropertyDamage.Command`.
-    """
-    |> String.trim()
   end
 
   # Inject an event mid-execution from an adapter.
