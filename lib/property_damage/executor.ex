@@ -6,6 +6,9 @@ defmodule PropertyDamage.Executor do
   updates projections, runs checks, and collects events from both the adapter
   and injector adapters.
 
+  `run/4` is the one-target path without the per-root boundary drain. A run
+  goes through `PropertyDamage.Runner`, not through `run/4`.
+
   ## Sequence Execution
 
   Commands are executed one after another:
@@ -112,8 +115,12 @@ defmodule PropertyDamage.Executor do
   @doc """
   Execute a command sequence using the given model and adapter.
 
-  This is the main entry point for execution. It handles the full lifecycle:
-  adapter setup, command execution, injector event draining, and cleanup.
+  This is the one-target engine path that runs a sequence without the
+  per-root boundary drain. It handles the full lifecycle (adapter setup,
+  command execution, injector event draining and cleanup) and is used by the
+  executor's own tests. A run does not execute this way: every run goes
+  through `PropertyDamage.Runner`, which drains the event queue after each
+  root.
 
   ## Parameters
 

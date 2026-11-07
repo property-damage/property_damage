@@ -3,9 +3,12 @@ defmodule PropertyDamage.Runner do
   The one run driver: runs one plan on every target of a run and returns what
   the run did.
 
-  `PropertyDamage.run/1` runs every generated sequence of a campaign through
-  `execute/2`, and reproduces a found failure through it. Trace capture and
-  the shrinker's candidate runs do not use it yet.
+  Every run goes through `execute/2`: each generated sequence of a campaign,
+  the reproduction of a found failure, the capture of a
+  `PropertyDamage.RunTrace` and the trigger isolation of
+  `PropertyDamage.Analysis`. So each of them runs the boundary drain after
+  every root, and a trace's step events are the events of the run it explains.
+  The shrinker's candidate runs do not use it yet.
 
   A plan is the symbolic sequence of one run (see `t:plan/0`). How the plan
   runs, on which targets and with which options, is a
