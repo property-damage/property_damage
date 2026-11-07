@@ -11,10 +11,14 @@ defmodule PropertyDamage.Verdict do
   | `nil`, `false` | fail, generic message | not yet | disagree, both values |
   | `{:fail, "text"}` | fail, that message | never: fail now | disagree, that message |
   | `{:fail, %Exception{}}` | fail, that exception | never: fail now | disagree, that exception |
-  | bare exception struct, `{:error, _}` | fail, with the grammar nudge | same | same |
+  | bare exception struct, `{:error, _}`, `{:mismatch, _}` | fail, with the grammar nudge | same | same |
 
   A raise is a failure in all three kinds; the caller catches it, since
   reading a value cannot see one.
+
+  `{:mismatch, _}` is the retired relation form of DR-046. It is truthy, so
+  without the nudge it would agree silently. `:match`, its retired partner, is
+  truthy and meant agreement, so it passes as it always did.
 
   `{:fail, reason}` is the returned form of `PropertyDamage.fail!/2`: raising
   is the early exit, returning is the tail, and both produce the same
@@ -78,8 +82,9 @@ defmodule PropertyDamage.Verdict do
       iex> PropertyDamage.Verdict.read({:fail, %ArgumentError{message: "bad"}})
       {:fail, %ArgumentError{message: "bad"}}
 
-  A bare exception struct and an `{:error, _}` tuple are not verdicts; they
-  fail with the grammar nudge, carrying the value:
+  A bare exception struct, an `{:error, _}` tuple and the retired
+  `{:mismatch, _}` are not verdicts; they fail with the grammar nudge,
+  carrying the value:
 
       iex> {:fail, failure} = PropertyDamage.Verdict.read(%ArgumentError{message: "bad"})
       iex> Exception.message(failure)
@@ -88,6 +93,10 @@ defmodule PropertyDamage.Verdict do
       iex> {:fail, failure} = PropertyDamage.Verdict.read({:error, :timeout})
       iex> Exception.message(failure)
       "returned {:error, :timeout}, which is not a verdict; a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
+
+      iex> {:fail, failure} = PropertyDamage.Verdict.read({:mismatch, "settled differs"})
+      iex> Exception.message(failure)
+      "returned {:mismatch, \\"settled differs\\"}, which is not a verdict; a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
   """
   @spec read(term(), kind()) :: t()
   def read(value, kind \\ :check)
@@ -98,6 +107,7 @@ defmodule PropertyDamage.Verdict do
   def read({:fail, other}, kind), do: {:fail, wrap(inspect(other), kind)}
 
   def read({:error, _reason} = value, kind), do: {:fail, wrap(nudge(value), kind)}
+  def read({:mismatch, _detail} = value, kind), do: {:fail, wrap(nudge(value), kind)}
   def read(value, kind) when is_exception(value), do: {:fail, wrap(nudge(value), kind)}
 
   def read(_value, _kind), do: :pass

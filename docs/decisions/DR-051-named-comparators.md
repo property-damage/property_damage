@@ -1,6 +1,6 @@
 # DR-051: Named Comparators, `using:` Is a Name
 
-**Status:** Accepted
+**Status:** Accepted. Amended 2026-10-26: item 6 names the two forms `stutter: [using:]` takes, `{Mod, :fun}` and `{Mod, :fun, args}`, and says why a bare `:fun` is refused.
 **Date:** 2026-10-16
 
 ## Context
@@ -70,9 +70,11 @@ about one in eight carried a `using:`; the rest compared under `==`.
    `using:` term (`{PropertyDamage.Equivalence, :within, [0.01]}`), and the
    reporter prints it beside the two values. The persistence version stays
    15 while 15 is unreleased.
-6. **`stutter: [using:]` accepts the same named forms** beside a 2-arity
-   function (DR-046 item 17); a function stays legal there because a run
-   option is runtime data. Documentation teaches the named form first.
+6. **`stutter: [using:]` accepts `{Mod, :fun}` and `{Mod, :fun, args}`**
+   beside a 2-arity function (DR-046 item 17), and refuses a bare `:fun`,
+   because a run option has no projection module to resolve a local name
+   against. A function stays legal there because a run option is runtime
+   data. Documentation teaches the named form first.
 7. **Normalization belongs in the observation.** The guides and the
    `PropertyDamage.Equivalence` documentation teach returning a canonical
    value from the `@compare` function and reserve `using:` for relations that

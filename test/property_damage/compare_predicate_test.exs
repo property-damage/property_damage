@@ -114,6 +114,17 @@ defmodule PropertyDamage.ComparePredicateTest do
       end
     end
     """,
+    retired_mismatch: """
+    defmodule #{@ns}.RetiredMismatch do
+    #{@header}
+      @compare using: :same_settled
+      def totals(s, _root), do: #{@value}
+
+      defp same_settled(reference, variant) do
+        if reference.settled == variant.settled, do: :match, else: {:mismatch, "settled differs"}
+      end
+    end
+    """,
     raising_predicate: """
     defmodule #{@ns}.RaisingPredicate do
     #{@header}
@@ -227,6 +238,15 @@ defmodule PropertyDamage.ComparePredicateTest do
 
       assert Exception.message(mismatch) ==
                "reference=#{reference.settled} variant=#{variant.settled}"
+    end
+
+    test "the retired {:mismatch, _} disagrees with the grammar nudge", ctx do
+      assert {:ok, _stats} = Compare.run(model!(ctx, :retired_mismatch), targets(0))
+      {_reference, _variant, mismatch} = diverge!(ctx, :retired_mismatch, 5)
+
+      assert Exception.message(mismatch) ==
+               ~s(returned {:mismatch, "settled differs"}, which is not a verdict; ) <>
+                 "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
     end
 
     test "without using:, values agree under ==", ctx do

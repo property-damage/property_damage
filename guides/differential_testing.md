@@ -330,9 +330,9 @@ defp same_members(reference, variant),
 The relation's return is a verdict, read with the grammar a `@check` and an
 `@eventually` predicate share (DR-052): a truthy value when the values agree,
 and `false` or `nil` (a mismatch holding both values), `{:fail, "text"}` or
-`{:fail, exception}` when they do not. A bare exception struct or an
-`{:error, _}` tuple is not a verdict and disagrees with a message that says
-so. A divergence report prints the `using:` term as written beside the two
+`{:fail, exception}` when they do not. A bare exception struct, an
+`{:error, _}` tuple or the retired `{:mismatch, _}` is not a verdict and
+disagrees with a message that says so. A divergence report prints the `using:` term as written beside the two
 values.
 
 A mismatch is an exception: by default a `PropertyDamage.ComparisonMismatch`
