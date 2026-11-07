@@ -98,9 +98,12 @@ defmodule PropertyDamage.LoadTest.Report do
     │ Adapter:       #{String.pad_trailing(adapter_name, 53)}│
     │ Arrival Rate:  #{String.pad_trailing(arrival_rate_str, 53)}│
     │ Duration:      #{String.pad_trailing(format_duration(config.duration_ms), 53)}│
+    │ Seed:          #{String.pad_trailing(format_seed(config), 53)}│
     └──────────────────────────────────────────────────────────────────────┘
     """
   end
+
+  defp format_seed(config), do: config |> Map.get(:seed, "unknown") |> to_string()
 
   defp terminal_throughput(metrics) do
     arrivals_spawned = Map.get(metrics, :arrivals_spawned, 0)
@@ -322,6 +325,7 @@ defmodule PropertyDamage.LoadTest.Report do
     | Adapter | `#{adapter_name}` |
     | Arrival Rate | #{arrival_rate_str} |
     | Duration | #{format_duration(c.duration_ms)} |
+    | Seed | #{format_seed(c)} |
 
     ## Summary
 

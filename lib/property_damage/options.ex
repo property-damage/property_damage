@@ -1297,6 +1297,14 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: @single_target_doc
     ],
+    seed: [
+      type: :pos_integer,
+      doc:
+        "Random seed for sequence generation. Each worker derives its own seed " <>
+          "from it and its worker id, so the same seed sends the same commands " <>
+          "from each worker. Defaults to a random seed, recorded in the report " <>
+          "as `config.seed`."
+    ],
     run_nonce: [
       type: :non_neg_integer,
       doc:

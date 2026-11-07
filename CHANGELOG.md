@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   simulator no placeholders are minted during generation, so a command whose
   `when:` depends on a value the system mints (an `external()` field) is never
   generated. `--strict` fails on the warning.
+- **`seed:` option for `PropertyDamage.LoadTest`.** Each worker derives its
+  own seed from it and its worker id, so the same seed sends the same commands
+  from each worker. Without it, the load test draws a seed and records it as
+  `config.seed` in the report, which prints it in the terminal, markdown and
+  JSON formats.
 - **`mix pd.scaffold --force` overwrites existing files.** Without it, the
   task refuses, names the files that already exist and writes nothing.
 - **`PropertyDamage.shrink_further/2` takes `external_markers:`.** The option
@@ -1385,6 +1390,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Listing a module twice in `commands/0` is an error.** The second entry
   silently replaced the first. `PropertyDamage.run/1` and `mix pd.validate`
   now raise, naming both entries; merge them into one.
+- **Load-test workers draw sequences across the generator's full range and
+  reproducibly from a seed.** A worker took the first value of an unsized,
+  unseeded generator, so every draw sat at the smallest size and two load
+  tests could never send the same traffic.
 - **`mix pd.integration --hunt` honors `--commands`.** A hunt ran every
   sequence with up to 50 commands, whatever `--commands` said.
   `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by

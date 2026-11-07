@@ -1496,8 +1496,6 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   describe "Worker generation" do
-    @describetag :known_defect
-
     test "draws values from the whole range of a command's generator" do
       commands = worker_commands([worker_id: 1, seed: 20_241_106], 200)
 
@@ -1511,6 +1509,89 @@ defmodule PropertyDamage.LoadTestTest do
 
       assert first != []
       assert first == second
+    end
+  end
+
+  defmodule WorkerTaggingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    # Each worker's setup takes the next number, so recorded commands can be
+    # grouped by the worker that executed them.
+    @impl true
+    def setup(%{recorder: recorder, counter: counter}) do
+      worker = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+      {:ok, %{recorder: recorder, worker: worker}}
+    end
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(command, %{recorder: recorder, worker: worker}, _runtime) do
+      Agent.update(recorder, &[{worker, command} | &1])
+      {:ok, []}
+    end
+  end
+
+  # Runs a short load test and returns its report with the commands each worker
+  # executed, in execution order. Arrival timing decides how many sequences a
+  # run completes, so callers compare equal-length prefixes.
+  defp load_test_commands(opts) do
+    {:ok, recorder} = Agent.start_link(fn -> [] end)
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    {:ok, report} =
+      LoadTest.run(
+        Keyword.merge(
+          [
+            model: WideDrawModel,
+            targets: [{WorkerTaggingAdapter, config: %{recorder: recorder, counter: counter}}],
+            arrival_rate: 5,
+            duration: {1, :seconds}
+          ],
+          opts
+        )
+      )
+
+    by_worker =
+      recorder
+      |> Agent.get(& &1)
+      |> Enum.reverse()
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    {report, by_worker}
+  end
+
+  describe "LoadTest seed" do
+    test "the same seed and run nonce send the same commands from each worker" do
+      {_, first} = load_test_commands(seed: 9_001, run_nonce: 1)
+      {_, second} = load_test_commands(seed: 9_001, run_nonce: 1)
+
+      assert [_ | _] = Map.keys(first)
+      assert Map.keys(first) == Map.keys(second)
+
+      for {worker, commands} <- first do
+        length = min(length(commands), length(second[worker]))
+        assert length > 0
+        assert Enum.take(commands, length) == Enum.take(second[worker], length)
+      end
+    end
+
+    test "a different seed sends different commands" do
+      {_, first} = load_test_commands(seed: 9_001, run_nonce: 1)
+      {_, second} = load_test_commands(seed: 9_002, run_nonce: 1)
+
+      length = min(length(first[1]), length(second[1]))
+      refute Enum.take(first[1], length) == Enum.take(second[1], length)
+    end
+
+    test "a run without a seed reports the seed it drew" do
+      {report, _} = load_test_commands([])
+
+      assert is_integer(report.config.seed) and report.config.seed > 0
+      assert Report.format(report, :terminal) =~ "Seed:"
+      assert Report.format(report, :markdown) =~ "| Seed | #{report.config.seed} |"
+      assert Report.format(report, :json) =~ ~s("seed": #{report.config.seed})
     end
   end
 end
