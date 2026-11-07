@@ -70,7 +70,7 @@ A **Target** (`lib/property_damage/target.ex`) is one system a run executes agai
 
 - **Scheduler / Variant** (`lib/property_damage/scheduler.ex`, `lib/property_damage/variant.ex`): Runs one sequence on every target in lockstep, one Variant process per target, and compares observations at each boundary.
 - **Executor** (`lib/property_damage/executor.ex`, `lib/property_damage/executor/stepping.ex`): Runs one command, with placeholder resolution, settle, projection updates and checks. `Executor.Stepping` is the public one-command-at-a-time seam that Variant and Replay use.
-- **Shrinker** (`lib/property_damage/shrinker.ex`) — Hierarchical and linear shrinking strategies, judged by an oracle that runs each candidate. Deterministic given seed.
+- **Shrinker** (`lib/property_damage/shrinker.ex`): Hierarchical and linear shrinking strategies, judged by an oracle that runs each candidate. Deterministic given seed.
 - **External / Placeholder** (`lib/property_damage/external.ex`, `lib/property_damage/placeholder.ex`) — Symbolic value system for server-generated data. `external()` (public) marks an event field the SUT mints; internally each such field becomes a `%PropertyDamage.Placeholder{}` that is created during simulation, resolved from real SUT events, and threaded into later commands.
 - **Settle** (`lib/property_damage/settle.ex`) — Retry logic for eventually consistent systems. Commands declare `:async` or `:probe` semantics.
 - **Export** (`lib/property_damage/export/`) — Generate ExUnit tests, scripts (curl/Python/Elixir), Livebook notebooks from failures.
