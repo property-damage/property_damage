@@ -287,12 +287,12 @@ For a root that runs as an expansion, a `@check every: Module` SHALL fire on a l
 
 ### Requirement: Check Detection and Metadata
 
-The framework SHALL detect checks at compile time using an `@on_definition` hook. Check metadata SHALL be stored and accessible via the `__checks__/0` function on the projection module.
+The framework SHALL detect checks at compile time using an `@on_definition` hook. Each check SHALL be stored as a `PropertyDamage.Model.Projection.Check` struct with a `kind` of `:step` (`@check every:`), `:phase` (`@check at:`) or `:eventually` (`@eventually`), derived once from the check's type and trigger. `PropertyDamage.Model.Projection.Checks.list/1` SHALL return a projection's checks, and an empty list for a module that does not use the projection macros.
 
 #### Scenario: Checks discovered at compile time
 - **WHEN** a projection module is compiled
 - **THEN** all functions preceded by `@check` or `@eventually` are recorded as checks
-- **AND** their metadata is stored in the module's `__checks__/0` function
+- **AND** each is recorded as a `Check` struct readable through `PropertyDamage.Model.Projection.Checks.list/1`
 
 #### Scenario: Synchronous check metadata
 - **WHEN** a synchronous check is detected
@@ -409,7 +409,7 @@ The `use PropertyDamage.Model.Projection` macro SHALL set up the check detection
 - **WHEN** a module invokes `use PropertyDamage.Model.Projection`
 - **THEN** the module declares `@behaviour PropertyDamage.Model.Projection`
 - **AND** check detection hooks are registered
-- **AND** the `__checks__/0` function is generated at compile time
+- **AND** the check list is generated at compile time
 
 ### Requirement: Declared Docs Capture (DR-058)
 

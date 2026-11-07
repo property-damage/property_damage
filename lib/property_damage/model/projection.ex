@@ -377,6 +377,8 @@ defmodule PropertyDamage.Model.Projection do
   - `command_or_event` - The command or event that triggered this check
   """
 
+  alias PropertyDamage.Model.Projection.Check
+
   # Note: No callback defined - checks are detected via @check/@eventually attributes
 
   @optional_callbacks init: 0, apply: 2
@@ -469,9 +471,9 @@ defmodule PropertyDamage.Model.Projection do
       @doc """
       Returns metadata for all checks defined in this module.
 
-      Each check entry contains:
-      - `:name` - Atom identifying the check
-      - `:trigger` - Normalized trigger specification
+      Each entry is a `PropertyDamage.Model.Projection.Check` with its `:name`,
+      `:kind` and normalized `:trigger`. Read the entries through
+      `PropertyDamage.Model.Projection.Checks.list/1`.
       """
       def __checks__, do: unquote(Macro.escape(checks))
 
@@ -697,13 +699,15 @@ defmodule PropertyDamage.Model.Projection do
         {inv, opts} = extract_invariant_meta(hd(eventually_opts), check_name, env)
 
         check_def =
-          Map.merge(inv, %{
-            name: check_name,
-            type: :polling,
-            function_name: name,
-            eventually: normalize_eventually(opts),
-            predicate_source: predicate_source
-          })
+          Check.new(
+            Map.merge(inv, %{
+              name: check_name,
+              type: :polling,
+              function_name: name,
+              eventually: normalize_eventually(opts),
+              predicate_source: predicate_source
+            })
+          )
 
         Module.put_attribute(env.module, :checks, check_def)
         Module.put_attribute(env.module, :__pd_check_fns__, name)
@@ -716,12 +720,14 @@ defmodule PropertyDamage.Model.Projection do
         {inv, opts} = extract_invariant_meta(hd(check_opts), check_name, env)
 
         check_def =
-          Map.merge(inv, %{
-            name: check_name,
-            type: :synchronous,
-            function_name: name,
-            trigger: normalize_trigger(opts)
-          })
+          Check.new(
+            Map.merge(inv, %{
+              name: check_name,
+              type: :synchronous,
+              function_name: name,
+              trigger: normalize_trigger(opts)
+            })
+          )
 
         Module.put_attribute(env.module, :checks, check_def)
         Module.put_attribute(env.module, :__pd_check_fns__, name)

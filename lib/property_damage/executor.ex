@@ -66,6 +66,7 @@ defmodule PropertyDamage.Executor do
   }
 
   alias PropertyDamage.Model.Projection
+  alias PropertyDamage.Model.Projection.Checks
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Log.Cap
@@ -1341,21 +1342,11 @@ defmodule PropertyDamage.Executor do
         fn projection, {:ok, counters, failures} ->
           projection_state = Map.get(projections, projection)
 
-          # Only projections that use PropertyDamage.Model.Projection have __checks__/0
-          checks =
-            if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-              projection.__checks__()
-            else
-              []
-            end
-
-          case run_projection_checks(
+          case Checks.step_checks(
                  projection,
                  projection_state,
-                 checks,
-                 step_ctx,
-                 counters,
-                 Map.get(check_ctx, :telemetry)
+                 Map.put(step_ctx, :telemetry, Map.get(check_ctx, :telemetry)),
+                 counters
                ) do
             {:ok, new_counters} ->
               {:cont, {:ok, new_counters, failures}}
@@ -1397,70 +1388,6 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp run_projection_checks(
-         projection,
-         projection_state,
-         checks,
-         step_ctx,
-         counters,
-         telemetry
-       ) do
-    alias PropertyDamage.Model.Projection
-
-    # Only synchronous (@check) checks run here; polling (@eventually)
-    # checks have no :trigger key and are handled by the pollers. Without
-    # this filter, accessing check.trigger on a polling check raised
-    # a KeyError that crashed the run on the first command. Lifecycle-boundary
-    # checks (@check at:, DR-024) are also synchronous but fire only at a
-    # phase boundary, not during the command loop, so they are excluded here and
-    # dispatched separately by run_phase_checks/2.
-    # A step that does not sample (a setup command's) skips the `every: N`
-    # triggers: they read counters it did not advance.
-    sampling = Map.get(step_ctx, :sampling, true)
-
-    sync_checks =
-      Enum.filter(checks, fn check ->
-        check.type == :synchronous and not match?(%{type: :at}, check.trigger) and
-          (sampling or not match?(%{type: :every_n}, check.trigger))
-      end)
-
-    Enum.reduce_while(sync_checks, {:ok, counters}, fn check, {:ok, acc_counters} ->
-      if Projection.should_run?(
-           check.trigger,
-           step_ctx.step_type,
-           step_ctx.module,
-           acc_counters
-         ) do
-        # The check runs: record the firing (DR-026) before invoking it, so
-        # a failing check still counts as exercised. This single site covers
-        # both the synchronous command/event path and the asynchronous
-        # observation path (DR-025), which dispatches through run_step_checks/7.
-        fired = bump_fired(acc_counters, projection, check.name)
-
-        # The check's return is its verdict (DR-052); a raise is captured
-        # with its stacktrace.
-        case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
-               projection
-               |> apply(check.function_name, [projection_state, step_ctx.command_or_event])
-               |> Verdict.check(check.name)
-             end) do
-          :ok -> {:cont, {:ok, fired}}
-          {:failed, e, stacktrace} -> {:halt, {:error, check.name, {e, stacktrace}, fired}}
-        end
-      else
-        {:cont, {:ok, acc_counters}}
-      end
-    end)
-  end
-
-  # Record one firing of a check (DR-026). Per-check fire counts are
-  # colocated as {:fired, projection, name} keys inside the existing
-  # check_counters map: inert to should_run?/4 (which does only point
-  # lookups, never iterates).
-  defp bump_fired(counters, projection, name) do
-    Map.update(counters, {:fired, projection, name}, 1, &(&1 + 1))
-  end
-
   # ============================================================================
   # Lifecycle-Boundary Checks (@check at:, DR-024)
   # ============================================================================
@@ -1498,7 +1425,7 @@ defmodule PropertyDamage.Executor do
                                                                            {:ok, recorded,
                                                                             acc_counters} ->
         projection_state = Map.get(projections, projection)
-        checks = phase_checks(projection, phase)
+        checks = Checks.phase_checks(projection, phase)
 
         case run_phase_projection_checks(
                projection,
@@ -1534,7 +1461,7 @@ defmodule PropertyDamage.Executor do
                                                             {:ok, acc_recorded, acc_counters} ->
       # Record the firing (DR-026) before invoking, so a failing lifecycle check
       # still counts as exercised.
-      fired = bump_fired(acc_counters, projection, check.name)
+      fired = Checks.record_fire(acc_counters, projection, check.name)
 
       case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
              projection
@@ -1570,29 +1497,6 @@ defmodule PropertyDamage.Executor do
           end
       end
     end)
-  end
-
-  # The @check at: <phase> checks declared on a projection. Lifecycle
-  # checks stay type: :synchronous; the at: phase lives in the trigger spec.
-  defp phase_checks(projection, phase) do
-    if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-      Enum.filter(projection.__checks__(), fn check ->
-        check_type!(projection, check) == :synchronous and
-          match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
-      end)
-    else
-      []
-    end
-  end
-
-  # A hand-written `__checks__/0` entry without `:type` is a model fault, so
-  # it raises with the projection and the entry instead of skipping the entry.
-  defp check_type!(_projection, %{type: type}), do: type
-
-  defp check_type!(projection, entry) do
-    raise ArgumentError,
-          "#{inspect(projection)}.__checks__/0 returned an entry without a :type key " <>
-            "(expected :synchronous or :eventually): #{inspect(entry)}"
   end
 
   defp projection_modules(model), do: PropertyDamage.Model.projection_modules(model)
@@ -1888,9 +1792,7 @@ defmodule PropertyDamage.Executor do
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
-            PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0),
-            check <- projection.__checks__(),
-            check.type == :polling,
+            check <- Checks.eventually_checks(projection),
             Projection.event_matches_poll_trigger?(check.eventually, event_module) do
           projection_state = Map.get(state.projections, projection)
           returned = apply(projection, check.function_name, [projection_state, event])
@@ -1986,7 +1888,7 @@ defmodule PropertyDamage.Executor do
 
     counters =
       Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
-        bump_fired(acc, proj, name)
+        Checks.record_fire(acc, proj, name)
       end)
 
     %{state | active_pollers: state.active_pollers ++ new_pollers, check_counters: counters}

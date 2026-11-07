@@ -162,7 +162,7 @@ defmodule PropertyDamage.Failure.Setup do
       raised; `detail` is the term or the exception
     * `:model` - model code raised, exited or threw while the variant came up,
       after the adapter's `setup/1` returned `{:ok, _}` (for example a
-      `__checks__/0` entry without `:type`); `detail` is the exception, with
+      hand-written check-list entry without `:type`); `detail` is the exception, with
       an exit or throw as an `ErlangError`
     * `:variant` - the variant process exited while it came up, in a way no
       `setup/1` or model code could rescue (an untrappable kill, or the crash

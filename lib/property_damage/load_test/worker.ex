@@ -12,7 +12,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   alias PropertyDamage.Executor.Timeout
   alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.Model.Projection
+  alias PropertyDamage.Model.Projection.Checks
   alias PropertyDamage.Sequence.Position
 
   defstruct [
@@ -514,55 +514,29 @@ defmodule PropertyDamage.LoadTest.Worker do
        ) do
     all_projections = PropertyDamage.Model.projection_modules(model)
 
+    step_ctx = %{step_type: step_type, module: module, command_or_event: command_or_event}
+
     failure_count =
       Enum.reduce(all_projections, 0, fn projection, failures ->
         projection_state = Map.get(projections, projection)
 
-        checks =
-          if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-            projection.__checks__()
-          else
-            []
-          end
+        case Checks.step_checks(projection, projection_state, step_ctx, counters) do
+          {:ok, _counters} ->
+            failures
 
-        Enum.reduce(checks, failures, fn check, acc_failures ->
-          if Projection.should_run?(check.trigger, step_type, module, counters) do
-            # The check's return is its verdict (DR-052); a raise fails it too.
-            try do
-              projection
-              |> apply(check.function_name, [projection_state, command_or_event])
-              |> PropertyDamage.Verdict.check(check.name)
-            rescue
-              e -> {:fail, e}
-            catch
-              kind, reason -> {:fail, PropertyDamage.Verdict.caught(kind, reason)}
-            end
-            |> case do
-              :pass ->
-                acc_failures
+          {:error, _check_name, {e, _stacktrace}, _counters} ->
+            failure = %{
+              reason: e,
+              command_index: command_index,
+              step_type: step_type,
+              module: module,
+              timestamp: System.monotonic_time(:millisecond)
+            }
 
-              {:fail, e} ->
-                failure = %{
-                  reason: e,
-                  command_index: command_index,
-                  step_type: step_type,
-                  module: module,
-                  timestamp: System.monotonic_time(:millisecond)
-                }
+            Metrics.record_check_failure(state.metrics, e.__struct__, module, failure)
 
-                Metrics.record_check_failure(
-                  state.metrics,
-                  e.__struct__,
-                  module,
-                  failure
-                )
-
-                acc_failures + 1
-            end
-          else
-            acc_failures
-          end
-        end)
+            failures + 1
+        end
       end)
 
     {counters, failure_count}

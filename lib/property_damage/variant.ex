@@ -227,7 +227,7 @@ defmodule PropertyDamage.Variant do
   (any other non-`{:ok, _}` return is the reason itself), or
   `{:error, {:raised, exception}}` when setup raised. Model code that faults
   after the adapter's `setup/1` returned `{:ok, _}` (a malformed
-  `__checks__/0` entry, say) returns `{:error, failure}` with a
+  hand-written check-list entry, say) returns `{:error, failure}` with a
   `%PropertyDamage.Failure{}` of cause `:model`; the adapter's `teardown/1`
   runs for it. After an error the
   queue, injectors and mocks are released, once (a later `release/1` or

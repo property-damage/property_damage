@@ -445,8 +445,6 @@ defmodule PropertyDamage.ForensicsTest do
   end
 
   describe "analyze/1 over checks that are not per-event samples" do
-    @describetag :known_defect
-
     test "replays events through a model that declares an @eventually check" do
       events = [
         %OrderCreated{order_id: "o1", amount: 10, currency: "USD"},

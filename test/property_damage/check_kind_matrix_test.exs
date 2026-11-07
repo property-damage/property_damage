@@ -38,17 +38,8 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   # Each one has a test below. A file added to or dropped from the output
   # turns `the reader list` red until this list and its tests follow.
   @readers ~w(
-    error.ex
-    executor.ex
-    failure.ex
-    failure_report/context.ex
-    forensics.ex
-    load_test/worker.ex
-    model.ex
     model/projection.ex
-    suggestions/analyzer.ex
-    validation.ex
-    variant.ex
+    model/projection/checks.ex
   )
 
   # ==========================================================================
@@ -303,14 +294,12 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   end
 
   describe "forensics.ex" do
-    @tag :known_defect
     test "analyzes events through a projection that declares every check form" do
       assert {:ok, _result} = Forensics.analyze(events: fixture_events(), model: Matrix.Model)
     end
   end
 
   describe "load_test/worker.ex" do
-    @tag :known_defect
     test "a worker that records check failures runs sequences of the model" do
       {:ok, metrics} = Metrics.start_link()
 
@@ -369,7 +358,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   end
 
   describe "suggestions/analyzer.ex" do
-    @tag :known_defect
     test "analyzes the model and lists every check as existing" do
       analysis = PropertyDamage.Suggestions.analyze(Matrix.Model)
 
