@@ -48,7 +48,8 @@ defmodule PropertyDamage do
   one system, a differential run that compares several systems, and a
   path-equivalence run that reaches one system by two command paths and
   compares the outcomes. For each
-  generated sequence, `PropertyDamage.Scheduler` starts one
+  generated sequence, the run driver `PropertyDamage.Runner` calls
+  `PropertyDamage.Scheduler`, which starts one
   `PropertyDamage.Variant` process per target and advances them in lockstep.
   Each variant executes one command at a time through
   `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
@@ -202,6 +203,7 @@ defmodule PropertyDamage do
     Progress.RunResult,
     Progress.RunUpdate,
     ReplayArtifact,
+    Runner,
     RunTrace,
     Scheduler,
     SeedLibrary,
@@ -1088,33 +1090,35 @@ defmodule PropertyDamage do
     end
   end
 
-  # Runs a generated linear sequence on every target. `run.seed` and
-  # `run.run_number` derive the run's effective seed.
+  # Runs a generated linear sequence on every target through the run driver.
+  # `run.seed` and `run.run_number` derive the run's effective seed.
   defp schedule(ctx, run) do
-    {:ok, outcome} =
-      Scheduler.run(
-        model: ctx.model,
-        targets: ctx.targets,
-        commands: Sequence.to_list(run.sequence),
-        variants: Expansion.schedule(ctx.targets, run.expansion),
-        setup_commands: run.sequence.setup,
-        teardown_commands: run.sequence.teardown,
-        placeholder_registry: run.sequence.registry,
-        seed: run.seed,
-        run_number: run.run_number,
-        run_nonce: ctx.run_nonce,
-        # The exploration run is epoch 0 (DR-034); shrink attempts and the
-        # reproduction re-execution draw later epochs.
-        mint_epoch: 0,
-        concurrency: ctx.concurrency,
-        compare: ctx.compare,
-        measure_latency: ctx.measure_latency,
-        stutter_config: ctx.stutter_config,
-        keep_attempts: ctx.keep_attempts,
-        external_markers: ctx.external_markers,
-        check_mode: ctx.check_mode
-      )
+    plan = %{
+      commands: Sequence.to_list(run.sequence),
+      variants: Expansion.schedule(ctx.targets, run.expansion),
+      setup_commands: run.sequence.setup,
+      teardown_commands: run.sequence.teardown,
+      placeholder_registry: run.sequence.registry
+    }
 
+    context = %Runner.Context{
+      model: ctx.model,
+      targets: ctx.targets,
+      seed: run.seed,
+      run_number: run.run_number,
+      run_nonce: ctx.run_nonce,
+      # The exploration run is epoch 0 (DR-034); shrink attempts and the
+      # reproduction re-execution draw later epochs.
+      mint_epoch: 0,
+      concurrency: ctx.concurrency,
+      compare: ctx.compare,
+      measure_latency: ctx.measure_latency,
+      stutter_config: ctx.stutter_config,
+      keep_attempts: ctx.keep_attempts,
+      check_mode: ctx.check_mode
+    }
+
+    {:ok, outcome} = Runner.execute(plan, context)
     outcome
   end
 

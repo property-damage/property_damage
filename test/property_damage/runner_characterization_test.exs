@@ -36,8 +36,6 @@ defmodule PropertyDamage.RunnerCharacterizationTest do
           )
         end
 
-        # Unbuilt until the runner exists.
-        @tag :known_defect
         test "runner, seed #{seed}: the first run equals the scheduler's and the golden run's",
              %{golden: golden} do
           scheduled = first_run(&RunnerSupport.scheduler_run/2, @case_name, @seed)

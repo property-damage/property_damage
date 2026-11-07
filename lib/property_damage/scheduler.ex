@@ -6,8 +6,8 @@ defmodule PropertyDamage.Scheduler do
   Each target runs as a `PropertyDamage.Variant`: its own process with its own
   executor state, event queue, injectors, mocks and pollers. The scheduler only
   tells the variants how far to go and looks at what they observed.
-  `PropertyDamage.run/1` calls `run/1` once per generated linear sequence, for
-  one target or several.
+  `PropertyDamage.run/1` runs each generated linear sequence, for one target or
+  several, through `PropertyDamage.Runner.execute/2`, which calls `run/1`.
 
   ## Lockstep
 
