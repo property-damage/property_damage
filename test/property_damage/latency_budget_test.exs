@@ -374,12 +374,12 @@ defmodule PropertyDamage.LatencyBudgetTest do
   describe "report" do
     @describetag :tmp_dir
 
-    test "a latency report persists at format version 18 and a version-11 file is refused",
+    test "a latency report persists at format version 19 and a version-11 file is refused",
          %{tmp_dir: dir} do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 18::8, _rest::binary>> = binary} = File.read(path)
+      assert {:ok, <<"PD", 19::8, _rest::binary>> = binary} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.report_kind == :latency_exceeded
@@ -390,7 +390,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
       File.write!(old, <<"PD", 11::8, rest::binary>>)
-      assert {:error, {:unsupported_format_version, 11, 18}} = Persistence.load(old)
+      assert {:error, {:unsupported_format_version, 11, 19}} = Persistence.load(old)
     end
   end
 

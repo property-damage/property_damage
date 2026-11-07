@@ -23,14 +23,14 @@ defmodule PropertyDamage.Log.LogFilterMemoryTest do
     end
   end
 
-  test "a saved and loaded report holds no filter, and the file is still version 18", %{dir: dir} do
+  test "a saved and loaded report holds no filter, and the file is still version 19", %{dir: dir} do
     report = F.filter_report!(log: [only: [:http], except: [:body]])
 
     assert F.field(report, :log_filter) == [only: [:http], except: [:body]],
            "control: it holds one"
 
     assert {:ok, path} = Persistence.save(report, dir)
-    assert <<"PD", 18, _checksum::32, term::binary>> = File.read!(path)
+    assert <<"PD", 19, _checksum::32, term::binary>> = File.read!(path)
 
     saved = inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     refute saved =~ "only: [:http]"

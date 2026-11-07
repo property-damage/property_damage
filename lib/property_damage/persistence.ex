@@ -32,8 +32,9 @@ defmodule PropertyDamage.Persistence do
 
   A file of an older format version is refused with
   `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
-  failure under the current version. Format 18 dropped the fields of the
-  removed parallel-branch mode from the saved sequence, trace and event log.
+  failure under the current version. Format 19 renamed the report's `kind`
+  field to `report_kind`, so a format 18 file no longer decodes into the
+  current report.
 
   ## Naming Convention
 
@@ -63,7 +64,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 18
+  @version 19
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -501,6 +502,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V19 format: a report's outcome field is `report_kind` (it was `kind`), so
+  # `kind` names only the fine kind of a failure in a report, a saved file and
+  # the JSON export.
   # V18 format: a sequence holds only its roots (`prefix`), setup and teardown
   # commands; a trace records no branch interleaving; an event-log entry and a
   # failure name no branch, and the check kind for a parallel-branch ordering
@@ -565,7 +569,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-17 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-18 are refused (DR-041, following DR-039/DR-040).
+  # A v18 report stores its outcome in a `kind` field that v19 renamed
+  # `report_kind`.
   # A v17 sequence, trace or event-log entry may carry the parallel-branch
   # fields v18 dropped, and no longer decodes into the current structs.
   # A v16 file may carry the fault-injection event source or failure kind,

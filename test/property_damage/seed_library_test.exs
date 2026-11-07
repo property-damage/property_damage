@@ -23,7 +23,7 @@ defmodule PropertyDamage.SeedLibraryTest do
       {:ok, library} =
         SeedLibrary.add_seed(SeedLibrary.new(), 123,
           model: "MyModel",
-          failure_type: :check_failed
+          kind: :check_failed
         )
 
       assert :ok = SeedLibrary.save(library, path)
@@ -77,9 +77,38 @@ defmodule PropertyDamage.SeedLibraryTest do
       entry = hd(loaded.entries)
       assert entry.seed == 999
       assert entry.consecutive_passes == 0
-      assert entry.failure_type == :check_failed
+      assert entry.kind == :check_failed
       assert entry.check_name == :balance
       refute Map.has_key?(entry, :status)
+    end
+
+    test "loads a version-2 entry's failure_type as its kind" do
+      path = tmp_path("version_2")
+      on_exit(fn -> File.rm(path) end)
+
+      File.write!(
+        path,
+        ~s({"version": 2, "entries": [{"seed": 7, "failure_type": "poll_timeout"}]})
+      )
+
+      assert {:ok, %{version: 3, entries: [entry]}} = SeedLibrary.load(path)
+      assert entry.kind == :poll_timeout
+      refute Map.has_key?(entry, :failure_type)
+    end
+
+    test "a saved library stores the kind and loads it back" do
+      path = tmp_path("version_3")
+      on_exit(fn -> File.rm(path) end)
+
+      {:ok, library} = SeedLibrary.add_seed(SeedLibrary.new(), 5, kind: :idempotency_violation)
+      assert :ok = SeedLibrary.save(library, path)
+
+      assert %{"version" => 3, "entries" => [%{"kind" => "idempotency_violation"} = saved]} =
+               path |> File.read!() |> Jason.decode!()
+
+      refute Map.has_key?(saved, "failure_type")
+      assert {:ok, %{entries: [entry]}} = SeedLibrary.load(path)
+      assert entry.kind == :idempotency_violation
     end
 
     test "loads a version-1 library's entries as a current library" do
@@ -87,7 +116,7 @@ defmodule PropertyDamage.SeedLibraryTest do
       on_exit(fn -> File.rm(path) end)
       File.write!(path, ~s({"version": 1, "entries": [{"seed": 7}, {"seed": 8}]}))
 
-      assert {:ok, %{version: 2, entries: entries}} = SeedLibrary.load(path)
+      assert {:ok, %{version: 3, entries: entries}} = SeedLibrary.load(path)
       assert Enum.map(entries, & &1.seed) == [7, 8]
     end
   end
@@ -105,7 +134,7 @@ defmodule PropertyDamage.SeedLibraryTest do
     end
 
     test "a failing replay resets the streak and refreshes descriptive metadata" do
-      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 1, failure_type: :check_failed)
+      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 1, kind: :check_failed)
       lib = SeedLibrary.record_run(lib, 1, failed: false)
       lib = SeedLibrary.record_run(lib, 1, failed: false)
       assert seed_entry(lib, 1).consecutive_passes == 2
@@ -113,12 +142,12 @@ defmodule PropertyDamage.SeedLibraryTest do
       lib =
         SeedLibrary.record_run(lib, 1,
           failed: true,
-          failure_type: :poll_timeout,
+          kind: :poll_timeout,
           check_name: :eventually
         )
 
       assert seed_entry(lib, 1).consecutive_passes == 0
-      assert seed_entry(lib, 1).failure_type == :poll_timeout
+      assert seed_entry(lib, 1).kind == :poll_timeout
       assert seed_entry(lib, 1).check_name == :eventually
     end
   end

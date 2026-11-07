@@ -68,7 +68,7 @@ defmodule PropertyDamage.ReplayOptionTest do
 
       assert {:error, replayed} = replay(path, targets())
       assert identity(replayed) == identity(report)
-      assert replayed.variant.index == term.failure.variant_index
+      assert replayed.variant.index == elem(term.failure.signature, 2)
       assert replayed.failed_at_index == term.failure.root_index
       assert replayed.failed_at_index == report.failed_at_index
 

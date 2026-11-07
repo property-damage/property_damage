@@ -215,7 +215,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   test "a still-failing replay halts before exploration, resetting the streak" do
     path = tmp_path("halt")
-    preseed(path, 777, model: "M", failure_type: :check_failed)
+    preseed(path, 777, model: "M", kind: :check_failed)
 
     # Give it an existing streak so we can observe the reset.
     {:ok, lib} = SeedLibrary.load(path)

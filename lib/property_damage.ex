@@ -1453,12 +1453,12 @@ defmodule PropertyDamage do
 
   defp replay_report(_ctx, _found, false), do: nil
 
-  # Refresh descriptive metadata from the new failure. Keep the prior
-  # failure_type if the reason did not classify (nil); check_name is
-  # legitimately nil for many failure types, so it is refreshed as-is.
+  # Refresh descriptive metadata from the new failure. Keep the prior kind
+  # if the reason did not classify (nil); check_name is legitimately nil for
+  # many failure kinds, so it is refreshed as-is.
   defp replay_refresh(reason) do
-    {failure_type, check_name} = FailureReport.classify_reason(reason)
-    [check_name: check_name] ++ if(failure_type, do: [failure_type: failure_type], else: [])
+    {kind, check_name} = FailureReport.classify_reason(reason)
+    [check_name: check_name] ++ if(kind, do: [kind: kind], else: [])
   end
 
   defp pass_outcome(library, seed, k) do
@@ -2446,7 +2446,7 @@ defmodule PropertyDamage do
 
       # Only check failures
       failures = PropertyDamage.list_failures("failures/",
-        filter: &(&1.failure_type == :check_failed))
+        filter: &(&1.kind == :check_failed))
   """
   @spec list_failures(Path.t(), keyword()) :: [map()]
   defdelegate list_failures(directory, opts \\ []), to: PropertyDamage.Persistence, as: :list

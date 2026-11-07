@@ -29,20 +29,21 @@ defmodule PropertyDamage.ReplayArtifact do
   # The term:
   #
   #   %{
-  #     format: 2,
+  #     format: 3,
   #     model: module,
   #     seed: the seed the run generated from,
   #     run: 1,
   #     external_markers: [atom],                        the run's atom markers
   #     targets: [%{name: name, expansion: mode}],      the reference first
-  #     failure: %{kind:, name:, variant_index:, root_index:},
+  #     failure: %{signature: {kind, name, variant_index}, root_index:},
   #     prefix: [setup command],
   #     roots: [%{root_id: id, command: root command}],
   #     choices: %{name => [%{root_id:, entry:, commands:, aliases:}]}
   #   }
   #
-  # The failure is recorded as data (its kind, its name, the failing target's
-  # index and the root), never as the exception or mismatch it carried. The
+  # The failure is recorded as data (its `Failure.signature/2`, which holds its
+  # kind, its name and the failing target's index, and the root), never as the
+  # exception or mismatch it carried. The
   # teardown commands are not recorded: a replay draws them against the state
   # the roots leave, as every run does.
   #
@@ -63,7 +64,7 @@ defmodule PropertyDamage.ReplayArtifact do
 
   alias PropertyDamage.Sequence.Position
 
-  @format 2
+  @format 3
   @header "# PropertyDamage replay artifact, format #{@format}"
   @header_prefix "# PropertyDamage replay artifact, format "
   @keys [
@@ -152,9 +153,7 @@ defmodule PropertyDamage.ReplayArtifact do
         external_markers: report.external_markers,
         targets: targets,
         failure: %{
-          kind: report.report_kind,
-          name: Failure.name(report.failure_reason),
-          variant_index: report.variant && report.variant.index,
+          signature: Failure.signature(report.failure_reason, variant_index(report)),
           root_index: report.failed_at_index
         },
         prefix: report.setup_commands,
@@ -304,8 +303,8 @@ defmodule PropertyDamage.ReplayArtifact do
 
   @doc false
   # Writes `term` into `dir` (created when missing). The file is
-  # `file_name(term)`, replaced when it holds the same failure (the same kind,
-  # name and failing target) under the same targets, as a re-shrink of that
+  # `file_name(term)`, replaced when it holds the same failure (the same
+  # signature) under the same targets, as a re-shrink of that
   # failure writes, or when it does not read as an artifact. A file holding
   # another failure or other targets is never replaced: the term goes to
   # `<Model>_seed<n>_<k>.replay.exs`, the smallest `k` from 2 whose file is
@@ -347,8 +346,7 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp same_failure?(existing, term) do
     existing.targets == term.targets and
-      Map.take(existing.failure, [:kind, :name, :variant_index]) ==
-        Map.take(term.failure, [:kind, :name, :variant_index])
+      existing.failure.signature == term.failure.signature
   end
 
   @doc false
@@ -1068,16 +1066,18 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   @doc false
-  # Whether `report` fails as the artifact `term` records: the same kind, the
-  # same failure name, the same failing target (by name) and the same root.
+  # Whether `report` fails as the artifact `term` records: the same
+  # `Failure.signature/2`, the same failing target (by name) and the same root.
   @spec reproduced?(t(), FailureReport.t()) :: boolean()
   def reproduced?(term, %FailureReport{} = report) do
-    recorded_name =
-      term.targets |> Enum.at(term.failure.variant_index || 0, %{}) |> Map.get(:name)
+    {_kind, _name, recorded_index} = term.failure.signature
+    recorded_name = term.targets |> Enum.at(recorded_index, %{}) |> Map.get(:name)
 
-    report.report_kind == term.failure.kind and
-      Failure.name(report.failure_reason) == term.failure.name and
+    Failure.signature(report.failure_reason, variant_index(report)) == term.failure.signature and
       (report.variant && report.variant.name) == recorded_name and
       report.failed_at_index == term.failure.root_index
   end
+
+  defp variant_index(%FailureReport{variant: %{index: index}}), do: index
+  defp variant_index(%FailureReport{}), do: 0
 end
