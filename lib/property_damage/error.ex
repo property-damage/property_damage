@@ -283,7 +283,7 @@ defmodule PropertyDamage.Error do
     #{cmd_info}
     Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
 
-    Model code (a projection, a check or a hand-written `__checks__/0`) raised,
+    Model code (a projection, a check or a hand-written check list) raised,
     exited or threw while the target came up. The adapter's setup/1 had succeeded.
 
     Suggestions:

@@ -38,11 +38,8 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   # Each one has a test below. A file added to or dropped from the output
   # turns `the reader list` red until this list and its tests follow.
   @readers ~w(
-    error.ex
-    failure.ex
     model/projection.ex
     model/projection/checks.ex
-    variant.ex
   )
 
   # ==========================================================================
