@@ -147,7 +147,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
   # ----------------------------------------------------------------------------
 
   describe "removal" do
-    # unbuilt until the shrinker takes an oracle
     test "linear removal reaches the two-command repro" do
       {result, calls} = shrink(original(), failing_at(&O.withdraw_after_deposit/1), 4)
 
@@ -164,7 +163,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert List.last(failed_calls(calls)).plan.commands == roots(result)
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "hierarchical removal drops a dependency chain, root by level" do
       # Eight zero-weight links, each consuming the previous link's external id,
       # then one heavy link: nine roots, above the granularity threshold. The
@@ -206,7 +204,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
   end
 
   describe "argument simplification" do
-    # unbuilt until the shrinker takes an oracle
     test "an integer argument shrinks to the smallest value that still fails" do
       # The withdrawal fails from 5 up. Halving walks 40, 20, 10, 5, then 2,
       # which passes, so 5 is the least reachable value. The deposit's amount
@@ -230,7 +227,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
   end
 
   describe "candidates the shrinker does not adopt" do
-    # unbuilt until the shrinker takes an oracle
     test "a candidate whose setup failed is never adopted" do
       commands = [deposit(:alice, 10), audit(:alice), withdraw(:alice, 5)]
 
@@ -247,7 +243,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert result.stop == :done
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "a candidate the model rejects never reaches the oracle" do
       # A withdrawal is valid only after an audit. Dropping the audit leaves a
       # deposit and a withdrawal that the predicate would call failing, so an
@@ -269,7 +264,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert length(calls) == 7
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "a failure with another signature is not adopted" do
       commands = [deposit(:alice, 10), audit(:alice), withdraw(:alice, 5)]
       other = Failure.signature(Failure.check_failed(:other_check, "other"), 0)
@@ -288,7 +282,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert roots(result) == commands
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "a failure at a later root is not adopted" do
       # Two withdrawals fail. With a deposit first the failure is at the last
       # withdrawal (root 3 here); without one, at the first. Dropping the
@@ -311,7 +304,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
   end
 
   describe "stopping" do
-    # unbuilt until the shrinker takes an oracle
     test "stops :max_iterations when the iteration cap is spent" do
       config = Config.new(max_iterations: 2, shrink_arguments: false)
 
@@ -324,7 +316,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert length(roots(result)) > length(minimal())
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "stops :max_time when the time budget is zero" do
       config = Config.new(max_time_ms: 0, shrink_arguments: false)
 
@@ -337,7 +328,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert roots(result) == original()
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "stops :done when it finishes inside its budget" do
       {result, _calls} = shrink(original(), failing_at(&O.withdraw_after_deposit/1), 4)
 
@@ -348,7 +338,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
   end
 
   describe "what the oracle is given" do
-    # unbuilt until the shrinker takes an oracle
     test "each candidate gets a distinct, increasing, positive mint epoch" do
       {_result, calls} = shrink(original(), failing_at(&O.withdraw_after_deposit/1), 4)
       epochs = Enum.map(calls, & &1.epoch)
@@ -359,7 +348,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert epochs == Enum.to_list(1..length(epochs))
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "epochs continue from a counter the caller passes" do
       counter = :atomics.new(1, signed: false)
       :atomics.put(counter, 1, 41)
@@ -374,7 +362,6 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       assert epochs == Enum.to_list(42..(41 + length(epochs)))
     end
 
-    # unbuilt until the shrinker takes an oracle
     test "every plan carries the five runner keys and the setup commands unchanged" do
       setup = [%O.Open{account: :alice}, %O.Open{account: :bob}]
 

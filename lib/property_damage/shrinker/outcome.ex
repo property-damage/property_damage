@@ -20,10 +20,14 @@ defmodule PropertyDamage.Shrinker.Outcome do
     * `root` - the index, among the candidate's roots, of the root the
       failure happened at; `nil` when not known or not `:failed`.
     * `reason` - the failure reason, for the reader; `nil` unless `:failed`.
+    * `adapter_ms` - the milliseconds the candidate's run spent in the
+      adapters' `setup/1` (`:setup`) and `teardown/1` (`:teardown`), summed
+      over its targets; `nil` when the oracle does not measure them. The
+      shrinker adds them up for its stop event.
   """
 
   @enforce_keys [:status]
-  defstruct [:status, :signature, :root, :reason]
+  defstruct [:status, :signature, :root, :reason, :adapter_ms]
 
   @type status :: :passed | :failed | :setup_failed | :invalid
 
@@ -31,6 +35,7 @@ defmodule PropertyDamage.Shrinker.Outcome do
           status: status(),
           signature: PropertyDamage.Failure.signature() | nil,
           root: non_neg_integer() | nil,
-          reason: term()
+          reason: term(),
+          adapter_ms: %{setup: number(), teardown: number()} | nil
         }
 end

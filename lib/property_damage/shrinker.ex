@@ -144,7 +144,8 @@ defmodule PropertyDamage.Shrinker do
     PlaceholderRegistry,
     ReplayArtifact,
     Sequence,
-    Settle
+    Settle,
+    Telemetry
   }
 
   alias PropertyDamage.Sequence.Position
@@ -321,6 +322,8 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_linear(sequence, opts) do
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
     commands = Sequence.to_list(sequence)
+    started_at = System.system_time()
+    Telemetry.shrink_start(%{original_length: length(commands)})
 
     shrink_state =
       opts
@@ -362,6 +365,17 @@ defmodule PropertyDamage.Shrinker do
     shrink_state = cycle(shrink_state)
 
     end_time = System.monotonic_time(:millisecond)
+    stop = stop_reason(shrink_state, end_time)
+
+    Telemetry.shrink_stop(
+      started_at,
+      Map.merge(timing_totals(shrink_state), %{
+        iterations: shrink_state.iterations,
+        original_length: length(commands),
+        shrunk_length: length(shrink_state.commands),
+        stop: stop
+      })
+    )
 
     # Carry the remapped registry so the shrunk sequence (reported and
     # replayed) still resolves its externals, and the teardown commands generated
@@ -377,7 +391,7 @@ defmodule PropertyDamage.Shrinker do
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time,
       cycles: shrink_state.cycles,
-      stop: stop_reason(shrink_state, end_time)
+      stop: stop
     }
   end
 
@@ -420,6 +434,10 @@ defmodule PropertyDamage.Shrinker do
       config: Keyword.get(opts, :config, Config.new()),
       external_markers: Keyword.get(opts, :external_markers, []),
       iterations: 0,
+      # Microseconds the candidates took (slot 1), and the microseconds their
+      # adapters spent in setup/1 (slot 2) and teardown/1 (slot 3); only the
+      # stop event reads them.
+      timers: :atomics.new(3, signed: false),
       # Candidates adopted so far, and the shrink cycles run.
       adopted: 0,
       cycles: 0,
@@ -1058,19 +1076,55 @@ defmodule PropertyDamage.Shrinker do
     # The candidate's registry has its producer_link remapped to the candidate's
     # positions (DR-021), so externals resolve against the shrunk sequence's own
     # indices.
+    started = System.monotonic_time()
     outcome = attempt(keyed, positions, remap_registry(state.registry, positions), state)
+    elapsed = System.monotonic_time() - started
     offset = generation_offset(positions, outcome.root)
 
-    if reproduces?(outcome, state.original_signature) and
-         not later?(offset, state.failing_offset) do
-      %{
-        state
-        | commands: commands,
-          positions: positions,
-          failing_offset: offset || state.failing_offset,
-          adopted: state.adopted + 1
-      }
+    adopted =
+      if reproduces?(outcome, state.original_signature) and
+           not later?(offset, state.failing_offset) do
+        %{
+          state
+          | commands: commands,
+            positions: positions,
+            failing_offset: offset || state.failing_offset,
+            adopted: state.adopted + 1
+        }
+      end
+
+    record_candidate(state, outcome, elapsed)
+
+    Telemetry.shrink_iteration(
+      state.iterations,
+      %{current_length: length((adopted || state).commands), success: adopted != nil},
+      elapsed
+    )
+
+    adopted
+  end
+
+  # Adds the candidate's time and its adapters' setup and teardown time to
+  # the totals of the stop event.
+  defp record_candidate(state, outcome, elapsed) do
+    :atomics.add(state.timers, 1, System.convert_time_unit(elapsed, :native, :microsecond))
+
+    case outcome.adapter_ms do
+      %{setup: setup, teardown: teardown} ->
+        :atomics.add(state.timers, 2, round(setup * 1000))
+        :atomics.add(state.timers, 3, round(teardown * 1000))
+
+      nil ->
+        :ok
     end
+  end
+
+  defp timing_totals(state) do
+    %{
+      candidate_ms: :atomics.get(state.timers, 1) / 1000,
+      setup_ms: :atomics.get(state.timers, 2) / 1000,
+      teardown_ms: :atomics.get(state.timers, 3) / 1000
+    }
   end
 
   # Whether a candidate's outcome is the original failure. Without an

@@ -151,6 +151,9 @@ defmodule PropertyDamage.Variant do
   alias PropertyDamage.Executor.{Phases, Stepping}
   alias PropertyDamage.Runtime.RunServices
 
+  @setup_slot 1
+  @teardown_slot 2
+
   @typedoc "An observation of one command, as `advance_to/2` reports it."
   @type observation :: {:ok, [struct()]}
 
@@ -446,6 +449,9 @@ defmodule PropertyDamage.Variant do
       # The lines of the adapter's setup/1 and teardown/1 (DR-054); the steps'
       # lines live in the executor state.
       logs: %{},
+      # Microseconds the adapter's setup/1 (slot 1) and teardown/1 (slot 2)
+      # took; `finish/1` hands the reference to the result (see `timed/3`).
+      adapter_timers: :atomics.new(2, signed: false),
       released: false
     }
 
@@ -644,7 +650,7 @@ defmodule PropertyDamage.Variant do
         if registry, do: guard(state, [registry])
         state = %{state | mock_registry: registry, mock_contexts: contexts}
 
-        case call_adapter_setup(target) do
+        case call_adapter_setup(target, state.adapter_timers) do
           {:ok, adapter_context} -> {:ok, state, adapter_context}
           {:error, reason} -> {:error, reason, state}
         end
@@ -664,8 +670,8 @@ defmodule PropertyDamage.Variant do
     kind, reason -> {:error, {kind, reason}}
   end
 
-  defp call_adapter_setup(target) do
-    case target.adapter.setup(target.config) do
+  defp call_adapter_setup(target, timers) do
+    case timed(timers, @setup_slot, fn -> target.adapter.setup(target.config) end) do
       {:ok, adapter_context} -> {:ok, adapter_context}
       {:error, reason} -> {:error, reason}
       other -> {:error, other}
@@ -674,6 +680,19 @@ defmodule PropertyDamage.Variant do
     exception -> {:error, {:raised, exception}}
   catch
     kind, reason -> {:error, {kind, reason}}
+  end
+
+  # Runs `fun`, adding the microseconds it took to `slot` of `timers` whether
+  # it returns or not.
+  defp timed(timers, slot, fun) do
+    started = System.monotonic_time()
+
+    try do
+      fun.()
+    after
+      elapsed = System.monotonic_time() - started
+      :atomics.add(timers, slot, System.convert_time_unit(elapsed, :native, :microsecond))
+    end
   end
 
   defp setup_context(state, adapter_context) do
@@ -800,7 +819,13 @@ defmodule PropertyDamage.Variant do
   # A finished result whose failure belongs to a setup command (an
   # `@eventually` window a setup command opened, a check on its drained
   # event) reports it as the setup failure it is, with no root index.
-  defp attribute(result, state), do: Phases.attribute(result, state.setup_commands)
+  defp attribute(result, state) do
+    result = Phases.attribute(result, state.setup_commands)
+
+    # The timers are still running when the result is built: teardown/1 runs
+    # at release. The reference is read after the run ends.
+    if is_map(result), do: Map.put(result, :adapter_timers, state.adapter_timers), else: result
+  end
 
   # ==========================================================================
   # Stepping
@@ -1170,7 +1195,12 @@ defmodule PropertyDamage.Variant do
     {:ok, released} = PropertyDamage.Log.inline(fn -> release_services(state) end)
 
     if state.ctx do
-      released ++ Executor.safe_teardown(state.ctx.adapter, state.ctx.adapter_context)
+      torn_down =
+        timed(state.adapter_timers, @teardown_slot, fn ->
+          Executor.safe_teardown(state.ctx.adapter, state.ctx.adapter_context)
+        end)
+
+      released ++ torn_down
     else
       released
     end

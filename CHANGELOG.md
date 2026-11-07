@@ -628,6 +628,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named under `missing_sources`. `use PropertyDamage.Adapter` now captures the
   adapter's docs like the other `use` macros, so a `def` or `defp` written
   before it is a compile error: move the `use` above it.
+- **The shrinker emits its telemetry events, with timings.** A shrink emits
+  `[:property_damage, :shrink, :start]` once, `[:property_damage, :shrink,
+  :iteration]` for each candidate it tries (with `duration` in native units,
+  and `current_length` and `success` in the metadata) and
+  `[:property_damage, :shrink, :stop]` once. The stop event's measurements add
+  `candidate_ms`, the time spent running candidates, and `setup_ms` and
+  `teardown_ms`, the time the adapters' `setup/1` and `teardown/1` took across
+  all candidates, all in milliseconds. The stop metadata adds `stop`, why the
+  shrink ended. `PropertyDamage.Shrinker.Outcome` has a new `adapter_ms` field
+  for an oracle that times the adapters.
 
 ### Changed
 

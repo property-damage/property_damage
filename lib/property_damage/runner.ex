@@ -89,7 +89,7 @@ defmodule PropertyDamage.Runner do
 
     fn plan, mint_epoch ->
       {:ok, run} = execute(plan, %{context | mint_epoch: mint_epoch})
-      outcome(run)
+      %{outcome(run) | adapter_ms: adapter_ms(run)}
     end
   end
 
@@ -98,6 +98,18 @@ defmodule PropertyDamage.Runner do
        do: %{config | probability: 1.0, enabled: true}
 
   defp shrink_stutter_config(_signature, _config), do: nil
+
+  # The milliseconds the run's targets spent in the adapters' setup/1 and
+  # teardown/1. Each target's result holds the timers its variant filled in;
+  # a target that left no result (its setup failed) holds none.
+  defp adapter_ms(%{results: results}) do
+    timers = for %{adapter_timers: timers} <- results, do: timers
+
+    %{
+      setup: Enum.sum(for t <- timers, do: :atomics.get(t, 1)) / 1000,
+      teardown: Enum.sum(for t <- timers, do: :atomics.get(t, 2)) / 1000
+    }
+  end
 
   defp outcome(%{failure: nil}), do: %Outcome{status: :passed}
 

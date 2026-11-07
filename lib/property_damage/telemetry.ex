@@ -105,17 +105,37 @@ defmodule PropertyDamage.Telemetry do
 
   ### Shrinking
 
+  The shrinker emits one `start` event, one `iteration` event for each
+  candidate it tries, and one `stop` event. A candidate the shrinker rejects
+  before it runs (an invalid one) still emits an `iteration` event. A
+  `duration` measurement is in native time units (`System.convert_time_unit/3`
+  converts it); the `_ms` measurements are milliseconds.
+
   - `[:property_damage, :shrink, :start]` - Shrinking started
     - Measurements: `%{system_time: integer()}`
     - Metadata: `%{original_length: integer()}`
 
-  - `[:property_damage, :shrink, :iteration]` - Shrink iteration completed
-    - Measurements: `%{iteration: integer()}`
-    - Metadata: `%{current_length: integer(), success: boolean()}`
+  - `[:property_damage, :shrink, :iteration]` - A candidate was tried
+    - Measurements: `%{iteration: integer(), duration: integer()}`, where
+      `iteration` is the shrinker's attempt count after this candidate and
+      `duration` is the time the candidate took, from building it to the
+      oracle's answer
+    - Metadata: `%{current_length: integer(), success: boolean()}`, where
+      `current_length` is the number of commands in the shortest failing
+      sequence after this candidate and `success` is whether the shrinker
+      adopted the candidate
 
   - `[:property_damage, :shrink, :stop]` - Shrinking completed
-    - Measurements: `%{duration: integer(), iterations: integer()}`
-    - Metadata: `%{original_length: integer(), shrunk_length: integer()}`
+    - Measurements: `%{duration: integer(), iterations: integer(),
+      candidate_ms: float(), setup_ms: float(), teardown_ms: float()}`.
+      `iterations` is the number of attempts, as the shrink result reports it.
+      `candidate_ms` sums the time of every candidate, and `setup_ms` and
+      `teardown_ms` sum the time the targets' adapters spent in `setup/1` and
+      `teardown/1` for those candidates. A candidate an oracle does not time
+      adds `0` to both.
+    - Metadata: `%{original_length: integer(), shrunk_length: integer(), stop: atom()}`,
+      where `stop` is why the shrink ended (`:done`, `:max_iterations` or
+      `:max_time`)
 
   ### Progress (DR-022)
 
@@ -456,29 +476,38 @@ defmodule PropertyDamage.Telemetry do
   end
 
   @doc """
-  Emit a shrink iteration event.
+  Emit a shrink iteration event. `duration` is the candidate's time in native
+  units; omit it when it is not measured.
   """
-  @spec shrink_iteration(integer(), map()) :: :ok
-  def shrink_iteration(iteration, metadata) do
-    :telemetry.execute(
-      [:property_damage, :shrink, :iteration],
-      %{iteration: iteration},
-      metadata
-    )
+  @spec shrink_iteration(integer(), map(), integer() | nil) :: :ok
+  def shrink_iteration(iteration, metadata, duration \\ nil) do
+    measurements = %{iteration: iteration}
+    measurements = if duration, do: Map.put(measurements, :duration, duration), else: measurements
+
+    :telemetry.execute([:property_damage, :shrink, :iteration], measurements, metadata)
   end
 
+  @shrink_totals [:iterations, :candidate_ms, :setup_ms, :teardown_ms]
+
+  @shrink_totals [:iterations, :candidate_ms, :setup_ms, :teardown_ms]
+
   @doc """
-  Emit a shrink stop event.
+  Emit a shrink stop event. The `:iterations`, `:candidate_ms`, `:setup_ms`
+  and `:teardown_ms` keys of `metadata` become measurements (each `0` when
+  absent); the rest stays metadata.
   """
   @spec shrink_stop(integer(), map()) :: :ok
   def shrink_stop(start_time, metadata) do
     duration = System.system_time() - start_time
+    {totals, metadata} = Map.split(metadata, @shrink_totals)
 
-    :telemetry.execute(
-      [:property_damage, :shrink, :stop],
-      %{duration: duration, iterations: metadata[:iterations] || 0},
-      metadata
-    )
+    measurements =
+      @shrink_totals
+      |> Map.new(&{&1, 0})
+      |> Map.merge(totals)
+      |> Map.put(:duration, duration)
+
+    :telemetry.execute([:property_damage, :shrink, :stop], measurements, metadata)
   end
 
   @doc """
