@@ -44,7 +44,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
     model.ex
     model/projection.ex
     model/projection/checks.ex
-    suggestions/analyzer.ex
     variant.ex
   )
 
