@@ -108,6 +108,30 @@ defmodule PropertyDamage.CommandSpecTest do
   end
 
   describe "build_spec/3" do
+    test "a partial settle map keeps the default for every key it omits" do
+      spec =
+        Command.build_spec(SyncCommand, [execution: :probe, settle: %{timeout_ms: 1_000}], [])
+
+      assert spec.settle == %{timeout_ms: 1_000, interval_ms: 300, backoff: :linear}
+    end
+
+    test "a call-time settle map merges per key over the module settle map" do
+      spec =
+        Command.build_spec(
+          SyncCommand,
+          [execution: :probe, settle: %{timeout_ms: 1_000, interval_ms: 10}],
+          settle: %{interval_ms: 20}
+        )
+
+      assert spec.settle == %{timeout_ms: 1_000, interval_ms: 20, backoff: :linear}
+    end
+
+    test "an unknown settle key is kept as given" do
+      spec = Command.build_spec(SyncCommand, [settle: %{retries: 3}], [])
+
+      assert spec.settle == %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear, retries: 3}
+    end
+
     test "returns spec with command module" do
       spec = Command.build_spec(SyncCommand, [], [])
 

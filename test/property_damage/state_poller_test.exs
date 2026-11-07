@@ -12,6 +12,21 @@ defmodule PropertyDamage.StatePollerTest do
     def apply(state, _), do: state
   end
 
+  defp await_check(poller, deadline) do
+    case StatePoller.check(poller) do
+      :pending ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          :pending
+        else
+          Process.sleep(5)
+          await_check(poller, deadline)
+        end
+
+      result ->
+        result
+    end
+  end
+
   describe "start/1" do
     test "starts a poller and returns a handle" do
       # Use a predicate that doesn't complete immediately so we can check the process
@@ -225,10 +240,8 @@ defmodule PropertyDamage.StatePollerTest do
           get_state_fn: fn _proj -> %{} end
         )
 
-      # Wait a bit for the poller to complete
-      Process.sleep(50)
-
-      result = StatePoller.check(poller)
+      # Wait for the poller to complete, as long as the machine needs.
+      result = await_check(poller, System.monotonic_time(:millisecond) + 5_000)
       assert {:ok, {:success, _}} = result
     end
   end

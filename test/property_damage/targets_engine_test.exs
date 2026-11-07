@@ -109,7 +109,7 @@ defmodule PropertyDamage.TargetsEngineTest do
 
   defmodule EchoCountModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [Echo]
@@ -123,8 +123,8 @@ defmodule PropertyDamage.TargetsEngineTest do
 
   defmodule EchoModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [Echo]

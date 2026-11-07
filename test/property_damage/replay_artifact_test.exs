@@ -23,9 +23,20 @@ defmodule PropertyDamage.ReplayArtifactTest do
   # carry the account placeholder (fixture smoke test below).
   @external_seed 4
 
-  @header "# PropertyDamage replay artifact, format 1"
+  @header "# PropertyDamage replay artifact, format 2"
 
-  @term_keys [:choices, :failure, :format, :model, :prefix, :roots, :run, :seed, :targets]
+  @term_keys [
+    :choices,
+    :external_markers,
+    :failure,
+    :format,
+    :model,
+    :prefix,
+    :roots,
+    :run,
+    :seed,
+    :targets
+  ]
 
   defp targets, do: [F.target("ref"), F.target("second", :random, %{bug: :credit})]
 
@@ -63,10 +74,11 @@ defmodule PropertyDamage.ReplayArtifactTest do
     ids = Enum.map(choices["ref"], & &1.root_id)
 
     %{
-      format: 1,
+      format: 2,
       model: model,
       seed: report.seed,
       run: 1,
+      external_markers: [],
       targets: [%{name: "ref", expansion: :random}, %{name: "second", expansion: :random}],
       failure: %{
         kind: report.kind,
@@ -281,7 +293,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       assert R.files(dir) == []
 
       assert [label, last] = R.last_lines(report, 2)
-      assert label == "Replay the shrunk failure:"
+      assert label == "# Replay the shrunk failure:"
       assert last =~ "replay_dir: false"
     end
   end
@@ -313,7 +325,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
         assert R.files(dir) == []
 
         assert [label, last] = R.last_lines(report, 2)
-        assert label == "Replay the shrunk failure:"
+        assert label == "# Replay the shrunk failure:"
         assert last =~ "refused"
         assert last =~ "payload"
       end

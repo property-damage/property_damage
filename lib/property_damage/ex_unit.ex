@@ -42,7 +42,7 @@ defmodule PropertyDamage.ExUnit do
   - `:seed` - Fixed seed for reproducibility
   - `:shrink` - Whether to shrink failures (default: true)
   - `:validate` - Whether to validate config (default: true)
-  - `:verbose`, `:check_mode`, `:branching`, `:stutter`,
+  - `:verbose`, `:check_mode`, `:stutter`,
     `:external_markers`, `:on_failure`, and the rest of the `run/1` surface
 
   Defaults are applied by `run/1` itself; a `nil` `:seed` is dropped so the
@@ -50,29 +50,23 @@ defmodule PropertyDamage.ExUnit do
 
   ## Failure Formatting
 
-  When a property test fails, the output includes:
+  When a property test fails, the test's failure message is the failure report
+  (`PropertyDamage.FailureReport`, DR-055, DR-056), printed with ANSI color. It
+  has these parts, in order:
 
-  1. The seed for reproducing the failure
-  2. The original command sequence
-  3. The shrunk (minimal) command sequence
-  4. The failure reason
-  5. Instructions for reproducing with the same seed
+  1. A banner and the seed
+  2. Failure: the kind, the failing step and the fields of its kind
+  3. Setup: the lines of work done before the run, when the run was given
+     `setup_log:`
+  4. Minimal Reproduction: the shrunk steps, each with its events and log
+     lines, the failing step marked
+  5. Projections: the state before and after the failing step
+  6. Reproduction: the calls that rerun and replay the failure
 
   ## Example Failure Output
 
-      1) property system maintains invariants
-         Failure with seed: 12345
-
-         Original sequence (5 commands):
-           [%CreateItem{...}, %ViewItem{...}, ...]
-
-         Shrunk sequence (2 commands):
-           [%CreateItem{quantity: 101}]
-
-         Failed at command #0:
-           #PropertyDamage.Failure<check_failed :quantity_limit "Quantity 101 exceeds limit">
-
-         Reproduce with: seed: 12345
+  The [Debugging Failures](debugging_failures.md#reading-the-report) guide shows a
+  real report and reads it section by section.
   """
 
   @doc """
@@ -151,7 +145,7 @@ defmodule PropertyDamage.ExUnit do
 
   `:model` and `:targets` are required (a missing one raises `KeyError` with a
   clear message); every other option is forwarded verbatim, so the full
-  `run/1` surface (`verbose:`, `check_mode:`, `branching:`, `stutter:`,
+  `run/1` surface (`verbose:`, `check_mode:`, `stutter:`,
   `external_markers:`, `on_failure:`, ...) is reachable from the ExUnit macro.
   `run/1` validates the result and applies its own defaults for any omitted
   option, so this function deliberately does not re-specify them. A `nil`
@@ -176,16 +170,32 @@ defmodule PropertyDamage.ExUnit do
   Format a failure report for ExUnit output.
 
   Produces human-readable output with all relevant information for
-  debugging and reproducing the failure.
+  debugging and reproducing the failure. A report that `PropertyDamage.run/1`
+  built with a `log: [only:, except:]` tag filter prints that filter.
+
+  ## Options
+
+  - `:log` - `[only: tags, except: tags]`: a tag filter for the report's log
+    lines that replaces the one the run gave (`PropertyDamage.Log.Filter`).
+    `only:` shows the lines that carry a listed tag, `except:` hides them and
+    wins, and a line with no tag always shows. It hides lines from one reader
+    and protects no secret. Any other key, `keep_attempts:` included, raises
+    `ArgumentError`: it cannot change a report that is already built.
+
+  The environment variable `PD_LOG`, for example
+  `PD_LOG="only:http,seed except:body"`, replaces either filter when set and
+  non-blank.
   """
-  @spec format_failure(FailureReport.t()) :: String.t()
-  def format_failure(%FailureReport{} = report) do
+  @spec format_failure(FailureReport.t(), keyword()) :: String.t()
+  def format_failure(report, opts \\ [])
+
+  def format_failure(%FailureReport{} = report, opts) do
     # Use the proper formatter for rich output
-    FailureReport.Formatter.format(report, :terminal, color: true)
+    FailureReport.Formatter.format(report, :terminal, Keyword.put(opts, :color, true))
   end
 
   # Legacy support for old map-based reports
-  def format_failure(report) when is_map(report) do
+  def format_failure(report, _opts) when is_map(report) do
     # Check if this is the old format
     if Map.has_key?(report, :original_commands) do
       format_legacy_failure(report)

@@ -8,33 +8,11 @@ defmodule PropertyDamage.Executor do
 
   ## Sequence Execution
 
-  The Executor handles both linear and branching sequences:
+  Commands are executed one after another:
 
-  ### Linear Sequences
-
-  Commands are executed sequentially:
-
-      %Sequence{prefix: [cmd1, cmd2, cmd3], branches: nil, suffix: []}
+      %Sequence{prefix: [cmd1, cmd2, cmd3]}
 
   Execution: cmd1 → cmd2 → cmd3
-
-  ### Branching Sequences
-
-  Commands with parallel branches:
-
-      %Sequence{
-        prefix: [cmd1],
-        branches: [[cmd2a, cmd3a], [cmd2b]],
-        suffix: [cmd4]
-      }
-
-  Execution:
-  1. Execute prefix: cmd1
-  2. Fork state at branch point
-  3. Execute branch A: cmd2a → cmd3a
-  4. Execute branch B: cmd2b
-  5. Verify linearizability of branch execution
-  6. Merge state, execute suffix: cmd4
 
   ## Execution Flow
 
@@ -61,7 +39,6 @@ defmodule PropertyDamage.Executor do
 
   - Command events: source = :command, command_index set
   - Injector events: source = :injector, injector_adapter set
-  - Branch ID for parallel execution tracking
 
   ## Results
 
@@ -72,7 +49,6 @@ defmodule PropertyDamage.Executor do
   - `:projections` - Final projection states
   - `:failed_at_index` - Index where check failed (nil if success)
   - `:failure_reason` - Check failure reason (nil if success)
-  - `:linearization` - Selected linearization (for branching sequences)
   """
 
   alias PropertyDamage.{
@@ -80,7 +56,6 @@ defmodule PropertyDamage.Executor do
     Failure,
     Mint,
     MockServiceRegistry,
-    Nemesis,
     Placeholder,
     PlaceholderRegistry,
     ResourcePoller,
@@ -91,10 +66,11 @@ defmodule PropertyDamage.Executor do
   }
 
   alias PropertyDamage.Model.Projection
+  alias PropertyDamage.Model.Projection.Checks
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Log.Cap
 
-  alias PropertyDamage.Executor.Branching
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Phases
@@ -127,10 +103,10 @@ defmodule PropertyDamage.Executor do
           failed_at_index: non_neg_integer() | nil,
           failure_reason: term() | nil,
           stacktrace: Exception.stacktrace() | nil,
-          linearization: [struct()] | nil,
           check_failures: [map()] | nil,
           check_counters: map(),
-          command_fold_ordinals: %{term() => non_neg_integer()}
+          command_fold_ordinals: %{term() => non_neg_integer()},
+          logs: PropertyDamage.Log.logs()
         }
 
   @doc """
@@ -141,7 +117,7 @@ defmodule PropertyDamage.Executor do
 
   ## Parameters
 
-  - `sequence` - Sequence struct to execute (linear or branching)
+  - `sequence` - Sequence struct to execute
   - `model` - Model module defining projections and checks
   - `adapter` - Adapter module for SUT interaction
   - `opts` - Options (see below)
@@ -151,6 +127,8 @@ defmodule PropertyDamage.Executor do
   - `:config` - Config passed to adapter.setup/1
   - `:event_queue` - EventQueue pid for injector events (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
+  - `:keep_attempts` - How many of a step's last settle or stutter attempts keep
+    their log lines, besides the first attempt's (default 3, DR-054)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
   - `:telemetry` - The context command and check telemetry is emitted with
@@ -166,8 +144,7 @@ defmodule PropertyDamage.Executor do
   ## Order
 
   The adapter's `setup/1`, the `@check at: :startup` checks, the setup
-  commands, the sequence (for a branching sequence its prefix, branches and
-  suffix), the finalization (pollers awaited, queue settled, `@check at:
+  commands, the sequence, the finalization (pollers awaited, queue settled, `@check at:
   :teardown` checks), the teardown commands, and the adapter's `teardown/1`.
 
   The teardown commands run whenever `setup/1` succeeded, whatever happened
@@ -188,7 +165,72 @@ defmodule PropertyDamage.Executor do
   def run(sequence_or_commands, model, adapter, opts \\ [])
 
   def run(%Sequence{} = sequence, model, adapter, opts) do
+    case set_up_and_run(sequence, model, adapter, opts) do
+      {:not_set_up, setup_result, _setup_lines} -> setup_result
+      ran -> ran
+    end
+  end
+
+  # Backwards compatibility: accept list of commands as linear sequence
+  def run(commands, model, adapter, opts) when is_list(commands) do
+    run(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  @doc false
+  # `run/4`, except that a failed adapter setup/1 returns
+  # `{:error, reason, logs}`: the lines that setup wrote, under
+  # `:adapter_setup` (DR-054). A setup/1 that raises, exits or throws
+  # fails the same way, with the exception (or `{kind, reason}`) as the
+  # reason, as `PropertyDamage.Variant` reports it on the lockstep path.
+  @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
+          {:ok, result()} | {:error, term(), PropertyDamage.Log.logs()} | term()
+  def run_logged(sequence_or_commands, model, adapter, opts \\ [])
+
+  def run_logged(%Sequence{} = sequence, model, adapter, opts) do
+    case set_up_and_run(sequence, model, adapter, opts, &guarded_setup/2) do
+      {:not_set_up, {:error, reason}, setup_lines} ->
+        {:error, reason, PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)}
+
+      {:not_set_up, setup_result, _setup_lines} ->
+        setup_result
+
+      ran ->
+        ran
+    end
+  end
+
+  def run_logged(commands, model, adapter, opts) when is_list(commands) do
+    run_logged(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  # The adapter's setup/1 and teardown/1 are execution points of their own;
+  # their log lines are kept under :adapter_setup and :adapter_teardown
+  # (DR-054). A setup/1 that does not answer `{:ok, context}` comes back as
+  # `{:not_set_up, its answer, its lines}`.
+  defp set_up_and_run(sequence, model, adapter, opts, setup \\ & &1.setup(&2)) do
     config = Keyword.get(opts, :config, %{})
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> setup.(adapter, config) end)
+
+    case setup_result do
+      {:ok, adapter_context} ->
+        run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts)
+
+      not_set_up ->
+        {:not_set_up, not_set_up, setup_lines}
+    end
+  end
+
+  # The adapter's setup/1, with a raise, exit or throw turned into an error,
+  # so the lines it wrote before stay with the setup failure.
+  defp guarded_setup(adapter, config) do
+    adapter.setup(config)
+  rescue
+    exception -> {:error, exception}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
     mock_registry = Keyword.get(opts, :mock_registry)
@@ -200,7 +242,7 @@ defmodule PropertyDamage.Executor do
     mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
     telemetry = Keyword.get(opts, :telemetry)
 
-    with {:ok, adapter_context} <- adapter.setup(config) do
+    result =
       try do
         env = %{
           model: model,
@@ -215,31 +257,41 @@ defmodule PropertyDamage.Executor do
           mint: mint,
           telemetry: telemetry,
           setup_commands: Keyword.get(opts, :setup_commands, []),
-          teardown_commands: Keyword.get(opts, :teardown_commands, [])
+          teardown_commands: Keyword.get(opts, :teardown_commands, []),
+          keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
+          logs: PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)
         }
 
-        {:ok, execute_run(sequence, env)}
-      after
-        safe_teardown(adapter, adapter_context)
+        execute_run(sequence, env)
+      catch
+        kind, reason ->
+          safe_teardown(adapter, adapter_context)
+          :erlang.raise(kind, reason, __STACKTRACE__)
       end
-    end
-  end
 
-  # Backwards compatibility: accept list of commands as linear sequence
-  def run(commands, model, adapter, opts) when is_list(commands) do
-    run(Sequence.linear(commands), model, adapter, opts)
+    teardown_lines = safe_teardown(adapter, adapter_context)
+
+    {:ok,
+     %{result | logs: PropertyDamage.Log.append(result.logs, :adapter_teardown, teardown_lines)}}
   end
 
   # Adapter teardown is best-effort (DR-027): a raising teardown logs a warning
   # but never fails the run, so a cleanup hiccup cannot mask the actual result
-  # (or, during shrinking, perturb the failure being minimized).
+  # (or, during shrinking, perturb the failure being minimized). It runs as an
+  # execution point of its own and returns the log lines it wrote (DR-054).
   # Shared with PropertyDamage.Variant.
   @doc false
   def safe_teardown(adapter, user_context) do
+    {:ok, lines} = PropertyDamage.Log.inline(fn -> try_teardown(adapter, user_context) end)
+    lines
+  end
+
+  defp try_teardown(adapter, user_context) do
     require Logger
 
     try do
       adapter.teardown(user_context)
+      :ok
     rescue
       e ->
         Logger.warning(
@@ -354,7 +406,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   # One run against an adapter context that is already set up: the startup
-  # checks, the setup commands, the sequence (linear or branching), the
+  # checks, the setup commands, the sequence, the
   # finalization, then the teardown commands. `env` holds the run's inputs.
   defp execute_run(%Sequence{} = sequence, env) do
     initial_state =
@@ -371,6 +423,13 @@ defmodule PropertyDamage.Executor do
         env.telemetry
       )
 
+    # The adapter setup/1's log lines, when the run set the adapter up itself.
+    initial_state = %{
+      initial_state
+      | logs: Map.get(env, :logs, %{}),
+        keep_attempts: Map.get(env, :keep_attempts, Cap.default_keep_attempts())
+    }
+
     ctx = %PropertyDamage.Executor.Stepping.Context{
       model: env.model,
       adapter: env.adapter,
@@ -379,25 +438,30 @@ defmodule PropertyDamage.Executor do
       target_name: env.telemetry && env.telemetry.variant.name
     }
 
-    {ended, linearization} =
+    ended =
       with {:ok, state} <- run_startup_checks(initial_state),
            {:ok, state} <- Phases.run_setup(env.setup_commands, state, ctx) do
         execute_body(sequence, state, env)
       else
-        {:failed, nil, _failure, _state} = failed -> {failed, nil}
-        {:failed, failure, failed_state} -> {{:failed, nil, failure, failed_state}, nil}
+        {:failed, nil, _failure, _state} = failed -> failed
+        {:failed, failure, failed_state} -> {:failed, nil, failure, failed_state}
       end
 
-    result = finalize_or_tear_down(ended, linearization, env, ctx)
-    {_state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
-    %{result | event_log: result.event_log ++ entries}
+    result = finalize_or_tear_down(ended, env, ctx)
+    {state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
+    # The teardown commands' log lines join the result's (DR-054).
+    %{
+      result
+      | event_log: result.event_log ++ entries,
+        logs: PropertyDamage.Log.merge(result.logs, state.logs)
+    }
   end
 
   # A raise, throw or exit during finalization still runs the teardown
   # commands before it propagates, as `teardown/1` runs on that path too.
-  defp finalize_or_tear_down(ended, linearization, env, ctx) do
+  defp finalize_or_tear_down(ended, env, ctx) do
     ended
-    |> Finalization.finalize_result(linearization)
+    |> Finalization.finalize_result()
     |> Phases.attribute(env.setup_commands)
   catch
     kind, reason ->
@@ -409,27 +473,11 @@ defmodule PropertyDamage.Executor do
   defp ended_state(state), do: state
 
   # The sequence itself, from the state the setup phase left. Returns the
-  # state (or the failed tuple) to finalize and the linearization of a
-  # branching run.
-  defp execute_body(%Sequence{branches: nil} = sequence, state, env) do
-    ended =
-      sequence
-      |> Sequence.to_list()
-      |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
-      |> restore_remaining_faults(env.adapter_context, env.event_queue)
-
-    {ended, nil}
-  end
-
+  # state (or the failed tuple) to finalize.
   defp execute_body(%Sequence{} = sequence, state, env) do
-    Branching.execute_body(
-      sequence,
-      state,
-      env.model,
-      env.adapter,
-      env.adapter_context,
-      env.event_queue
-    )
+    sequence
+    |> Sequence.to_list()
+    |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
   end
 
   # ============================================================================
@@ -457,14 +505,7 @@ defmodule PropertyDamage.Executor do
              event_queue
            ) do
         {:ok, new_state} ->
-          # Lift any auto-restoring fault whose duration has elapsed, so a
-          # time-bounded fault stops affecting later commands.
-          {:cont,
-           PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
-             new_state,
-             adapter_context,
-             event_queue
-           )}
+          {:cont, new_state}
 
         {:error, reason, failed_state} ->
           {:halt, {:failed, index, reason, failed_state}}
@@ -480,8 +521,8 @@ defmodule PropertyDamage.Executor do
   @doc false
   def run_startup_checks(state) do
     case run_phase_checks(state, :startup) do
-      {:halt, name, reason, _counters} ->
-        {:failed, nil, Failure.check_failed(name, reason), state}
+      {:halt, name, projection, reason, _counters} ->
+        {:failed, nil, Failure.check_failed(name, reason, projection), state}
 
       {:ok, startup_recorded, startup_counters} ->
         {:ok,
@@ -491,30 +532,6 @@ defmodule PropertyDamage.Executor do
              check_counters: startup_counters
          }}
     end
-  end
-
-  # Restore any still-active faults at sequence end so none leak past the run.
-  # On success the restore events flow into the reported state; on failure it is
-  # best-effort environment cleanup and the failed state is reported unchanged.
-  # Shared with PropertyDamage.Executor.Branching (prefix/suffix end). DR-029.
-  @doc false
-  def restore_remaining_faults(
-        {:failed, index, reason, failed_state},
-        adapter_context,
-        event_queue
-      ) do
-    _ =
-      PropertyDamage.Executor.Nemesis.restore_all_faults(
-        failed_state,
-        adapter_context,
-        event_queue
-      )
-
-    {:failed, index, reason, failed_state}
-  end
-
-  def restore_remaining_faults(state, adapter_context, event_queue) do
-    PropertyDamage.Executor.Nemesis.restore_all_faults(state, adapter_context, event_queue)
   end
 
   # ============================================================================
@@ -528,10 +545,9 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Build the executor's internal per-run state map. Shared by linear and
-  # branching execution (and exposed to the stepping shell via init_state/2)
-  # so the state shape lives in exactly one place.
-  # Shared with Branching. DR-029.
+  # Build the executor's internal per-run state map. Exposed to the stepping
+  # shell via init_state/2 so the state shape lives in exactly one place.
+  # DR-029.
   @doc false
   def build_initial_state(
         model,
@@ -568,7 +584,6 @@ defmodule PropertyDamage.Executor do
       check_counters: %{step: 0, command: 0, event: 0},
       check_failures: [],
       check_mode: check_mode,
-      branch_id: nil,
       stutter_config: stutter_config,
       mock_registry: mock_registry,
       active_pollers: [],
@@ -576,7 +591,7 @@ defmodule PropertyDamage.Executor do
       model: model,
       external_markers: external_markers,
       event_queue: event_queue,
-      command_specs: build_command_specs(model),
+      command_specs: PropertyDamage.Model.spec_table(model),
       telemetry: telemetry
     }
   end
@@ -584,13 +599,10 @@ defmodule PropertyDamage.Executor do
   # The per-command stepping seam (init_state / step / drain / finalize /
   # stop_pollers) lives in PropertyDamage.Executor.Stepping, the documented
   # public interface. It builds on the engine primitives below
-  # (build_initial_state / execute_command_with_outcome); Executor.Branching
-  # shares them through execute_command (DR-029).
+  # (build_initial_state / execute_command_with_outcome) (DR-029).
 
   # Execute a single command
-  # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
-  @doc false
-  def execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
+  defp execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
     case execute_command_with_outcome(
            command,
            index,
@@ -610,9 +622,8 @@ defmodule PropertyDamage.Executor do
   # state. The outcome is one of:
   #
   #   {:ok, events}      the events the adapter returned (settled events for
-  #                      :probe/:async; the events inject/2 returned for a
-  #                      nemesis command)
-  #   {:error, reason}   the adapter's (or nemesis inject/2's) own error term;
+  #                      :probe/:async)
+  #   {:error, reason}   the adapter's own error term;
   #                      a settle timeout is {:error, {:timeout, last_reason}}
   #                      and a return outside the adapter protocol is
   #                      {:error, return_value}
@@ -644,7 +655,16 @@ defmodule PropertyDamage.Executor do
       command,
       index,
       fn ->
-        execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
+        execute_regular_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          state.mock_registry
+        )
       end,
       leaf_index(state.current_position)
     )
@@ -659,31 +679,33 @@ defmodule PropertyDamage.Executor do
   defp sampling?({:setup, _offset}), do: false
   defp sampling?(_index), do: true
 
-  defp execute_any_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    if Nemesis.nemesis_command?(command) do
-      PropertyDamage.Executor.Nemesis.execute_nemesis_command(
-        command,
-        index,
-        state,
-        model,
-        adapter_context,
-        event_queue
-      )
-    else
-      execute_regular_command(
-        command,
-        index,
-        state,
-        model,
-        adapter,
-        adapter_context,
-        event_queue,
-        state.mock_registry
-      )
+  # The mocks' on_command/2 runs under a scope of its own; its lines go under
+  # the command's step (DR-054). A callback that raised, exited or threw comes
+  # back as the registry's `{:error, {module, :on_command, reason}}`.
+  defp notify_mocks(state, nil, _command), do: {:ok, state}
+
+  defp notify_mocks(state, mock_registry, command) do
+    {notified, lines} =
+      PropertyDamage.Log.collect(fn sink ->
+        MockServiceRegistry.notify_command(
+          mock_registry,
+          command,
+          PropertyDamage.Log.writer(sink, 1)
+        )
+      end)
+
+    state = %{state | logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)}
+
+    case notified do
+      :ok -> {:ok, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
-  # Execute a regular (non-nemesis) command
+  # Execute a command. The mocks are told of it first;
+  # a mock's on_command/2 that raised fails the step before the adapter is
+  # called, as an adapter error whose detail names the mock and the callback,
+  # the shape a raising execute/3 gets.
   defp execute_regular_command(
          command,
          index,
@@ -694,11 +716,34 @@ defmodule PropertyDamage.Executor do
          event_queue,
          mock_registry
        ) do
-    # 0. Notify mock registry of command (before execution)
-    if mock_registry do
-      MockServiceRegistry.notify_command(mock_registry, command)
-    end
+    case notify_mocks(state, mock_registry, command) do
+      {:ok, state} ->
+        execute_notified_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          mock_registry
+        )
 
+      {:error, reason, state} ->
+        {:error, Failure.adapter_error(reason), state, :not_called}
+    end
+  end
+
+  defp execute_notified_command(
+         command,
+         index,
+         state,
+         model,
+         adapter,
+         adapter_context,
+         event_queue,
+         mock_registry
+       ) do
     placeholder_registry = state.placeholder_registry
 
     # 1. Resolve placeholders and mint markers in the command (DR-021/DR-034).
@@ -719,7 +764,6 @@ defmodule PropertyDamage.Executor do
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
-          branch_id: state.branch_id,
           command: command,
           # DR-040: seed the fold counter so injected events folded during
           # adapter execution take real fold ordinals ahead of the command fold.
@@ -740,7 +784,6 @@ defmodule PropertyDamage.Executor do
                 Keyword.merge(opts,
                   event_queue: event_queue,
                   command_index: index,
-                  branch_id: state.branch_id,
                   caller: poller_owner
                 )
               )
@@ -760,21 +803,26 @@ defmodule PropertyDamage.Executor do
             # an adapter can reach a mocked third party's handle_request/2 during
             # execute/3 (WP-C5); the framework flushes what the mock pushes after
             # the command (source: :mock, step 7.5 below).
-            mock_registry: mock_registry
+            mock_registry: mock_registry,
+            # DR-054: the first attempt's log lines go into the same sink.
+            log: PropertyDamage.Log.writer(sink, 1)
           }
         end
 
         # 3. Execute via adapter (with settle logic for probes/async).
         # Commands may be plain maps in low-level/test usage, hence the guard.
-        command_spec =
-          if is_struct(command) do
-            Map.get(state.command_specs, command.__struct__)
-          end
+        command_spec = PropertyDamage.Model.spec_for(state.command_specs, command)
 
         # The adapter's wall-clock, every settle attempt and the waits between
         # them included, is timed here and nothing after it answered.
-        execute_fn = fn runtime ->
+        # Each settle attempt gets the runtime with its own attempt number on
+        # the lines it logs (DR-054), all written into the one sink.
+        execute_fn = fn runtime, sink ->
           started = System.monotonic_time(:microsecond)
+
+          runtime_for = fn attempt ->
+            %{runtime | log: PropertyDamage.Log.writer(sink, attempt)}
+          end
 
           result =
             try do
@@ -782,7 +830,7 @@ defmodule PropertyDamage.Executor do
                 resolved_command,
                 adapter,
                 adapter_context,
-                runtime,
+                runtime_for,
                 command_spec
               )
             rescue
@@ -794,15 +842,25 @@ defmodule PropertyDamage.Executor do
           {result, System.monotonic_time(:microsecond) - started}
         end
 
-        # The window drains the accumulated injection context and any resource
-        # pollers started during execution, then stops the sink (even if the
-        # adapter raises).
-        {{result, execute_us}, final_injection_ctx, started_resource_pollers} =
-          Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
+        # The window drains the accumulated injection context, any resource
+        # pollers started during execution and the log lines written, then
+        # stops the sink (even if the adapter raises). The lines move under
+        # the command's position on every outcome path below (DR-054).
+        {{result, execute_us}, final_injection_ctx, started_resource_pollers, lines} =
+          Runtime.InjectionWindow.run_logged(
+            initial_ctx,
+            build_runtime,
+            execute_fn,
+            keep_attempts: state.keep_attempts
+          )
 
         started_resource_pollers = drop_timed_out_pollers(result, started_resource_pollers)
 
-        state = %{state | last_execute_us: execute_us}
+        state = %{
+          state
+          | last_execute_us: execute_us,
+            logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)
+        }
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
@@ -926,7 +984,25 @@ defmodule PropertyDamage.Executor do
     e in PropertyDamage.ProjectionError ->
       {:error, Failure.projection_violation(e.projection, e.original), event_ctx.state,
        {:ok, events}}
+
+    # A mock event the mocks or the projections refused; the lines the mocks'
+    # on_event/2 wrote stay under the step (DR-054).
+    e in Events.MockEventsError ->
+      state = event_ctx.state
+      logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
+      {:error, mock_events_failure(e.error), %{state | logs: logs}, {:ok, events}}
   end
+
+  @doc false
+  # The failure of a step whose mock events could not be folded
+  # (`Events.process_mock_events/6`): a mock's on_event/2 that raised is an
+  # adapter error naming the mock and the callback, as for on_command/2; a
+  # projection that rejected a mock event is a projection violation.
+  @spec mock_events_failure(term()) :: Failure.t()
+  def mock_events_failure({:mock_callback, reason}), do: Failure.adapter_error(reason)
+
+  def mock_events_failure({:projection, e, _stacktrace}),
+    do: Failure.projection_violation(e.projection, e.original)
 
   # Shared post-events pipeline for both command success arms: {:ok, events} from
   # sync commands and {:settled, events} from probe/async commands that settled
@@ -986,7 +1062,6 @@ defmodule PropertyDamage.Executor do
         index,
         base_event_log,
         projections,
-        state.branch_id,
         fold_counter
       )
 
@@ -1008,21 +1083,21 @@ defmodule PropertyDamage.Executor do
         event_queue,
         event_log,
         projections,
-        state.branch_id,
         fold_counter,
         state.await_matchers
       )
 
-    # 7.5. Flush and process mock-injected events
-    {projections, event_log, fold_counter} =
-      Events.process_mock_events(
-        mock_registry,
-        index,
-        event_log,
-        projections,
-        state.branch_id,
-        fold_counter
-      )
+    # 7.5. Flush and process mock-injected events; the mocks' on_event/2
+    # lines go under this command's step (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
+      mock_registry
+      |> Events.process_mock_events(index, event_log, projections, fold_counter)
+      |> Events.folded_or_raise!()
+
+    state = %{
+      state
+      | logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
+    }
 
     # 7.6. Update mock projections
     if mock_registry do
@@ -1076,7 +1151,7 @@ defmodule PropertyDamage.Executor do
            check_failures,
            state.telemetry
          ) do
-      {:halt, async_name, async_reason, async_index, async_counters} ->
+      {:halt, async_name, async_projection, async_reason, async_index, async_counters} ->
         # DR-025: attribute the failure to the offending event's command_index
         # (`async_index`), which may be an earlier command than the one currently
         # executing (or nil for an ambient injector event) — never blindly to the
@@ -1084,7 +1159,7 @@ defmodule PropertyDamage.Executor do
         failed_state =
           pack.(%{check_counters: async_counters, async_failed_index: async_index})
 
-        {:error, Failure.check_failed(async_name, async_reason), failed_state}
+        {:error, Failure.check_failed(async_name, async_reason, async_projection), failed_state}
 
       {:ok, async_counters, async_failures} ->
         # 8. Run checks
@@ -1094,7 +1169,6 @@ defmodule PropertyDamage.Executor do
           command_index: index,
           step_count: state.step_count + 1,
           projections: projections,
-          branch_id: state.branch_id,
           telemetry: state.telemetry,
           sampling: sampling?(index)
         }
@@ -1108,23 +1182,35 @@ defmodule PropertyDamage.Executor do
                async_failures
              ) do
           {:ok, check_counters, updated_failures} ->
-            # 9. Execute stutter retries if configured
-            case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
-                   command,
-                   resolved_command,
-                   events,
-                   index,
-                   event_log,
-                   state,
-                   adapter,
-                   adapter_context
-                 ) do
+            # 9. Execute stutter retries if configured. Their log lines join
+            #    the command's under the same cap, each with its attempt
+            #    number (DR-054); `stutter_lines` is the step's whole list
+            #    then, and nil when no retry ran.
+            {stutter_outcome, stutter_lines} =
+              PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
+                command,
+                resolved_command,
+                events,
+                index,
+                event_log,
+                state,
+                adapter,
+                adapter_context
+              )
+
+            logs =
+              if stutter_lines,
+                do: Map.put(state.logs, state.current_position, stutter_lines),
+                else: state.logs
+
+            case stutter_outcome do
               {:ok, final_event_log} ->
                 new_state =
                   pack.(%{
                     event_log: final_event_log,
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 # Spawn pollers for any @eventually checks triggered by these events
@@ -1132,15 +1218,16 @@ defmodule PropertyDamage.Executor do
                   {:ok, new_state} ->
                     {:ok, update_poller_state_getters(new_state)}
 
-                  {:error, check_name, reason, failed_state} ->
-                    {:error, Failure.check_failed(check_name, reason), failed_state}
+                  {:error, check_name, projection, reason, failed_state} ->
+                    {:error, Failure.check_failed(check_name, reason, projection), failed_state}
                 end
 
               {:error, :idempotency_violation, violation} ->
                 failed_state =
                   pack.(%{
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 {:error, Failure.idempotency_violation(violation), failed_state}
@@ -1149,52 +1236,18 @@ defmodule PropertyDamage.Executor do
                 failed_state =
                   pack.(%{
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 {:error, Failure.stutter_execution_failed(details), failed_state}
             end
 
-          {:error, check_name, reason, check_counters} ->
+          {:error, check_name, projection, reason, check_counters} ->
             failed_state = pack.(%{check_counters: check_counters})
-            {:error, Failure.check_failed(check_name, reason), failed_state}
+            {:error, Failure.check_failed(check_name, reason, projection), failed_state}
         end
     end
-  end
-
-  # Build a %{command_module => resolved_spec} lookup so execution-time
-  # settle/stutter behaviour comes from the single resolved command spec (DR-028),
-  # which honors `use PropertyDamage.Command, execution: :probe` and model-level
-  # overrides.
-  defp build_command_specs(model) do
-    # A setup or teardown command's module gets its spec from its own entry,
-    # unless commands/0 lists the module too.
-    sequences =
-      PropertyDamage.Model.setup_commands(model) ++ PropertyDamage.Model.teardown_commands(model)
-
-    (sequences ++ PropertyDamage.Model.normalize_commands(model.commands()))
-    |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
-  rescue
-    # Never swallow a misconfigured model into an empty spec map: that silently
-    # dropped every command's settle/stutter semantics and turned a config bug
-    # into confusing downstream behaviour. Re-raise loudly with fix-forward
-    # guidance, preserving the original cause (B4).
-    e ->
-      reraise ArgumentError, [message: build_command_specs_error(model, e)], __STACKTRACE__
-  end
-
-  defp build_command_specs_error(model, error) do
-    """
-    Could not build command specs for model #{inspect(model)}: #{Exception.message(error)}
-
-    Suggestions:
-      - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
-    {module, opts} tuples (such as {module, weight: 3}), or %{command: module, ...} maps.
-      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
-    overrides have the expected shape.
-      - Verify every listed command module is defined and uses `PropertyDamage.Command`.
-    """
-    |> String.trim()
   end
 
   # Inject an event mid-execution from an adapter.
@@ -1216,7 +1269,7 @@ defmodule PropertyDamage.Executor do
         # 2. Create entry with source :injected, stamping its fold ordinal
         #    (DR-040) from the sink's threaded counter.
         entry =
-          Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
+          Entry.from_injected(event, ctx.command_index)
           |> Map.put(:fold_index, ctx.fold_counter)
 
         # 3. Store the accumulated state. Injected events are accumulated in
@@ -1262,7 +1315,6 @@ defmodule PropertyDamage.Executor do
   # changed. Uses struct!/2 so a write to an undeclared field RAISES rather than
   # silently producing a corrupt struct-shaped map (DR-029); the State struct is
   # the single source of truth for the run-state shape.
-  # Shared with PropertyDamage.Executor.Nemesis (active_faults updates). DR-029.
   @doc false
   def put_state(%State{} = state, updates), do: struct!(state, updates)
 
@@ -1290,21 +1342,11 @@ defmodule PropertyDamage.Executor do
         fn projection, {:ok, counters, failures} ->
           projection_state = Map.get(projections, projection)
 
-          # Only projections that use PropertyDamage.Model.Projection have __checks__/0
-          checks =
-            if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-              projection.__checks__()
-            else
-              []
-            end
-
-          case run_projection_checks(
+          case Checks.step_checks(
                  projection,
                  projection_state,
-                 checks,
-                 step_ctx,
-                 counters,
-                 Map.get(check_ctx, :telemetry)
+                 Map.put(step_ctx, :telemetry, Map.get(check_ctx, :telemetry)),
+                 counters
                ) do
             {:ok, new_counters} ->
               {:cont, {:ok, new_counters, failures}}
@@ -1313,12 +1355,13 @@ defmodule PropertyDamage.Executor do
               # Handle based on check_mode
               case check_mode do
                 :halt ->
-                  {:halt, {:error, check_name, reason, new_counters}}
+                  {:halt, {:error, check_name, projection, reason, new_counters}}
 
                 :record ->
                   # Record failure and continue
                   failure = %{
                     check_name: check_name,
+                    projection: projection,
                     reason: reason,
                     command: Map.get(check_ctx, :command),
                     command_index: Map.get(check_ctx, :command_index),
@@ -1341,73 +1384,8 @@ defmodule PropertyDamage.Executor do
     # Normalize result format
     case result do
       {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, _, _, _} = error -> error
+      {:error, _, _, _, _} = error -> error
     end
-  end
-
-  defp run_projection_checks(
-         projection,
-         projection_state,
-         checks,
-         step_ctx,
-         counters,
-         telemetry
-       ) do
-    alias PropertyDamage.Model.Projection
-
-    # Only synchronous (@check) checks run here; polling (@eventually)
-    # checks have no :trigger key and are handled by the pollers. Without
-    # this filter, accessing check.trigger on a polling check raised
-    # a KeyError that crashed the run on the first command. Lifecycle-boundary
-    # checks (@check at:, DR-024) are also synchronous but fire only at a
-    # phase boundary, not during the command loop, so they are excluded here and
-    # dispatched separately by run_phase_checks/2.
-    # A step that does not sample (a setup command's) skips the `every: N`
-    # triggers: they read counters it did not advance.
-    sampling = Map.get(step_ctx, :sampling, true)
-
-    sync_checks =
-      Enum.filter(checks, fn check ->
-        check.type == :synchronous and not match?(%{type: :at}, check.trigger) and
-          (sampling or not match?(%{type: :every_n}, check.trigger))
-      end)
-
-    Enum.reduce_while(sync_checks, {:ok, counters}, fn check, {:ok, acc_counters} ->
-      if Projection.should_run?(
-           check.trigger,
-           step_ctx.step_type,
-           step_ctx.module,
-           acc_counters
-         ) do
-        # The check runs: record the firing (DR-026) before invoking it, so
-        # a failing check still counts as exercised. This single site covers
-        # both the synchronous command/event path and the asynchronous
-        # observation path (DR-025), which dispatches through run_step_checks/7.
-        fired = bump_fired(acc_counters, projection, check.name)
-
-        # The check's return is its verdict (DR-052); a raise is captured
-        # with its stacktrace.
-        case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
-               projection
-               |> apply(check.function_name, [projection_state, step_ctx.command_or_event])
-               |> Verdict.check(check.name)
-             end) do
-          :ok -> {:cont, {:ok, fired}}
-          {:failed, e, stacktrace} -> {:halt, {:error, check.name, {e, stacktrace}, fired}}
-        end
-      else
-        {:cont, {:ok, acc_counters}}
-      end
-    end)
-  end
-
-  # Record one firing of a check (DR-026). Per-check fire counts are
-  # colocated as {:fired, projection, name} keys inside the existing
-  # check_counters map: inert to should_run?/4 (which does only point
-  # lookups, never iterates) and carried for free by the additive branch merge
-  # in merge_branch_states/5.
-  defp bump_fired(counters, projection, name) do
-    Map.update(counters, {:fired, projection, name}, 1, &(&1 + 1))
   end
 
   # ============================================================================
@@ -1430,7 +1408,7 @@ defmodule PropertyDamage.Executor do
   # firings are recorded, since these checks never pass through the
   # during-run counter path):
   #   {:ok, recorded_failures, counters}
-  #   {:halt, name, {exception, stacktrace}, counters}
+  #   {:halt, name, projection, {exception, stacktrace}, counters}
   # Shared with PropertyDamage.Executor.Finalization (:teardown checkpoint). DR-029.
   @doc false
   def run_phase_checks(state, phase) do
@@ -1447,7 +1425,7 @@ defmodule PropertyDamage.Executor do
                                                                            {:ok, recorded,
                                                                             acc_counters} ->
         projection_state = Map.get(projections, projection)
-        checks = phase_checks(projection, phase)
+        checks = Checks.phase_checks(projection, phase)
 
         case run_phase_projection_checks(
                projection,
@@ -1458,8 +1436,11 @@ defmodule PropertyDamage.Executor do
                {recorded, acc_counters},
                Map.get(state, :telemetry)
              ) do
-          {:ok, new_recorded, new_counters} -> {:cont, {:ok, new_recorded, new_counters}}
-          {:halt, name, reason, halt_counters} -> {:halt, {:halt, name, reason, halt_counters}}
+          {:ok, new_recorded, new_counters} ->
+            {:cont, {:ok, new_recorded, new_counters}}
+
+          {:halt, name, halt_projection, reason, halt_counters} ->
+            {:halt, {:halt, name, halt_projection, reason, halt_counters}}
         end
       end)
     end
@@ -1480,7 +1461,7 @@ defmodule PropertyDamage.Executor do
                                                             {:ok, acc_recorded, acc_counters} ->
       # Record the firing (DR-026) before invoking, so a failing lifecycle check
       # still counts as exercised.
-      fired = bump_fired(acc_counters, projection, check.name)
+      fired = Checks.record_fire(acc_counters, projection, check.name)
 
       case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
              projection
@@ -1493,11 +1474,12 @@ defmodule PropertyDamage.Executor do
         {:failed, e, stacktrace} ->
           case check_mode do
             :halt ->
-              {:halt, {:halt, check.name, {e, stacktrace}, fired}}
+              {:halt, {:halt, check.name, projection, {e, stacktrace}, fired}}
 
             :record ->
               failure = %{
                 check_name: check.name,
+                projection: projection,
                 reason: {e, stacktrace},
                 command: nil,
                 command_index: nil,
@@ -1517,25 +1499,11 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # The @check at: <phase> checks declared on a projection. Lifecycle
-  # checks stay type: :synchronous; the at: phase lives in the trigger spec.
-  defp phase_checks(projection, phase) do
-    if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-      Enum.filter(projection.__checks__(), fn check ->
-        check.type == :synchronous and
-          match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
-      end)
-    else
-      []
-    end
-  end
-
   defp projection_modules(model), do: PropertyDamage.Model.projection_modules(model)
 
   # Legacy wrapper for backward compatibility
   # Maps old check_ctx format to new step_ctx format
   # Now accepts check_mode and check_failures from state
-  # Shared with PropertyDamage.Executor.Nemesis (nemesis-command checks). DR-029.
   @doc false
   def run_checks(
         _model,
@@ -1669,7 +1637,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
   #
   # The asynchronous event paths (resource-poller / injector-adapter events,
-  # mock-service events, nemesis events, and the finalize-time drains) fold
+  # mock-service events, and the finalize-time drains) fold
   # events into projection state. DR-025 additionally evaluates `@check every:`
   # checks on those events, so a violation is reported AT the offending event
   # (with that event's `command_index`) rather than only at the
@@ -1690,7 +1658,7 @@ defmodule PropertyDamage.Executor do
   # Run `@check every:` checks on the events folded since `log_before`
   # (newest-first prepended to `event_log`), incrementally on each event's
   # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
-  # `{:halt, name, reason, command_index, counters}` where `command_index`
+  # `{:halt, name, projection, reason, command_index, counters}` where `command_index`
   # locates the offending event for the shrinker (nil for a pure injector event).
   # Shared with PropertyDamage.Executor.Finalization (settle/drain). DR-029.
   @doc false
@@ -1728,14 +1696,17 @@ defmodule PropertyDamage.Executor do
         projs = Events.update_projections(projs, entry.event)
 
         case check_async_event(model, projs, entry, c, mode, f, telemetry) do
-          {:ok, c, f} -> {:cont, {projs, c, f}}
-          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, Entry.attribution(entry), c}}
+          {:ok, c, f} ->
+            {:cont, {projs, c, f}}
+
+          {:halt, name, projection, reason, c} ->
+            {:halt, {:halt, name, projection, reason, Entry.attribution(entry), c}}
         end
       end)
 
     case folded do
       {_projs, c, f} -> {:ok, c, f}
-      {:halt, name, reason, idx, c} -> {:halt, name, reason, idx, c}
+      {:halt, name, projection, reason, idx, c} -> {:halt, name, projection, reason, idx, c}
     end
   end
 
@@ -1763,7 +1734,7 @@ defmodule PropertyDamage.Executor do
 
     case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, name, reason, counters} -> {:halt, name, reason, counters}
+      {:error, name, projection, reason, counters} -> {:halt, name, projection, reason, counters}
     end
   end
 
@@ -1775,7 +1746,7 @@ defmodule PropertyDamage.Executor do
   # Spawn pollers for any @eventually checks triggered by the given events
   # DR-030: build and register the awaits matchers a command declares. Pure
   # correlation: each %Await{match} becomes a registry entry carrying the
-  # command's index + branch, appended in registration order (so first-registered
+  # command's index, appended in registration order (so first-registered
   # wins on overlap). A matcher persists for the rest of the run, so a late
   # injector event still correlates to the command that claimed it. Plain-map
   # commands (low-level/test usage) and commands without awaits/2 are no-ops.
@@ -1786,7 +1757,7 @@ defmodule PropertyDamage.Executor do
 
       new_matchers =
         for %PropertyDamage.Await{match: match} <- module.awaits(model_state, command) do
-          %{command_index: index, branch_id: state.branch_id, match: match}
+          %{command_index: index, match: match}
         end
 
       %{state | await_matchers: state.await_matchers ++ new_matchers}
@@ -1803,7 +1774,7 @@ defmodule PropertyDamage.Executor do
   # triggers. The check function's return must be the 1-arity predicate the
   # poller calls; any other return is a check failure at this step, handled
   # under the run's `check_mode:` like a synchronous check that failed.
-  # Returns `{:ok, state}` or `{:error, check_name, reason, state}`.
+  # Returns `{:ok, state}` or `{:error, check_name, projection, reason, state}`.
   defp maybe_spawn_pollers(state, events, model, command, command_index) do
     check_mode = state.check_mode
 
@@ -1821,9 +1792,7 @@ defmodule PropertyDamage.Executor do
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
-            PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0),
-            check <- projection.__checks__(),
-            check.type == :polling,
+            check <- Checks.eventually_checks(projection),
             Projection.event_matches_poll_trigger?(check.eventually, event_module) do
           projection_state = Map.get(state.projections, projection)
           returned = apply(projection, check.function_name, [projection_state, event])
@@ -1837,7 +1806,7 @@ defmodule PropertyDamage.Executor do
 
       case reject_non_predicates(state, others, command, command_index) do
         {:ok, state} -> {:ok, spawn_pollers(state, predicates, command_index)}
-        {:error, _name, _reason, _state} = error -> error
+        {:error, _name, _projection, _reason, _state} = error -> error
       end
     end
   end
@@ -1850,7 +1819,7 @@ defmodule PropertyDamage.Executor do
   defp reject_non_predicates(state, others, command, command_index) do
     require Logger
 
-    Enum.reduce_while(others, {:ok, state}, fn {_projection, check, event, returned},
+    Enum.reduce_while(others, {:ok, state}, fn {projection, check, event, returned},
                                                {:ok, state} ->
       reason =
         "@eventually #{check.name} must return a 1-arity predicate function " <>
@@ -1858,11 +1827,12 @@ defmodule PropertyDamage.Executor do
 
       case state.check_mode do
         :halt ->
-          {:halt, {:error, check.name, reason, state}}
+          {:halt, {:error, check.name, projection, reason, state}}
 
         :record ->
           failure = %{
             check_name: check.name,
+            projection: projection,
             reason: reason,
             command: command,
             command_index: command_index,
@@ -1918,7 +1888,7 @@ defmodule PropertyDamage.Executor do
 
     counters =
       Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
-        bump_fired(acc, proj, name)
+        Checks.record_fire(acc, proj, name)
       end)
 
     %{state | active_pollers: state.active_pollers ++ new_pollers, check_counters: counters}
@@ -2067,8 +2037,16 @@ defmodule PropertyDamage.Executor do
             inject_unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
           end
 
-        # Execute via adapter (bounded by adapter.timeout/1, DR-032)
-        case Timeout.execute(adapter, resolved_command, adapter_context, runtime) do
+        # Execute via adapter (bounded by adapter.timeout/1, DR-032). The
+        # command logs into a sink of its own; raw mode builds no report, so
+        # its lines are dropped (DR-054).
+        {result, _lines} =
+          PropertyDamage.Log.collect(fn sink ->
+            runtime = %{runtime | log: PropertyDamage.Log.writer(sink, 1)}
+            Timeout.execute(adapter, resolved_command, adapter_context, runtime)
+          end)
+
+        case result do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).
@@ -2114,7 +2092,6 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   # Resolve placeholders in a command before execution.
-  # Shared with PropertyDamage.Executor.Nemesis (nemesis placeholder resolution). DR-029.
   @doc false
   def resolve_command_placeholders(command, registry, mint \\ {nil, 0}) do
     {run_nonce, mint_epoch} = mint
@@ -2180,8 +2157,7 @@ defmodule PropertyDamage.Executor do
   # (DR-021). The command's structured `position` selects the placeholders it
   # produces (via the registry's producer_link); each is resolved by id with the
   # value found at its recorded path/event_index in the real events. This is
-  # position-driven, so it is correct under branching (distinct branch positions)
-  # and shrinking (the position is rebuilt per run, never a stale generation key).
+  # position-driven, so it is correct under shrinking (the position is rebuilt per run, never a stale generation key).
   defp capture_externals(events, position, registry) do
     PlaceholderRegistry.capture(registry, position, events)
   end

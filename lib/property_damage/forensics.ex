@@ -61,6 +61,8 @@ defmodule PropertyDamage.Forensics do
   - Event ordering must match production ordering
   """
 
+  alias PropertyDamage.Model.Projection.Checks
+
   @typedoc """
   Failed analysis result.
 
@@ -229,24 +231,41 @@ defmodule PropertyDamage.Forensics do
       events: [event],
       command_index: nil,
       step_count: index + 1,
-      projections: new_projections,
-      branch_id: nil
+      projections: new_projections
     }
 
     case run_checks(model, projection_modules, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, [event | history], violations}}
 
-      {:error, check_name, reason} when stop_early ->
+      {:error, check_name, projection, reason} when stop_early ->
         failure =
-          build_failure(check_name, reason, index, event, state, new_projections, history)
+          build_failure(
+            check_name,
+            projection,
+            reason,
+            index,
+            event,
+            state,
+            new_projections,
+            history
+          )
 
         {:halt, {:error, failure}}
 
-      {:error, check_name, reason} ->
+      {:error, check_name, projection, reason} ->
         # Collect the violation and continue when stop_early is false.
         failure =
-          build_failure(check_name, reason, index, event, state, new_projections, history)
+          build_failure(
+            check_name,
+            projection,
+            reason,
+            index,
+            event,
+            state,
+            new_projections,
+            history
+          )
 
         {:cont, {:ok, new_state, [event | history], [failure | violations]}}
     end
@@ -254,9 +273,18 @@ defmodule PropertyDamage.Forensics do
 
   # A single violation record, shared by the stop-early failure and the
   # collected-violations path so both carry the same detail shape.
-  defp build_failure(check_name, reason, index, event, state, new_projections, history) do
+  defp build_failure(
+         check_name,
+         projection,
+         reason,
+         index,
+         event,
+         state,
+         new_projections,
+         history
+       ) do
     %{
-      failure_reason: PropertyDamage.Failure.check_failed(check_name, reason),
+      failure_reason: PropertyDamage.Failure.check_failed(check_name, reason, projection),
       failure_step: index,
       event_at_failure: event,
       state_before: state.projections,
@@ -268,7 +296,7 @@ defmodule PropertyDamage.Forensics do
   defp finalize_result({:ok, state, _history, violations}) do
     command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
-        not PropertyDamage.ModuleCheck.exports?(mod, :__checks__, 0)
+        not Checks.declared?(mod)
       end)
 
     {:ok,
@@ -295,50 +323,18 @@ defmodule PropertyDamage.Forensics do
   end
 
   defp run_step_checks(_model, all_projections, projections, step_ctx) do
-    alias PropertyDamage.Model.Projection
-
     # Run checks on all projections (state + extra)
-
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
-      # Get checks for this projection (only if it has __checks__/0)
-      checks =
-        if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-          projection.__checks__()
-        else
-          []
-        end
+      case Checks.step_checks(projection, projection_state, step_ctx, step_ctx.counters) do
+        {:ok, _counters} ->
+          {:cont, :ok}
 
-      case run_projection_checks(projection, projection_state, checks, step_ctx) do
-        :ok -> {:cont, :ok}
-        {:error, check_name, reason} -> {:halt, {:error, check_name, reason}}
+        {:error, check_name, {reason, _stacktrace}, _counters} ->
+          {:halt, {:error, check_name, projection, reason}}
       end
     end)
-  end
-
-  defp run_projection_checks(_projection, _projection_state, [], _ctx), do: :ok
-
-  defp run_projection_checks(projection, projection_state, [check | rest], ctx) do
-    alias PropertyDamage.Model.Projection
-
-    # Check if check should run given current context
-    if Projection.should_run?(check.trigger, ctx.step_type, ctx.module, ctx.counters) do
-      # The check's return is its verdict (DR-052); a raise fails it too.
-      try do
-        projection
-        |> apply(check.function_name, [projection_state, ctx.command_or_event])
-        |> PropertyDamage.Verdict.check(check.name)
-      rescue
-        e -> {:fail, e}
-      end
-      |> case do
-        :pass -> run_projection_checks(projection, projection_state, rest, ctx)
-        {:fail, e} -> {:error, check.name, e}
-      end
-    else
-      run_projection_checks(projection, projection_state, rest, ctx)
-    end
   end
 
   # Legacy wrapper for backward compatibility

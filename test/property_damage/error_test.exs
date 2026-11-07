@@ -86,16 +86,6 @@ defmodule PropertyDamage.ErrorTest do
     end
   end
 
-  describe "Error.format/2 for linearization_failed" do
-    test "formats linearization failure" do
-      result = Error.format(Failure.linearization("No valid ordering for 2 branches"), %{})
-
-      assert result =~ "Linearization Failed"
-      assert result =~ "No valid ordering for 2 branches"
-      assert result =~ "race condition"
-    end
-  end
-
   describe "Error.format/2 for unknown errors" do
     test "formats unknown error gracefully" do
       result = Error.format(:some_random_error, %{})

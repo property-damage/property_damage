@@ -4,16 +4,16 @@ defmodule PropertyDamage.Executor.State do
 
   Built once per run by `Executor.build_initial_state/7` (and via `init_state/2`
   for the `PropertyDamage.Replay` stepping shell), then threaded through the
-  per-command engine, the branching fork/merge, and the finalize chain.
+  per-command engine and the finalize chain.
 
   This replaces the former untyped flat map. With `Executor.put_state/2` rewritten
   to `struct!/2` and the in-loop updates using struct-update syntax, a write to an
   **undeclared** field now raises instead of silently producing a corrupt
-  struct-shaped map (`Map.merge/2` onto a struct does not raise). The two fields
-  that previously existed only as "ghosts" (entering solely via `Map.put` writes
-  and `Map.get(state, k, default)` reads, never initialized in
-  `build_initial_state/7`) are declared here with explicit defaults:
-  `:active_faults` and `:async_halt`.
+  struct-shaped map (`Map.merge/2` onto a struct does not raise). A field
+  that previously existed only as a "ghost" (entering solely via `Map.put`
+  writes and `Map.get(state, k, default)` reads, never initialized in
+  `build_initial_state/7`) is declared here with an explicit default:
+  `:async_halt`.
 
   ## Fields
 
@@ -38,7 +38,7 @@ defmodule PropertyDamage.Executor.State do
     * `:projections_before` - snapshot of projections before the current command
     * `:current_position` - structured position of the executing command (DR-021)
     * `:executed` - `%{Sequence.Position => command}` of the concrete resolved
-      commands actually sent to the adapter, keyed branch-aware (DR-033). Feeds
+      commands actually sent to the adapter, keyed by position (DR-033). Feeds
       `RunTrace.executed`; always accumulated.
     * `:run_nonce` - the 64-bit run nonce (DR-034) seeding `mint_per_run`
       resolution; `nil` when the run declared no minted values.
@@ -47,11 +47,9 @@ defmodule PropertyDamage.Executor.State do
     * `:step_count` - number of commands executed
     * `:check_counters` - `%{step:, command:, event:, ...}` firing counts
     * `:check_failures` - accumulated `:record`-mode failures (newest-first)
-    * `:branch_id` - current branch id during branching (`nil` on the linear path)
     * `:active_pollers` - running `@eventually` pollers
     * `:active_resource_pollers` - running resource pollers
-    * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
-    * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
+    * `:async_halt` - `{name, projection, reason, command_index}` set when a DR-025 async
       `every:` check trips during a `@eventually` await drain (ghost field)
     * `:async_failed_index` - the command index a DR-025 async `every:` check
       failure is attributed to (the offending event's `command_index`, which may
@@ -59,7 +57,7 @@ defmodule PropertyDamage.Executor.State do
       ambient injector event). `:unset` on every non-failing state; consulted by
       finalization so the report names the right command (ghost field).
     * `:await_matchers` - DR-030 correlation registry: a registration-ordered
-      list of `%{command_index:, branch_id:, match:}` declared via
+      list of `%{command_index:, match:}` declared via
       `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
       the command that declared it) so late injector events still correlate.
       First-registered wins when several match one event.
@@ -75,7 +73,7 @@ defmodule PropertyDamage.Executor.State do
     * `:last_execute_us` - wall-clock microseconds the adapter's `execute/3`
       took for the most recent command, every settle attempt and the waits
       between them included; `nil` when that command never reached the adapter
-      (a nemesis command, an unresolved placeholder). Written on every command:
+      (an unresolved placeholder). Written on every command:
       two monotonic clock reads, so a run that ignores it pays nothing
       measurable. `PropertyDamage.Variant` reads it for latency comparison.
     * `:last_command_index` - the index of the most recent command (`{:setup,
@@ -87,10 +85,20 @@ defmodule PropertyDamage.Executor.State do
       linked to the process that started it (a per-command Task), so an owner
       that must reap every poller even when it is killed mid-command
       (`PropertyDamage.Variant`) learns of it here. `nil` everywhere else.
+    * `:logs` - the log lines the run's user code wrote (DR-054), by the step
+      they belong to (`PropertyDamage.Log`): a `Sequence.Position` for a
+      command, `:adapter_setup` or `:adapter_teardown` for the adapter's
+      `setup/1` or `teardown/1`. Each list is in the order written. Feeds
+      `RunTrace.logs`.
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines, besides the first attempt's (`log: [keep_attempts: n]`,
+      DR-054 decision 13).
     * `:telemetry` - `nil`, or the context command and check telemetry is
       emitted with (`%{variant: %{index, name}, run_number: n}`, see
       `PropertyDamage.Telemetry`); `nil` when nothing listens.
   """
+
+  alias PropertyDamage.Log.Cap
 
   @enforce_keys [
     :model,
@@ -125,10 +133,8 @@ defmodule PropertyDamage.Executor.State do
     step_count: 0,
     check_counters: %{step: 0, command: 0, event: 0},
     check_failures: [],
-    branch_id: nil,
     active_pollers: [],
     active_resource_pollers: [],
-    active_faults: %{},
     async_halt: nil,
     async_failed_index: :unset,
     await_matchers: [],
@@ -137,6 +143,8 @@ defmodule PropertyDamage.Executor.State do
     last_execute_us: nil,
     last_command_index: nil,
     on_resource_poller_start: nil,
+    logs: %{},
+    keep_attempts: Cap.default_keep_attempts(),
     telemetry: nil
   ]
 
@@ -160,10 +168,8 @@ defmodule PropertyDamage.Executor.State do
           step_count: non_neg_integer(),
           check_counters: map(),
           check_failures: list(),
-          branch_id: term(),
           active_pollers: list(),
           active_resource_pollers: list(),
-          active_faults: map(),
           async_halt: term(),
           async_failed_index: non_neg_integer() | nil | :unset,
           await_matchers: [map()],
@@ -172,6 +178,8 @@ defmodule PropertyDamage.Executor.State do
           last_execute_us: non_neg_integer() | nil,
           last_command_index: non_neg_integer() | {:setup, non_neg_integer()} | nil,
           on_resource_poller_start: (pid() -> term()) | nil,
+          logs: PropertyDamage.Log.logs(),
+          keep_attempts: pos_integer(),
           telemetry: map() | nil
         }
 end

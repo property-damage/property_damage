@@ -6,12 +6,15 @@ defmodule PropertyDamage.Failure.Check do
   `context` is `nil` except for an `@eventually` window that ended before its
   timeout (DR-052), where it holds `poll_count` and `elapsed_ms`, so the report
   can name the poll while `detail` keeps the exception itself.
+
+  `projection` is the projection module whose check failed, for `:check_failed`
+  and `:poll_timeout`. It is `nil` for every other kind and for a failure
+  rebuilt from a signature.
   """
 
   @type kind ::
           :check_failed
           | :idempotency_violation
-          | :linearization
           | :poll_timeout
           | :settle_timeout
           | :projection_violation
@@ -20,10 +23,11 @@ defmodule PropertyDamage.Failure.Check do
           kind: kind(),
           name: atom() | {module(), atom()} | nil,
           detail: term(),
-          context: map() | nil
+          context: map() | nil,
+          projection: module() | nil
         }
 
-  defstruct kind: nil, name: nil, detail: nil, context: nil
+  defstruct kind: nil, name: nil, detail: nil, context: nil, projection: nil
 end
 
 defmodule PropertyDamage.Failure.Execution do
@@ -34,7 +38,6 @@ defmodule PropertyDamage.Failure.Execution do
 
   @type kind ::
           :adapter_error
-          | :nemesis_error
           | :stutter_execution_failed
           | :resource_poller_error
           | :poll_error
@@ -80,7 +83,9 @@ defmodule PropertyDamage.Failure.Divergence do
   difference (by default a `PropertyDamage.ComparisonMismatch`). `using` is
   the observation's `using:` term as written (`:fun`, `{Mod, :fun}` or
   `{Mod, :fun, args}`, DR-051), `nil` when the values were compared under
-  `==`.
+  `==`. `waited_ms` is how long the comparison waited at the boundary and
+  `within_ms` the convergence bound it waited against; both are `nil` on a
+  divergence saved before they were recorded.
 
   `other_keys` lists every further observation compared at the same boundary
   that still differed or was still pending when the bound expired, in key
@@ -97,6 +102,8 @@ defmodule PropertyDamage.Failure.Divergence do
           variant_value: term(),
           mismatch: Exception.t() | nil,
           using: atom() | {module(), atom()} | {module(), atom(), list()} | nil,
+          waited_ms: non_neg_integer() | nil,
+          within_ms: pos_integer() | nil,
           other_keys: [PropertyDamage.Failure.other_key()]
         }
 
@@ -108,6 +115,8 @@ defmodule PropertyDamage.Failure.Divergence do
     :variant_value,
     :mismatch,
     :using,
+    :waited_ms,
+    :within_ms,
     other_keys: []
   ]
 end
@@ -151,6 +160,14 @@ defmodule PropertyDamage.Failure.Setup do
 
     * `:adapter_setup` - the adapter's `setup/1` returned `{:error, term}` or
       raised; `detail` is the term or the exception
+    * `:model` - model code raised, exited or threw while the variant came up,
+      after the adapter's `setup/1` returned `{:ok, _}` (for example a
+      hand-written check-list entry without `:type`); `detail` is the exception, with
+      an exit or throw as an `ErlangError`
+    * `:variant` - the variant process exited while it came up, in a way no
+      `setup/1` or model code could rescue (an untrappable kill, or the crash
+      of a process linked to it); `detail` is the exit reason, as
+      `{:exit, reason}` or the exception that ended the process
     * `:command` - a setup command's adapter answer was `{:error, term}` or a
       raise, or the command could not be executed; `detail` is the term, the
       exception, or the `%PropertyDamage.Failure{}` the engine reported
@@ -165,7 +182,7 @@ defmodule PropertyDamage.Failure.Setup do
   its offset among the setup commands.
   """
 
-  @type cause :: :adapter_setup | :command | :check | :unresolved_placeholder
+  @type cause :: :adapter_setup | :model | :variant | :command | :check | :unresolved_placeholder
 
   @type t :: %__MODULE__{
           cause: cause(),
@@ -232,13 +249,8 @@ defmodule PropertyDamage.Failure do
           | %Failure.Divergence{}
           | %Failure.Convergence{}
           | %Failure.Setup{}
-          | %Failure.Latency{},
-        branch_id: non_neg_integer() | nil
+          | %Failure.Latency{}
       }
-
-  The envelope holds the cross-class commons. `branch_id` absorbs the old
-  recursive `{:branch_failure, id, inner}` wrapper: a branch failure is just an
-  ordinary failure whose envelope records which branch produced it.
 
   Each class struct owns its `kind` (a closed, documented set), a `name` where
   one is meaningful, and a class-specific payload (`detail`, plus
@@ -256,7 +268,6 @@ defmodule PropertyDamage.Failure do
   |------|------|--------|
   | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` relation that raised | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
-  | `:linearization` | `nil` | a human message |
   | `:poll_timeout` | the eventually check name | the poll-timeout info map |
   | `:settle_timeout` | `nil` | the last settle error |
   | `:projection_violation` | the projection module | the raised exception |
@@ -266,10 +277,9 @@ defmodule PropertyDamage.Failure do
   | kind | detail | partial_events |
   |------|--------|----------------|
   | `:adapter_error` | the adapter error / exception | events captured before the error (or `nil`) |
-  | `:nemesis_error` | the fault-injection error | `nil` |
   | `:stutter_execution_failed` | the retry failure details | `nil` |
   | `:resource_poller_error` | the poller error | `nil` |
-  | `:poll_error` | the raised poll-predicate error | `nil` |
+  | `:poll_error` | the error from waiting on a check's poller, such as `:await_timeout` | `nil` |
   | `:retry_from_sync_command` | a `:sync` command that returned `{:retry, _}` | `nil` |
   | `:malformed_adapter_return` | the unexpected adapter return value | `nil` |
 
@@ -284,7 +294,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:, other_keys:}` |
+  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:, using:, waited_ms:, within_ms:, other_keys:}` |
 
   ### `Failure.Convergence` - a boundary observation stayed pending
 
@@ -296,7 +306,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1` or of a setup command, the failed check, or the unresolved placeholder |
+  | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1`, of model code that faulted during setup or of a setup command, the failed check, or the unresolved placeholder |
 
   ### `Failure.Latency` - a latency statistic exceeded its budget
 
@@ -328,6 +338,15 @@ defmodule PropertyDamage.Failure do
   @type class ::
           :check | :execution | :framework | :divergence | :convergence | :setup | :latency
 
+  @typedoc "The outcome a failure report describes (`report_kind/1`)."
+  @type report_kind ::
+          :check_failed
+          | :diverged
+          | :setup_failed
+          | :execution_failed
+          | :did_not_converge
+          | :latency_exceeded
+
   @typedoc "A failure's name: a check name, a projection, or a `{projection, function}` key."
   @type name :: atom() | {module(), atom()} | nil
 
@@ -345,12 +364,10 @@ defmodule PropertyDamage.Failure do
   @type kind ::
           :check_failed
           | :idempotency_violation
-          | :linearization
           | :poll_timeout
           | :settle_timeout
           | :projection_violation
           | :adapter_error
-          | :nemesis_error
           | :stutter_execution_failed
           | :resource_poller_error
           | :poll_error
@@ -371,11 +388,10 @@ defmodule PropertyDamage.Failure do
             | Divergence.t()
             | Convergence.t()
             | Setup.t()
-            | Latency.t(),
-          branch_id: non_neg_integer() | nil
+            | Latency.t()
         }
 
-  defstruct type: nil, branch_id: nil
+  defstruct type: nil
 
   # ==========================================================================
   # Accessors
@@ -393,6 +409,26 @@ defmodule PropertyDamage.Failure do
   def class(%__MODULE__{type: %Convergence{}}), do: :convergence
   def class(%__MODULE__{type: %Setup{}}), do: :setup
   def class(%__MODULE__{type: %Latency{}}), do: :latency
+
+  @doc """
+  The report kind for a failure reason: `:check_failed` for every check kind,
+  `:diverged`, `:did_not_converge`, `:setup_failed`, `:latency_exceeded`, and
+  `:execution_failed` for every execution and framework kind. `nil` for anything that is not a
+  `%Failure{}`.
+  """
+  @spec report_kind(term()) :: report_kind() | nil
+  def report_kind(%__MODULE__{} = failure) do
+    case class(failure) do
+      :check -> :check_failed
+      :divergence -> :diverged
+      :convergence -> :did_not_converge
+      :setup -> :setup_failed
+      :latency -> :latency_exceeded
+      class when class in [:execution, :framework] -> :execution_failed
+    end
+  end
+
+  def report_kind(_failure_reason), do: nil
 
   @doc "The failure's globally-unique kind atom."
   @spec kind(t()) :: kind()
@@ -439,22 +475,20 @@ defmodule PropertyDamage.Failure do
   def partial_events(%__MODULE__{type: %Execution{partial_events: events}}), do: events
   def partial_events(%__MODULE__{type: _}), do: nil
 
-  @doc "The branch id that produced this failure, or `nil` for a linear run."
-  @spec branch_id(t()) :: non_neg_integer() | nil
-  def branch_id(%__MODULE__{branch_id: id}), do: id
-
-  @doc "Record that `failure` occurred inside branch `branch_id`."
-  @spec in_branch(t(), non_neg_integer()) :: t()
-  def in_branch(%__MODULE__{} = failure, branch_id), do: %{failure | branch_id: branch_id}
-
   # ==========================================================================
   # Check constructors
   # ==========================================================================
 
-  @doc "A check or invariant failed (`name` identifies which)."
-  @spec check_failed(name(), term()) :: t()
-  def check_failed(name, detail) do
-    %__MODULE__{type: %Check{kind: :check_failed, name: name, detail: detail}}
+  @doc """
+  A check or invariant failed (`name` identifies which). `projection` is the
+  projection module that defines the check, or `nil` when no projection module
+  applies.
+  """
+  @spec check_failed(name(), term(), module() | nil) :: t()
+  def check_failed(name, detail, projection \\ nil) do
+    %__MODULE__{
+      type: %Check{kind: :check_failed, name: name, detail: detail, projection: projection}
+    }
   end
 
   @doc """
@@ -472,7 +506,8 @@ defmodule PropertyDamage.Failure do
         kind: :check_failed,
         name: info.triggered_by.check_name,
         detail: detail,
-        context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms}
+        context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms},
+        projection: info[:projection]
       }
     }
   end
@@ -483,17 +518,14 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Check{kind: :idempotency_violation, detail: violation}}
   end
 
-  @doc "No sequential ordering explained the observed parallel results."
-  @spec linearization(term()) :: t()
-  def linearization(message) do
-    %__MODULE__{type: %Check{kind: :linearization, detail: message}}
-  end
-
-  @doc "A `@eventually` check timed out; `info` carries the details."
+  @doc "A `@eventually` check timed out; `info` carries the details and the `:projection`."
   @spec poll_timeout(map()) :: t()
   def poll_timeout(info) do
     name = get_in(info, [:triggered_by, :check_name])
-    %__MODULE__{type: %Check{kind: :poll_timeout, name: name, detail: info}}
+
+    %__MODULE__{
+      type: %Check{kind: :poll_timeout, name: name, detail: info, projection: info[:projection]}
+    }
   end
 
   @doc "A probe/bridge command never settled; `detail` is the last error."
@@ -525,12 +557,6 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{
       type: %Execution{kind: :adapter_error, detail: reason, partial_events: partial_events}
     }
-  end
-
-  @doc "A nemesis (fault-injection) command failed to inject or restore."
-  @spec nemesis_error(term()) :: t()
-  def nemesis_error(reason) do
-    %__MODULE__{type: %Execution{kind: :nemesis_error, detail: reason}}
   end
 
   @doc "A retry attempt during stutter testing raised."
@@ -571,7 +597,8 @@ defmodule PropertyDamage.Failure do
   A variant's boundary observation differed from the reference's at the
   convergence bound. `fields` holds `:key`, `:root`, `:command`,
   `:reference_value`, `:variant_value` and `:mismatch`, and optionally
-  `:using` and `:other_keys` (see `PropertyDamage.Failure.Divergence`).
+  `:using`, `:waited_ms`, `:within_ms` and `:other_keys` (see
+  `PropertyDamage.Failure.Divergence`).
   """
   @spec diverged(map()) :: t()
   def diverged(fields) do
@@ -599,13 +626,15 @@ defmodule PropertyDamage.Failure do
   end
 
   @doc """
-  A setup command failed in a target. `cause` is `:command`, `:check` or
-  `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
+  A setup command failed in a target, model code faulted while the target came
+  up, or the variant process died while it came up. `cause` is `:model`,
+  `:variant`, `:command`, `:check` or `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
   `:detail` and, for an unresolved placeholder, `:field` (see
   `PropertyDamage.Failure.Setup`).
   """
   @spec setup_failed(Setup.cause(), keyword()) :: t()
-  def setup_failed(cause, fields) when cause in [:command, :check, :unresolved_placeholder] do
+  def setup_failed(cause, fields)
+      when cause in [:model, :variant, :command, :check, :unresolved_placeholder] do
     %__MODULE__{type: struct!(Setup, Keyword.put(fields, :cause, cause))}
   end
 
@@ -638,7 +667,6 @@ defmodule PropertyDamage.Failure do
   @check_kinds [
     :check_failed,
     :idempotency_violation,
-    :linearization,
     :poll_timeout,
     :settle_timeout,
     :projection_violation
@@ -646,7 +674,6 @@ defmodule PropertyDamage.Failure do
 
   @execution_kinds [
     :adapter_error,
-    :nemesis_error,
     :stutter_execution_failed,
     :resource_poller_error,
     :poll_error,
@@ -657,8 +684,9 @@ defmodule PropertyDamage.Failure do
   @doc """
   Build a minimal `%Failure{}` carrying only a kind and a name.
 
-  Used by the shrinker to reconstruct a comparable failure from the kind and
-  name of a failure signature; the `detail` is left `nil`. Names are retained
+  Reconstructs a comparable failure from the kind and name of a failure
+  signature (`PropertyDamage.Shrinker.failure_signature/2`); the `detail` is
+  left `nil`. Names are retained
   for `Check` kinds, `:diverged`, `:did_not_converge` and `:latency_exceeded`, so the rebuilt
   failure has the signature it was built from.
   """

@@ -128,7 +128,7 @@ end
 
 ```elixir
 defmodule AuthOnlyModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   import MyDomain.CommandConfigs
 
@@ -144,7 +144,7 @@ defmodule AuthOnlyModel do
 end
 
 defmodule FullPaymentModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   import MyDomain.CommandConfigs
 

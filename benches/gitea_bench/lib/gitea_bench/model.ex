@@ -95,7 +95,7 @@ defmodule GiteaBench.Model do
   several labels, gets closed, etc.).
   """
 
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias GiteaBench.Commands.{
     AddLabelToIssue,

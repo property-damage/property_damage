@@ -33,10 +33,10 @@ start per second.
 ## Quick Start
 
 ```elixir
-alias PropertyDamage.LoadTest.{Runner, Report}
+alias PropertyDamage.LoadTest
 
 # Start a load test
-{:ok, runner} = Runner.start_link(
+{:ok, runner} = LoadTest.start(
   model: MyApp.Model,
   targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
   arrival_rate: 50,           # 50 new sequences per second
@@ -44,18 +44,18 @@ alias PropertyDamage.LoadTest.{Runner, Report}
 )
 
 # Wait for completion
-{:ok, report} = Runner.await(runner)
+{:ok, report} = LoadTest.await(runner)
 
 # Display results
-IO.puts(Report.format(report, :terminal))
+IO.puts(LoadTest.format(report, :terminal))
 
 # Or save to file
-Report.save(report, "load_test_report.md", :markdown)
+LoadTest.save(report, "load_test_report.md", :markdown)
 ```
 
 ### The `run/1` entry point
 
-The Quick Start above drives the async `Runner` surface directly. The simplest
+The Quick Start above uses the async `start/1` and `await/2` pair. The simplest
 way to run a load test is the one-shot `PropertyDamage.LoadTest.run/1`, the same
 entry point `benches/openapi_bench` uses. It starts a runner, blocks until the
 run finishes, and returns the final report:
@@ -73,7 +73,8 @@ IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
 
 Like `PropertyDamage.run/1` for correctness testing, `run/1` takes a keyword
 list and returns a single result: `{:ok, report}` on completion or
-`{:error, reason}` if the runner fails to start. The difference is what happens
+`{:error, reason}` if the runner fails to start. Invalid options raise
+`NimbleOptions.ValidationError` instead. The difference is what happens
 between those points. `PropertyDamage.run/1` explores many short sequences
 hunting for bugs and returns run statistics (or a failure report);
 `LoadTest.run/1` sustains concurrent arrivals for the configured `duration` and
@@ -82,9 +83,8 @@ returns a load report (see [Understanding the Report](#understanding-the-report)
 When you need to observe or stop a run in flight, use the async facade instead
 of `run/1`. `PropertyDamage.LoadTest` exposes `start/1` (returns
 `{:ok, runner}`), `await/2`, `status/1`, `get_metrics/1`, and `stop/1` over the
-`Runner` process shown in the Quick Start; `run/1` is exactly `start/1` followed
-by `await/2`. `format/2`, `summary/1`, and `save/3` render a report and delegate
-to the load report module.
+runner process shown in the Quick Start; `run/1` is exactly `start/1` followed
+by `await/2`. `format/2`, `summary/1`, and `save/3` render a report.
 
 `run/1` validates its options against a NimbleOptions schema, the authority
 for what is accepted. The required options are `model`, `targets`,
@@ -93,13 +93,19 @@ is optional.
 
 ## Server-Generated Values (`external()`)
 
-Realistic load uses the same models as correctness testing, including commands
+Load testing uses the same models as correctness testing, including commands
 that chain a server-generated id. When a command produces a value its event marks
 with `external()` (see the "External Field Markers" section of the
 [Writing Commands](writing_commands.md) guide), each worker captures that
 concrete value and resolves it into the later commands in the same sequence,
 exactly as in `PropertyDamage.run/1`. Capture is per worker, so concurrent
 arrivals never share or clobber each other's ids.
+
+Load-test workers skip the model's `setup_each/0` and `teardown_each/0`
+commands. Each worker generates a sequence and runs only its prefix and suffix.
+If your model needs fixtures, create them in the adapter's `setup/1` or seed
+the system before the test starts. Workers run the roots of `commands/0` as
+themselves and do not apply the model's `expansions/0`.
 
 ## Invariants under sustained load
 
@@ -151,6 +157,12 @@ write.
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
 | `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
+| `seed` | Positive integer the workers derive their sequences from; the same `seed` and `run_nonce` send the same commands from each worker | drawn at random, recorded as `config.seed` in the report |
+
+Every time value written as `{n, unit}` takes a positive integer `n` and one of
+these units: `:milliseconds`, `:seconds`, `:minutes` or `:hours`. This covers
+`duration`, `metrics_interval`, the time in `arrival_rate`, and the durations
+in the ramp strategies.
 
 ### Arrival Rate Formats
 
@@ -179,13 +191,13 @@ ramp_up: {:linear, {30, :seconds}}
 ramp_up: {:step, 5, {10, :seconds}}  # 5 steps, 10 seconds each
 
 # Exponential - exponential growth curve
-ramp_up: {:exponential, {1, :minute}}
+ramp_up: {:exponential, {1, :minutes}}
 ```
 
 Example with ramp-up and ramp-down:
 
 ```elixir
-Runner.start_link(
+LoadTest.start(
   model: MyModel,
   targets: [MyAdapter],
   arrival_rate: 100,
@@ -270,7 +282,8 @@ A single arrival may execute multiple commands before the sequence terminates.
 - **Commands/Second**: Average command throughput
 - **Arrivals Spawned**: Sequences that started
 - **Arrivals Completed**: Sequences that ran to completion (a gap below Spawned
-  means workers failed to start or sequences errored out)
+  means workers failed to start, sequences errored out, or slow commands are
+  still running)
 - **Arrivals/Second**: Actual arrival rate achieved
 
 If `Total Commands ≈ Arrivals Spawned`, each sequence runs ~1 command.
@@ -322,10 +335,15 @@ checked out (or created on demand) for each arrival, so it grows to whatever
 concurrency the arrival rate and command latency demand. You do not tune it.
 
 So a large gap between `Arrivals Spawned` and `Arrivals Completed` is not pool
-saturation: it means workers could not start or their sequences errored out
-(for example `adapter.setup/1` failed). That points at the adapter or the SUT
-refusing connections, not at a queue depth to raise. Watch `pool_utilization`
-and `peak_workers` in `Runner.status/1` to see how far the pool grew.
+saturation. It means workers could not start (for example `adapter.setup/1`
+failed), their sequences errored out, or slow or hung commands are still in
+flight. The first two point at the adapter or the SUT refusing connections,
+not at a queue depth to raise. For the third, the adapter's `timeout/1`
+callback bounds each command (30 seconds unless you set `default_timeout:` in
+`use PropertyDamage.Adapter`). A command over its timeout raises
+`PropertyDamage.CommandTimeoutError`, so a hung command cannot grow the pool
+without bound. Watch `pool_utilization` and `peak_workers` in
+`LoadTest.status/1` to see how far the pool grew.
 
 ### 2. Lower Arrival Rate
 
@@ -333,7 +351,7 @@ Match the arrival rate to what your system can actually handle:
 
 ```elixir
 # If completions lag spawns at rate 100, try rate 70
-Runner.start_link(
+LoadTest.start(
   arrival_rate: 70,
   # ...
 )
@@ -352,16 +370,34 @@ Faster commands mean workers become available sooner:
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 ~1 command. Check your model's `terminate_early?/3` implementation:
 
-```elixir
-# This terminates immediately - only 1 command per sequence
-def terminate_early?(_state, _history, _step), do: true
+`terminate_early?/3` receives the state after a command, the command that was
+just added, and the events the simulator predicts for it. The generator calls
+it while it builds the sequence, before anything runs, so the events are a
+prediction and never a real answer from the SUT. For a model without a
+`simulator/0`, the generator always passes `[]` as the events, and the state
+changes only through what the projection derives from the command itself.
+The callback does not receive a step count, so decide from the state. The
+second clause below counts accounts that a simulator predicts as
+`AccountCreated` events. Without a simulator the count stays at 0 and the
+clause never fires (see the
+[simulate callback](writing_commands.md#simulate-callback)). In that case,
+match on the command instead, as the last clause below does.
 
-# This runs 5-10 commands per sequence
-def terminate_early?(_state, _history, step), do: step >= 8
+```elixir
+# This terminates immediately: only 1 command per sequence
+def terminate_early?(_state, _command, _events), do: true
+
+# With a simulator, this ends each sequence once it holds three accounts
+def terminate_early?(state, _command, _events), do: map_size(state.accounts) >= 3
+
+# Without a simulator, end each sequence at the first Shutdown command
+def terminate_early?(_state, %Shutdown{}, _events), do: true
 ```
 
-Longer sequences mean more commands per arrival, potentially improving
-overall throughput efficiency.
+A load test has no `max_commands:` option. Without a `terminate_early?/3` that
+returns `true`, each sequence runs up to the generator's default of 50
+commands. Longer sequences mean more commands per arrival, potentially
+improving overall throughput efficiency.
 
 ## Real-Time Monitoring
 
@@ -375,7 +411,7 @@ arrival scheduling.
 alias PropertyDamage.Progress
 alias PropertyDamage.Progress.{LoadResult, LoadUpdate}
 
-Runner.start_link(
+PropertyDamage.LoadTest.start(
   # ...
   on_progress: fn
     %Progress{data: %LoadUpdate{snapshot: snapshot}} ->
@@ -393,7 +429,7 @@ Runner.start_link(
 Or check status programmatically:
 
 ```elixir
-status = Runner.status(runner)
+status = PropertyDamage.LoadTest.status(runner)
 # %{
 #   phase: :steady,
 #   current_rate: {50, {1, :seconds}},
@@ -407,7 +443,7 @@ status = Runner.status(runner)
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
-| Completed << Spawned | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
+| Completed << Spawned | Workers failing to start (`adapter.setup`), SUT refusing connections, or slow commands still in flight | Check adapter setup, SUT connection limits and the adapter `timeout/1`; lower arrival rate |
 | Commands ≈ Arrivals | Early termination | Check `terminate_early?/3` returns `false` initially |
 | Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
 | Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
@@ -421,7 +457,7 @@ status = Runner.status(runner)
 Colored output with ASCII charts for interactive use:
 
 ```elixir
-IO.puts(Report.format(report, :terminal))
+IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
 ```
 
 ### Markdown
@@ -429,7 +465,7 @@ IO.puts(Report.format(report, :terminal))
 Detailed report suitable for documentation:
 
 ```elixir
-Report.save(report, "results/load_test.md", :markdown)
+PropertyDamage.LoadTest.save(report, "results/load_test.md", :markdown)
 ```
 
 ### JSON
@@ -437,14 +473,14 @@ Report.save(report, "results/load_test.md", :markdown)
 Machine-readable format for analysis pipelines:
 
 ```elixir
-json = Report.format(report, :json)
+json = PropertyDamage.LoadTest.format(report, :json)
 File.write!("results/load_test.json", json)
 ```
 
 ## Example: Full Load Test Script
 
 ```elixir
-alias PropertyDamage.LoadTest.{Runner, Report}
+alias PropertyDamage.LoadTest
 
 # Configuration
 config = [
@@ -467,19 +503,18 @@ config = [
 
 # Run test
 IO.puts("Starting load test...")
-{:ok, runner} = Runner.start_link(config)
-{:ok, report} = Runner.await(runner)
+{:ok, runner} = LoadTest.start(config)
+{:ok, report} = LoadTest.await(runner)
 
 # Output results
-IO.puts(Report.format(report, :terminal))
-Report.save(report, "load_test_#{System.os_time(:second)}.md", :markdown)
+IO.puts(LoadTest.format(report, :terminal))
+LoadTest.save(report, "load_test_#{System.os_time(:second)}.md", :markdown)
 
 # Summary
-IO.puts("\n#{Report.summary(report)}")
+IO.puts("\n#{LoadTest.summary(report)}")
 ```
 
 ## Next Steps
 
 - [Integration Testing](integration_testing.md) - Correctness testing
-- [Chaos Engineering](chaos_engineering.md) - Fault injection under load
 - [Debugging Failures](debugging_failures.md) - Analyzing test failures

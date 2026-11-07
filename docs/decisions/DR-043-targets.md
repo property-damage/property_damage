@@ -118,6 +118,6 @@ record fixes the entry shape and the removal of the old keys.
   persistence format does not change.
 - DR-042 decided that `targets:` is the only place a target is described;
   this record gives the entry shape and the detailed removal. The `adapter:`
-  option that DR-035 lists for `RunTrace.capture/1` and
+  option that DR-035 lists for `RunTrace.Capture.capture/1` and
   `RunComparison.investigate/1` is now a `targets:` entry (inside `capture:`
   for the comparison functions).

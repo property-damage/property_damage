@@ -1,10 +1,9 @@
 defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
   @moduledoc """
-  Integration coverage for the executor surface: nemesis fault
-  injection, stutter (idempotency retries), resource pollers (@eventually
-  eventual consistency), and mid-execution event injection ("mocks") all in a
-  SINGLE Executor.run sequence sharing one event log, projection set, and run
-  loop. Each mechanism is tested in isolation elsewhere; this asserts they
+  Integration coverage for the executor surface: stutter (idempotency
+  retries), resource pollers (@eventually eventual consistency), and
+  mid-execution event injection ("mocks") all in a SINGLE Executor.run
+  sequence sharing one event log, projection set, and run loop. Each mechanism is tested in isolation elsewhere; this asserts they
   compose without interfering.
 
   The mechanisms are deliberately attached to different commands so the test
@@ -21,7 +20,6 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     defmodule Confirmed, do: defstruct([:id])
     defmodule MockArrived, do: defstruct([:id])
     defmodule Charged, do: defstruct([:id])
-    defmodule FaultInjected, do: defstruct([:kind])
   end
 
   defmodule InitiatePayment do
@@ -36,23 +34,6 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     defstruct [:id]
     @impl true
     def generator(_overrides \\ %{}), do: StreamData.constant(%{id: "p1"})
-  end
-
-  # A nemesis command: dispatched to inject/2, not the adapter.
-  defmodule LatencyFault do
-    @behaviour PropertyDamage.Nemesis
-    defstruct [:ms]
-
-    @impl true
-    def precondition(_state), do: true
-
-    @impl true
-    def inject(%__MODULE__{ms: _ms}, _ctx) do
-      {:ok, [%Events.FaultInjected{kind: :latency}]}
-    end
-
-    @impl true
-    def restore(%__MODULE__{}, _ctx), do: {:ok, []}
   end
 
   defmodule Projection do
@@ -70,7 +51,7 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     def apply(state, %Charged{id: id}), do: %{state | charged: MapSet.put(state.charged, id)}
     def apply(state, _), do: state
 
-    # Synchronous invariant fired after every step (including after the nemesis
+    # Synchronous invariant fired after every step (including after the last
     # command): every tracked payment is in a known status.
     @check every: 1
     def assert_status_valid(state, _cmd_or_event) do
@@ -98,7 +79,7 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [InitiatePayment, Charge]
     @impl true
@@ -141,13 +122,8 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     end
   end
 
-  test "nemesis + stutter + poller + injected events compose in one sequence" do
-    sequence =
-      Sequence.linear([
-        %InitiatePayment{id: "p1"},
-        %Charge{id: "p1"},
-        %LatencyFault{ms: 5}
-      ])
+  test "stutter + poller + injected events compose in one sequence" do
+    sequence = Sequence.linear([%InitiatePayment{id: "p1"}, %Charge{id: "p1"}])
 
     stutter_config = %Config{
       probability: 1.0,
@@ -191,12 +167,8 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     assert MapSet.member?(proj.charged, "p1")
 
     sources = result.event_log |> Enum.map(& &1.source) |> Enum.uniq()
-    # All three event provenances are present in one log.
+    # Command and injected event provenances are present in one log.
     assert :command in sources
     assert :injected in sources
-    assert :nemesis in sources
-
-    # NEMESIS: the fault event was recorded.
-    assert Enum.any?(result.event_log, &match?(%Events.FaultInjected{}, &1.event))
   end
 end

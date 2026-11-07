@@ -82,7 +82,7 @@ Because a run option is runtime data, a 2-arity function
 `fn original_events, retry_events -> ... end` is accepted too, but a named
 relation is a function you can unit-test and a run prints it as written. The
 relation's return is a verdict (DR-052): a truthy value when the retry agrees,
-and `false`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
+and `false`, `nil`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
 
 ### Default: `==`
 
@@ -227,33 +227,32 @@ end
 
 ## Adapter Integration
 
-On retry executions, the adapter receives stutter context through the
-`%PropertyDamage.Runtime{}` handle passed as the third argument to `execute/3`.
-On the first (non-retry) execution `runtime.stutter` is `nil` -- only retries
-populate it. You can also use `PropertyDamage.Runtime.stuttering?(runtime)` to
-test whether the current execution is a retry.
+Send the command's `idempotency_key` on every execution, the first one
+included. A server can only recognize a retry as a repeat if the original
+request carried the same key. Stutter retries reuse the key that
+`idempotency_key/1` returns for the command.
+
+The adapter also receives stutter context through the `%PropertyDamage.Runtime{}`
+handle passed as the third argument to `execute/3`. On the first (non-retry)
+execution `runtime.stutter` is `nil`; only retries populate it. Use
+`PropertyDamage.Runtime.stuttering?(runtime)` to test whether the current
+execution is a retry, for example to label it in logs.
 
 ```elixir
 defmodule MyAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
 
-  def execute(
-        %CreateOrder{} = cmd,
-        _user_context,
-        %PropertyDamage.Runtime{stutter: %{idempotency_key: key}}
-      )
-      when is_binary(key) do
-    # Retry execution -- include idempotency header
-    headers = [{"Idempotency-Key", key}]
+  def setup(_config), do: {:ok, %{}}
+
+  def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
+    # The same header goes out on the first execution and on every retry.
+    # Calling the callback keeps this key equal to the one stutter retries reuse.
+    headers = [{"Idempotency-Key", CreateOrder.idempotency_key(cmd)}]
     result = HttpClient.post("/orders", %{amount: cmd.amount}, headers: headers)
     {:ok, [result.event]}
   end
 
-  def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
-    # First execution -- runtime.stutter is nil
-    result = HttpClient.post("/orders", %{amount: cmd.amount})
-    {:ok, [result.event]}
-  end
+  def teardown(_ctx), do: :ok
 end
 ```
 
@@ -326,6 +325,11 @@ To debug violations:
 3. Use `seed:` to reproduce the exact sequence deterministically.
 4. If the violation is expected (e.g., a legitimately non-idempotent command),
    set `idempotent: false` in that command's `command_spec/1`.
+
+To read the violation as a page in a browser, pass
+`report_html: "_build/pd_reports"` to `PropertyDamage.run/1` or set
+`PD_REPORT_HTML=_build/pd_reports`. See
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
 
 ## Full Example
 

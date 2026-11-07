@@ -66,7 +66,6 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         %PropertyDamage.EventLog.Entry{
           timestamp: 0,
           command_index: failed_at,
-          branch_id: nil,
           event: event,
           source: :command
         }
@@ -95,8 +94,8 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     do: Failure.projection_violation(name || :Projection, msg)
 
   defp fi_failure_reason(:adapter_error, _name, msg), do: Failure.adapter_error(msg)
-  defp fi_failure_reason(:nemesis_error, _name, msg), do: Failure.nemesis_error(msg)
   defp fi_failure_reason(:settle_timeout, _name, msg), do: Failure.settle_timeout(msg)
+  defp fi_failure_reason(:poll_error, _name, msg), do: Failure.poll_error(msg)
 
   def create_similar_failure(base, changes \\ []) do
     base
@@ -113,7 +112,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   def cluster_b_failure(seed) do
     create_failure_report(
       seed: seed,
-      failure_type: :nemesis_error,
+      failure_type: :adapter_error,
       check_name: nil,
       command: %TestCommand.CreateAccount{
         account_ref: "acc_2",
@@ -278,7 +277,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
       report2 =
         create_failure_report(
-          failure_type: :nemesis_error,
+          failure_type: :adapter_error,
           check_name: nil,
           command: %TestCommand.CreateAccount{
             account_ref: "acc_2",
@@ -353,7 +352,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
     test "returns false for dissimilar fingerprints" do
       report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
-      report2 = create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+      report2 = create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
 
       fp1 = Fingerprint.from_failure_report(report1)
       fp2 = Fingerprint.from_failure_report(report2)
@@ -380,7 +379,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       others = [
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
       ]
 
       target_fp = Fingerprint.from_failure_report(target)
@@ -415,7 +414,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         create_failure_report(seed: 111),
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
       ]
 
       clusters = Patterns.cluster_failures(failures)
@@ -582,7 +581,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
     test "detects dissimilar failures" do
       report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
-      report2 = create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+      report2 = create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
 
       refute FailureIntelligence.similar?(report1, report2)
     end
@@ -608,7 +607,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failures = [
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
       ]
 
       results = FailureIntelligence.find_similar(target, failures)
@@ -689,7 +688,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failures = [
         create_failure_report(seed: 111),
         create_failure_report(seed: 222),
-        create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
+        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
       ]
 
       groups = FailureIntelligence.group_by_fingerprint(failures)
@@ -856,7 +855,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       [big, mid, _lone] = clusters
       assert big.pattern.failure_type == :check_failed
       assert big.pattern.command_types == [TestCommand.DebitAccount]
-      assert mid.pattern.failure_type == :nemesis_error
+      assert mid.pattern.failure_type == :adapter_error
     end
 
     test "analyze/2 reports two clusters, one singleton, and the most common pattern",
@@ -901,11 +900,11 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test "returns nil for a novel failure that matches no cluster", %{clusters: clusters} do
       novel =
         create_failure_report(
-          failure_type: :adapter_error,
+          failure_type: :poll_error,
           check_name: nil,
           command: %TestCommand.CreditAccount{account_ref: "x", amount: 1, currency: "JPY"},
           events: [],
-          message: "unexpected adapter error"
+          message: "unexpected poll error"
         )
 
       assert FailureIntelligence.match_pattern(novel, clusters) == nil
@@ -941,6 +940,28 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert result.variations_run == 10
       assert result.variations_failed == 0
       assert result.confidence == 1.0
+    end
+
+    test "a one-variation budget and a zero range run no variation" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_variations: 1,
+          variation_range: 0
+        )
+
+      assert result.variations_run == 0
+    end
+
+    test "a negative variation range runs only the random variations" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          targets: [{FI.Adapter, config: %{bug: :off}}],
+          max_variations: 5,
+          variation_range: -4
+        )
+
+      assert result.variations_run == 2
     end
 
     test ":still_failing when the original seed still reproduces" do

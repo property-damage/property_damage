@@ -7,9 +7,10 @@ defmodule PropertyDamage.Replay do
   exactly how the system reached the failure state.
 
   Replay is a thin **stepping shell over the Executor**: every command runs
-  through the exact same engine path as a real run (ref/placeholder resolution,
-  settle for probe/async commands, nemesis injection, injector and mock events,
-  projection updates, `@check` checks, and stutter). This is what makes a
+  through the exact same engine path as a real run (placeholder resolution,
+  settle for probe/async commands, injector and mock events,
+  projection updates, and `@check` checks; stutter is the one exception, see
+  Limitations). This is what makes a
   recorded failure replay to the identical step sequence and state.
 
   ## Usage Modes
@@ -65,30 +66,22 @@ defmodule PropertyDamage.Replay do
   - `events` - Events produced by this command (in chronological order)
   - `projections` - Projection states after this command
   - `projections_before` - Projection states before this command
-  - `refs` - Ref resolution map
   - `result` - `:ok`, `{:check_failed, name, exception}`, or `{:error, reason}`
 
   ## Limitations
 
-  - **Branching sequences are not steppable.** Interactive stepping is linear by
-    nature; the fork/merge semantics of a parallel sequence cannot be reproduced
-    one command at a time. `start/2` and `run/2` return
-    `{:error, :branching_replay_unsupported}` for a branching `shrunk_sequence`.
-    Inspect a branching failure via the `FailureReport` fields or re-run it
-    through `PropertyDamage.Executor.run/4`.
-  - **Stutter config is not stored in the report.** The `FailureReport` records
-    the model, adapter, and sequence, but not the `stutter:` config a run was
-    given. If the original run used stutter and you want it re-applied during
-    replay, pass it via `opts` (`:stutter_config`). It is deliberately not
-    persisted yet: stutter is not seed-deterministic (decisions consume the
-    process `:rand` stream at execution time), so persisting the config alone
-    would not make replay reproduce *which* commands stuttered, and the
-    `using:` predicate, a function, cannot survive the `[:safe]` term decode
-    used by `PropertyDamage.Persistence`. Persisting it belongs with the determinism
-    hardening that introduces a generation-time stutter plan; see that item in
-    the project's fix checklist. (`external_markers` is not a gap: real runs
-    never set it, and external paths are derived from the event struct
-    definitions, which are reachable from the persisted model.)
+  - **Replay does not apply stutter.** The `FailureReport` records the run's
+    normalized `stutter:` option, but no replay option re-applies it, and
+    `start/2` and `run/2` reject a `stutter_config:` option. A run derives its
+    stutter decisions for a command from the run seed and the command's index,
+    not from the process `:rand` stream (DR-029), but a replay has no stutter
+    option to apply them, so it runs each command once.
+    `PropertyDamage.shrink_further/2` does re-apply the report's
+    `stutter:` option.
+
+  A replay simulates the report's commands with the atom markers the run
+  named through `external_markers:`, which the report records, so a model
+  that relies on such markers replays its `external()` values here.
   """
 
   alias PropertyDamage.{
@@ -163,8 +156,11 @@ defmodule PropertyDamage.Replay do
     `config:`); see
     `PropertyDamage.Target`
   - `:stop_on_failure` - Stop at first failure (default: true)
-  - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
-  - `:external_markers` - External markers to apply during replay (not stored in the report)
+  - `:include_projections` - Accepted, and no code reads it: every step
+    carries its projection states (default: true)
+  - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
+    step's last settle or stutter attempts keep their log lines in the
+    session's executor state (default 3, DR-054)
 
   ## Returns
 
@@ -245,9 +241,6 @@ defmodule PropertyDamage.Replay do
       is_nil(adapter) ->
         {:error, :missing_adapter}
 
-      branching?(FailureReport.shrunk_sequence(failure)) ->
-        {:error, :branching_replay_unsupported}
-
       true ->
         do_start(failure, model, target, opts)
     end
@@ -266,20 +259,28 @@ defmodule PropertyDamage.Replay do
 
     {:ok, event_queue} = EventQueue.start_link()
 
-    case adapter.setup(config) do
+    # The adapter's setup/1 runs in a scope of its own; a stepping session
+    # builds no failure report, so its log lines are dropped (DR-054).
+    # A raise, exit or throw from setup/1 is a setup failure, not a crash: it
+    # must reach the caller as an error so `mix pd.replay` reports it as
+    # indeterminate (exit 125) instead of dying with exit 1.
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> contained_setup(adapter, config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         exec_state =
           Stepping.init_state(model,
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
-            external_markers: opts[:external_markers] || [],
+            external_markers: failure.external_markers,
             # The run's check mode: a `:record` failure replays under
             # `:record`, recording a failing check and going on.
             check_mode: replay_check_mode(failure),
             # Seed the placeholder registry from the failing sequence (DR-021),
             # so replaying a failure whose commands consume `external()` values
             # resolves them instead of raising "Unknown placeholder".
-            placeholder_registry: registry
+            placeholder_registry: registry,
+            keep_attempts: opts[:log][:keep_attempts]
           )
 
         session = %__MODULE__{
@@ -314,6 +315,14 @@ defmodule PropertyDamage.Replay do
         EventQueue.stop(event_queue)
         {:error, Failure.setup_failed(reason)}
     end
+  end
+
+  defp contained_setup(adapter, config) do
+    adapter.setup(config)
+  rescue
+    exception -> {:error, Exception.format(:error, exception, __STACKTRACE__)}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   @doc """
@@ -485,11 +494,13 @@ defmodule PropertyDamage.Replay do
     EventQueue.stop(session.event_queue)
 
     if session.adapter && session.adapter_context do
-      try do
-        session.adapter.teardown(session.adapter_context)
-      rescue
-        _ -> :ok
-      end
+      PropertyDamage.Log.inline(fn ->
+        try do
+          session.adapter.teardown(session.adapter_context)
+        rescue
+          _ -> :ok
+        end
+      end)
     end
   end
 
@@ -618,8 +629,8 @@ defmodule PropertyDamage.Replay do
     end
   end
 
-  defp recorded_check(%{check_name: name, reason: reason}),
-    do: normalize_result(Failure.check_failed(name, reason))
+  defp recorded_check(%{check_name: name, reason: reason} = recorded),
+    do: normalize_result(Failure.check_failed(name, reason, recorded[:projection]))
 
   defp step_context(session) do
     %Stepping.Context{
@@ -654,7 +665,4 @@ defmodule PropertyDamage.Replay do
         {Enum.map(steps, &elem(&1, 0)), Enum.map(steps, &elem(&1, 1)), variant.registry}
     end
   end
-
-  defp branching?(%Sequence{} = seq), do: not Sequence.linear?(seq)
-  defp branching?(_), do: false
 end

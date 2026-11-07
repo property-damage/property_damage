@@ -9,6 +9,24 @@ defmodule PropertyDamage.Mutation do
 
   A **killed** mutant means your tests detected the simulated bug (good).
   A **survived** mutant means your tests missed the bug (bad - weak tests).
+  A mutant **killed by error** made the run fail with an `:execution_failed`
+  report, for example a status mutation that made the adapter return an error.
+  No check caught it, so the mutation score leaves these out:
+  `killed / (total - killed_by_error)`. The report shows the count next to
+  killed and survived (see DR-059).
+
+  Before it mutates each command, `run/1` runs the whole model once with the
+  unmodified adapter, up to 10 commands (`max_commands: 10`) and a fresh random
+  seed, and takes every event of that run as the sample events to mutate. A
+  model with three commands in `commands/0` runs three baselines. If a baseline run fails
+  for any reason (an adapter error, a failed setup, a failed check or
+  invariant), `run/1` stops and returns
+  `{:error, {:baseline_failed, command_module, message}}`. Without this guard
+  every mutation would fail the same way: an adapter error is reported as
+  killed by error, a failed setup yields no events and an empty report, and a
+  failed check counts every mutation as killed. Each hides that the model or
+  the adapter is broken. The message is the failure message of the baseline
+  run.
 
   ## Usage
 
@@ -53,11 +71,22 @@ defmodule PropertyDamage.Mutation do
     `{AdapterModule, config: map}`; see `PropertyDamage.Target`. `injectors:` and
     `mocks:` are not supported and raise.
   - `:operators` - List of operator names (default: all)
-  - `:mutations_per_command` - Max mutations per command (default: 5)
+  - `:mutations_per_command` - Max mutations per operator (default: 5). A command
+    gets up to this cap times the number of operators.
   - `:max_runs` - Property test runs per mutation (default: 10)
   - `:target_score` - Target mutation score (default: 0.80)
   - `:timeout_ms` - Timeout per mutation test (default: 30000)
   - `:verbose` - Print progress (default: false)
+  - `:on_progress` - A 1-arity function called with a `%PropertyDamage.Progress{}`
+    per mutation (`data: %PropertyDamage.Progress.MutationUpdate{}`) and once at
+    the end with the terminal report (`data: %PropertyDamage.Progress.MutationResult{}`)
+
+  ## Outcomes
+
+  Each mutation ends as `:killed`, `:killed_by_error`, `:survived` or
+  `:timeout`. A mutation is `:timeout` when its test runs longer than
+  `:timeout_ms`; the report counts it in `timeout` and in the score's
+  denominator, so it counts against the score like a survivor.
   """
 
   alias PropertyDamage.Mutation.{Analysis, Formatter, Report, Runner}
@@ -65,7 +94,9 @@ defmodule PropertyDamage.Mutation do
   @doc """
   Runs mutation testing against a model.
 
-  Returns `{:ok, report}` with mutation testing results.
+  Returns `{:ok, report}` with mutation testing results, or
+  `{:error, {:baseline_failed, command_module, message}}` when the baseline run
+  for `command_module` fails with an adapter error or a failed setup.
 
   ## Examples
 
@@ -78,9 +109,12 @@ defmodule PropertyDamage.Mutation do
 
       report.mutation_score  # => 0.85
       report.killed          # => 17
+      report.killed_by_error # => 2
       report.survived        # => 3
   """
-  @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
+  @spec run(keyword()) ::
+          {:ok, Report.t()}
+          | {:error, {:baseline_failed, module(), String.t()}}
   defdelegate run(opts), to: Runner
 
   @doc """

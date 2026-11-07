@@ -150,7 +150,7 @@ defmodule CachexBench.ExpansionsTest do
   describe "a model listing a non-root module in expansions/0" do
     defmodule NonRootModel do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [CachexBench.Commands.PutKey, CachexBench.Commands.Incr]

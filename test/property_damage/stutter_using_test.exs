@@ -84,7 +84,7 @@ defmodule PropertyDamage.StutterUsingTest do
           Code.compile_quoted(
             quote do
               defmodule unquote(model) do
-                @behaviour PropertyDamage.Model
+                use PropertyDamage.Model
                 def commands, do: [unquote(command)]
                 def command_sequence_projection, do: PropertyDamage.Test.Compare.Counter
               end

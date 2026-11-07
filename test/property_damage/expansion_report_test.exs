@@ -115,28 +115,37 @@ defmodule PropertyDamage.ExpansionReportTest do
                report |> expansions("beta") |> Enum.at(report.failed_at_index)
     end
 
-    test "the terminal report prints beside the failing root the entry each variant ran" do
+    test "the terminal report says on the failing root's line what each side ran in its place" do
       {report, _entries} = diverged_report()
-      lines = report |> Formatter.format(:terminal, color: false) |> String.split("\n")
+      root = report.failed_at_index
+      text = Formatter.format(report, :terminal, color: false)
 
-      alpha = report |> expansions("alpha") |> Enum.at(report.failed_at_index) |> entry_text()
-      beta = report |> expansions("beta") |> Enum.at(report.failed_at_index) |> entry_text()
-      assert beta == "Refund[1] = [Credit, Credit]"
+      alpha = report |> expansions("alpha") |> Enum.at(root)
+      beta = report |> expansions("beta") |> Enum.at(root)
+      assert entry_text(alpha) == "Refund[0] = [Refund]"
+      assert entry_text(beta) == "Refund[1] = [Credit, Credit]"
 
-      assert Enum.any?(lines, &(&1 =~ "alpha" and &1 =~ alpha and &1 =~ ~r/reference/i)),
-             "no line names alpha's entry #{alpha} as the reference's"
+      [_, reference, variant] = String.split(text, ~r/^(Reference|Variant): target .*$/m)
+      assert text =~ ~s(Reference: target "alpha") and text =~ ~s(Variant: target "beta")
 
-      assert Enum.any?(lines, &(&1 =~ "beta" and &1 =~ beta)),
-             "no line names beta's entry #{beta}"
+      # Each side's failing root line says what it ran; beta's leaves follow it.
+      assert reference =~ ~r/^► \[#{root}\] .*  kept as one step  ◄── diverged$/m
+
+      assert variant =~
+               ~r/^► \[#{root}\] .*  split into steps #{root}\.0 and #{root}\.1  ◄── diverged$/m
+
+      # The command follows its label on the same line or, when too wide for one, the next.
+      assert variant =~
+               ~r/^    \[#{root}\.0\](\n\s+| )%.*Credit\{(.*\n)*    \[#{root}\.1\](\n\s+| )%.*Credit\{/m
     end
 
     @tag :tmp_dir
-    test "survives a persistence round trip at format version 15", %{tmp_dir: dir} do
+    test "survives a persistence round trip at format version 18", %{tmp_dir: dir} do
       {report, _entries} = diverged_report()
       assert expansions(report, "beta") != []
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert <<"PD", 15::8, _rest::binary>> = File.read!(path)
+      assert <<"PD", 18::8, _rest::binary>> = File.read!(path)
       assert {:ok, loaded} = Persistence.load(path)
       assert Map.fetch!(loaded, :expansions) == Map.fetch!(report, :expansions)
       assert Map.fetch!(loaded, :expansion_counts) == Map.fetch!(report, :expansion_counts)
@@ -150,7 +159,7 @@ defmodule PropertyDamage.ExpansionReportTest do
       path = Path.join(dir, "v12-legacy.pd")
       File.write!(path, <<"PD", 12::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 12, 15}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 12, 18}} = Persistence.load(path)
     end
   end
 
@@ -163,8 +172,12 @@ defmodule PropertyDamage.ExpansionReportTest do
       assert step.position == X.call(Position, :leaf, [root, 1])
       assert X.call(Position, :describe, [step.position]) == "leaf 1 of root #{root}"
 
+      # The report labels the leaf under the root it belongs to.
       formatted = Formatter.format(report, :terminal, color: false)
-      assert formatted =~ "leaf 1 of root #{root}"
+      assert formatted =~ ~r/^At\s+\[#{root}\.1\] %.*Credit\{/m
+      # The failing leaf carries the mark, however the width wraps its command.
+      assert formatted =~ ~r/^►\s+\[#{root}\.1\](  ◄── failed\n\s+| )%.*Credit\{/m
+      assert formatted =~ "◄── failed"
     end
 
     test "progress printing names the leaf" do

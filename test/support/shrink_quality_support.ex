@@ -184,7 +184,7 @@ end
 
 defmodule PropertyDamage.Test.ShrinkQuality.Model do
   @moduledoc "Ties the store commands and the consistency projection together."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.ShrinkQuality.Commands.{DelKey, GetKey, PutKey}
 

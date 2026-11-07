@@ -80,7 +80,7 @@
 
 5. **Full traces are captured on demand, not retained per exploration run.**
    Ordinary exploration keeps its current memory profile; a `RunTrace` is
-   materialized only (a) on the explicit capture path `RunTrace.capture/1`
+   materialized only (a) on the explicit capture path `RunTrace.Capture.capture/1`
    (DR-035), and (b) for the run a `FailureReport` describes. `RunTrace`
    owns capture because capture produces a trace; `RunComparison` (DR-035)
    only consumes traces.

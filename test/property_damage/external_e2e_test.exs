@@ -76,8 +76,8 @@ defmodule PropertyDamage.ExternalE2ETest do
   end
 
   defmodule PlainModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Create, Use]
     @impl true
@@ -90,8 +90,8 @@ defmodule PropertyDamage.ExternalE2ETest do
   end
 
   defmodule RoutingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands do
       [
@@ -163,82 +163,6 @@ defmodule PropertyDamage.ExternalE2ETest do
       end)
 
       assert Enum.any?(targets, fn t -> is_binary(t) and String.starts_with?(t, "real_") end)
-    end
-  end
-
-  describe "branching identity" do
-    test "two parallel producers resolve to distinct concrete values" do
-      # The legacy flat command_index gave both branches the same key
-      # (length(prefix)); the structured Position.branch(b, i) positions keep them
-      # distinct, so each branch's external resolves independently.
-      ph0 = Placeholder.new_at(Created, [:id], Position.branch(0, 0), 0)
-      ph1 = Placeholder.new_at(Created, [:id], Position.branch(1, 0), 0)
-
-      reg =
-        PlaceholderRegistry.new()
-        |> PlaceholderRegistry.register(ph0)
-        |> PlaceholderRegistry.register(ph1)
-
-      seq = %Sequence{
-        prefix: [],
-        branches: [[%Create{label: "a"}], [%Create{label: "b"}]],
-        suffix: [%Use{target: ph0}, %Use{target: ph1}],
-        registry: reg
-      }
-
-      {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
-
-      assert result.failed_at_index == nil
-
-      targets = drain_used([])
-      assert length(targets) == 2
-      assert Enum.all?(targets, &(is_binary(&1) and String.starts_with?(&1, "real_")))
-      assert targets |> Enum.uniq() |> length() == 2
-    end
-
-    test "generation mints branch-positioned placeholders that resolve on execution" do
-      # Find a seed that produces a branching sequence whose branches contain a
-      # producer (so the registry carries a Position.branch(_, _) placeholder).
-      seq =
-        Enum.find_value(1..400, fn seed ->
-          s =
-            PlainModel
-            |> Generator.generate_sequence(
-              max_commands: 16,
-              branching: [branch_probability: 0.9, max_branches: 3, min_prefix_length: 1]
-            )
-            |> Generator.generate_value(seed)
-
-          with %Sequence{branches: [_ | _], registry: %PlaceholderRegistry{} = reg} <- s,
-               true <-
-                 Enum.any?(
-                   PlaceholderRegistry.all(reg),
-                   &match?(%Position{section: {:branch, _}}, &1.position)
-                 ) do
-            s
-          else
-            _ -> nil
-          end
-        end)
-
-      assert seq, "no seed produced a branching sequence with a branch-positioned placeholder"
-
-      # The generator minted at least one Position.branch(_, _) placeholder.
-      branch_phs =
-        seq.registry
-        |> PlaceholderRegistry.all()
-        |> Enum.filter(&match?(%Position{section: {:branch, _}}, &1.position))
-
-      assert branch_phs != []
-
-      # And the branching sequence executes cleanly with those placeholders
-      # flowing through capture/merge (resolution itself is asserted by the
-      # hand-built branching test above).
-      {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
-
-      assert result.failed_at_index == nil
     end
   end
 

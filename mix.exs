@@ -24,10 +24,11 @@ defmodule PropertyDamage.MixProject do
 
   def application do
     [
-      # :inets provides :httpc, which the built-in network nemeses use to drive
-      # the Toxiproxy control API; :ssl is listed so its modules (public_key et
-      # al.) are on the code path, since httpc computes SSL verify defaults when
-      # building request options even for a plain-HTTP request.
+      # :inets provides :httpc, the HTTP client that the health check in
+      # `PropertyDamage.Integration` and the scaffold task use when Req is not
+      # installed; :ssl is listed so its modules (public_key et al.) are on the
+      # code path, since httpc computes SSL verify defaults when building
+      # request options even for a plain-HTTP request.
       extra_applications: [:logger, :inets, :ssl]
     ]
   end
@@ -60,11 +61,10 @@ defmodule PropertyDamage.MixProject do
         "guides/writing_invariants.md",
         "guides/coverage_and_catalogs.md",
         "guides/debugging_failures.md",
+        "guides/log_lines.md",
         "guides/async_and_eventual_consistency.md",
         "guides/resource_polling.md",
         "guides/idempotency_testing.md",
-        "guides/parallel_testing.md",
-        "guides/chaos_engineering.md",
         "guides/mocking_third_parties.md",
         "guides/contract_testing_with_shared_libraries.md",
         "guides/differential_testing.md",
@@ -86,12 +86,10 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Command,
           PropertyDamage.Model,
           PropertyDamage.Model.Projection,
-          PropertyDamage.Model.Projection.Liveness,
           PropertyDamage.Model.Projection.Statistics,
           PropertyDamage.Model.Simulator,
           PropertyDamage.Adapter,
-          PropertyDamage.Adapter.Injector,
-          PropertyDamage.Nemesis
+          PropertyDamage.Adapter.Injector
         ],
         Generation: [
           PropertyDamage.External,
@@ -101,7 +99,6 @@ defmodule PropertyDamage.MixProject do
         ],
         Execution: [
           PropertyDamage.Executor,
-          PropertyDamage.Linearization,
           PropertyDamage.Settle,
           PropertyDamage.EventQueue,
           PropertyDamage.EventLog.Entry,
@@ -113,11 +110,6 @@ defmodule PropertyDamage.MixProject do
         Shrinking: [
           PropertyDamage.Shrinker,
           PropertyDamage.Shrinker.Config
-        ],
-        "Fault Injection": [
-          PropertyDamage.Nemesis.NetworkLatency,
-          PropertyDamage.Nemesis.NetworkPartition,
-          PropertyDamage.Nemesis.PacketLoss
         ],
         "Diagnostics & Reporting": [
           PropertyDamage.FailureReport,
@@ -205,7 +197,7 @@ defmodule PropertyDamage.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
+      files: ~w(lib priv mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 end

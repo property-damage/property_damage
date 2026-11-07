@@ -15,7 +15,10 @@ defmodule PropertyDamage.Executor.Timeout do
   # The Runtime.Sink lives in the parent process (execute_regular_command), and
   # the adapter's `runtime.inject` closure writes to it cross-process. A
   # timed-out Task is shut down but the sink survives, so events injected before
-  # the hang are still drained by the caller.
+  # the hang are still drained by the caller. The same holds for log lines
+  # (DR-054): the Task holds the runtime's `log` function as its scope, so
+  # `PropertyDamage.log/2` in `execute/3`, or in a Task it starts, writes into
+  # the sink, and a line written before the hang outlives the kill.
 
   alias PropertyDamage.CommandTimeoutError
 
@@ -50,6 +53,8 @@ defmodule PropertyDamage.Executor.Timeout do
 
     task =
       Task.async(fn ->
+        PropertyDamage.Log.enter(runtime.log)
+
         try do
           {:returned, adapter.execute(command, user_context, runtime)}
         rescue

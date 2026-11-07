@@ -275,7 +275,7 @@ defmodule PropertyDamage.Test.ExpansionFor do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ExpansionFor, as: F
 
@@ -303,7 +303,7 @@ defmodule PropertyDamage.Test.ExpansionFor do
 
   defmodule PlainModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ExpansionFor, as: F
 

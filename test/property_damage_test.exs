@@ -135,7 +135,7 @@ defmodule PropertyDamageTest do
   end
 
   defmodule AlwaysFailModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     def commands, do: [AlwaysFailCmd]
     def command_sequence_projection, do: AlwaysFailState
     def check_projections, do: [AlwaysFailCheck]

@@ -57,7 +57,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Create, AsyncCreate, Noise, Use]
     @impl true
@@ -182,63 +182,6 @@ defmodule PropertyDamage.ExternalShrinkTest do
     commands = Sequence.to_list(shrunk.sequence)
     assert [%Create{}, %Use{}] = commands
 
-    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
-
-    assert match?(
-             %Failure{
-               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
-             },
-             replay.failure_reason
-           )
-  end
-
-  test "branching shrink remaps the producer registry so a branch producer / suffix consumer still resolves after removal" do
-    # Producer (Create) lives at branch 0 offset 1, behind a removable Noise; its
-    # external is consumed by a suffix command after the branches merge (DR-021).
-    # Removing the leading Noise shifts the producer to branch 0 offset 0, so the
-    # registry's producer_link MUST be remapped onto the candidate's positions.
-    # Otherwise the surviving consumer strands, the candidate fails with a
-    # different (placeholder_resolution) signature, and shrinking stalls with the
-    # noise still in place.
-    ph = Placeholder.new_at(Created, [:id], Position.branch(0, 1), 0)
-    reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
-
-    full =
-      Sequence.branching(
-        [],
-        [[%Noise{}, %Create{}], [%Noise{}]],
-        [%Use{target: ph}]
-      )
-      |> Sequence.with_registry(reg)
-
-    {:ok, result} = Executor.run(full, Model, Adapter, config: %{})
-
-    assert match?(
-             %Failure{
-               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
-             },
-             result.failure_reason
-           )
-
-    shrunk =
-      Shrinker.shrink(full,
-        failed_at_index: result.failed_at_index,
-        failure_reason: result.failure_reason,
-        model: Model,
-        targets: [
-          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
-        ]
-      )
-
-    commands = Sequence.to_list(shrunk.sequence)
-
-    # All noise is gone: the producer/consumer pair is the minimal repro. This
-    # is only reachable if the registry was remapped as noise was removed.
-    refute Enum.any?(commands, &match?(%Noise{}, &1))
-
-    # And the shrunk sequence still reproduces the ORIGINAL failure on replay,
-    # proving the consumer's external resolved against the remapped producer
-    # position.
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
 
     assert match?(

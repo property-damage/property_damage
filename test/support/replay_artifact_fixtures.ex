@@ -252,7 +252,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
 
   defmodule ExternalModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -279,7 +279,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
 
   defmodule CheckModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -308,7 +308,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
     @moduledoc false
     # An Open (whose event carries an external() id) rewrites to one Open
     # with the same label: an entry whose one leaf is the root itself.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -500,6 +500,14 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   @doc false
   # `PropertyDamage.FailureReport.expansion_command(report)`.
   def expansion_command(report), do: call(failure_report_module(), :expansion_command, [report])
+
+  @doc false
+  # `call` as the printed report shows it: the report binds its targets once
+  # (`targets = [...]`) and every call names `targets: targets`.
+  def printed(report, call) do
+    source = call(failure_report_module(), :targets_source, [report])
+    String.replace(call, "targets: " <> source, "targets: targets")
+  end
 
   defp failure_report_module, do: Module.concat([PropertyDamage, "FailureReport"])
 

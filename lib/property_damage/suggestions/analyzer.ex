@@ -2,6 +2,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   @moduledoc false
 
   alias PropertyDamage.Model
+  alias PropertyDamage.Model.Projection.Checks
   alias PropertyDamage.Suggestions.Patterns
 
   @doc """
@@ -165,16 +166,17 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     |> Enum.flat_map(fn projection ->
       Code.ensure_loaded?(projection)
 
-      if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-        projection.__checks__()
-        |> Enum.map(fn check ->
-          Map.put(check, :projection, projection)
-        end)
-      else
-        []
-      end
+      projection
+      |> Checks.list()
+      |> Enum.map(fn check ->
+        check |> plain_map() |> Map.put(:projection, projection)
+      end)
     end)
   end
+
+  # A check struct becomes a plain map so it can carry the `:projection` key.
+  defp plain_map(%_{} = check), do: Map.from_struct(check)
+  defp plain_map(check), do: check
 
   # ============================================================================
   # Suggestion Generation

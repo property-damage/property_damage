@@ -663,28 +663,4 @@ defmodule PropertyDamage.ResourcePollerTest do
       EventQueue.stop(queue)
     end
   end
-
-  describe "branch_id support" do
-    test "events include branch_id when provided" do
-      {:ok, queue} = EventQueue.start_link()
-
-      poller =
-        ResourcePoller.start(
-          poll_fn: fn -> :ok end,
-          handler: fn _ -> {:done, %StatusChanged{id: "1", status: :done}} end,
-          interval_ms: 10,
-          timeout_ms: 5000,
-          event_queue: queue,
-          command_index: 3,
-          branch_id: 7
-        )
-
-      ResourcePoller.await(poller)
-
-      [entry] = EventQueue.drain(queue)
-      assert entry.branch_id == 7
-
-      EventQueue.stop(queue)
-    end
-  end
 end

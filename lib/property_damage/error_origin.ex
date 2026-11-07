@@ -19,7 +19,6 @@ defmodule PropertyDamage.ErrorOrigin do
   - `:check_failed` - Invariant violations
   - `:poll_timeout` - Eventually check timeout
   - `:idempotency_violation` - SUT not idempotent
-  - `:linearization` - Race condition detected
 
   ### Test Code Errors (High Confidence)
 
@@ -29,6 +28,9 @@ defmodule PropertyDamage.ErrorOrigin do
   - `FunctionClauseError` in projection.apply/2 or command callbacks
   - Missing required callbacks
   - Module compilation errors
+  - `PropertyDamage.Log.NoScopeError`: `PropertyDamage.log/2` called where no
+    scope is open, raised in `execute/3` or the exit reason of a call into a
+    process that raised it (DR-054)
 
   ### Ambiguous
 
@@ -65,24 +67,10 @@ defmodule PropertyDamage.ErrorOrigin do
       %{origin: :test_code_error, details: %{reason: "Missing callback", ...}}
   """
   alias PropertyDamage.Failure
+  alias PropertyDamage.Failure.Naming
 
   @spec classify(term(), list() | nil) :: classification()
   def classify(failure_reason, stacktrace \\ nil)
-
-  # Branch failures: classify the underlying failure, then note the branch.
-  def classify(%Failure{branch_id: branch_id} = failure, stacktrace)
-      when not is_nil(branch_id) do
-    inner = classify(%{failure | branch_id: nil}, stacktrace)
-
-    %{
-      inner
-      | details:
-          Map.merge(inner.details, %{
-            branch_id: branch_id,
-            context: "Failure occurred in branch #{branch_id}"
-          })
-    }
-  end
 
   def classify(%Failure{} = failure, stacktrace) do
     classify_kind(Failure.kind(failure), failure, stacktrace)
@@ -115,7 +103,7 @@ defmodule PropertyDamage.ErrorOrigin do
         origin: :test_code_error,
         details: %{
           reason:
-            "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' raised an " <>
+            "Check '#{Naming.format_name(check_name)}' raised an " <>
               "unexpected exception",
           evidence: %{
             check_name: check_name,
@@ -131,7 +119,7 @@ defmodule PropertyDamage.ErrorOrigin do
       %{
         origin: :sut_error,
         details: %{
-          reason: "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' failed",
+          reason: "Check '#{Naming.format_name(check_name)}' failed",
           evidence: %{check_name: check_name, reason: format_reason(reason)},
           confidence: :high
         }
@@ -173,17 +161,6 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  defp classify_kind(:linearization, failure, _stacktrace) do
-    %{
-      origin: :sut_error,
-      details: %{
-        reason: "Race condition - no valid linearization exists",
-        evidence: %{message: Failure.detail(failure)},
-        confidence: :high
-      }
-    }
-  end
-
   defp classify_kind(:adapter_error, failure, stacktrace) do
     classify_adapter_error(Failure.detail(failure), stacktrace)
   end
@@ -207,17 +184,6 @@ defmodule PropertyDamage.ErrorOrigin do
         reason: "Command timed out waiting to settle",
         evidence: %{last_reason: inspect(Failure.detail(failure))},
         confidence: :low
-      }
-    }
-  end
-
-  defp classify_kind(:nemesis_error, failure, _stacktrace) do
-    %{
-      origin: :test_code_error,
-      details: %{
-        reason: "Nemesis (fault injection) command failed",
-        evidence: %{reason: inspect(Failure.detail(failure))},
-        confidence: :medium
       }
     }
   end
@@ -255,6 +221,36 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
+  defp classify_kind(
+         :setup_failed,
+         %Failure{type: %Failure.Setup{cause: :model}} = failure,
+         _stacktrace
+       ) do
+    %{
+      origin: :test_code_error,
+      details: %{
+        reason: "Model code failed while the variant came up",
+        evidence: %{reason: inspect(Failure.detail(failure))},
+        confidence: :high
+      }
+    }
+  end
+
+  defp classify_kind(
+         :setup_failed,
+         %Failure{type: %Failure.Setup{cause: :variant}} = failure,
+         _stacktrace
+       ) do
+    %{
+      origin: :unknown,
+      details: %{
+        reason: "The variant process died while the target came up",
+        evidence: %{reason: inspect(Failure.detail(failure))},
+        confidence: :low
+      }
+    }
+  end
+
   defp classify_kind(:setup_failed, failure, _stacktrace) do
     %{
       origin: :unknown,
@@ -281,19 +277,49 @@ defmodule PropertyDamage.ErrorOrigin do
   # Adapter-error detail classification
   # ============================================================================
 
-  defp classify_adapter_error(%UndefinedFunctionError{} = error, stacktrace) do
+  # A log call with no scope (DR-054) is test code, whether `execute/3` raised
+  # it or a process it called raised it and the call exited with it.
+  defp classify_adapter_error(reason, stacktrace) do
+    case no_scope_error(reason) do
+      nil -> classify_adapter_detail(reason, stacktrace)
+      error -> classify_no_scope_error(error)
+    end
+  end
+
+  defp classify_no_scope_error(error) do
+    %{
+      origin: :test_code_error,
+      details: %{
+        reason: "PropertyDamage.log/2 was called where no scope is open",
+        evidence: %{error: error, hint: Exception.message(error)},
+        confidence: :high
+      }
+    }
+  end
+
+  # The `NoScopeError` inside an adapter error's detail: the exception itself,
+  # or one held by an exit reason (a `GenServer.call` into a process that
+  # raised it exits with `{{exception, stacktrace}, call}`).
+  defp no_scope_error(%PropertyDamage.Log.NoScopeError{} = error), do: error
+
+  defp no_scope_error(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.find_value(&no_scope_error/1)
+
+  defp no_scope_error(_other), do: nil
+
+  defp classify_adapter_detail(%UndefinedFunctionError{} = error, stacktrace) do
     classify_undefined_function_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%FunctionClauseError{} = error, stacktrace) do
+  defp classify_adapter_detail(%FunctionClauseError{} = error, stacktrace) do
     classify_function_clause_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%ArgumentError{} = error, stacktrace) do
+  defp classify_adapter_detail(%ArgumentError{} = error, stacktrace) do
     classify_argument_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%KeyError{} = e, _stacktrace) do
+  defp classify_adapter_detail(%KeyError{} = e, _stacktrace) do
     # KeyError during adapter execution - likely test code error
     %{
       origin: :test_code_error,
@@ -305,11 +331,11 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  defp classify_adapter_error(reason, stacktrace) when is_exception(reason) do
+  defp classify_adapter_detail(reason, stacktrace) when is_exception(reason) do
     classify_generic_exception(reason, stacktrace)
   end
 
-  defp classify_adapter_error(reason, _stacktrace) do
+  defp classify_adapter_detail(reason, _stacktrace) do
     %{
       origin: :unknown,
       details: %{

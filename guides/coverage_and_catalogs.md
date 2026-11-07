@@ -87,8 +87,8 @@ defmodule Bank.Ledger do
 end
 
 defmodule Bank.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
   alias Bank.Commands.{Deposit, Withdraw}
   alias Bank.Events.{Deposited, Withdrawn, WithdrawRejected}
 
@@ -262,7 +262,7 @@ defmodule Bank.Observed do
 end
 
 defmodule Bank.SplitModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
   alias Bank.Commands.{Deposit, Withdraw}
 
   @impl true
@@ -353,7 +353,7 @@ Bank.Ledger closed_balance_zero: closed_balance_zero/synchronous
 ```
 
 Check kinds are `:synchronous` (`@check every:`), `:lifecycle` (`@check at:`),
-and `:polling` (`@eventually`). One invariant may have several checks of
+and `:eventual` (`@eventually`). One invariant may have several checks of
 different kinds. `mix pd.validate` prints this catalog and flags static-vacuity
 entries.
 
@@ -376,7 +376,7 @@ end
 ```
 
 ```text
-balance_nonneg: covered?=true fire_count=4000 kinds=[:synchronous]
+balance_nonneg: covered?=true fire_count=2000 kinds=[:synchronous]
 closed_balance_zero: covered?=false fire_count=0 kinds=[:synchronous]
 ```
 
@@ -393,6 +393,36 @@ The whole-run tracker exposes the same facts:
 PropertyDamage.Coverage.uncovered_invariants(stats.coverage)
 #=> [{Bank.Ledger, :closed_balance_zero}]
 ```
+
+Checks are not the only guarantee a run can leave untested. A `@compare`
+function runs only when a run has two or more targets, and one that never
+reached a boundary proves nothing. `stats.compare_counts` counts, per
+`{projection, function}` key, the boundaries the function was compared at
+(`compared_at`), the boundaries where it had to wait for a side that was
+pending or differed (`waited_at`), and the time it waited (`waited_ms`). With
+one target every count is 0, and a model with no `@compare` function gives an
+empty map. This run compares the `Bank.Observed` balance of two targets after
+every root, 1000 times over the 50 runs:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+{:ok, two_stats} =
+  PropertyDamage.run(
+    model: Bank.SplitModel,
+    targets: [{Bank.Adapter, name: "reference"}, {Bank.Adapter, name: "variant"}],
+    max_commands: 20,
+    max_runs: 50,
+    seed: 7,
+    verbose: false
+  )
+
+two_stats.compare_counts
+#=> %{{Bank.Observed, :balance} => %{compared_at: 1000, waited_at: 0, waited_ms: 0}}
+%{compared_at: 1000} = two_stats.compare_counts[{Bank.Observed, :balance}]
+```
+
+A `compared_at` of 0 for a key in a multi-target run says the comparison never
+ran, the same vacuity as an invariant with no fires.
 
 When a run is verbose, a terse footer reports the headline count through the
 progress reporter:

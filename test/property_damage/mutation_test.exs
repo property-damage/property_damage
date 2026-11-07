@@ -71,11 +71,8 @@ defmodule PropertyDamage.MutationTest do
     def describe_mutation(_mutation), do: "counting"
   end
 
-  # A projection whose check always fails, used by the progress-projection
-  # tests below. Mutation testing harvests sample events from a baseline run via
-  # RunTrace.capture/1, which carries the full event log regardless of outcome,
-  # so a passing model yields mutable events just as well (see the passing-model
-  # regression test in "run/1 end-to-end").
+  # A projection whose check always fails. A model that uses it fails its
+  # baseline run, so `run/1` returns the baseline error.
   defmodule AlwaysFailCheck do
     use PropertyDamage.Model.Projection
 
@@ -87,13 +84,51 @@ defmodule PropertyDamage.MutationTest do
 
     @check every: PropertyDamage.Test.Commands.CreateItem
     def assert_always_fails(_state, _cmd_or_event) do
-      PropertyDamage.fail!("mutation progress fixture: always fails")
+      PropertyDamage.fail!("mutation fixture: always fails")
+    end
+  end
+
+  # A projection whose check fails only on a mutated event. The test adapter
+  # answers every CreateItem with an item_ref of the form "item_N" and echoes
+  # the generated name (non-empty) and quantity (positive), so the baseline run
+  # passes. The first value mutation of any field (an empty string or a zero)
+  # breaks one of these rules, so a mutation is what the check catches.
+  # Mutation testing harvests sample events from the baseline run via
+  # RunTrace.Capture.capture/1. Used by the end-to-end and progress tests below.
+  defmodule WellFormedItemCheck do
+    use PropertyDamage.Model.Projection
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def init, do: %{malformed: []}
+
+    @impl true
+    def apply(state, %ItemCreated{item_ref: ref} = event) when is_binary(ref) do
+      if well_formed?(event),
+        do: state,
+        else: %{state | malformed: [event | state.malformed]}
+    end
+
+    def apply(state, _), do: state
+
+    defp well_formed?(%ItemCreated{item_ref: ref, name: name, quantity: quantity}) do
+      ref =~ ~r/\Aitem_\d+\z/ and is_binary(name) and name != "" and
+        is_integer(quantity) and quantity > 0
+    end
+
+    @check every: PropertyDamage.Test.Commands.CreateItem
+    def assert_items_well_formed(state, _cmd_or_event) do
+      state.malformed == [] or
+        PropertyDamage.fail!("mutation fixture: malformed ItemCreated",
+          events: state.malformed
+        )
     end
   end
 
   defmodule FixtureModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Events.ItemCreated
@@ -106,7 +141,7 @@ defmodule PropertyDamage.MutationTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def check_projections, do: [AlwaysFailCheck]
+    def check_projections, do: [WellFormedItemCheck]
 
     @impl true
     def simulator, do: __MODULE__
@@ -551,6 +586,50 @@ defmodule PropertyDamage.MutationTest do
       assert length(report.survived_mutations) == 1
     end
 
+    test "record_result counts error kills apart and leaves them out of the score" do
+      error_kill = %{
+        command: TestEvent,
+        operator: :status,
+        result: :killed_by_error,
+        mutation: %{},
+        failure_message: "boom",
+        duration_ms: 1
+      }
+
+      kill = %{error_kill | result: :killed}
+      survivor = %{error_kill | result: :survived}
+
+      report =
+        Enum.reduce(
+          [error_kill, error_kill, kill, survivor],
+          Report.new(),
+          &Report.record_result(&2, &1)
+        )
+
+      assert report.killed_by_error == 2
+      assert report.total == 4
+      assert report.mutation_score == 0.5
+      assert report.by_command[TestEvent].killed_by_error == 2
+      assert report.by_command[TestEvent].score == 0.5
+      assert report.by_operator[:status].score == 0.5
+    end
+
+    test "score is 0.0 when every mutation was an error kill" do
+      result = %{
+        command: TestEvent,
+        operator: :status,
+        result: :killed_by_error,
+        mutation: %{},
+        failure_message: "boom",
+        duration_ms: 1
+      }
+
+      report = Report.record_result(Report.new(), result)
+
+      assert report.mutation_score == 0.0
+      assert report.by_command[TestEvent].score == 0.0
+    end
+
     test "passes? returns true when score meets target" do
       report = %Report{mutation_score: 0.85, target_score: 0.80}
       assert Report.passes?(report)
@@ -627,6 +706,60 @@ defmodule PropertyDamage.MutationTest do
       assert output =~ "| Metric | Value |"
       assert output =~ "85"
       assert output =~ "PASS"
+    end
+
+    test "names the error kills and says the score excludes them", %{report: report} do
+      report = %{report | killed_by_error: 4, total: 24}
+
+      terminal = Formatter.format(report, :terminal)
+      markdown = Formatter.format(report, :markdown)
+      json = Jason.decode!(Formatter.format(report, :json))
+
+      assert terminal =~ "4 killed by adapter error"
+      assert terminal =~ "excluded from the score"
+      assert markdown =~ "| Killed by adapter error | 4 |"
+      assert markdown =~ "excluded from the score"
+      assert json["killed_by_error"] == 4
+    end
+
+    test "terminal totals match the markdown totals and each row shows its error kills",
+         %{report: report} do
+      report = %{
+        report
+        | killed: 3,
+          killed_by_error: 7,
+          survived: 0,
+          total: 10,
+          mutation_score: 1.0,
+          by_command: %{
+            TestEvent => %{killed: 3, killed_by_error: 7, survived: 0, total: 10, score: 1.0}
+          },
+          by_operator: %{
+            value: %{killed: 3, killed_by_error: 0, survived: 0, total: 3, score: 1.0},
+            status: %{killed: 0, killed_by_error: 7, survived: 0, total: 7, score: 0.0}
+          }
+      }
+
+      terminal = Formatter.format(report, :terminal)
+      markdown = Formatter.format(report, :markdown)
+
+      assert markdown =~ "| Total | 10 |"
+      assert markdown =~ "| TestEvent | 100.0% | 3 | 7 | 0 | 10 |"
+
+      assert terminal =~ "(3/10 killed, 7 by adapter error)"
+      assert terminal =~ ~r/TestEvent\s+\S+\s+100\.0?%\s+\(3\/10, 7 by error\)/
+      assert terminal =~ ~r/:value\s+\S+\s+100\.0?%\s+\(3\/3, 0 by error\)/
+      assert terminal =~ ~r/:status\s+\S+\s+0\.0?%\s+\(0\/7, 7 by error\)/
+      refute terminal =~ "3/3 killed"
+    end
+
+    test "json says the score excludes mutations killed by an adapter error", %{report: report} do
+      report = %{report | killed_by_error: 4, total: 24}
+      json = Jason.decode!(Formatter.format(report, :json))
+
+      assert json["score_rule"] =~ "killed / (total - killed_by_error)"
+      assert json["score_rule"] =~ "excludes"
+      assert json["killed_by_error"] == 4
     end
 
     test "formats json output", %{report: report} do
@@ -751,8 +884,8 @@ defmodule PropertyDamage.MutationTest do
   # harvesting this produced zero sample events (PropertyDamage.run's success
   # result carries no event log) and therefore zero mutations.
   defmodule PassingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Events.ItemCreated
@@ -802,12 +935,178 @@ defmodule PropertyDamage.MutationTest do
         )
 
       # The regression: a model whose suite passes must still yield sample events
-      # (harvested via RunTrace.capture), so mutations are generated and tested.
+      # (harvested via RunTrace.Capture.capture), so mutations are generated and tested.
       assert %Report{} = report
       assert report.total > 0
 
       # Report shape stays internally consistent.
       assert report.total == report.killed + report.survived + report.timeout
+    end
+  end
+
+  describe "run/1 killed mutation message" do
+    test "a killed mutation carries the failure message of the report" do
+      {:ok, report} =
+        Mutation.run(
+          model: FixtureModel,
+          targets: [PropertyDamage.Test.TestAdapter],
+          operators: [:value],
+          mutations_per_command: 1,
+          max_runs: 1
+        )
+
+      assert report.killed > 0
+
+      for %{failure_message: message} <- report.killed_mutations do
+        assert message =~ "mutation fixture: malformed ItemCreated"
+      end
+    end
+  end
+
+  # Adapters that fail without any mutation. `AlwaysErrorAdapter` fails every
+  # command. `ErrorAfterFirstAdapter` answers the first command of a run and
+  # fails the rest, so the baseline run harvests events and still fails.
+  defmodule AlwaysErrorAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(_command, _context, _runtime), do: {:error, :backend_down}
+  end
+
+  defmodule ErrorAfterFirstAdapter do
+    use PropertyDamage.Adapter
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def setup(_config), do: {:ok, %{calls: :atomics.new(1, [])}}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(command, %{calls: calls}, _runtime) do
+      case :atomics.add_get(calls, 1, 1) do
+        1 -> {:ok, [%ItemCreated{item_ref: "item_0", name: command.name, quantity: 1}]}
+        _ -> {:error, :backend_down}
+      end
+    end
+  end
+
+  defmodule SetupFailsAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:error, :backend_unreachable}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(_command, _context, _runtime), do: {:ok, []}
+  end
+
+  # A model whose check fails every run, mutated or not: its baseline fails.
+  defmodule AlwaysFailModel do
+    @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
+
+    alias PropertyDamage.Test.Commands.CreateItem
+    alias PropertyDamage.Test.Events.ItemCreated
+    alias PropertyDamage.Test.Projections.ModelState
+
+    @impl true
+    def commands, do: [CreateItem]
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+
+    @impl true
+    def check_projections, do: [AlwaysFailCheck]
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+      [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
+  describe "run/1 baseline guard" do
+    @opts [
+      model: PassingModel,
+      operators: [:value, :status],
+      mutations_per_command: 3,
+      max_runs: 1
+    ]
+
+    test "an adapter that errors without any mutation returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [AlwaysErrorAdapter]] ++ @opts)
+
+      assert is_binary(message)
+      assert message =~ "backend_down"
+    end
+
+    test "an adapter that errors after harvesting events returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [ErrorAfterFirstAdapter]] ++ @opts)
+
+      assert message =~ "backend_down"
+    end
+
+    test "an adapter whose setup fails returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run([targets: [SetupFailsAdapter]] ++ @opts)
+
+      assert message =~ "backend_unreachable"
+    end
+
+    test "a baseline that fails a check returns the baseline error" do
+      assert {:error, {:baseline_failed, PropertyDamage.Test.Commands.CreateItem, message}} =
+               Mutation.run(
+                 Keyword.put(@opts, :model, AlwaysFailModel) ++
+                   [targets: [PropertyDamage.Test.TestAdapter]]
+               )
+
+      assert message =~ "always fails"
+    end
+
+    test "a healthy adapter still yields a report (control)" do
+      assert {:ok, %Report{total: total}} =
+               Mutation.run([targets: [PropertyDamage.Test.TestAdapter]] ++ @opts)
+
+      assert total > 0
+    end
+  end
+
+  describe "run/1 adapter-error kills" do
+    test "error kills are counted apart and excluded from the score" do
+      {:ok, report} =
+        Mutation.run(
+          model: PassingModel,
+          targets: [PropertyDamage.Test.TestAdapter],
+          operators: [:status],
+          mutations_per_command: 4,
+          max_runs: 1
+        )
+
+      assert report.mutation_score == 0.0
+      assert report.killed == 0
+      assert report.killed_by_error > 0
+
+      assert report.total ==
+               report.killed + report.killed_by_error + report.survived + report.timeout
+
+      for {_command, stats} <- report.by_command, do: assert(stats.score == 0.0)
+      for {_operator, stats} <- report.by_operator, do: assert(stats.score == 0.0)
     end
   end
 

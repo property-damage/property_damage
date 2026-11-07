@@ -9,6 +9,9 @@ defmodule PropertyDamage.Model.Projection do
   2. **Invariant checking**: Define checks via `@check` and `@eventually`
   3. **Comparing targets**: Define boundary observations via `@compare`
 
+  A module that declares `use PropertyDamage.Model.Projection` also keeps its
+  docs and source path, readable with `PropertyDamage.Docs.fetch/1`.
+
   ## Basic Usage
 
       defmodule MyProjection do
@@ -76,9 +79,7 @@ defmodule PropertyDamage.Model.Projection do
 
   Spawn a background poller when an event arrives. The poller periodically
   checks if a predicate becomes true within a timeout. Use for eventual
-  consistency checks. A command inside a branch of a `branching:` sequence
-  spawns no poller: checks are off inside the branches and run after the
-  branch set.
+  consistency checks.
 
       @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       def payment_confirmed(_state, %PaymentInitiated{id: id}) do
@@ -376,6 +377,8 @@ defmodule PropertyDamage.Model.Projection do
   - `command_or_event` - The command or event that triggered this check
   """
 
+  alias PropertyDamage.Model.Projection.Check
+
   # Note: No callback defined - checks are detected via @check/@eventually attributes
 
   @optional_callbacks init: 0, apply: 2
@@ -408,6 +411,10 @@ defmodule PropertyDamage.Model.Projection do
       @on_definition PropertyDamage.Model.Projection
 
       @before_compile PropertyDamage.Model.Projection
+
+      # Keeps the module's docs and source path for PropertyDamage.Docs.fetch/1.
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Model.Projection)
     end
   end
 
@@ -464,9 +471,9 @@ defmodule PropertyDamage.Model.Projection do
       @doc """
       Returns metadata for all checks defined in this module.
 
-      Each check entry contains:
-      - `:name` - Atom identifying the check
-      - `:trigger` - Normalized trigger specification
+      Each entry is a `PropertyDamage.Model.Projection.Check` with its `:name`,
+      `:kind` and normalized `:trigger`. Read the entries through
+      `PropertyDamage.Model.Projection.Checks.list/1`.
       """
       def __checks__, do: unquote(Macro.escape(checks))
 
@@ -692,13 +699,15 @@ defmodule PropertyDamage.Model.Projection do
         {inv, opts} = extract_invariant_meta(hd(eventually_opts), check_name, env)
 
         check_def =
-          Map.merge(inv, %{
-            name: check_name,
-            type: :polling,
-            function_name: name,
-            eventually: normalize_eventually(opts),
-            predicate_source: predicate_source
-          })
+          Check.new(
+            Map.merge(inv, %{
+              name: check_name,
+              type: :polling,
+              function_name: name,
+              eventually: normalize_eventually(opts),
+              predicate_source: predicate_source
+            })
+          )
 
         Module.put_attribute(env.module, :checks, check_def)
         Module.put_attribute(env.module, :__pd_check_fns__, name)
@@ -711,12 +720,14 @@ defmodule PropertyDamage.Model.Projection do
         {inv, opts} = extract_invariant_meta(hd(check_opts), check_name, env)
 
         check_def =
-          Map.merge(inv, %{
-            name: check_name,
-            type: :synchronous,
-            function_name: name,
-            trigger: normalize_trigger(opts)
-          })
+          Check.new(
+            Map.merge(inv, %{
+              name: check_name,
+              type: :synchronous,
+              function_name: name,
+              trigger: normalize_trigger(opts)
+            })
+          )
 
         Module.put_attribute(env.module, :checks, check_def)
         Module.put_attribute(env.module, :__pd_check_fns__, name)

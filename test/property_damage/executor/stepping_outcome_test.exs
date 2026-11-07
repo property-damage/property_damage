@@ -5,14 +5,7 @@ defmodule PropertyDamage.Executor.SteppingOutcomeTest do
   alias PropertyDamage.Executor.Stepping
   alias PropertyDamage.Failure
 
-  alias PropertyDamage.Test.Lockstep.{
-    FaultInjected,
-    ProbeModel,
-    ProbeStep,
-    StepAdapter,
-    StepModel,
-    TimedFault
-  }
+  alias PropertyDamage.Test.Lockstep.{ProbeModel, ProbeStep}
 
   defmodule RaisingProbeAdapter do
     use PropertyDamage.Adapter
@@ -42,17 +35,5 @@ defmodule PropertyDamage.Executor.SteppingOutcomeTest do
     # The failure keeps the {exception, stacktrace} shape a full run reports.
     assert {%RuntimeError{message: "probe exploded"}, stacktrace} = detail
     assert is_list(stacktrace)
-  end
-
-  test "a nemesis command's outcome is what its inject/2 returned" do
-    ctx = context(StepModel, StepAdapter)
-
-    assert {:ok, _state, {:ok, [%FaultInjected{tag: :brief}]}} =
-             Stepping.step(
-               %TimedFault{duration_ms: 0, tag: :brief},
-               0,
-               Stepping.init_state(StepModel),
-               ctx
-             )
   end
 end

@@ -1,12 +1,18 @@
 defmodule PropertyDamage.LoadTest.Worker do
   @moduledoc false
 
+  # Sequence generation is a pure function of the run seed, the worker id and
+  # the sequence number. A worker's own seed is `worker_seed(run_seed,
+  # worker_id)`, a hash of the pair. Its nth sequence (0-based) is drawn with
+  # `Generator.generate_value/2` from `Generator.run_seed(worker_seed, n)`, the
+  # same sized and seeded path `PropertyDamage.run/1` uses for its runs.
+
   use GenServer
 
   alias PropertyDamage.Executor.Timeout
   alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.Model.Projection
+  alias PropertyDamage.Model.Projection.Checks
   alias PropertyDamage.Sequence.Position
 
   defstruct [
@@ -21,6 +27,8 @@ defmodule PropertyDamage.LoadTest.Worker do
     # load-test harness threads one through. Each worker uses its worker_id as
     # the mint_epoch, so workers send distinct minted values regardless.
     :run_nonce,
+    # Seed of this worker's sequences, from `worker_seed/2`.
+    :seed,
     # Stats
     :sequences_executed,
     :commands_executed,
@@ -51,12 +59,19 @@ defmodule PropertyDamage.LoadTest.Worker do
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
+  - `:seed` - Run seed the worker's sequences derive from (default: random)
 
   Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
+  end
+
+  @doc false
+  @spec worker_seed(integer(), non_neg_integer()) :: non_neg_integer()
+  def worker_seed(run_seed, worker_id) when is_integer(run_seed) do
+    :erlang.phash2({run_seed, worker_id}, 4_294_967_296)
   end
 
   @doc """
@@ -103,9 +118,14 @@ defmodule PropertyDamage.LoadTest.Worker do
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     check_mode = Keyword.get(opts, :check_mode, :disabled)
     run_nonce = Keyword.get(opts, :run_nonce)
+    run_seed = opts[:seed] || :rand.uniform(1_000_000_000)
 
-    # Setup adapter ONCE - this context will be reused for all sequences
-    case target.adapter.setup(target.config) do
+    # Setup adapter ONCE - this context will be reused for all sequences. It
+    # runs in a scope of its own; a load test builds no failure report, so
+    # its log lines are dropped (DR-054).
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> target.adapter.setup(target.config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         state = %__MODULE__{
           worker_id: worker_id,
@@ -116,6 +136,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           think_time_range: think_time_range,
           check_mode: check_mode,
           run_nonce: run_nonce,
+          seed: worker_seed(run_seed, worker_id),
           sequences_executed: 0,
           commands_executed: 0,
           errors: 0,
@@ -157,7 +178,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   def terminate(_reason, state) do
     # Teardown adapter context on worker shutdown
     if state.adapter_context do
-      state.target.adapter.teardown(state.adapter_context)
+      PropertyDamage.Log.inline(fn -> state.target.adapter.teardown(state.adapter_context) end)
     end
 
     :ok
@@ -170,12 +191,8 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp run_one_sequence(state) do
     # Generate a full sequence using the model
     generator = Generator.generate_sequence(state.model)
-
-    sequence =
-      case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
-        {:halted, value} -> value
-        {:done, _} -> Sequence.linear([])
-      end
+    sequence_seed = Generator.run_seed(state.seed, state.sequences_executed)
+    sequence = Generator.generate_value(generator, sequence_seed)
 
     # Execute sequence using persistent adapter context
     case execute_sequence_commands(sequence, state) do
@@ -497,53 +514,29 @@ defmodule PropertyDamage.LoadTest.Worker do
        ) do
     all_projections = PropertyDamage.Model.projection_modules(model)
 
+    step_ctx = %{step_type: step_type, module: module, command_or_event: command_or_event}
+
     failure_count =
       Enum.reduce(all_projections, 0, fn projection, failures ->
         projection_state = Map.get(projections, projection)
 
-        checks =
-          if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
-            projection.__checks__()
-          else
-            []
-          end
+        case Checks.step_checks(projection, projection_state, step_ctx, counters) do
+          {:ok, _counters} ->
+            failures
 
-        Enum.reduce(checks, failures, fn check, acc_failures ->
-          if Projection.should_run?(check.trigger, step_type, module, counters) do
-            # The check's return is its verdict (DR-052); a raise fails it too.
-            try do
-              projection
-              |> apply(check.function_name, [projection_state, command_or_event])
-              |> PropertyDamage.Verdict.check(check.name)
-            rescue
-              e -> {:fail, e}
-            end
-            |> case do
-              :pass ->
-                acc_failures
+          {:error, _check_name, {e, _stacktrace}, _counters} ->
+            failure = %{
+              reason: e,
+              command_index: command_index,
+              step_type: step_type,
+              module: module,
+              timestamp: System.monotonic_time(:millisecond)
+            }
 
-              {:fail, e} ->
-                failure = %{
-                  reason: e,
-                  command_index: command_index,
-                  step_type: step_type,
-                  module: module,
-                  timestamp: System.monotonic_time(:millisecond)
-                }
+            Metrics.record_check_failure(state.metrics, e.__struct__, module, failure)
 
-                Metrics.record_check_failure(
-                  state.metrics,
-                  e.__struct__,
-                  module,
-                  failure
-                )
-
-                acc_failures + 1
-            end
-          else
-            acc_failures
-          end
-        end)
+            failures + 1
+        end
       end)
 
     {counters, failure_count}

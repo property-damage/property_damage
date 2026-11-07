@@ -52,7 +52,7 @@ end
 
 defmodule ObanBench.Model do
   @moduledoc "Ties the increment command to the eventual-consistency projection."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.Commands.Increment
 

@@ -126,7 +126,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
           )
       \"\"\"
 
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       #{commands_section}
 

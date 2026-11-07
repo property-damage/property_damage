@@ -31,8 +31,8 @@ defmodule PropertyDamage.MintTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Send]
     @impl true
@@ -154,52 +154,6 @@ defmodule PropertyDamage.MintTest do
     end
   end
 
-  describe "sibling branches at the same flat index mint distinct values" do
-    test "branch positions keep two same-flat-index mints distinct" do
-      # Both branches' first command shares the executor flat index, but their
-      # structured positions (Position.branch(0, 0) vs Position.branch(1, 0)) differ, so the
-      # minted values differ. A flat-index key would have collided — the exact
-      # duplicate-identity bug DR-034 bakes coordinates in to prevent.
-      b0 = %Send{request_id: Mint.reify(Mint.new(:uuid), Position.branch(0, 0), [:request_id])}
-      b1 = %Send{request_id: Mint.reify(Mint.new(:uuid), Position.branch(1, 0), [:request_id])}
-      seq = Sequence.branching([], [[b0], [b1]], [])
-
-      result = run(seq, 111, 0)
-
-      v0 = result.executed[%Position{section: {:branch, 0}, offset: 0}].request_id
-      v1 = result.executed[%Position{section: {:branch, 1}, offset: 0}].request_id
-
-      assert is_binary(v0) and is_binary(v1)
-      refute v0 == v1
-    end
-
-    test "the generator bakes branch-structured positions into branch mints" do
-      # Prove the reification path itself keys on Position.branch(b, i), not the flat
-      # index, so the distinctness above is what generation actually produces.
-      seq =
-        Enum.find_value(1..400, fn seed ->
-          s =
-            generate(seed,
-              max_commands: 12,
-              branching: [branch_probability: 0.9, max_branches: 3, min_prefix_length: 1]
-            )
-
-          if s.branches && Enum.count(s.branches, &(&1 != [])) >= 2, do: s
-        end)
-
-      assert seq, "no seed produced a multi-branch plan"
-
-      branch_positions =
-        for {branch, b} <- Enum.with_index(seq.branches),
-            {%Send{request_id: %Mint{position: pos}}, _i} <- Enum.with_index(branch),
-            do: {b, pos}
-
-      assert Enum.all?(branch_positions, fn {b, pos} ->
-               match?(%Position{section: {:branch, ^b}}, pos)
-             end)
-    end
-  end
-
   describe "models without minted fields are unaffected by the nonce" do
     defmodule Plain do
       @behaviour PropertyDamage.Command
@@ -209,8 +163,8 @@ defmodule PropertyDamage.MintTest do
     end
 
     defmodule PlainModel do
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
       @impl true
       def commands, do: [Plain]
       @impl true

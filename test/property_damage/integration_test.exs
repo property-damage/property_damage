@@ -246,6 +246,30 @@ defmodule PropertyDamage.IntegrationTest do
       end)
     end
 
+    test "a result with 0 runs prints n/a as the pass rate in both formats", %{result: result} do
+      empty = %{result | total_runs: 0, passed: 0, failed: 0, failures: []}
+
+      output = capture_io(fn -> Integration.generate_report(empty, %{format: :terminal}) end)
+      assert output =~ "Pass rate:  n/a"
+
+      path = report_path("zero_runs") <> ".md"
+      on_exit(fn -> File.rm(path) end)
+      capture_io(fn -> Integration.generate_report(empty, %{format: :markdown, path: path}) end)
+      assert File.read!(path) =~ "| Pass Rate | n/a |"
+    end
+
+    test "creates the report's missing parent directory", %{result: result} do
+      dir = report_path("missing_dir")
+      path = Path.join([dir, "nested", "report.md"])
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      capture_io(fn ->
+        Integration.generate_report(result, %{format: :markdown, path: path})
+      end)
+
+      assert File.exists?(path)
+    end
+
     test "markdown format writes a file with the expected content", %{result: result} do
       path = report_path("markdown") <> ".md"
       on_exit(fn -> File.rm(path) end)
@@ -273,6 +297,34 @@ defmodule PropertyDamage.IntegrationTest do
       decoded = path |> File.read!() |> Jason.decode!()
       assert decoded["total_runs"] == @pass_runs
       assert decoded["success"] == true
+      assert decoded["failed"] == 0
+      assert decoded["failures"] == []
+    end
+
+    test "json format writes a failed result's counts and failures" do
+      {:error, failed} = Integration.run(failing_opts(max_runs: 2, stop_on_failure: true))
+      [failure] = failed.failures
+
+      path = report_path("json_failed") <> ".json"
+      on_exit(fn -> File.rm(path) end)
+
+      capture_io(fn ->
+        Integration.generate_report(failed, %{format: :json, path: path})
+      end)
+
+      decoded = path |> File.read!() |> Jason.decode!()
+      assert decoded["success"] == false
+      assert decoded["total_runs"] == failed.total_runs
+      assert decoded["failed"] == 1
+      assert decoded["model"] == inspect(FailingModel)
+
+      assert decoded["failures"] == [
+               %{
+                 "seed" => failure.seed,
+                 "check" => inspect(PropertyDamage.FailureReport.check_name(failure)),
+                 "error" => PropertyDamage.FailureReport.failure_message(failure)
+               }
+             ]
     end
 
     test "junit format writes XML with a testsuite element", %{result: result} do
@@ -287,6 +339,22 @@ defmodule PropertyDamage.IntegrationTest do
       content = File.read!(path)
       assert content =~ ~s(<testsuite name="PropertyDamage Integration")
       assert content =~ ~s(tests="#{@pass_runs}")
+    end
+
+    test "junit format lists no passing testcase for a report with no passing run" do
+      {:error, failed} = Integration.run(failing_opts(max_runs: 2, stop_on_failure: true))
+      assert failed.passed == 0
+
+      path = report_path("junit_failed") <> ".xml"
+      on_exit(fn -> File.rm(path) end)
+
+      capture_io(fn ->
+        Integration.generate_report(failed, %{format: :junit, path: path})
+      end)
+
+      content = File.read!(path)
+      assert content =~ ~s(tests="#{failed.total_runs}")
+      refute content =~ ~s(name="run_)
     end
   end
 

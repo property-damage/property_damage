@@ -1,8 +1,11 @@
 # Deterministic Generation
 
 PropertyDamage generates a command sequence as a **pure function of the seed**.
-Reproducing a failure with `mix test ... seed: N`, and comparing two runs of the
-same plan, both depend on that purity. This guide states the contract, shows the
+Reproducing a failure with the `seed: N` run option (not ExUnit's
+`mix test --seed`), and comparing two runs of the same plan, both depend on
+that purity. To pin the seed under `mix test` without editing code, set
+`PD_SEED` in the environment (for example `PD_SEED=123 mix test`); an explicit
+`seed:` option wins over the variable. This guide states the contract, shows the
 four blessed ways to model nondeterministic needs without breaking it, and
 points at the audit that enforces it.
 
@@ -15,6 +18,9 @@ free of side effects and ambient reads:
 
 - command generators (`generator/1`),
 - `when:` and `overrides:` predicates in the model's command list,
+- the command specs that `setup_each/0` and `teardown_each/0` return, with their
+  `overrides:` functions,
+- the expansion functions that `expansions/0` names,
 - the `command_sequence_projection`, and
 - the `simulator`.
 
@@ -52,7 +58,6 @@ Run the audit against your model in development and CI:
 ```bash
 mix pd.audit MyApp.Model
 mix pd.audit MyApp.Model --seeds 500 --max-commands 40
-mix pd.audit MyApp.Model --branching --branch-probability 0.3
 ```
 
 It realizes your model's generated sequence twice at each of N seeds and checks
@@ -63,6 +68,20 @@ CI gates on it. The programmatic form is `PropertyDamage.audit/2`.
 The audit is generation-only: no adapter, no SUT, no execution. It never
 resolves `mint_per_run` markers or `external()` placeholders (those are
 deterministic symbolic structs and part of the plan).
+
+It covers the sequence that `PropertyDamage.Generator.generate_sequence/2`
+draws: the roots, the setup commands drawn before them, and the `when:` and
+`overrides:` functions, the simulator and the sequence projection that drawing
+calls. It does not cover two things, so review them by hand:
+
+- **Teardown commands.** The run seed draws them in a separate step after the
+  roots (`PropertyDamage.Generator.teardown_commands/4`), and the audit never
+  makes that call.
+- **Expansion functions.** `expansions/0` functions run when a target picks a
+  rewrite of a root, which the audit does not do.
+
+Keep both free of clocks, randomness and other ambient reads, as the contract
+above requires.
 
 ### Projection purity, too
 
@@ -114,8 +133,9 @@ def generator(_overrides) do
   end)
 end
 
-# The adapter performs the ONE wall-clock read, at execution time:
-def execute(%IssueToken{exp: {:relative_seconds, off}}, ctx) do
+# The adapter (a module with `use PropertyDamage.Adapter`) performs the ONE
+# wall-clock read, in its `execute/3` callback at execution time:
+def execute(%IssueToken{exp: {:relative_seconds, off}}, _ctx, _runtime) do
   exp = DateTime.add(DateTime.utc_now(), off, :second)
   # ... send `exp` to the SUT ...
 end
@@ -153,7 +173,10 @@ end
 
 The result is unique per run yet byte-reproducible when the nonce and epoch are
 pinned. Hold `(seed, run_number)` and vary the nonce to re-run the identical
-plan with fresh minted values on a shared SUT.
+plan with fresh minted values on a shared SUT. The `run_nonce:` option sets the
+nonce; `mix test` cannot forward custom flags, so set `PD_RUN_NONCE` in the
+environment instead (for example `PD_RUN_NONCE=42 mix test`). An explicit
+option wins over the variable.
 
 ### 3. Server-assigned output: `external/0`
 

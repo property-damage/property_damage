@@ -205,7 +205,7 @@ Three questions follow.
     - Export emits the reference's concrete leaves. The ExUnit export emits
       `only: [replay: path]` when the report has a file and the seed path
       otherwise.
-    - The seed-library replay and `RunTrace.capture/1` recompute from the seed
+    - The seed-library replay and `RunTrace.Capture.capture/1` recompute from the seed
       and record the choices, unchanged.
     - The report's `expansions` and `expansion_counts` describe the shrunk run,
       for the report `run/1` returns and for `shrink_further/2`.
@@ -261,3 +261,31 @@ Three questions follow.
 - A mix task that runs an artifact.
 - Whether a failure in one non-reference target should retire only that
   target (the active-set rule, as in DR-048 and DR-049).
+
+## Amendment (2026-11-03)
+
+The loader now loads some modules before it resolves atoms. It loads the
+framework's failure and expansion modules and, when the model the file names
+is already loaded, the commands and projections that model lists. It loads no
+other module the file names, so a file still cannot make the reader load an
+arbitrary module.
+
+Why: a fresh VM loads modules lazily, so the atoms a module defines (field
+names, check names, struct names) do not exist until the module loads. The
+loader refuses an atom the running system does not know, so a replay in a
+fresh VM refused a file that the VM that wrote it could read. Loading the
+modules that define the atoms first makes the atoms exist, and the rule that
+reading never creates an atom stays intact.
+
+## Amendment (2026-11-04)
+
+When a first read refuses an unknown atom or struct module, the loader loads
+the modules of every loaded application and reads the file once more. The
+failure-file loader of `PropertyDamage.Persistence` already does the same.
+
+Why: the first amendment loads only the model and the modules it lists. An
+atom that only an unlisted module of the project defines, such as a constants
+module or a leaf command that only an expansion produces, stayed unknown in a
+fresh VM, so the replay refused a valid file. The file still chooses no
+module to load: the set is every module of the applications already loaded,
+and an atom none of them defines is still refused.

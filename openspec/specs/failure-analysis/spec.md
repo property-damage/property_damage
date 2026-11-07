@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -14,24 +14,69 @@ A run's `failure_reason` SHALL be a single structured type,
 `%PropertyDamage.Failure{}` (DR-041), not a loose family of `{:tag, ...}` tuples.
 It SHALL nest one class struct under `type`: `Failure.Check`,
 `Failure.Execution`, or `Failure.Framework`, so that illegal class/kind
-combinations are unrepresentable, and SHALL record the producing branch (if any)
-as `branch_id` on the envelope (absorbing the former `{:branch_failure, id,
-inner}` wrapper). Each class struct SHALL own a `kind` from a closed, documented
+combinations are unrepresentable. Each class struct SHALL own a `kind` from a closed, documented
 set; kinds SHALL be globally unique atoms across the three classes. The framework
-SHALL expose `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
+SHALL expose `Failure.class/1`, `kind/1`, `name/1`, `detail/1`,
 and `partial_events/1` accessors.
 
 #### Scenario: Kinds partition into three classes
 
 - **WHEN** a run fails
-- **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
-- **AND** `:execution` for a command-execution failure (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
+- **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
+- **AND** `:execution` for a command-execution failure (`:adapter_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
 - **AND** `:framework` for a framework-level failure (`:placeholder_resolution`, `:unknown`)
 
 #### Scenario: Report views derive from the failure reason
 
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
 - **THEN** `FailureReport.failure_type/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
+
+### Requirement: A Failed Check Records Its Projection (DR-058)
+
+A failure of kind `:check_failed` or `:poll_timeout` SHALL record the projection
+module that defines the failed check, in the `projection` field of its
+`Failure.Check`. Every other kind, and a failure rebuilt from a signature, SHALL
+leave `projection` as `nil`. The printed Failure section SHALL show a
+`Projection` field directly after the `Check` field when `projection` is set.
+The JSON report's `failure` object SHALL carry a `projection` key beside
+`check_name`: the module name when set, `null` for a check failure without one,
+and no key when the failure is not a check failure. A failure report file saved
+before the field existed SHALL load with `projection` as `nil`.
+
+#### Scenario: Two projections share a check name
+
+- **GIVEN** projections `Alpha` and `Beta` that both define a check named `:balance_is_sane`
+- **WHEN** the check of `Beta` fails
+- **THEN** the failure's `projection` SHALL be `Beta`
+- **AND** the Failure section SHALL show `Projection` with the value `Beta` after `Check`
+- **AND** the JSON report's `failure.projection` SHALL be `"Beta"`
+
+#### Scenario: A check failure without a projection
+
+- **WHEN** a report holds a check failure whose `projection` is `nil`
+- **THEN** the Failure section SHALL show no `Projection` field
+- **AND** the JSON report's `failure.projection` SHALL be `null`
+
+#### Scenario: A report file saved before the field existed
+
+- **WHEN** a failure report file holds a `Failure.Check` without a `projection` key
+- **THEN** loading it SHALL succeed and the loaded failure's `projection` SHALL be `nil`
+
+### Requirement: Every Failure Kind Has a Meaning (DR-058)
+
+`PropertyDamage.Failure.Explain.meaning/1` SHALL return a text for every kind of
+the `PropertyDamage.Failure.kind()` type, in plain words, as a string. It SHALL
+raise `FunctionClauseError` for a value that is not a kind.
+
+#### Scenario: A kind has a meaning
+
+- **WHEN** `Failure.Explain.meaning/1` is called with any kind of the `Failure.kind()` type
+- **THEN** it SHALL return a non-empty string
+
+#### Scenario: A value that is not a kind
+
+- **WHEN** `Failure.Explain.meaning/1` is called with an atom that is not a kind
+- **THEN** it SHALL raise `FunctionClauseError`
 
 ### Requirement: Failure Fingerprinting
 
@@ -147,7 +192,7 @@ The system SHALL classify each failure as originating from the SUT, the test cod
 
 #### Scenario: SUT error with high confidence
 
-- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:check_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization`
+- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:check_failed`, `:poll_timeout`, or `:idempotency_violation`
 - **THEN** the origin SHALL be classified as `:sut_error` with confidence `:high`
 
 #### Scenario: Test code error with high confidence
@@ -168,12 +213,14 @@ The system SHALL produce user-facing banners and hints based on error origin cla
 #### Scenario: SUT error banner
 
 - **WHEN** a failure is classified as `:sut_error`
-- **THEN** the report SHALL include a banner indicating the likely SUT bug and the violated invariant name
+- **THEN** the printed report SHALL open with the banner `BUG DETECTED!` (DR-055)
+- **AND** the Failure section SHALL name the violated invariant in its `Invariant` field when its name differs from the check's, and the check in its `Check` field
 
 #### Scenario: Test code error banner
 
 - **WHEN** a failure is classified as `:test_code_error`
-- **THEN** the report SHALL include a banner indicating a likely test configuration issue with the specific module and callback involved
+- **THEN** the printed report SHALL open with the banner `TEST CODE ERROR` and a line saying the system under test is not at fault (DR-055)
+- **AND** the Failure section SHALL say what went wrong in its `What went wrong` field, and name the module and callback involved in its `Hint` or `Location` field when the classification found them
 
 ### Requirement: Invariant Suggestions
 
@@ -212,7 +259,7 @@ The system SHALL analyze a model's commands, events, and projections to suggest 
 
 ### Requirement: Structured Failure Reports
 
-The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason. The shrunk sequence and event trail are served through the report's embedded `RunTrace` (DR-033); `shrunk_sequence/1` and `event_log/1` are accessors over the trace, not struct fields.
+The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason. The shrunk sequence and event trail are served through the report's embedded `RunTrace` (DR-033); `shrunk_sequence/1` and `event_log/1` are accessors over the trace, not struct fields. A report of kind `:diverged` or `:did_not_converge` SHALL also carry `reference_trace` (the reference target's `RunTrace` of the reported run) and `reference_state_at_failure` (the reference's projection state at the failing boundary, cut as DR-040 defines), and every other kind SHALL leave both `nil` (DR-055). Every report SHALL carry `shrink_stop`: `:done` when the shrinker finished inside its budget or never ran, `:max_iterations` or `:max_time` when a budget ran out first (DR-055).
 
 #### Scenario: Report creation
 
@@ -223,6 +270,7 @@ The system SHALL produce structured failure reports containing location (run num
 
 - **WHEN** a report is formatted
 - **THEN** the system SHALL support `:terminal`, `:markdown`, `:json`, and `:compact` output formats
+- **AND** the `:json` format SHALL keep every field of the report, the sections the printed formats dropped included (DR-055)
 
 #### Scenario: Report with error origin
 
@@ -247,26 +295,106 @@ The system SHALL produce structured failure reports containing location (run num
 
 - **WHEN** a `FailureReport` is inspected structurally
 - **THEN** `FailureReport.steps/1` SHALL delegate to `RunTrace.steps/1` (DR-033) on the report's embedded trace, returning the run as an ordered list of `%RunTrace.Step{position, flattened_index, command, executed_command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order; `command` is the plan's symbolic command (unchanged semantics for existing consumers) and `executed_command` is the concrete resolved command actually sent (`nil` when not captured, e.g. a command that never executed)
-- **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
-- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a nemesis / mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
-- **AND** at most one step SHALL have `failed?: true`: the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
-- **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
+- **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `{:leaf, n}`, `:setup` or `:teardown`) and its offset within that section, giving each command an identity
+- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `command_index` resolves to that step's position, in log order, preserving each event's provenance (`source`; the bare event is `entry.event`) so a mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
+- **AND** at most one step SHALL have `failed?: true`: the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index`
+- **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run, where `failed_at_index` is `nil`)
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
 - **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
 
+### Requirement: Printed Failure Report Layout (DR-055, DR-056, DR-058)
+
+The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `What this checks`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` format SHALL keep every field it carried before this layout and SHALL gain `reference_trace` and `reference_projections` for a comparison failure (DR-055) and the `logs` key (DR-054); the `:compact` format SHALL NOT change.
+
+#### Scenario: One label per step in every section
+
+- **WHEN** a report is printed
+- **THEN** every listed command SHALL carry the label `Sequence.Position.label/2` gives it: `[i]` for a root, `[i.j]` for a leaf listed under root `[i]` (never the root's generated id), `[setup i]`, `[teardown i]`
+- **AND** the Failure section's `At` field, every line marked `►` and the Projections heading SHALL carry the failing step's label, and every `►` line SHALL end with `◄── diverged`, `◄── did not converge` or `◄── failed`
+- **AND** a failure tied to no step SHALL print no `►` and no `At` field
+- **AND** a command that prints over several lines SHALL start on the line after its label, so the notes and the `◄──` mark end the label's line and never split the printed value
+
+#### Scenario: A comparison failure lists both sides
+
+- **WHEN** the report's kind is `:diverged` or `:did_not_converge`
+- **THEN** Minimal Reproduction SHALL list the reference under `Reference: target "<name>"` and the failing variant under `Variant: target "<name>"`, each with its own events, and the root at the failing boundary SHALL be marked in both, also when the variant ran it as leaves
+- **AND** the Failure section SHALL print both values, the `using:` relation as written (`==` without one) and the time waited against the bound (`still differing after N ms (bound M ms)`, or `still pending`)
+- **AND** it SHALL print `Mismatch` only when the relation failed with a reason
+- **AND** the Projections `-` and `+` sides SHALL be the reference's and the variant's states cut at the failing boundary (DR-040), so that nothing either side folded after the boundary shows
+
+#### Scenario: Events sit under their step
+
+- **WHEN** a listed step has events
+- **THEN** they SHALL print under it in timestamp order, each with its offset from the earliest timestamp of that target's event log and with `event` or the source badge of its source
+- **AND** entries tied to no command SHALL print after the listing under `Not tied to a command`
+
+#### Scenario: Values print in full
+
+- **WHEN** a command, an event, a Failure value or a projection attribute is printed
+- **THEN** it SHALL print through one `inspect/2` call with no element or string limit, and a projection SHALL print one attribute per line, equal attributes once and differing ones as a `-` line then a `+` line
+
+#### Scenario: A shrinker that ran out of budget says so (DR-055)
+
+- **WHEN** the report's `shrink_stop` is `:max_iterations` or `:max_time`
+- **THEN** the Failure section SHALL print a `Shrink` field that says the shrinker stopped at its iteration (or time) budget, so the reproduction may not be minimal
+- **AND** a report whose `shrink_stop` is `:done` or `nil` SHALL print no `Shrink` field
+
+#### Scenario: Reproduction binds the targets once
+
+- **WHEN** the report's `targets` is not empty
+- **THEN** Reproduction SHALL print `targets = [...]` once and every call SHALL name `targets: targets`
+- **AND** when a target holds a pid, a reference, a port or a function, also inside a list or a tuple, a line under the binding SHALL name each place by its path (`config.server`, a list or tuple element by its index) and say to rebuild the list as the test does
+
+### Requirement: The "What this checks" Section of the Printed Report (DR-058)
+
+The printed failure report SHALL carry a section titled `What this checks` right after `Failure`, in the terminal text, the markdown and the HTML page. The section SHALL print, for the failure at hand, the meaning of its kind (`PropertyDamage.Failure.Explain.meaning/1`) and the docs of the model, of the check or observation that failed, of that check's projection, of the expansion path each listed target took and of the command, and SHALL name what is missing with the line that fixes it. The items SHALL print in this order: the meaning, `Model`, the subject of the kind with its supporting items, one `Path` item for each root a listed target ran as a listed expansion entry (the reference first), and `Command`.
+
+The subject is `Observation` for `:diverged` and `:did_not_converge` (then `Relation` when `using:` names a function of a module, one `Also differed` per further observation that disagreed, and `Projection`); `Check` for `:check_failed` and `:poll_timeout` (then `Projection`, and `Property` when the invariant has a description); `Projection` for `:projection_violation`; and `Command` for the execution kinds and for `:setup_failed` when a setup command failed. Every other kind has no subject. `Command` SHALL print last, from the marked step of the listing, for every kind that has no `Command` as its subject, and SHALL NOT print when no step is marked.
+
+A subject SHALL print its whole doc and any other item the text up to the first blank line, both as written and never parsed or re-wrapped. Docs SHALL come from `PropertyDamage.Docs.fetch/1`. An item whose doc is missing SHALL print a line that starts with `(no description: ` and names the fix: the `@doc` or `@moduledoc` to add, the `false` doc to replace, the `use` line that lets PropertyDamage read the module's docs, or the `doc:` to add to the numbered entry that the model's expansion function returns for the root.
+
+Each item SHALL print its label at column 2 and its name (a module, `Module.function/arity`, or for `Path` the target, the root and the step labels) on the label line at column 16, with its text on the lines below at column 16. A label of 14 characters or more SHALL stand alone on its line, and the text of an item without a name SHALL start on the label line. A blank line inside a doc SHALL print empty. Items SHALL be one empty line apart, and text written by PropertyDamage SHALL wrap at word boundaries within 80 columns. The three text renderings SHALL carry the same section body, byte for byte. The HTML page SHALL show the section open, as preformatted text, right after the failure summary. The `:json` format SHALL carry the items under `what_this_checks`. The section SHALL NOT raise for a projection without a check list or `__compares__/0`, for a module that is not loaded, or for a failure that names no projection: the item is left out or prints its gap line.
+
+#### Scenario: A failed check prints its docs after the meaning
+
+- **GIVEN** a failed check whose model, projection, check function and command all carry docs
+- **WHEN** the report is printed
+- **THEN** the section SHALL be the second section and SHALL hold the items `Check failed`, `Model`, `Check`, `Projection`, `Property` (when the invariant has a description) and `Command`, in that order
+- **AND** `Check` SHALL print the check function's whole doc and `Model`, `Projection` and `Command` the text up to the first blank line of theirs
+
+#### Scenario: A missing doc names the fix
+
+- **GIVEN** a check function with no `@doc` and a command module with `@moduledoc false`
+- **WHEN** the report is printed
+- **THEN** `Check` SHALL print `(no description: add @doc to <Module.function/arity>)`
+- **AND** `Command` SHALL print `(no description: <Module> has @moduledoc false; replace it with a @moduledoc)`
+
+#### Scenario: A target that ran an expansion entry prints its path
+
+- **GIVEN** a comparison failure in which each target ran a root as a listed expansion entry
+- **WHEN** the report is printed
+- **THEN** a `Path` item for each target, the reference first, SHALL be named `"<target>" split <Root> (step i) into <A> (step i.0) and <B> (step i.1)` when the target ran the root as leaves (one leaf: `into <A> (step i.0)`; three or more: `<A> (step i.0), <B> (step i.1) and <C> (step i.2)`) `"<target>" kept <Root> (step i) as one step` when the entry is the root alone, or `"<target>" dropped <Root> (step i)` when the entry has no commands, using the step labels of the Run view, and SHALL print the entry's `doc:`, or when the entry has none, the line that names the entry's number, the model function that returned it and the root
+- **AND** a root that a target ran as itself in place of an entry SHALL have no `Path` item
+- **AND** the header of that root's band in the Run view of the HTML page SHALL name the same case after the target's name: `split it into <A> (step i.0) and <B> (step i.1)` (the leaves worded as in the `Path` item), `kept it as one step`, or `dropped it`; the root line of the terminal listing and of the Markdown listing SHALL carry the same case in the words of the `Path` item: `split into steps i.0 and i.1` (one leaf: `split into step i.0`; three or more: `split into steps i.0, i.1 and i.2`), `kept as one step`, or `dropped: no step ran in its place`, and SHALL NOT print the entry key; the HTML viewer SHALL read the case from that note and not from the "What this checks" section
+
+#### Scenario: A kind without a subject prints the meaning and the model
+
+- **WHEN** the report's kind is `:latency_exceeded`
+- **THEN** the section SHALL hold the meaning and `Model` and no `Command`
+
 ### Requirement: Failure Report Replay Fields and Footer (DR-050)
 
-`FailureReport` SHALL carry `run` (the campaign run the failure happened in, counted from 1), `replay` (the replay artifact term, `{:refused, where}` or `nil`), `replay_path` (the file or `nil`) and `replay_status` (`:written`, `:disabled`, `{:write_failed, reason}`, `:refused`, `:unavailable`, `:reproduced`, `:not_reproduced` or `nil`). The printed report SHALL end with, in this order: the reproduction command (`reproduction_command/1`, the seed path, unchanged); "Regenerate the failing variant:" and the `PropertyDamage.Expansion.for/5` call for the failing target (`expansion_command/1`); and "Replay the shrunk failure:" ("Replay the unshrunk failure:" when no shrink step ran) and the `only: [replay: path]` call (`replay_command/1`), which SHALL name a non-default `compare: [converge_within: ms]` and `check_mode:` as `reproduction_command/1` does. That call SHALL be the last code line of the report. When there is no file, the last lines SHALL say why: `replay_dir: false`, a refusal naming the target, the root, the leaf and the field path, or the write error. `targets_source/1` SHALL print each target's `expansion:` when it is not `:random`, so that a pasted call runs the targets as the failing run did.
+`FailureReport` SHALL carry `run` (the campaign run the failure happened in, counted from 1), `replay` (the replay artifact term, `{:refused, where}` or `nil`), `replay_path` (the file or `nil`) and `replay_status` (`:written`, `:disabled`, `{:write_failed, reason}`, `:refused`, `:unavailable`, `:reproduced`, `:not_reproduced` or `nil`). The printed report SHALL end with, in this order: the reproduction command (`reproduction_command/1`, the seed path); the comment `# Regenerate the failing variant:` and the `PropertyDamage.Expansion.for/5` call for the failing target (`expansion_command/1`), both omitted when the report records no target, since it has no name to regenerate with (`expansion_command/1` then returns `nil`); and the comment `# Replay the shrunk failure:` (`# Replay the unshrunk failure:` when no shrink step ran) and the `only: [replay: path]` call (`replay_command/1`); when the report has targets, each call SHALL name `targets: targets`, bound once above it (DR-055, DR-056), in place of the list. The replay call SHALL name a non-default `compare: [converge_within: ms]` and `check_mode:` as `reproduction_command/1` does. That call SHALL be the last code line of the report. When there is no file, the last lines SHALL say why: `replay_dir: false`, a refusal naming the target, the root, the leaf and the field path, or the write error. `targets_source/1` SHALL print each target's `expansion:` when it is not `:random`, so that a pasted call runs the targets as the failing run did.
 
 #### Scenario: The footer ends with the replay call
 - **WHEN** a failing run writes an artifact
-- **THEN** the report's last code line SHALL be `PropertyDamage.run(model: M, targets: ..., only: [replay: "<path>"])`
+- **THEN** the report's last code line SHALL be `PropertyDamage.run(model: M, targets: targets, only: [replay: "<path>"])`
 - **AND** the regenerate call SHALL come before the replay label
 
 #### Scenario: A pasted call keeps each target's expansion mode
 - **GIVEN** a failing run with a target on `expansion: :reference`
-- **WHEN** the report prints a call that holds `targets:`
-- **THEN** the `targets:` source SHALL include `expansion: :reference` for that target
+- **WHEN** the report prints the `targets = [...]` binding
+- **THEN** the binding SHALL include `expansion: :reference` for that target
 
 #### Scenario: No artifact says why
 - **WHEN** a run fails with `replay_dir: false`
@@ -292,7 +420,7 @@ The system SHALL produce structured failure reports containing location (run num
 
 ### Requirement: Replay Artifact Generation (DR-050)
 
-A failing run SHALL write one replay artifact after shrinking, in the format the persistence requirement "Replay Artifact File (DR-050)" specifies, into `replay_dir:`. With `shrink: false` it SHALL hold the unshrunk run and the footer SHALL say so. The run SHALL refuse to build the artifact when a command field (inside lists, tuples and maps, map keys included) holds a function, pid, reference, port, improper list or non-binary bitstring. A refusal SHALL set `replay` to `{:refused, where}` and `replay_status` to `:refused`, SHALL name the target, the root, the leaf and the field path (a refused map key marked `{:key, text}`), and SHALL leave the failure reported and reproducible from its seed. A latency budget failure and a branching sequence SHALL have no artifact (`replay_status: :unavailable`).
+A failing run SHALL write one replay artifact after shrinking, in the format the persistence requirement "Replay Artifact File (DR-050)" specifies, into `replay_dir:`. With `shrink: false` it SHALL hold the unshrunk run and the footer SHALL say so. The run SHALL refuse to build the artifact when a command field (inside lists, tuples and maps, map keys included) holds a function, pid, reference, port, improper list or non-binary bitstring. A refusal SHALL set `replay` to `{:refused, where}` and `replay_status` to `:refused`, SHALL name the target, the root, the leaf and the field path (a refused map key marked `{:key, text}`), and SHALL leave the failure reported and reproducible from its seed. A latency budget failure SHALL have no artifact (`replay_status: :unavailable`).
 
 #### Scenario: A function in a command is refused
 - **GIVEN** a command whose field holds an anonymous function
@@ -311,7 +439,7 @@ A failing run SHALL write one replay artifact after shrinking, in the format the
 
 ### Requirement: Re-execution Paths Read the Recorded Data (DR-050)
 
-Every path that executes a failure again SHALL take each target's concrete commands from the report's `replay` term, or from the choices the report's trace records when the report has no term, and SHALL NOT raise for a target that ran leaves. A report loaded from a version-15 `.pd` file SHALL behave the same. `PropertyDamage.shrink_further/2` SHALL work for every recorded target, SHALL recompute `expansions` and `expansion_counts` for the further-shrunk run, and SHALL write its smaller artifact over the incoming report's file; it SHALL raise, naming `replay_dir:`, only when the report holds neither a term nor choices. `PropertyDamage.Replay.run/2` and `start/2` SHALL replay any recorded target, each leaf as a step. `PropertyDamage.Analysis.isolate_trigger/2` on a reference that ran leaves SHALL vary one concrete command of the reference's sequence and re-run the reference alone, and SHALL raise `ArgumentError` for a non-reference target that ran leaves. Because every variation runs one target alone, `isolate_trigger/2` SHALL return `{:error, :not_applicable}` for a `:diverged` or `:did_not_converge` report. Export SHALL emit the reference's concrete leaves; the ExUnit export SHALL emit `only: [replay: path]` when the report has a file and the seed path otherwise. The seed-library replay and `RunTrace.capture/1` SHALL recompute from the seed. `RunComparison` SHALL align two runs at root level.
+Every path that executes a failure again SHALL take each target's concrete commands from the report's `replay` term, or from the choices the report's trace records when the report has no term, and SHALL NOT raise for a target that ran leaves. A report loaded from a version-15 `.pd` file SHALL behave the same. `PropertyDamage.shrink_further/2` SHALL work for every recorded target, SHALL recompute `expansions` and `expansion_counts` for the further-shrunk run, and SHALL write its smaller artifact over the incoming report's file; it SHALL raise, naming `replay_dir:`, only when the report holds neither a term nor choices. `PropertyDamage.Replay.run/2` and `start/2` SHALL replay any recorded target, each leaf as a step. `PropertyDamage.Analysis.isolate_trigger/2` on a reference that ran leaves SHALL vary one concrete command of the reference's sequence and re-run the reference alone, and SHALL raise `ArgumentError` for a non-reference target that ran leaves. Because every variation runs one target alone, `isolate_trigger/2` SHALL return `{:error, :not_applicable}` for a `:diverged` or `:did_not_converge` report. Export SHALL emit the reference's concrete leaves; the ExUnit export SHALL emit `only: [replay: path]` when the report has a file and the seed path otherwise. The seed-library replay and `RunTrace.Capture.capture/1` SHALL recompute from the seed. `RunComparison` SHALL align two runs at root level.
 
 #### Scenario: Replay of a leaf-running target
 - **GIVEN** a report whose second target ran a root as two leaves
@@ -347,13 +475,13 @@ Every path that executes a failure again SHALL take each target's concrete comma
 
 ### Requirement: Run Trace as the Execution Record (DR-033)
 
-The framework SHALL model the complete record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `mint_epoch` (DR-034), `model`, `adapter`, UTC `timestamp`, and best-effort `source_revision`), the plan (`plan`, the `%Sequence{}` this run executed; deliberately NOT named `original_sequence`, whose report-level meaning is the generated plan of the failing exploration run), a `plan_source` of `:generated` (a pure function of the effective seed) or `:shrunk` (a shrinker product, not regenerable from the seed), the canonical `plan_fingerprint` (DR-036), the concrete executed commands with their resolved and minted values keyed branch-aware by `%Sequence.Position{}`, the complete `EventLog` with per-entry provenance, the `command_labels`, and an `outcome` of `:pass` or `{:fail, reason}`. The executor SHALL always accumulate the resolved concrete command per position (including within branch workers, merged with branch state) so the executed record exists whenever a trace is materialized. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same branch-aware `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of the run the report describes: the shrunk minimal reproduction when its re-execution reproduced the failure, otherwise the original failing run (the existing non-reproduction fallback), and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs the trace's plan), and the failure classification. Deep execution-record structures SHALL live once, on the trace: the report SHALL NOT carry `event_log` or `shrunk_sequence` struct fields; `FailureReport.event_log/1` and `FailureReport.shrunk_sequence/1` SHALL be accessors over the embedded trace, while scalar identity (`seed`, `run_number`, `model`, `adapter`, `timestamp`) MAY remain duplicated on the report as its locator surface. Full `RunTrace` capture SHALL be on demand (`RunTrace.capture/1`, DR-035), not retained for every exploration run.
+The framework SHALL model the complete record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `mint_epoch` (DR-034), `model`, `adapter`, UTC `timestamp`, and best-effort `source_revision`), the plan (`plan`, the `%Sequence{}` this run executed; deliberately NOT named `original_sequence`, whose report-level meaning is the generated plan of the failing exploration run), a `plan_source` of `:generated` (a pure function of the effective seed) or `:shrunk` (a shrinker product, not regenerable from the seed), the canonical `plan_fingerprint` (DR-036), the concrete executed commands with their resolved and minted values keyed by `%Sequence.Position{}`, the complete `EventLog` with per-entry provenance, the `command_labels`, and an `outcome` of `:pass` or `{:fail, reason}`. The executor SHALL always accumulate the resolved concrete command per position so the executed record exists whenever a trace is materialized. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of the run the report describes: the shrunk minimal reproduction when its re-execution reproduced the failure, otherwise the original failing run (the existing non-reproduction fallback), and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs the trace's plan), and the failure classification. Deep execution-record structures SHALL live once, on the trace: the report SHALL NOT carry `event_log` or `shrunk_sequence` struct fields; `FailureReport.event_log/1` and `FailureReport.shrunk_sequence/1` SHALL be accessors over the embedded trace, while scalar identity (`seed`, `run_number`, `model`, `adapter`, `timestamp`) MAY remain duplicated on the report as its locator surface. Full `RunTrace` capture SHALL be on demand (`RunTrace.Capture.capture/1`, DR-035), not retained for every exploration run.
 
 #### Scenario: Trace captured for a passing run
 
 - **WHEN** a run is executed on an on-demand capture path (run comparison or flakiness investigation) and passes
 - **THEN** the framework SHALL produce a `RunTrace` with `outcome: :pass`, `plan_source: :generated`, the full unshrunk executed plan, and its complete event log
-- **AND** `RunTrace.steps/1` SHALL return one step per command in `Sequence.to_list/1` reading order, with the same branch-aware position identity used for failing runs
+- **AND** `RunTrace.steps/1` SHALL return one step per command in `Sequence.to_list/1` reading order, with the same position identity used for failing runs
 
 #### Scenario: FailureReport composes a RunTrace
 
@@ -376,12 +504,12 @@ The framework SHALL model the complete record of a single run as a `PropertyDama
 
 ### Requirement: Per-Step State Timeline and Projection Purity (DR-040)
 
-Per-command projection state SHALL be DERIVED from a `RunTrace`, never captured per step. The executor SHALL record the run's real fold order additively: each `EventLog.Entry` SHALL carry a `fold_index` stamped when its event folds into projections (`nil` for entries that are recorded but never folded, i.e. `:stutter` retries and `:telemetry` spans), and the trace SHALL carry `command_fold_ordinals` (each command's own fold ordinal by position) and the verified branch `linearization`. From this record the framework SHALL derive two state views: a FAITHFUL view (`RunTrace.state_at/2`, `state_before/2`, `state_timeline/1`) that replays the real fold order so async / injected events land where they folded, and a CANONICAL view (`RunTrace.canonical_state_timeline/1`) that folds each step's command then its attributed events in flattened order and is therefore fold-order-independent. Branching faithful replay SHALL mirror the executor's branch merge: branch steps fold branch-locally from the post-prefix state, and suffix steps fold the merged state (branches replayed in verified `linearization` order when recorded, else branch order) then the suffix. The framework SHALL provide a projection-purity check (`FailureReport.verify_projections/1`, `RunTrace.verify_projections/4`): the faithful-derived state at the failing step MUST equal the runtime `state_at_failure` snapshot (and `state_before_failure` at its step), and a mismatch SHALL be reported as `{:non_pure_projections, [module]}` naming the projection module(s) whose `apply/2` is not a pure function of `(state, event)`. Because the faithful view replays the real fold order, a pure-but-async projection SHALL NOT be reported as non-pure. This is a two-point sample (before + at the failing step), an explicitly partial coverage. A generation-side companion (`PropertyDamage.audit_projections/2`, run by `mix pd.audit`) SHALL fold each generated plan twice and name any projection whose two folds disagree.
+Per-command projection state SHALL be DERIVED from a `RunTrace`, never captured per step. The executor SHALL record the run's real fold order additively: each `EventLog.Entry` SHALL carry a `fold_index` stamped when its event folds into projections (`nil` for entries that are recorded but never folded, i.e. `:stutter` retries and `:telemetry` spans), and the trace SHALL carry `command_fold_ordinals` (each command's own fold ordinal by position). From this record the framework SHALL derive two state views: a FAITHFUL view (`RunTrace.state_at/2`, `state_before/2`, `state_timeline/1`) that replays the real fold order so async / injected events land where they folded, and a CANONICAL view (`RunTrace.canonical_state_timeline/1`) that folds each step's command then its attributed events in flattened order and is therefore fold-order-independent. The framework SHALL provide a projection-purity check (`FailureReport.verify_projections/1`, `RunTrace.verify_projections/4`): the faithful-derived state at the failing step MUST equal the runtime `state_at_failure` snapshot (and `state_before_failure` at its step), and a mismatch SHALL be reported as `{:non_pure_projections, [module]}` naming the projection module(s) whose `apply/2` is not a pure function of `(state, event)`. Because the faithful view replays the real fold order, a pure-but-async projection SHALL NOT be reported as non-pure. This is a two-point sample (before + at the failing step), an explicitly partial coverage. A generation-side companion (`PropertyDamage.audit_projections/2`, run by `mix pd.audit`) SHALL fold each generated plan twice and name any projection whose two folds disagree.
 
 #### Scenario: Faithful state matches the runtime snapshot
 
 - **WHEN** the faithful per-step state is derived at the failing step of a report built from a real run
-- **THEN** it SHALL equal the runtime `state_at_failure` snapshot (and `state_before_failure` at that step) for a model whose projections are pure, on both linear and branching runs
+- **THEN** it SHALL equal the runtime `state_at_failure` snapshot (and `state_before_failure` at that step) for a model whose projections are pure
 
 #### Scenario: Impure projection is detected
 
@@ -432,3 +560,252 @@ The system SHALL replay production event logs through model projections to detec
 - **WHEN** production events have different field names or structures than framework event structs
 - **THEN** the system SHALL use an `EventMapping` behaviour module to translate production events
 - **AND** events returning `:skip` from the mapping SHALL be excluded from replay
+
+### Requirement: Log Lines in the Printed Report (DR-054, DR-055)
+
+The `:terminal` and `:markdown` reports SHALL print every log line of the reported run (DR-054) in the target's listing, under the step that wrote it, merged with that step's events in timestamp order; on an equal millisecond a line SHALL print before an event. A line SHALL print at the event column as `+S.SSs`, a space, the badge `log` padded to five columns, a space, then the tags in brackets separated by spaces when it has tags, then the message; a message over several lines SHALL continue at the message's column. Offsets of events and lines SHALL count from one origin per target: the earliest timestamp among that target's events and lines. A string SHALL print as written; any other value SHALL print through the report's one `inspect/2` call, with syntax colors when the report is colored; a function SHALL be called each time the report is formatted and its result printed by those rules, and one that raises, throws or exits SHALL print `(log line raised: ...)`. The lines of the adapter's `setup/1` SHALL print before the first listed step under the note `adapter setup/1`, and those of its `teardown/1` after the last listed step under the note `adapter teardown/1`, each only when there are some. For a comparison failure each listing SHALL hold its own target's lines. Only the reported run's lines SHALL print: no line of a shrink attempt or of a target the report does not list. The `:json` format SHALL carry the lines under `logs` (see "Tag Filters and `PD_LOG`"); the `:compact` format SHALL NOT print lines.
+
+#### Scenario: A timed-out step shows the lines written before the kill
+- **WHEN** an adapter logs two tagged lines and then hangs past its timeout
+- **THEN** the `:execution_failed` report SHALL print both lines under the timed-out step with their offsets and tags
+
+#### Scenario: A divergence lists each target's lines
+- **WHEN** the report is `:diverged`
+- **THEN** the Reference listing SHALL hold the reference's lines and the Variant listing the variant's, each under its step with that step's events
+
+#### Scenario: A setup failure shows the adapter's setup lines
+- **WHEN** the adapter's `setup/1` logs and then fails
+- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note
+- **AND** the lines of the target's injector and mock setup and teardown SHALL print once each, under the `adapter setup/1` and `adapter teardown/1` notes
+
+#### Scenario: A shrunk report shows the reported run's lines only
+- **WHEN** a failure is shrunk
+- **THEN** each listed step SHALL show the lines of its one execution in the reported run, and no line of a shrink attempt
+
+### Requirement: Setup Lines and Gaps in the Printed Report (DR-054, DR-055, DR-056)
+
+A report built with `setup_log:` (the lines `PropertyDamage.Log.capture/1` returned) SHALL print them once, in a section whose heading starts with `Setup`, right after Failure and before Minimal Reproduction, whatever the number of targets. The section SHALL be present exactly when the report's `setup_log` is not empty. Its first body line SHALL say that the lines are shared by every run; each following line SHALL be a log line in the form of the target listings, at the event column, in timestamp order (stable), with offsets counted from the earliest setup line. A setup line SHALL never enter a target's offset origin. Function and value messages SHALL follow the rules of the listings. The `:markdown` report SHALL carry the section's plain body in one fence. `shrink_further/2` SHALL keep the given report's `setup_log` on the report it returns. `FailureReport.setup_log` SHALL be set on every report `PropertyDamage.run/1` builds, `only: [replay: path]` included. The `:json` format SHALL carry the setup lines once under `logs.setup`; the `:compact` format SHALL NOT print setup lines.
+
+Where a step's retry cap dropped attempts (see the execution-engine requirement "Log Lines Keep a Step's First and Last Attempts"), the listing SHALL print each gap in its place among the step's lines as `... N attempts omitted (M lines)`, at the event column with no offset and no badge, with comma thousands separators and the singular `1 attempt` and `1 line`; faint when colored; the markdown report SHALL print the plain text. A step whose omitted attempts logged nothing SHALL show no gap.
+
+#### Scenario: The Setup section sits between Failure and the reproduction
+- **WHEN** a run with `setup_log: lines` fails, with one target or with two that diverge
+- **THEN** the report SHALL print one Setup section, right after Failure, whose first body line says the lines are shared by every run and whose other lines are the setup lines in the log line form
+
+#### Scenario: No lines, no section
+- **WHEN** a run has no `setup_log:` or `setup_log: []`
+- **THEN** the report SHALL print no Setup section
+
+#### Scenario: A setup line does not move a target's offsets
+- **WHEN** a setup line carries a timestamp far earlier than any event
+- **THEN** the offsets of the target listings SHALL be those of the same report without setup lines
+
+#### Scenario: A replay prints the Setup section
+- **WHEN** `only: [replay: path]` runs with `setup_log: lines`
+- **THEN** the report SHALL print the Setup section
+
+#### Scenario: A gap prints in its place
+- **WHEN** a step's cap dropped 296 attempts that wrote 1,184 lines
+- **THEN** the listing SHALL print `... 296 attempts omitted (1,184 lines)` between the first attempt's lines and the kept ones
+
+### Requirement: Tag Filters and `PD_LOG` for the Printed Log Lines (DR-054)
+
+`log: [only: tags, except: tags]` SHALL be accepted by `PropertyDamage.run/1` (so by `only: [replay: path]` and `only: [run: n]` too) and by `PropertyDamage.ExUnit.format_failure/2` (the arity-1 form keeps its meaning). Each of `only:` and `except:` SHALL be a non-empty list of atoms, and an empty list, a non-list or a non-atom element SHALL raise `NimbleOptions.ValidationError` naming the key. A line SHALL print when it has no tags, or when (the filter has no `only:` or the line carries a listed `only:` tag) and (the filter has no `except:` or the line carries no listed `except:` tag). The filter SHALL hide whole lines only: a line that prints SHALL print exactly as it does without a filter, and hiding a line SHALL NOT move another line's offset, because every offset origin counts from all of a target's lines. The filter SHALL apply to the step lines of every listed target, the adapter `setup/1` and `teardown/1` lines and the `setup_log:` lines; the Setup section and the adapter notes, which print only when they have lines, SHALL be absent when the filter hides all of theirs. A retry-cap gap is not a line: it SHALL always print, with its counts unchanged. `keep_attempts:` SHALL keep its meaning and no filter SHALL change which lines a run keeps.
+
+Every report `PropertyDamage.run/1` builds SHALL hold the run's filter in `FailureReport.log_filter` (`nil` for none), and `shrink_further/2` SHALL keep it. The filter is memory only: `Persistence.save/3` SHALL write `log_filter: nil`, `Persistence.load/1` SHALL return `log_filter: nil`, a version-15 file saved before the field existed included, and a replay artifact SHALL carry none. The persistence version SHALL stay 15.
+
+The environment variable `PD_LOG` SHALL hold the same filter as text, `only:a,b except:c`, either part optional, parts separated by whitespace, each key at most once, at least one tag per part, spaces around a colon or comma tolerated, tag names matched as strings and no atom created. When set and not blank, it SHALL replace the in-code filter and SHALL NOT merge with it; an empty or whitespace-only value SHALL count as unset. A value that does not parse SHALL raise `ArgumentError` whose message quotes the value and shows the expected syntax with an example. `PD_LOG` SHALL be read only when a report is formatted, so the verdict, the shrink and the replay artifact of a run SHALL be byte-identical with and without it, and a run under an invalid value SHALL complete and return its report. The filter that applies SHALL be, in order: `PD_LOG`; else a `log:` in the format options of `Formatter.format/3` or `format_failure/2`, which replaces the report's own; else the report's own; else none. `format_failure/2` SHALL raise `ArgumentError` for any key but `log:`, and for any key but `only:` and `except:` under `log:`, `keep_attempts:` included. The `:compact` format SHALL ignore filters and `PD_LOG`.
+
+When a filter applied, the `:terminal` and `:markdown` reports SHALL print, once, a `Log filter` field at the end of the Failure section that names every listed tag of both parts and the source, `(from the log: option)` or `(from PD_LOG)`; without a filter they SHALL print no such field. A tag listed in `only:` or `except:` that no line of the report carries (no line of `setup_log` and of the failing target's and the reference's trace) SHALL be named, in the order given and without duplicates, in one `Log warning` field after it: `no line carries the tag :sed`. The warning SHALL be absent when every listed tag is carried.
+
+The `:json` format SHALL gain a top-level `logs` key built from the same layout and filter as the terminal: `filter` (`only`, `except`, `source` as `"log_option"` or `"PD_LOG"`; null without a filter), `unknown_tags`, `setup` (the setup lines once), `target` and `reference` (null when the report lists one target), each with `name`, `adapter_setup`, `adapter_teardown` and `steps` (`label`, `root` and `lines`, in report order). A line SHALL be `kind: "line"`, `message` (plain text: a string as written, any other value through `inspect/2` with `pretty: true`, a function called with the raise marker), `tags` (strings), `file`, `line`, `offset_ms` and `attempt`; a gap SHALL be `kind: "gap"`, `attempts` and `lines`. A hidden line SHALL appear nowhere in `logs`, and every other JSON key SHALL be unchanged. The JSON output is not the persistence format.
+
+#### Scenario: only: shows the tagged and the untagged lines
+- **WHEN** a step logged lines tagged `[:http]`, `[:http, :headers]`, `[:seed]` and one untagged, and the report prints under `only: [:headers]`
+- **THEN** the step SHALL show the `[:http, :headers]` line and the untagged line only
+
+#### Scenario: except: wins over only:
+- **WHEN** a line is tagged `[:http, :body]` and the filter is `only: [:http], except: [:body]`
+- **THEN** the line SHALL be hidden
+
+#### Scenario: A shown line is unchanged
+- **WHEN** the same report prints with and without a filter
+- **THEN** each line that prints under the filter SHALL be byte-identical to the same line without it, offsets included
+
+#### Scenario: A misspelled tag is named
+- **WHEN** the filter lists `:sed` and no line carries it
+- **THEN** the report SHALL print one `Log warning` field naming `:sed`
+
+#### Scenario: PD_LOG replaces the in-code filter
+- **WHEN** `PD_LOG="only:headers"` is set and the run gave `log: [only: [:seed], except: [:body]]`
+- **THEN** the report SHALL apply `only: [:headers]` alone and name `PD_LOG` as its source
+
+#### Scenario: A value that does not parse
+- **WHEN** `PD_LOG="only"` is set
+- **THEN** the run SHALL complete and return its report, and formatting it SHALL raise `ArgumentError` quoting `"only"` and showing the syntax
+
+#### Scenario: A saved report holds no filter
+- **WHEN** a report built with `log: [only: [:http]]` is saved and loaded again
+- **THEN** the loaded report SHALL have `log_filter: nil` and the file SHALL hold no filter
+
+### Requirement: HTML Failure Report (DR-057)
+
+A failing run SHALL write its failure report as one HTML page into a directory when the run option `report_html: dir` (default `false`, which writes no page) or the environment variable `PD_REPORT_HTML` names one (DR-057). When `PD_REPORT_HTML` is set and not blank, it SHALL replace the option; a blank value SHALL count as unset. The directory SHALL be created when missing. An error while rendering or writing the page SHALL cost one logged warning and SHALL NOT change the report (DR-057). A value of `report_html:` that is neither a string nor `false` SHALL raise `NimbleOptions.ValidationError`.
+
+`PropertyDamage.FailureReport.HTML.render/1` SHALL return one page that holds the terminal report text without color, as built by `Formatter.format/3` for `:terminal`, and the viewer that reads it. The text SHALL follow the layout of the printed report and apply the same log tag filter (DR-054, DR-057), so the page body SHALL carry nothing the terminal text does not carry. The page SHALL load nothing from the network (DR-057).
+
+The page SHALL be named after the model, the failing target, the failure kind the report states (for example `adapter_error`) and the seed, so a later failure with the same four replaces it, and SHALL be written by a rename of a temporary file in the same directory (DR-057). `HTML.write/2` SHALL rebuild `index.html` in the directory after each page, and `HTML.write_index/1` SHALL rebuild it from the report pages present, in file name order, leaving out any page whose title cannot be read (DR-057).
+
+#### Scenario: PD_REPORT_HTML replaces report_html:
+- **WHEN** the run gives `report_html: "dir_a"`, `PD_REPORT_HTML="dir_b"` is set and the run fails
+- **THEN** the page SHALL be written into `dir_b` and none into `dir_a` (DR-057)
+
+#### Scenario: A blank PD_REPORT_HTML is unset
+- **WHEN** the run gives `report_html: "dir_a"`, `PD_REPORT_HTML` is whitespace only and the run fails
+- **THEN** the page SHALL be written into `dir_a` (DR-057)
+
+#### Scenario: The page carries the terminal text without color
+- **WHEN** a report is rendered with `HTML.render/1`
+- **THEN** the page SHALL embed the text `Formatter.format(report, :terminal, color: false)` returns, as data a script reads, and SHALL reference no resource outside the file (DR-057)
+
+#### Scenario: The report tag filter applies to the page
+- **WHEN** the report holds `log_filter` `only: [:http]` or `PD_LOG` is set
+- **THEN** the embedded text SHALL hide the same lines the terminal report hides (DR-054, DR-057)
+
+#### Scenario: An unwritable directory costs a warning
+- **WHEN** the run fails and the directory in `report_html:` cannot be created
+- **THEN** the run SHALL log one warning and SHALL return its report unchanged (DR-057)
+
+#### Scenario: An invalid log filter value costs a warning
+- **WHEN** the run fails with `report_html:` naming a directory and `PD_LOG` holds a value that does not parse
+- **THEN** the run SHALL log one warning naming the directory and SHALL return its report unchanged (DR-054, DR-057)
+
+#### Scenario: The index lists the pages present
+- **WHEN** a directory holds two report pages and a file that is not a report page, and `HTML.write_index/1` runs on it
+- **THEN** `index.html` SHALL list the two pages in file name order and not the other file (DR-057)
+
+### Requirement: The HTML Page Carries a JSON Bundle (DR-058)
+
+Every page `PropertyDamage.FailureReport.HTML.render/1` returns SHALL carry exactly one script tag of type `application/json` with the id `pd-bundle`, on the line after the tag that holds the report text, and `HTML.write_index/1` SHALL write none (DR-058). The tag SHALL hold `Bundle.build(report, [])` encoded so that no text in it can close the tag. The viewer's script SHALL NOT read the tag. The bundle SHALL be deterministic: it SHALL hold no timestamp and no process id, and it SHALL list everything in a stable order.
+
+The bundle SHALL name the failure's fields, the context items, the steps and events of each target's listing, and the sections by id, and SHALL NOT copy the text the page prints for any of them. `ids` SHALL list every id the bundle declares once. An id SHALL be `failure:<label>`, `context:<label>`, `step:<target>:<label>`, `entry:<target>:<label>:<n>`, `section:<title>` or `source:<Module>.<function>/<arity>`, with the text as the page prints it; from its second occurrence in one section, a repeated label SHALL carry an ordinal suffix (`:2`). Entries SHALL count the events under a step after the log filter, and the lines under the adapter's `setup/1` and `teardown/1` notes and the events tied to no command SHALL be counted per target and filed under no step.
+
+The bundle SHALL hold, for the model, its projections, the commands and events of the listed steps, the adapter of each target and the sub-adapters its `delegate_execution` calls name, the moduledoc, the source file path (relative to the project root, the current directory, and the base name alone for a file outside the project, in `missing_sources` and a missing source too), the full source text, how the docs were read (`captured`, `beam` or `unavailable`) and, per function, its doc and the lines it spans. A function SHALL start at its first clause and end the line before the next function definition of the module, or before the module's closing `end`. A source file that cannot be read SHALL give `{"missing": path}` as the source, null ranges, and an entry in `missing_sources`. The source of every module whose file is the file of an adapter in the bundle SHALL have each double-quoted string literal on a line that names a secret, password, token or key (and on the next line when that line ends in a comma or an opening bracket) replaced by `"[REDACTED]"`, a quoted map key excepted; each such module SHALL count its own replacements, and the bundle SHALL sum them and state the rule; the source of a module in a file no adapter shares SHALL NOT be scanned.
+
+#### Scenario: One bundle per page
+- **WHEN** a report is rendered with `HTML.render/1` or written with `HTML.write/2`
+- **THEN** the page SHALL hold one `pd-bundle` tag whose content decodes to `Bundle.build(report, [])`, and the directory's `index.html` SHALL hold none (DR-058)
+
+#### Scenario: Source text cannot close the tag
+- **WHEN** an adapter's source holds the text `</script>`
+- **THEN** the page SHALL hold the same number of script tags as it does without it, and the decoded bundle SHALL hold the source as written (DR-058)
+
+#### Scenario: A repeated label is numbered
+- **WHEN** the Failure section prints two `Also differed` fields
+- **THEN** the ids SHALL be `failure:Also differed` and `failure:Also differed:2` (DR-058)
+
+#### Scenario: A log filter changes the entries
+- **WHEN** a `log:` filter hides the log lines of a step
+- **THEN** the step's entries SHALL still be its events, numbered from 1 in print order, and the lines the filter hides SHALL NOT count under `adapter_setup` (DR-058)
+
+#### Scenario: A function range starts at its first clause
+- **WHEN** a function has a `@doc` line, three clauses and a private function after them
+- **THEN** `from` SHALL be the line of its first clause and `to` the line before the private function, whether the docs were captured or read from the beam (DR-058)
+
+#### Scenario: A missing source file is named
+- **WHEN** the file of a module is deleted before the page is built
+- **THEN** the module's source SHALL be `{"missing": path}`, its functions SHALL keep their docs with null ranges, and `missing_sources` SHALL list the path once (DR-058)
+
+#### Scenario: A secret literal in an adapter is replaced
+- **WHEN** an adapter's source holds `@api_token "alice-token"`
+- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"`, the count SHALL be at least 1, and a model's source with the same line SHALL stay as written when its file holds no adapter (DR-058)
+
+#### Scenario: A module that shares a file with an adapter is redacted too
+- **WHEN** a model above an adapter in one file holds `password: "alice-pass"`
+- **THEN** the source of the model and the source of the adapter SHALL hold `"[REDACTED]"` and not the literal, each module's count SHALL be at least 1, and the bundle's count SHALL equal the sum of the module counts (DR-058)
+
+#### Scenario: The rule reads one line at a time
+- **WHEN** an adapter's source holds `@api_token "alice-token"`, a heredoc that holds a token, and `@base_url "http://internal.example"`
+- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"` and SHALL hold the heredoc and the `@base_url` literal as written, and the bundle's `redactions` SHALL name the rule it applied (DR-058)
+
+### Requirement: Explaining a Failure Page (DR-058)
+
+`mix pd.explain PAGE` SHALL read one failure page, load no project code and call no model of its own (DR-058). It SHALL read the bundle from the page's one `pd-bundle` tag and SHALL exit with 1, with every error on standard error and standard output empty, when the page has no bundle, more than one, a bundle that is not a JSON object, or a bundle format the version does not read. The bundle hash SHALL be the lowercase hex SHA-256 of the bytes between the bundle tag and its closing `</script>`.
+
+Without an option, the task SHALL write `bundle.json` (the bundle bytes) and `instructions.md` into the directory `PAGE.explain`, create the directory when missing, remove nothing else in it, and print the absolute paths of the two files, the prompt version and the bundle hash, one per line. If the page already holds an explanation of this bundle for this prompt version, the task SHALL print one line saying so, write nothing and exit with 0. With `--prompt`, the task SHALL print the instructions, a newline, the bundle bytes and a newline to standard output, and nothing else, and SHALL write nothing.
+
+With `--apply FILE` (or `--apply -` for standard input), the task SHALL check the explanation and SHALL report every problem it finds, one line each on standard error, in this order: the schema lines, the hash line, the citation lines. A passing explanation SHALL have the keys `summary`, `hypotheses` and `talking_points` and no other key except `bundle_hash`. `summary` and `talking_points` SHALL be non-empty lists of objects with a non-empty `text` and a non-empty list `cites`. `hypotheses` SHALL be a non-empty list of objects with `rank`, `likelihood` (`likely`, `possible` or `unlikely`), `claim`, a non-empty list `evidence` and a non-empty list `next_steps` of non-empty strings; the ranks SHALL run 1 to n in order, and a hypothesis SHALL NOT be more likely than the one ranked above it. A `bundle_hash` the explanation names SHALL be the page's. Every id it cites SHALL be in the bundle's `ids`, or SHALL have the form `source:<Module>:<from>-<to>` where the bundle holds the source of `<Module>` with at least `<to>` lines. A hypothesis SHALL NOT cite the context item of a missing description as evidence. When any check fails, the page SHALL stay untouched and the task SHALL exit with 1.
+
+With `--with CMD`, the task SHALL run `CMD` with `sh -c`, send it the text `--prompt` prints on standard input, read the explanation from its standard output (the whole output as a JSON object, or the last fenced block whose info string is exactly `json`), and run the checks of `--apply`. An attempt SHALL fail when `CMD` exits with a status other than 0, runs past the timeout, prints no JSON, or prints an explanation that fails a check. After a failed attempt that is not the last, the task SHALL print `attempt N/M: ` and the reason to standard error and run `CMD` again with the prompt, the heading `## Your previous answer` with the previous output, and the heading `## Errors` with the error lines. The attempts SHALL number 3 by default and the timeout SHALL be `10m` by default. The page SHALL change only when an attempt passes. `--with` SHALL NOT be combined with `--prompt` or `--apply`, and `--attempts` and `--timeout` SHALL need `--with` or a non-empty string in `config :property_damage, explain_with`, which the task SHALL use as `--with` when no mode option is given.
+
+#### Scenario: The page already holds the explanation
+- **WHEN** `mix pd.explain PAGE` runs on a page whose `pd-explanation` tag names the page's bundle hash and the current prompt version
+- **THEN** the task SHALL print one line that says the page is already explained, SHALL write no file and SHALL exit with 0 (DR-058)
+
+#### Scenario: The files for an agent
+- **WHEN** `mix pd.explain PAGE` runs on a page with a bundle and no explanation
+- **THEN** `PAGE.explain/bundle.json` SHALL hold the bundle bytes, so `sha256sum` of it prints the hash the task printed (DR-058)
+
+#### Scenario: A citation the bundle lacks
+- **WHEN** `--apply` reads an explanation that cites `step:alice:[9]` and the bundle declares no such id
+- **THEN** the task SHALL print a line that names the id on standard error, SHALL exit with 1 and SHALL leave the page byte for byte as it was (DR-058)
+
+#### Scenario: A hypothesis ranked above a likelier one
+- **WHEN** the hypothesis ranked 1 is `possible`, the one ranked 2 is `likely` and the one ranked 3 is `unlikely`
+- **THEN** the task SHALL report that the likelihood of `hypotheses[1]` is higher than that of `hypotheses[0]`, SHALL exit with 1 and SHALL leave the page untouched (DR-058)
+
+#### Scenario: Ranks that do not run 1 to n
+- **WHEN** an explanation has three hypotheses with the ranks 1, 2 and 2
+- **THEN** the task SHALL report that the ranks must run 1 to 3 in order, each once (DR-058)
+
+#### Scenario: A source range at the edges of the module
+- **WHEN** an explanation cites `source:MyApp.Ledger:1-64`, `source:MyApp.Ledger:64-64` and `source:MyApp.Ledger:1-1`, and the bundle holds the source of `MyApp.Ledger` with 64 lines
+- **THEN** every citation SHALL resolve (DR-058)
+
+#### Scenario: A source range outside the module
+- **WHEN** an explanation cites `source:MyApp.Ledger:60-70` or `source:MyApp.Ledger:0-5` and the bundle holds 64 lines of `MyApp.Ledger`
+- **THEN** the task SHALL print one line for each citation that names the range and `outside 1-64`, and SHALL leave the page untouched (DR-058)
+
+#### Scenario: A source range that runs backward
+- **WHEN** an explanation cites `source:MyApp.Ledger:5-3`
+- **THEN** the citation SHALL NOT resolve, because a range SHALL satisfy `1 <= from <= to <= lines` (DR-058)
+
+#### Scenario: A retry carries the errors
+- **WHEN** the first answer of a `--with` command fails the checks and `--attempts` allows another
+- **THEN** the second run SHALL receive the prompt, `## Your previous answer` with the first output and `## Errors` with the error lines, and the task SHALL print `attempt 1/3: ` and the reason to standard error (DR-058)
+
+#### Scenario: No attempt passes
+- **WHEN** every attempt of `--with` fails
+- **THEN** the task SHALL print the error lines of the last attempt and say that the page is unchanged, SHALL exit with 1 and SHALL leave the page as it was (DR-058)
+
+### Requirement: An Explanation Is Embedded in the Page (DR-058)
+
+A passing explanation SHALL go into the page in a script tag of type `application/json` with the id `pd-explanation`, right after the closing `</script>` of the bundle tag, and no other byte of the page SHALL change (DR-058). The tag SHALL hold a JSON object with `format` 1, the `bundle_hash` of the page, the `prompt_version` and the `explanation` (its three parts, without a `bundle_hash`), encoded so that no text in it can close the tag. The task SHALL write the page in one step, so a failure part way leaves the old page. Every earlier `pd-explanation` tag SHALL be removed: a page holds at most one explanation. An explanation counts as of this bundle and prompt version only when its tag names both. When an earlier `pd-explanation` tag has no closing `</script>`, or another script opener comes before it, the task SHALL leave the page untouched, exit with 1 and name the tag.
+
+#### Scenario: An explanation replaces an earlier one
+- **WHEN** `--apply` succeeds on a page that already holds a `pd-explanation` tag
+- **THEN** the page SHALL hold one `pd-explanation` tag, holding the new explanation, right after the bundle tag (DR-058)
+
+#### Scenario: Explanation text cannot close the tag
+- **WHEN** a claim of the explanation holds `</script>`
+- **THEN** the page SHALL hold the same number of script tags as before and the decoded explanation SHALL hold the claim as written (DR-058)
+
+#### Scenario: A malformed earlier tag
+- **WHEN** the page holds a `pd-explanation` opener with no closing `</script>`
+- **THEN** `--apply` SHALL exit with 1, print a line that says an earlier explanation is malformed and leave the page untouched (DR-058)
+
+#### Scenario: An explanation of another prompt version
+- **WHEN** the page holds an explanation that names the page's bundle hash and an older prompt version
+- **THEN** `mix pd.explain PAGE` SHALL NOT report the page as explained and SHALL write the two files (DR-058)
+
+### Requirement: The Viewer Shows the Explanation (DR-058)
+
+A page without a `pd-explanation` tag SHALL run none of the explanation code and SHALL look as before (DR-058). A page with one SHALL open on an Explanation tab next to a Run tab, and the Run tab SHALL show the failure report as before. The Explanation tab SHALL list the summary, the hypotheses and the talking points. A hypothesis SHALL print its rank and likelihood in its heading, then its claim and its next steps. The markers of a claim, a summary item or a talking point SHALL follow its text inline, on the last line of its paragraph, with no label of their own. Every cited id SHALL resolve through the ids and the modules of the bundle, never through the page's text. A citation that resolves to an element of the Run view SHALL be a button that switches to the Run tab, unfolds what hides the element, scrolls to it and highlights it in a color the page uses for nothing else, in either theme, with at most one element highlighted at a time. A `source:` citation that resolves SHALL be a button that unfolds the cited lines, with their line numbers, as a block below the paragraph and folds them on a second click. A citation SHALL show its number within its claim or hypothesis (1, 2, 3, in order) as a small, muted marker, never its id; the id SHALL be in the marker's `title` and `aria-label`. A citation that does not resolve SHALL be a muted marker whose `title` and `aria-label` give its id followed by `(not in this page)`, and it SHALL do nothing when clicked. Every change of the visible tab, by a tab click or by a citation jump, SHALL add one browser history entry, and a click on the tab already shown SHALL add none; Back and Forward SHALL restore each entry's tab and scroll position, and Forward after a citation jump SHALL show the cited element highlighted again. Actions inside the Run view SHALL add no entry. The Run view's checkbox that unfolds the matching step in the other targets SHALL be checked when the page opens. On the Explanation tab the arrow keys SHALL scroll the page and SHALL NOT move the Run view's selection.
+
+#### Scenario: The viewer starts the explanation only for a page with the tag
+- **WHEN** the viewer script runs
+- **THEN** it SHALL call its explanation code only when the page has a `pd-explanation` tag, SHALL read the `pd-bundle` tag only inside that code, and SHALL print the line `Hypotheses ranked by a language model from this run; each claim links to its evidence.` on the Explanation tab (DR-058)
+
+#### Scenario: A page without an explanation
+- **WHEN** the report renders a page without an explanation
+- **THEN** the page markup SHALL hold no `pd-explanation` tag and none of the explanation line (DR-058)

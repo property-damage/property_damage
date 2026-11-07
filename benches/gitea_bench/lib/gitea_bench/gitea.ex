@@ -24,6 +24,8 @@ defmodule GiteaBench.Gitea do
     UserCreated
   }
 
+  require PropertyDamage
+
   @user_password "Pd-User-12345"
 
   defstruct [:base_url, :admin_user, :admin_password]
@@ -57,7 +59,14 @@ defmodule GiteaBench.Gitea do
   end
 
   defp do_ensure_ready(base_url, deadline) do
-    case Req.request(method: :get, url: base_url <> "/api/healthz", retry: false) do
+    result = Req.request(method: :get, url: base_url <> "/api/healthz", retry: false)
+
+    case result do
+      {:ok, %{status: status}} -> log_http("GET /api/healthz -> #{status}")
+      {:error, reason} -> log_http("GET /api/healthz -> error #{inspect(reason)}")
+    end
+
+    case result do
       {:ok, %{status: 200}} ->
         :ok
 
@@ -346,19 +355,69 @@ defmodule GiteaBench.Gitea do
 
   defp admin_auth(%__MODULE__{admin_user: admin} = client), do: auth_for(client, admin)
 
+  # Every request is logged as one entry once it returns. The body is decoded
+  # here rather than by Req, so the entry can show the JSON text Gitea sent.
   defp req(method, %__MODULE__{base_url: base_url}, path, opts) do
     request =
-      [method: method, url: base_url <> "/api/v1" <> path, auth: opts[:auth], retry: false]
+      [
+        method: method,
+        url: base_url <> "/api/v1" <> path,
+        auth: opts[:auth],
+        retry: false,
+        decode_body: false
+      ]
       |> maybe_put(:json, opts[:json])
 
+    call = "#{method |> to_string() |> String.upcase()} /api/v1#{path}"
+    sent = {"request", json_detail(opts[:json])}
+
     case Req.request(request) do
-      {:ok, %{status: status, body: body}} -> {:ok, status, body}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{status: status, body: raw} = response} ->
+        json? = json?(response)
+        received = if json?, do: raw |> Jason.Formatter.pretty_print() |> redact(), else: raw
+        summary = "#{call} -> #{status}#{as(opts)}"
+        log_http(GiteaBench.log_entry(summary, [sent, {"response", received}]))
+        {:ok, status, if(json? and raw != "", do: Jason.decode!(raw), else: raw)}
+
+      {:error, reason} ->
+        summary = "#{call} -> error#{as(opts)}"
+        log_http(GiteaBench.log_entry(summary, [sent, {"error", inspect(reason, pretty: true)}]))
+        {:error, reason}
     end
   end
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp json?(response) do
+    response |> Req.Response.get_header("content-type") |> Enum.any?(&(&1 =~ "json"))
+  end
+
+  # The acting user, read from the basic-auth credentials; the password stays out.
+  defp as(opts) do
+    case opts[:auth] do
+      {:basic, credentials} -> "  as=" <> (credentials |> String.split(":", parts: 2) |> hd())
+      _ -> ""
+    end
+  end
+
+  defp json_detail(nil), do: nil
+
+  defp json_detail(body) do
+    body |> Map.replace(:password, "[REDACTED]") |> Jason.encode!(pretty: true) |> redact()
+  end
+
+  # The token in a webhook's callback URL routes a delivery to its run, so it
+  # stays out of the log like any other credential.
+  defp redact(text), do: String.replace(text, ~r{/hook/[\w-]+}, "/hook/[REDACTED]")
+
+  # A test that calls an adapter directly, outside a run, has no log scope;
+  # its requests go unlogged.
+  defp log_http(entry) do
+    PropertyDamage.log(entry, tags: [:http])
+  rescue
+    PropertyDamage.Log.NoScopeError -> :ok
+  end
 
   # Treat the REST response as a transport observation: an expected status is a
   # success (the observers read back the real state); anything else is a genuine

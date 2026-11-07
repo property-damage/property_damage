@@ -25,7 +25,7 @@ defmodule PropertyDamage.EngineTelemetryTest do
   # Draws the failing value 13 often enough for a campaign to find its first
   # failure after run 0.
   defmodule LateFailureModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -128,21 +128,7 @@ defmodule PropertyDamage.EngineTelemetryTest do
     assert Enum.all?(stops, fn {_m, meta} -> meta.variant == %{index: 0, name: "tel_solo"} end)
   end
 
-  test "command stop names index 0 on the one-target branching path" do
-    assert {:ok, _stats} =
-             run(StepModel, [target("tel_branch")],
-               max_commands: 6,
-               branching: [branch_probability: 1.0]
-             )
-
-    stops = collect([:property_damage, :command, :stop], ["tel_branch"])
-    assert stops != []
-    assert Enum.all?(stops, fn {_m, meta} -> meta.variant == %{index: 0, name: "tel_branch"} end)
-  end
-
-  # A command's `index` counts across the whole run: a branching sequence
-  # numbers its prefix, then each branch from the end of the prefix, then the
-  # suffix after every branch command.
+  # A command's `index` counts across the whole run.
   describe "command index" do
     alias PropertyDamage.{Executor, Sequence}
     alias PropertyDamage.Test.Lockstep.Step
@@ -163,22 +149,6 @@ defmodule PropertyDamage.EngineTelemetryTest do
     end
 
     defp steps(count), do: for(value <- 1..count//1, do: %Step{value: value})
-
-    test "is cumulative across prefix, branches and suffix" do
-      sequence = Sequence.branching(steps(2), [steps(2), steps(1)], steps(2))
-
-      # Both branches start at the index after the prefix; the suffix starts
-      # after all three branch commands.
-      assert indices(sequence, "idx_branch") == [
-               {:root, 0, 0},
-               {:root, 1, 1},
-               {:root, 2, 2},
-               {:root, 2, 2},
-               {:root, 3, 3},
-               {:root, 5, 5},
-               {:root, 6, 6}
-             ]
-    end
 
     test "is the position in the sequence on the linear path" do
       assert indices(Sequence.linear(steps(3)), "idx_linear") ==

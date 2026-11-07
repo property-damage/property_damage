@@ -3,28 +3,309 @@
 When PropertyDamage finds a failing sequence, it provides powerful tools for
 understanding and fixing the bug. This guide covers the debugging workflow.
 
-## The Failure Report
+## Reading the report
 
-When a test fails, PropertyDamage returns a failure report:
+A failed run prints a report. This section reads one section by section. The
+example is the bank of the [log lines guide](log_lines.md): an in-memory bank
+with a planted bug, run with `mix run bug.exs` and seed 20. Its adapter logs
+each request and answer with `PropertyDamage.log/2`, which is why the listing
+below shows `log` lines beside the events.
 
-```elixir
-{:error, failure} = PropertyDamage.run(
-  model: MyModel,
-  targets: [MyAdapter],
-  max_runs: 100
-)
+<!-- pd-report-excerpt: the bank example of log_lines.md: mix run bug.exs; seed 20 -->
+```text
+#FailureReport<
+╔══════════════════════════════════════════════════════════════════════╗
+║                            BUG DETECTED!                             ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-IO.inspect(failure, label: "Failure")
+Seed: 20
+
+## Failure
+
+Failure     check failed
+Check       never_negative
+Projection  MyApp.Balances
+At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
+Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
+
+## What this checks
+
+  Check failed  A property did not hold. After the marked step, a check judged
+                the projection state (built from the events observed so far) and
+                found that it violates the property.
+
+  Model         MyApp.Model
+                Deposits and withdrawals on two accounts.
+
+  Check         MyApp.Balances.never_negative/2
+                (no description: add @doc to MyApp.Balances.never_negative/2)
+
+  Projection    MyApp.Balances
+                Folds the balances the bank reported and checks that none is negative.
+
+  Command       MyApp.Withdraw
+                Withdraw `amount` from `account`.
+
+## Minimal Reproduction (2 roots)
+
+  [0] %MyApp.Deposit{account: "alice", amount: 5}
+        +0.00s log   [http url] POST /accounts/alice/deposit
+        +0.00s log   [http headers] %{"authorization" => "[REDACTED]"}
+        +0.00s log   [http body] %{"amount" => 5}
+        +0.00s log   [http status] -> 200
+        +0.00s log   [http response] %{"balance" => 5}
+        +0.00s event %MyApp.BalanceChanged{account: "alice", balance: 5}
+► [1] %MyApp.Withdraw{account: "alice", amount: 5}  ◄── failed
+        +0.00s log   [http url] POST /accounts/alice/withdraw
+        +0.00s log   [http headers] %{"authorization" => "[REDACTED]"}
+        +0.00s log   [http body] %{"amount" => 5}
+        +0.00s log   [http status] -> 200
+        +0.00s log   [http response] %{"balance" => -1}
+        +0.00s event %MyApp.BalanceChanged{account: "alice", balance: -1}
+
+## Projections at [1]   (- before, + after)
+
+MyApp.Balances   last applied: BalanceChanged
+  - "alice" => 5
+  + "alice" => -1
+
+## Reproduction
+
+targets = [MyApp.Adapter]
+
+# Rerun from the seed:
+PropertyDamage.run(model: MyApp.Model, targets: targets, seed: 20, max_runs: 1)
+
+# Regenerate the failing variant:
+PropertyDamage.Expansion.for(MyApp.Model, 20, 1, "Adapter")
+
+# Replay the shrunk failure:
+PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "property_damage_replays/Model_seed20.replay.exs"])
+>
 ```
 
-The report includes:
+`IO.inspect(report, pretty: true)` prints the report like this, wrapped in
+`#FailureReport<` and `>`, without color. A failure in a
+`property_damage` ExUnit test prints the same layout through
+`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Both print the
+same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
+`pretty: true`, prints a one-line summary.
+
+### Banner and seed
+
+The banner says `BUG DETECTED!`. A failure in the test's own code says
+`TEST CODE ERROR` and adds a hint. The line under it, `Seed: 20`, is the seed
+the failing run generated from, so the failing run is run 1 of that seed.
+
+### Failure
+
+The Failure section holds labeled fields in one aligned column. `Failure` names
+the kind in words, and `Check` (or `Observation`, for a comparison) names what
+failed. `At` is the step label and the command where it happened. The fields
+after those depend on the kind: a poll timeout adds its predicate, an
+idempotency violation adds one line per attempt, a latency budget adds the
+statistic, bound and measured value. A run with other failures adds one
+`Other failure` line each. A shrinker that ran out of time or iterations adds a
+`Shrink` line that warns the reproduction may not be minimal. A run with a log
+filter adds a `Log filter` line (see the [log lines guide](log_lines.md#filtering-by-tag)).
+
+### What this checks
+
+This section says what was being checked, from the docs its author wrote. The
+items depend on the failure kind, and each prints under its label:
+
+- The first item names the kind and says what it means. A failure
+  kind that blames the test or the framework, not the system, opens with the
+  words "Unable to test the system". Examples are `:adapter_error` (the
+  adapter raised or returned an error), `:setup_failed` (a target could not be
+  prepared) and `:stutter_execution_failed` (a retry attempt raised).
+  `PropertyDamage.Failure.Explain.meaning/1` returns the text for each kind.
+- `Model` prints the model's `@moduledoc`.
+- The subject comes next: here `Check`, for a comparison failure
+  `Observation`. It prints its whole doc. Supporting items follow, here
+  `Projection`, and each prints the first paragraph of its doc (up to the first
+  blank line).
+- `Path` appears when a target ran an expansion. See the
+  [path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
+- `Command` prints the `@moduledoc` of the command at the marked step.
+
+Docs print as plain text. PropertyDamage does not render Markdown in them and
+does not wrap them, so a heading inside a doc prints as a plain line. It does
+not cut the subject's doc, but supporting items print only their first
+paragraph.
+
+A line that starts with `(no description: ...)` is a gap line. It says which
+doc is missing and where to add it. In the excerpt, `Check` has one: add a
+`@doc` to `MyApp.Balances.never_negative/2`. For a module the fix is a
+`@moduledoc`, and for an expansion entry it is `doc: "..."` on the entry. The
+line prints every time a doc is missing, so adding the doc is the only way to
+remove it. Sometimes PropertyDamage cannot read a module's docs. Then the line
+tells you to declare the module with the matching `use PropertyDamage.*` line,
+because that `use` captures the docs at compile time. Without it, PropertyDamage
+falls back to the docs the compiler stores in the compiled module's `.beam`
+file (its docs chunk). A module compiled from a script, such as a model in an
+`.exs` test file, has no such chunk. So the line appears, for example, for a
+model defined in a test file with a bare `@behaviour PropertyDamage.Model`.
+
+Decision record DR-058 (Failure Report Context and Explanations) holds the full
+rules.
+
+### Setup
+
+A Setup section appears between What this checks and Minimal Reproduction when
+the run was given `setup_log:`. It holds the lines a test captured while it
+prepared the system, before the run started. See
+[Work done before the run](log_lines.md#work-done-before-the-run).
+
+### Minimal Reproduction
+
+The heading counts roots: `(2 roots)`. Each step has one label, used in every
+section of the report:
+
+| Label | Step |
+|-------|------|
+| `[i]` | root `i`, counted from 0 in reading order |
+| `[i.j]` | leaf `j` of root `i`, listed under that root |
+| `[setup i]`, `[teardown i]` | a setup or teardown command |
+
+`►` marks the failing step and `◄── failed` names the outcome (`diverged` and
+`did not converge` for comparison failures). Under each step, the events the
+command produced and the log lines its code wrote print in the order they
+happened. Each line starts with its offset from the start of the target's run
+(`+0.00s`), then `log` or `event`. A log line shows its tags in brackets. An
+event from another source keeps a badge for it (`POL` for a
+resource poller, and so on). Entries tied to no command print after the
+listing under "Not tied to a command". For log lines, see the
+[log lines guide](log_lines.md).
+
+### Projections
+
+The heading names the failing step: `Projections at [1]`. Each projection
+prints the event it folded last, then every attribute on its own line, in full.
+An attribute that did not change prints once. One that changed prints a `-`
+line and a `+` line. For most failures the two sides are the state before and
+after the failing step. Here, `alice` held 5 before the withdrawal and -1 after
+it.
+
+### Reproduction
+
+The section binds `targets = [...]` once, then prints three calls, each
+passing `targets: targets`:
+
+1. Rerun from the seed: generates the failing run again, then fails and
+   shrinks again.
+2. Regenerate the failing variant: `PropertyDamage.Expansion.for/4` returns the
+   sequence one target ran before shrinking, without running anything. Its
+   fifth argument, the options, has a default, which is why the report's call
+   passes four.
+3. Replay the shrunk failure: runs the replay artifact the failure wrote.
+   Step 1 below explains it.
+
+When `targets` holds a value no source code can rebuild (a pid, a reference, a
+port or a function), a line under the binding says where it sits and tells you
+to rebuild the list as your test does. None of the three calls carries the
+run's `log:` filter: add it back if you want the same lines.
+
+### A comparison failure
+
+A divergence between two targets prints the same sections, with two changes.
+Minimal Reproduction lists two sides, each under its own header
+(`Reference: target "left"` and `Variant: target "right"`), and marks the
+failing root in both. Projections compares the reference's state with the
+variant's at the failing boundary. For a real report, see the excerpt in the
+[path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
+
+## Explaining the report
+
+A failure page can carry an explanation of its failure: a summary, ranked hypotheses and talking points, each claim citing the page. Reading one takes four steps:
+
+1. Write the page. Set `report_html:` or `PD_REPORT_HTML` as the [README](../README.md#explaining-a-failure-page) shows, and let a run fail.
+2. Get an explanation written. Either ask an agent that has the `pd-explain` skill to explain the page (the skill runs `mix pd.explain PAGE --files`, so a project that sets `explain_with` still gets the files for the agent to read), or run `mix pd.explain PAGE --with "my-agent --print"`, where the command reads the prompt on standard input and prints the explanation as JSON.
+3. Apply it. The skill keeps `explanation.json` under `PAGE.explain/` and runs `mix pd.explain PAGE --apply PAGE.explain/explanation.json`, and `--with` applies its own answer. The task checks the explanation against the page and refuses one that cites an id the page does not hold. A refused explanation leaves the page as it was.
+4. Reopen the page in a browser.
+
+A page with an explanation opens on an Explanation tab, next to the Run tab. The tab lists the summary, the hypotheses and the talking points. Each hypothesis prints with its rank and its likelihood, as `Hypothesis 1 (likely)`, then its claim, with its numbered markers at the end of the claim, and its next steps.
+
+Every claim ends with the evidence it cites as small numbered markers (1, 2, 3 within the claim), on the last line of its paragraph. Hover a marker, or read it with a screen reader, to see the full id of what it cites. Click a marker to switch to the Run view, where the page unfolds the cited step, event or section, scrolls to it and highlights it in a color the page uses for nothing else. A `source:` citation names lines of a module's source file: click it to unfold those lines as a block below the paragraph, and click again to fold them. If the page cannot find a cited id, the marker is muted, its tooltip names the id and says it is not in this page, and it does nothing when clicked.
+
+Each change of tab adds an entry to the browser history, whether you click a tab or a citation. Back returns to the previous tab at the scroll position you left, and Forward shows the cited element again. Unfolding steps inside the Run view adds no entry. On a run of several targets, the Run view's checkbox "unfold the matching step in the other targets too" starts checked.
+
+## Sharing a failure page
+
+A failure page is as private as the people you send it to. It carries the report in full, and the bundle that an explanation cites holds the full source of the model, the projections, the commands, the events and the adapters. If the system under test uses real credentials, share the page only with people who may see them.
+
+### What the page redacts
+
+Only one thing: secret-shaped string literals in the source of an adapter file. PropertyDamage scans each source file that holds an adapter (a sub-adapter too), and any model or command defined in the same file. On a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. A name counts when its last `_`-separated part is one of those words, so `@api_key`, `password:` and `"admin_token" =>` count and `keys` does not. When such a line ends in a comma or an opening bracket, the next line is masked too, and no line after it unless that line names a secret itself. The page records the count of masked literals and the rule.
+
+### What the page does not redact
+
+The rule reads one line at a time, and the page redacts nothing else.
+
+- **Logged values.** The page prints a line from `PropertyDamage.log/2` exactly as the adapter gave it. A `log:` filter only hides lines from one reader. Redact in the code that logs, as the [log lines guide](log_lines.md#a-filter-is-not-redaction) shows.
+- **The target config.** The Reproduction section prints each target's `config:` as written, so `config: %{password: "hunter2"}` appears in the page as `targets: [{MyApp.Adapter, config: %{password: "hunter2"}}]`.
+- **Events and command arguments.** The page prints them in full.
+- **A source file that holds no adapter.** The page does not scan it.
+- **Source paths.** The bundle names each source file by its path from the project root, such as `lib/my_app/adapter.ex`, so the page shows your project's directory and file names but no directory above the project. A file outside the project shows its base name only.
+- **A value on the line after its key.** When a formatter wraps `password:` and puts the string on the next line, the key line ends in `:` and masks nothing. The string stays.
+- **A secret deep in a multi-line map or call.** The reach past a secret-named line is one line. In `%{token: "..."`, `user: "..."`, `host: "..."`, `login: "..."` on four lines, the page masks the `token` and `user` strings and leaves `host` and `login`, because neither line names a secret word.
+- **A name that is not an identifier.** A key such as `"x-api-key"` has hyphens, so it does not count as a secret name.
+- **A secret in a bare string, a comment, a heredoc, a sigil or a charlist.** `"https://host.test/?token=abc"`, `# password is "hunter2"` and `~s(password: "hunter2")` pass unchanged.
+
+The rule also masks harmless strings on a line that names a secret. Read the page before you share it.
+
+### Keep credentials out of the source
+
+To keep a credential off the page, never write it as a literal in the adapter file or the target config. Read it from the environment when the run starts, for example `System.fetch_env!("MYAPP_PASSWORD")` in the adapter's `setup/1`. The page then holds the call, not the value. A target config can name the variable, not its content.
+
+## The Failure Report
+
+The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it.
+
+The steps below run on the bank of the [log lines guide](log_lines.md#2-write-the-system-the-adapter-and-the-model).
+First create `lib/my_app.ex` in a Mix project that depends on PropertyDamage
+(the project of that guide's step 1 works). Copy the whole code block of that
+guide's step 2 into it.
+
+Put the first fence in a script file in the project root, such as `debug.exs`,
+and run it with `mix run debug.exs`, as step 3 of the log lines guide runs
+`bug.exs`. The later fences use `failure`, the report that first fence binds.
+Each later fence that uses `MyApp.Model`, `MyApp.Adapter` or `failure` runs
+against the bank: append it to the end of the same script and run the script
+again. A fence that names `MyModel`, `MyAdapter` or another `My` module is a
+placeholder for your own code. Read it, or replace the name with your own
+module; it does not run against the bank.
+
+<!-- pd-doc-verify: include guides/log_lines.md lib/my_app.ex -->
+<!-- pd-doc-verify: runnable -->
+```elixir
+{:error, failure} = PropertyDamage.run(
+  model: MyApp.Model,
+  targets: [MyApp.Adapter],
+  max_runs: 50,
+  seed: 20
+)
+
+IO.inspect(failure, pretty: true)
+```
+
+Read it through its fields and accessors:
+
 - **seed** - Random seed for reproducibility
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
-- **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
+- **shrink_iterations** / **shrink_time_ms** / **shrink_stop** - How much shrinking it took, and why it stopped (`:done`, `:max_iterations` or `:max_time`)
 - **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
 - **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which check failed and a human-readable description
-- **state_at_failure** - Model state when failure occurred
+- **state_before_failure** / **state_at_failure** - Projection state before and after the failing step
+- **`FailureReport.steps/1`**, **`failure_step/1`**, **`failure_index/1`** - the run as a list of steps, the failing step, and its reading-order index
+- **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)
+- **setup_log** / **log_filter** - the lines `setup_log:` carried and the run's log filter (see the [log lines guide](log_lines.md))
+
+"Reading the report" above reads the report of seed 20, and the run above
+produces it. A run
+without `seed:` picks a random seed, so your own report differs from the
+walkthrough.
 
 ### The `%Failure{}` reason
 
@@ -39,19 +320,31 @@ branch (if any) on the envelope:
 }
 ```
 
-There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
+There are seven **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 
-- `:check` — a property or invariant did not hold (`:check_failed`,
-  `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
+- `:check`: a property or invariant did not hold (`:check_failed`,
+  `:idempotency_violation`, `:poll_timeout`, `:settle_timeout`,
   `:projection_violation`). This is the class you usually want: it means the SUT
   misbehaved.
-- `:execution` — the machinery around the SUT failed to run a command
+- `:execution`: the machinery around the SUT failed to run a command
   (an adapter raise or `{:error, _}` answer is `:adapter_error` in every run,
-  never compared as an observation; `:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
-  `:resource_poller_error`, `:poll_error`, ...). Often a test-harness or
+  never compared as an observation; `:adapter_error`, `:stutter_execution_failed`,
+  `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`,
+  `:malformed_adapter_return`). Often a test-harness or
   infrastructure problem rather than a SUT bug.
-- `:framework` — PropertyDamage itself could not proceed
+- `:framework`: PropertyDamage itself could not proceed
   (`:placeholder_resolution`, `:unknown`).
+- `:divergence`: in a comparison run, a variant's boundary observation differed
+  from the reference's (kind `:diverged`).
+- `:convergence`: in a comparison run, a variant's boundary observation was
+  still pending when the convergence bound expired (kind `:did_not_converge`).
+- `:setup`: a target could not be brought up, so no root ran in it (kind
+  `:setup_failed`).
+- `:latency`: a variant's latency statistic exceeded its `latency:` bound over
+  the whole campaign (kind `:latency_exceeded`).
+
+The last four classes each carry one kind, so the class and the kind identify
+the same failure.
 
 Read a failure with the accessors rather than matching the struct by hand:
 `PropertyDamage.Failure.kind/1`, `name/1`, `detail/1`, `class/1`, `branch_id/1`,
@@ -95,10 +388,11 @@ end
 
 Every failure writes a replay artifact: a file named
 `<model>_seed<seed>.replay.exs` in the `replay_dir:` directory (default
-`property_damage_replays`; `replay_dir: false` writes nothing). A file another
-failure of the same seed wrote (under other `targets:`, say) is kept: the new
-one is named `<model>_seed<seed>_2.replay.exs`, and the report prints the path
-it wrote. The report ends
+`property_damage_replays`; `replay_dir: false` writes nothing). `<model>` is the
+last segment of the model's module name, so `MyApp.Model` gives
+`Model_seed20.replay.exs`. A file another failure of the same seed wrote (under
+other `targets:`, say) is kept: the new one is named
+`<model>_seed<seed>_2.replay.exs`, and the report prints the path it wrote. The report ends
 with a paste-ready call that runs the shrunk failure again without generating
 anything:
 
@@ -109,14 +403,33 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "propert
 
 Every target executes the commands the file records, so the replay needs the
 same `targets:` the report printed. `shrink:` defaults to false under
-`only: [replay: path]`. A replay that does not fail the way the file records
-returns stats with `:replay` set to `:not_reproduced`.
+`only: [replay: path]`. The artifact records the run's `external_markers:`, so the
+replaying `run/1` call does not repeat them. A replay that reproduces the failure returns
+`{:error, report}`, the same shape as a failing run. A replay that does not
+fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
+`:not_reproduced`. The bank's replay file is
+`property_damage_replays/Model_seed20.replay.exs`:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+{:error, replayed} =
+  PropertyDamage.run(
+    model: MyApp.Model,
+    targets: [MyApp.Adapter],
+    only: [replay: "property_damage_replays/Model_seed20.replay.exs"]
+  )
+
+# The replay fails the same way as the original run.
+true =
+  PropertyDamage.FailureReport.failure_type(replayed) ==
+    PropertyDamage.FailureReport.failure_type(failure)
+```
 
 The artifact is one Elixir literal term, so you can read it and edit an
 argument before you run it again. This is the start of a real one:
 
 ```elixir
-# PropertyDamage replay artifact, format 1
+# PropertyDamage replay artifact, format 2
 # model: CachexBench.Model
 # seed: 3
 # run: 1 (the run this seed generates)
@@ -148,11 +461,12 @@ seed.
 
 To run the same failure from its seed instead, use the seed:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Run with the same seed
-result = PropertyDamage.run(
-  model: MyModel,
-  targets: [MyAdapter],
+{:error, rerun} = PropertyDamage.run(
+  model: MyApp.Model,
+  targets: [MyApp.Adapter],
   seed: failure.seed,
   max_runs: 1
 )
@@ -169,13 +483,19 @@ With several targets, each target may run its own expansion of a root. To see
 the sequence one target ran before shrinking, regenerate it. Nothing runs, and
 no adapter is touched:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # run is 1-based; failure.seed is the seed the failing run generated from.
+# The bank has one target, named "Adapter" after its adapter module.
 {:ok, %{sequence: sequence}} =
-  PropertyDamage.Expansion.for(MyModel, failure.seed, 1, "second")
+  PropertyDamage.Expansion.for(MyApp.Model, failure.seed, 1, "Adapter")
 ```
 
-Pass `targets:` when a target does not run `:random`, because the pick then
+With several targets, name the one you want: `"second"` in the examples below.
+
+The last argument is the target's name. A target given without `name:` is named
+after the last segment of its adapter module (`"Adapter"` for `MyApp.Adapter`),
+as the report's Reproduction section prints it. Pass `targets:` when a target does not run `:random`, because the pick then
 depends on the reference. To run part of a campaign, use `only:`:
 
 ```elixir
@@ -189,14 +509,17 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "se
 ```
 
 `with_reference: false` is legal only with exactly one non-reference name.
-`only:` takes `max_runs: 1` at most, no `branching:`, and `seed:` is not allowed
+`only:` takes `max_runs: 1` at most, and `seed:` is not allowed
 beside `replay:`.
 
 ## Step 2: Understand the Shrunk Sequence
 
-The shrunk sequence is the minimal reproduction. Every command in it is
-necessary for the failure:
+The shrinker stops when it cannot remove any single command without losing the
+failure. So no one command of the shrunk sequence can be dropped, but a shorter
+sequence that also fails may exist: the bank example's shrunk sequence ranges
+from 2 to 14 commands, depending on the seed. Print it:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Print the shrunk sequence (a %PropertyDamage.Sequence{}; flatten with to_list/1)
 PropertyDamage.FailureReport.shrunk_sequence(failure)
@@ -207,50 +530,43 @@ PropertyDamage.FailureReport.shrunk_sequence(failure)
 end)
 ```
 
-Example output:
-
-```
-[0] CreateAccount{currency: "USD", initial_balance: 1000}
-[1] CreateAuthorization{account_ref: @0, amount: 500}
-[2] CreateCapture{authorization_ref: @1, amount: 600}
-```
+The output has one line per command: its index, then the command as Elixir
+prints it, for example `[0] %MyApp.Deposit{account: "alice", amount: 5}`.
 
 ## Step 3: Explain the Sequence
 
-Use `explain/1` to understand why each command matters:
+Use `explain/1` to see which command triggered the failure and which commands
+it depends on:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # explain/1 returns a map; format it for printing
 explanation = PropertyDamage.explain(failure)
 IO.puts(PropertyDamage.Analysis.format_explanation(explanation))
 ```
 
-Output:
-
-```
-Command Analysis:
-
-[0] CreateAccount{currency: "USD", initial_balance: 1000}
-    Required: Creates the account referenced by later commands
-    State change: Adds account with $10.00 balance
-
-[1] CreateAuthorization{account_ref: @0, amount: 500}
-    Required: Creates authorization referenced by capture
-    State change: Holds $5.00 on account
-
-[2] CreateCapture{authorization_ref: @1, amount: 600}
-    Fails because: Capture exceeds authorization amount
-    Expected: Capture should fail or be limited to $5.00
-    Actual: Capture of $6.00 succeeded
-```
+`format_explanation/1` prints a `FAILURE ANALYSIS` header with a summary (the
+number of commands and the command that triggered the failure), then a
+`COMMAND BREAKDOWN` section with one entry per command: its index, its name, a
+marker (`← FAILURE TRIGGER` or `← DEPENDENCY`, or none), and a line giving the
+reason. A `DEPENDENCY CHAIN` section follows when the failing command depends on
+earlier ones. The text comes from the analysis of the command structs, so it
+names commands and roles, not what they mean in your domain. It infers a role
+from the placeholders alone. A command no placeholder links to the failing
+command, such as a deposit that only supplies a balance, has no marker and
+reads `Kept by shrinking: removing it lost the failure; it may set up state the
+failing command reads`. It stays out of the `DEPENDENCY CHAIN`, because the
+analysis does not infer dependencies through state.
 
 ## Step 4: Step-by-Step Replay
 
 Replay the sequence step by step to observe state changes:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # replay/2 returns {:ok, [step]}; each step is
-# %{index, command, command_name, events, projections, projections_before, result}
+# %{command, index, events, result, command_name, projections,
+#   projections_before, leaf_index}
 {:ok, steps} = PropertyDamage.replay(failure)
 
 Enum.each(steps, fn step ->
@@ -264,6 +580,8 @@ end)
 
 `step.projections` is the projection state after the command; `projections_before`
 is the state just before it, so you can diff the two around the failing step.
+`leaf_index` is `nil` for a root that ran as itself. For a root that ran as
+leaves, it is the leaf's position within that root's expansion.
 
 #### Step results
 
@@ -271,16 +589,17 @@ is the state just before it, so you can diff the two around the failing step.
 a replay-local outcome vocabulary (distinct from the run-level `failure_reason`)
 with three shapes:
 
-- `:ok` — the command executed and every check that ran passed.
+- `:ok`: the command executed and every check that ran passed.
 - `{:check_failed, name, exception}` — a check failed. `name` is the check
   name (an atom, e.g. `:balance_non_negative`) and `exception` is the exception
   struct the check raised. Only `:check_failed` failures take this shape.
 - `{:error, reason}` — any other failure: an adapter/execution error, or a
-  non-check failure (a poll/settle timeout, linearization, framework error).
+  non-check failure (a poll/settle timeout, framework error).
   `reason` is the underlying value.
 
 So the failing step is the one whose `result` is not `:ok`:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, steps} = PropertyDamage.replay(failure)
 
@@ -293,8 +612,9 @@ Enum.each(steps, fn step ->
 end)
 ```
 
-If the failure was saved to a `.pd` file, you can replay it from the shell
-without writing any code:
+If the failure was saved to a `.pd` file (see
+[Step 8](#step-8-save-for-later) for `PropertyDamage.save_failure/2`), you can
+replay it from the shell without writing any code:
 
 ```bash
 mix pd.replay failures/the-failure.pd --verbose
@@ -303,15 +623,18 @@ mix pd.replay failures/the-failure.pd --verbose
 It prints each step and exits non-zero while the bug still reproduces (zero once
 it is fixed), so the same command doubles as a regression check. Concretely it
 exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
-replay could not run at all (the project does not compile, the file fails to
-load, it records no model/adapter, or the sequence is branching). That third
+replay could not run at all (the project does not compile, its applications do
+not start, the file fails to load, it records no model/adapter, or the target's setup or
+a setup command fails). That third
 case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
 needs to treat as "skip".
 
 ### Finding the commit that introduced the bug
 
 When you know a failure is new but not where it crept in, `mix pd.bisect` drives
-`git bisect` for you, replaying the saved failure at each candidate commit:
+`git bisect` for you, replaying the saved failure (a `.pd` file, see
+[Step 8](#step-8-save-for-later)) at each candidate commit. It needs a project
+in a git repository and exits 1 outside one:
 
 ```bash
 mix pd.bisect failures/the-failure.pd --good v0.1.0 [--bad HEAD]
@@ -335,19 +658,59 @@ not offered.
 
 Find the specific field/value that causes the failure:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
 
 IO.puts("Trigger: #{inspect(trigger)}")
-# => %{trigger_index: 0, trigger_command: %Withdraw{...}, likely_cause: "...", changes: [%{field: ..., original: ..., fixed: ...}]}
+# => %{trigger_index: 1,
+#      trigger_command: %MyApp.Withdraw{account: "alice", amount: 5},
+#      likely_cause: "Amount-related issue: original amount 5 causes failure",
+#      changes: [%{description: "Changing amount from 5 to 0 eliminates failure",
+#                  field: :amount, original: 5, fixed: 0}, ...]}
 ```
 
 ## Step 6: Visual Debugging
+
+### The report in a browser
+
+`PropertyDamage.FailureReport.HTML` turns a report into one HTML page that
+opens from disk and loads nothing from the network. It shows one column per
+target. Each step unfolds to its log lines and events. Repeated log lines
+collapse into one, and the detail under a log line folds by its indentation.
+Below each step, the step's events are compared across targets.
+
+```elixir
+{:error, report} = PropertyDamage.run(model: MyModel, targets: targets)
+File.write!("failure.html", PropertyDamage.FailureReport.HTML.render(report))
+```
+
+To get a page for every failing run without touching the tests, name a
+directory when running the suite:
+
+```bash
+PD_REPORT_HTML=_build/pd_reports mix test
+open _build/pd_reports/index.html
+```
+
+Each failing run writes its page into that directory. The run option
+`report_html: "_build/pd_reports"` does the same for one run. `index.html`
+shows one report at a time; its arrow buttons move between them. The left and
+right arrow keys do the same while the index page has focus, but a browser may
+keep the key presses inside the report frame, so use the buttons.
+When several test processes write into one directory, run
+`PropertyDamage.FailureReport.HTML.write_index/1` once they finish, so the
+index lists every page.
+
+The page holds the same text `PropertyDamage.ExUnit.format_failure/2` prints,
+with the same tag filter, and log lines in it are written to disk: keep the
+directory out of git.
 
 ### Sequence Diagrams
 
 Generate visual diagrams of the failing sequence:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Mermaid diagram
 diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
@@ -372,7 +735,7 @@ discriminate the outcomes (DR-035). The two use cases:
 
 Both need full, unshrunk runs of the same plan, which is exactly what a
 `FailureReport` is *not* (it holds a shrunk sequence). Capture those runs with
-`PropertyDamage.RunTrace.capture/1` and feed them to
+`PropertyDamage.RunTrace.Capture.capture/1` and feed them to
 `PropertyDamage.RunComparison.compare/1`. Neither runs a SUT during comparison:
 capture records the runs, `compare/1` is pure data-in/data-out.
 
@@ -383,8 +746,8 @@ same seed (same seed and model ⇒ same plan ⇒ comparable):
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides: identical plan, different SUT behavior.
-before = RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 
 comparison = RunComparison.compare([before, after_])
 ```
@@ -467,6 +830,7 @@ A failure report keeps two authoritative state snapshots
 state is **derived** from the run — nothing is captured per command. Ask a
 `RunTrace` (a report embeds one as `failure.trace`) for the state at any step:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 alias PropertyDamage.RunTrace
 
@@ -491,8 +855,9 @@ what the run actually had. `verify_projections/1` catches exactly that — it
 re-derives the state at the failing step and compares it to the runtime
 snapshot:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
-PropertyDamage.FailureReport.verify_projections(failure)
+:ok = PropertyDamage.FailureReport.verify_projections(failure)
 #=> :ok
 #=> {:non_pure_projections, [MyApp.ImpureProjection]}
 ```
@@ -510,15 +875,19 @@ names any projection that disagrees with itself. See the
 
 Create a regression test:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 test_code = PropertyDamage.Export.to_exunit(failure)
+File.mkdir_p!("test/regression")
 File.write!("test/regression/capture_overflow_test.exs", test_code)
 ```
 
 ### Generate Reproduction Script
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Curl script for API testing (script/livebook exports need a :base_url)
+File.mkdir_p!("debug")
 script = PropertyDamage.Export.to_script(failure, :curl, base_url: "http://localhost:4000")
 File.write!("debug/reproduce.sh", script)
 
@@ -529,6 +898,7 @@ File.write!("debug/reproduce.exs", script)
 
 ### Generate Livebook
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 notebook = PropertyDamage.Export.to_livebook(failure, base_url: "http://localhost:4000")
 File.write!("debug/failure_analysis.livemd", notebook)
@@ -538,10 +908,15 @@ File.write!("debug/failure_analysis.livemd", notebook)
 
 ### Persist the Failure
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
-# => "failures/capture_overflow_20240115_143022.pd"
+# => "failures/20261028T002141-check_failed-never_negative-seed20.pd"
 ```
+
+The directory is created when missing. The name is the report's UTC timestamp
+(`YYYYMMDDTHHMMSS`), its failure kind, its check name and its seed. Pass
+`filename:` to choose another name.
 
 ### Replay the failing seed first while you fix it
 
@@ -557,7 +932,8 @@ PropertyDamage.run(model: M, targets: [A], seed_library: "seeds.json")
 
 ## Step 9: Verify the Fix
 
-After fixing the bug:
+After fixing the bug (these fences need your fixed system, so the guide does not
+run them against the planted-bug bank):
 
 ```elixir
 # Run with the same seed - should pass now
@@ -587,7 +963,7 @@ end
 
 ## Verbose Output Mode
 
-Enable verbose output to see what PropertyDamage generates and executes:
+Enable verbose output to see how a run progresses:
 
     PropertyDamage.run(
       model: MyModel,
@@ -595,73 +971,116 @@ Enable verbose output to see what PropertyDamage generates and executes:
       verbose: true
     )
 
-Verbose mode shows:
-- Each generated command with field values and placeholders
-- Execution results (events returned by the adapter)
-- Checks (which triggers fired, pass/fail)
-- Projection state updates
+Verbose mode prints progress and configuration, nothing per step:
+- A "PropertyDamage Configuration Summary" block per target, first: the model
+  and the adapter, each command with its weight, the state projection, the
+  check projections with their check counts, and the validation warnings
+  (printed under `validate: true`, the default)
+- A "Runtime Warnings" block if an option such as `max_runs:` or
+  `max_commands:` is set very low
+- A "PropertyDamage Test Run" header with the model, each target (index, name,
+  adapter), the run and command limits, and the seed if you gave one
+- One line per run: the run number, the command count
+- A final summary: the run totals and seed on success, or the failure summary
+  on failure
 
-This is useful when:
-- Commands aren't being generated as expected (check `when:` predicates)
-- You want to understand what sequences look like before failures
-- Debugging adapter issues (seeing exact command values sent)
+It does not print commands, events, check firings or projection state. Use it
+to see how far a long run has got and how big the generated sequences are.
+
+For per-step detail, use these instead:
+- `PropertyDamage.log/2` in the adapter, to record each request and answer
+  (see the [log lines guide](log_lines.md))
+- `PropertyDamage.replay/2` to rerun a saved failure and watch it again
+- `RunTrace.state_timeline/1` to read the projection state after each command
+  of a failed run (see above)
 
 ## Shrinking Deep Dive
 
 ### How Shrinking Works
 
-PropertyDamage shrinks by:
+PropertyDamage first drops everything after the failing root. Then it runs a
+cycle of four phases, in order, each on what the one before left:
 
-1. **Removing commands** - Try removing each command
-2. **Simplifying values** - Try smaller numbers, shorter strings
-3. **Simplifying refs** - Try using earlier refs
+1. **Dropping roots** - Try removing each root command, in groups by dependency
+   depth first, then one at a time
+2. **Collapsing the reference's expansions** - For each root, try the root
+   command alone, then each earlier entry of the root's expansion list
+3. **Collapsing the other targets' expansions** - Make each other target run
+   what the reference runs at that root
+4. **Simplifying arguments** - Try smaller numbers, shorter strings, shorter
+   lists
+
+The cycle repeats until a whole cycle adopts no candidate, or the shrink budget
+runs out. Placeholders (`external()` fields) are never shrunk, because that
+would break the commands that depend on them. A run without expansions skips
+phases 2 and 3 (see the [path equivalence guide](path_equivalence_testing.md)
+for expansions).
 
 ### Shrinking in Action
 
-Here's what a shrinking run looks like in practice. Suppose a test fails at command
-index 15 in a 23-command sequence:
+Here is an illustrative shrink, not captured output. The shrinker does not print
+its steps. Suppose a test fails at command index 15 in a 23-command sequence
+with no expansions:
 
     Original sequence: 23 commands, failure at index 15
 
-    Phase 1: Sequence Shrinking
+    Truncate after the failing root:
+      16 commands remaining, failure still at index 15 ✓
 
-    Step 1 — Drop unexecuted (commands 16-22):
-      18 commands remaining, failure still at index 15 ✓
+    Phase 1: drop roots
+      Hierarchical (groups by dependency depth):
+        Try removing depth-3 group (commands 10, 13, 14): failure at index 12 ✓
+        Try removing depth-2 group (commands 6, 8): no failure ✗ (rejected)
+        Try removing depth-1 group (commands 3, 5): failure at index 10 ✓
+      Linear (one at a time):
+        Try removing command 0: no failure ✗
+        Try removing command 1: failure at index 9 ✓
+        ...
+      Result: 4 commands
 
-    Step 2 — Hierarchical shrinking (by dependency depth):
-      Try removing depth-3 group (commands 10, 13, 14): failure at index 12 ✓
-      15 commands remaining
-      Try removing depth-2 group (commands 6, 8): no failure ✗ (rejected)
-      Try removing depth-1 group (commands 3, 5): failure at index 10 ✓
-      13 commands remaining
+    Phase 2 and 3: nothing to collapse (no expansions)
 
-    Step 3 — Linear shrinking (one at a time):
-      Try removing command 0: no failure ✗
-      Try removing command 1: failure at index 9 ✓ → 12 commands
-      Try removing command 2: no failure ✗
-      ...
-      Try removing command 7: failure at index 5 ✓ → 8 commands
-      ...done, no more removable
-
-    Result: 4 commands (from original 23)
-
-    Phase 2: Argument Shrinking
-
+    Phase 4: simplify arguments
       command 0: amount 4827 → 1 ✓
       command 1: currency "GBP" → "A" ✓
       command 2: amount 391 → 0, no failure ✗ → try 195, failure ✓
       ...
 
+    Cycle 2: no candidate adopted, done.
     Final: 4 commands with simplified arguments
 
-Each candidate is only accepted if it reproduces the **same failure** — same failure
-type and same check name. If removing a command causes a different failure, it's
+With expansions, phases 2 and 3 work on what each target runs at each root.
+The shrinker tries the root alone first, so the report shows the smallest
+expansion that still fails. Phase 4 then simplifies the arguments of the roots
+and of the leaves that remain.
+
+Each candidate is only accepted if it reproduces the **same failure**: same failure
+type, same check name, and same target index. A candidate that fails at a later
+root than the original is rejected too. If removing a command causes a different failure, it's
 rejected. This ensures the minimal sequence demonstrates the original bug, not a
 different one. For a divergence between targets (or a failure to converge), the name is the
 `@compare` key `{Projection, function}`: a candidate that diverges on another
 observation, or in another target, is a different failure and is rejected too.
-When a run has several failures (in every run, retirement or not), only the primary one (the first by root, then by
-target order) is shrunk, and `report.other_failures` lists the rest.
+A run can hold several failures. Only the primary one is shrunk: the first by
+root, then by target order. Here "reference" means the first target in
+`targets:`. A failure in the reference ends the run. A target other than the
+reference leaves the run if its adapter fails at a root or its setup fails, and
+the others go on. With two targets, a failure in the second one ends the run,
+because no target other than the reference is left.
+
+Several failures need no extra target. A check can fail while a target
+finalizes its run (an `@eventually` timeout, a `:teardown` check), a check can
+be recorded under `check_mode: :record`, and a comparison can fail at the same
+root as a check.
+
+When a run fails, it executes the reported sequence once more, and
+`report.other_failures` lists the other failures of that execution. By default
+the reported sequence is the shrunk one, so a failure past its last root drops
+out and the list can differ from the original run's. With `shrink: false`, the
+reported sequence is the original one. If the execution does not reproduce the
+primary failure (for example, a nondeterministic system), the report keeps the
+original run's `other_failures`. A failed target setup is reported as found,
+without shrinking.
 
 ### Shrinking and References
 
@@ -696,8 +1115,9 @@ If the shrunk sequence is still large:
 )
 ```
 
-If the failure was saved to a `.pd` file, re-shrink it from the shell without
-writing any code:
+If the failure was saved to a `.pd` file (see
+[Step 8](#step-8-save-for-later)), re-shrink it from the shell without writing
+any code:
 
 ```bash
 mix pd.reshrink failures/the-failure.pd --strategy exhaustive
@@ -706,7 +1126,8 @@ mix pd.reshrink failures/the-failure.pd --strategy exhaustive
 It prints the before/after command counts and, by default, writes nothing. Pass
 `--output PATH` to save the smaller report, or `--overwrite` to replace the input
 file in place. Re-shrinking re-runs the engine, so against a live SUT it exercises
-the service repeatedly.
+the service repeatedly. The file records the run's `external_markers:`, and the
+re-shrink uses them.
 
 ### Understanding Shrink Stats
 
@@ -737,8 +1158,14 @@ failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 
 summary = PropertyDamage.RunComparison.outcome_summary(comparison)
 
-if summary.passing > 0 and summary.failing > 0 do
-  IO.puts("Flaky: #{summary.passing} passed / #{summary.failing} failed")
+# A seed is flaky when runs disagree on pass or fail, or when the failing
+# runs disagree on why they failed.
+if (summary.passing > 0 and summary.failing > 0) or length(summary.failure_signatures) > 1 do
+  IO.puts(
+    "Flaky: #{summary.passing} passed / #{summary.failing} failed, " <>
+      "#{length(summary.failure_signatures)} failure signature(s)"
+  )
+
   IO.inspect(comparison.ranking, label: "most discriminating fields")
 else
   IO.puts("Reproduces consistently (#{summary.failing}/#{comparison.traces |> length} failed)")
@@ -758,7 +1185,8 @@ verdicts, bounded memory).
 
 ### 2. Shrunk Sequence Too Long
 
-- Add more command preconditions
+- Add `when:` options to the model's command specs, so the model stops
+  generating commands in states where they make no sense
 - Use `shrink_further/2` with `:exhaustive` strategy
 - Check for hidden dependencies between commands
 
@@ -770,5 +1198,4 @@ verdicts, bounded memory).
 ## Next Steps
 
 - [Writing Invariants](writing_invariants.md) - Improve your checks
-- [Chaos Engineering](chaos_engineering.md) - Test resilience
 - See `PropertyDamage.FailureIntelligence` for pattern detection

@@ -22,16 +22,6 @@ defmodule Mix.Tasks.Pd.AuditTest do
       assert output =~ "PropertyDamage Determinism Audit"
       assert output =~ "AUDIT PASSED"
     end
-
-    test "reports branching mode when branching flags are given" do
-      output =
-        capture_io(fn ->
-          Audit.run([@pure, "--seeds", "15", "--branching", "--branch-probability", "0.4"])
-        end)
-
-      assert output =~ "Mode:     branching"
-      assert output =~ "AUDIT PASSED"
-    end
   end
 
   describe "failure path (exec/1, no halt)" do

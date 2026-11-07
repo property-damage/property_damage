@@ -5,7 +5,7 @@ defmodule OpenapiBench.Generated.Model do
   Generated from OpenAPI spec. Customize command weights and add projections/checks.
   """
 
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias OpenapiBench.Generated.Commands
 

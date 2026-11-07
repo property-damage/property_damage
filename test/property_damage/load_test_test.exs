@@ -460,8 +460,8 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule WorkerTestModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [WorkerTestCommand]
@@ -566,8 +566,8 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule OrderingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [PropertyDamage.LoadTestTest.OrderingCommand]
@@ -959,8 +959,8 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockModel do
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
 
       @impl PropertyDamage.Model
       def commands, do: [MockCommand]
@@ -1270,7 +1270,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockModelWithChecks do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [{MockCommand, weight: 1}]
@@ -1364,8 +1364,12 @@ defmodule PropertyDamage.LoadTestTest do
         assert arrivals < 250,
                "Expected fewer than 250 arrivals, got #{arrivals} - possible parallel arrival chain bug"
 
-        # Additional sanity check: arrival rate should be reasonable
-        test_duration_sec = report.metrics.duration_ms / 1000
+        # Additional sanity check: arrival rate should be reasonable. The rate
+        # is taken over the configured duration, not the measured
+        # `duration_ms`: the measured time also covers draining the last
+        # arrivals, which stretches under full-suite load and pushed a
+        # correct run below the lower bound.
+        test_duration_sec = 1.0
         actual_rate = arrivals / test_duration_sec
         # With linear ramp, effective average rate is ~75% of target (0-100 over 50%, 100 for 50%)
         # So we expect roughly 75/sec average, allow 40-150 range
@@ -1410,6 +1414,184 @@ defmodule PropertyDamage.LoadTestTest do
                         50,
                         "Arrival rate #{actual_rate}/sec not close to target 100/sec"
       end)
+    end
+  end
+
+  # ============================================================================
+  # Worker draws
+  # ============================================================================
+
+  defmodule WideDrawCommand do
+    defstruct [:n]
+
+    # A size-bounded generator: it draws from -size..size, so a draw at the
+    # smallest size stays in -1..1.
+    def generator(_overrides \\ %{}), do: StreamData.fixed_map(n: StreamData.integer())
+  end
+
+  defmodule WideDrawProjection do
+    @behaviour PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+  end
+
+  defmodule WideDrawModel do
+    use PropertyDamage.Model
+
+    @impl PropertyDamage.Model
+    def commands, do: [WideDrawCommand]
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: WideDrawProjection
+  end
+
+  defmodule RecordingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(command, %{recorder: recorder}, _runtime) do
+      Agent.update(recorder, &[command | &1])
+      {:ok, []}
+    end
+  end
+
+  # Runs `count` sequences on one worker and returns every command it executed,
+  # in execution order.
+  defp worker_commands(worker_opts, count) do
+    {:ok, recorder} = Agent.start_link(fn -> [] end)
+    {:ok, metrics} = Metrics.start_link()
+
+    {:ok, worker} =
+      Worker.start_link(
+        Keyword.merge(
+          [
+            model: WideDrawModel,
+            target: %PropertyDamage.Target{
+              adapter: RecordingAdapter,
+              config: %{recorder: recorder},
+              name: "adapter",
+              index: 0
+            },
+            metrics: metrics
+          ],
+          worker_opts
+        )
+      )
+
+    for _ <- 1..count, do: {:ok, _} = Worker.execute_sequence(worker)
+
+    Worker.stop(worker)
+    Metrics.stop(metrics)
+    recorder |> Agent.get(& &1) |> Enum.reverse()
+  end
+
+  describe "Worker generation" do
+    test "draws values from the whole range of a command's generator" do
+      commands = worker_commands([worker_id: 1, seed: 20_241_106], 200)
+
+      assert Enum.any?(commands, fn %WideDrawCommand{n: n} -> n < -1 or n > 1 end),
+             "every draw lay in -1..1 across #{length(commands)} commands"
+    end
+
+    test "two workers with the same seed and worker id execute the same commands" do
+      first = worker_commands([worker_id: 7, seed: 42], 20)
+      second = worker_commands([worker_id: 7, seed: 42], 20)
+
+      assert first != []
+      assert first == second
+    end
+  end
+
+  defmodule WorkerTaggingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    # Each worker's setup takes the next number, so recorded commands can be
+    # grouped by the worker that executed them.
+    @impl true
+    def setup(%{recorder: recorder, counter: counter}) do
+      worker = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+      {:ok, %{recorder: recorder, worker: worker}}
+    end
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(command, %{recorder: recorder, worker: worker}, _runtime) do
+      Agent.update(recorder, &[{worker, command} | &1])
+      {:ok, []}
+    end
+  end
+
+  # Runs a short load test and returns its report with the commands each worker
+  # executed, in execution order. Arrival timing decides how many sequences a
+  # run completes, so callers compare equal-length prefixes.
+  defp load_test_commands(opts) do
+    {:ok, recorder} = Agent.start_link(fn -> [] end)
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    {:ok, report} =
+      LoadTest.run(
+        Keyword.merge(
+          [
+            model: WideDrawModel,
+            targets: [{WorkerTaggingAdapter, config: %{recorder: recorder, counter: counter}}],
+            arrival_rate: 5,
+            duration: {1, :seconds}
+          ],
+          opts
+        )
+      )
+
+    by_worker =
+      recorder
+      |> Agent.get(& &1)
+      |> Enum.reverse()
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    {report, by_worker}
+  end
+
+  describe "LoadTest seed" do
+    test "the same seed and run nonce send the same commands from each worker" do
+      {_, first} = load_test_commands(seed: 9_001, run_nonce: 1)
+      {_, second} = load_test_commands(seed: 9_001, run_nonce: 1)
+
+      assert [_ | _] = Map.keys(first)
+      assert Map.keys(first) == Map.keys(second)
+
+      for {worker, commands} <- first do
+        length = min(length(commands), length(second[worker]))
+        assert length > 0
+        assert Enum.take(commands, length) == Enum.take(second[worker], length)
+      end
+    end
+
+    test "a different seed sends different commands" do
+      {_, first} = load_test_commands(seed: 9_001, run_nonce: 1)
+      {_, second} = load_test_commands(seed: 9_002, run_nonce: 1)
+
+      length = min(length(first[1]), length(second[1]))
+      refute Enum.take(first[1], length) == Enum.take(second[1], length)
+    end
+
+    test "a run without a seed reports the seed it drew" do
+      {report, _} = load_test_commands([])
+
+      assert is_integer(report.config.seed) and report.config.seed > 0
+      assert Report.format(report, :terminal) =~ "Seed:"
+      assert Report.format(report, :markdown) =~ "| Seed | #{report.config.seed} |"
+      assert Report.format(report, :json) =~ ~s("seed": #{report.config.seed})
     end
   end
 end

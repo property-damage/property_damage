@@ -69,7 +69,7 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 
 ### Requirement: Finalize-Chain Ordering and Precedence (DR-029)
 
-After the last command of a run (linear or merged-branch), the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@eventually` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@check at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@check every:` violation observed during the `@eventually` await drain, then a `@eventually` poll timeout/error, then an async `@check every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@check at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
+After the last command of a run, the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@eventually` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@check at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@check every:` violation observed during the `@eventually` await drain, then a `@eventually` poll timeout/error, then an async `@check every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@check at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
 
 #### Scenario: An async drain violation preempts a concurrent poll timeout
 - **WHEN** an async `@check every:` check trips on an event folded during the `@eventually` await drain while a `@eventually` poller is also timing out
@@ -235,9 +235,15 @@ The system SHALL support mock service adapters that stand in for third-party ser
 - **WHEN** events are pushed into the registry after a command's own flush (after the command returned, before the next command or the end of the run)
 - **THEN** the boundary drain (`Stepping.drain/2`) and the finalization SHALL flush and fold them, attributed to the command that ran last
 
+#### Scenario: A mock callback that raises fails its step
+- **WHEN** a mock's `on_command/2` or `on_event/2` raises, exits or throws
+- **THEN** the step the mock was told of SHALL fail as an `:adapter_error` whose detail is the registry's `{module, callback, reason}`, the shape a raising `execute/3` gets, so the report names the mock and the callback; an `on_command/2` that raised SHALL fail the step before the adapter's `execute/3` is called, and an `on_event/2` told of an event the boundary drain or the finalization flushed SHALL fail the command that ran last
+- **AND** `MockServiceRegistry.notify_command/3` and `notify_event/3` SHALL keep answering `{:error, {module, callback, reason}}` and stay up
+- **AND** when a projection rejects a mock event folded after a command, the lines the mocks' `on_event/2` wrote before it SHALL stay under that command's step
+
 ### Requirement: Checks on Asynchronously-Observed Events
 
-The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally**: one event at a time, on the state produced by folding that event, with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
+The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, and mock-service events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally**: one event at a time, on the state produced by folding that event, with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
 
 #### Scenario: Check fires on a poller-observed event
 - **WHEN** a resource poller injects an event that matches an `@check every:` check
@@ -260,7 +266,7 @@ The executor SHALL evaluate `@check every:` checks on every observed event, incl
 
 ### Requirement: Per-Check Firing and Whole-Run Coverage Accumulation (DR-026)
 
-The executor SHALL record how many times each check actually fired during a run, keyed by its owning projection and name. a check counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Per-check firing counts SHALL merge across parallel branches the same way the existing check counters do. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.check_fires`.
+The executor SHALL record how many times each check actually fired during a run, keyed by its owning projection and name. a check counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.check_fires`.
 
 #### Scenario: Firing recorded at every evaluation site
 - **WHEN** a check is evaluated via `every:`, an `at:` boundary, an asynchronously-observed event, or a spawned `@eventually` poller
@@ -273,10 +279,6 @@ The executor SHALL record how many times each check actually fired during a run,
 #### Scenario: Firing accumulates across the whole run
 - **WHEN** a run executes multiple generated sequences
 - **THEN** `result.check_fires` SHALL reflect firing counts summed across all sequences, not a single representative sequence
-
-#### Scenario: Per-check firing merges across branches
-- **WHEN** execution branches in parallel and checks fire in different branches
-- **THEN** the per-check firing counts SHALL merge by the same delta-from-prefix rule as the existing check counters
 
 ### Requirement: Pre-Run Validation
 
@@ -321,13 +323,8 @@ The adapter, its setup configuration, its injector adapters and its mock service
 `PropertyDamage.run/1` SHALL accept one or more `targets:` entries. Every other entry point that runs commands SHALL require `targets:` to hold exactly one entry; replay, trigger isolation and `RunTrace` capture use the report's reference target. An entry point whose engine cannot honor a target's `injectors:` or `mocks:` SHALL raise instead of ignoring the key.
 
 #### Scenario: More than one target
-- **WHEN** an entry point other than `PropertyDamage.run/1` (for example `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` or `RunTrace.capture/1`) is called with a `targets:` list of two entries
+- **WHEN** an entry point other than `PropertyDamage.run/1` (for example `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` or `RunTrace.Capture.capture/1`) is called with a `targets:` list of two entries
 - **THEN** the system SHALL raise `NimbleOptions.ValidationError` stating that exactly one `targets:` entry is expected
-- **AND** no command SHALL execute
-
-#### Scenario: Branching with several targets (DR-045)
-- **WHEN** `PropertyDamage.run/1` is called with `branching:` and two or more `targets:` entries
-- **THEN** the system SHALL raise `NimbleOptions.ValidationError` naming `:branching` and stating that branching sequences run against one target only
 - **AND** no command SHALL execute
 
 #### Scenario: Empty or missing targets
@@ -530,7 +527,7 @@ Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce
 
 ### Requirement: Deterministic Symbolic Identity (DR-036)
 
-Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the branch-structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
+Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
 
 #### Scenario: Same plan generates equal
 
@@ -555,7 +552,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 #### Scenario: A pure model passes the audit
 
 - **WHEN** `PropertyDamage.audit/2` runs against a model whose generation is a pure function of the seed, including one using `external/0` or `mint_per_run/1`
-- **THEN** it SHALL return `:ok` for every audited seed, under both linear and branching generation options
+- **THEN** it SHALL return `:ok` for every audited seed
 
 #### Scenario: An impure generator is rejected
 
@@ -570,7 +567,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 ### Requirement: One Runner Over the Scheduler (DR-045, DR-046)
 
-`PropertyDamage.run/1` SHALL run every linear sequence through `PropertyDamage.Scheduler`, one target exactly as several. A run SHALL end in `{:ok, stats}` when no run failed in any kind, or in `{:error, %PropertyDamage.FailureReport{}}` for the first failing run. The report's `kind` SHALL be the failure kind: `:check_failed` (a check failed in a variant, including `@eventually` timeouts and startup and finalization checks), `:diverged` (ready sides of a `@compare` observation differ at the convergence bound), `:did_not_converge` (a side of a `@compare` observation is still pending at the bound), `:setup_failed` (a variant's adapter setup returned an error or raised, an injector or mock setup raised included) or `:execution_failed` (an adapter raised at a root or answered `{:error, _}` at a root, in every mode, or a nemesis, stutter, placeholder or unknown failure) or `:latency_exceeded` (a variant's aggregate latency breached a `latency:` budget at campaign end; it SHALL NOT be shrunk and its `failed_at_index` SHALL be `nil`). The report SHALL carry `variant` (`%{index, name}`) and `failed_at_index`, the failing root, `nil` for a setup failure and a startup failure. `:execution_failed` is final: an adapter error is a failure and never an observation.
+`PropertyDamage.run/1` SHALL run every linear sequence through `PropertyDamage.Scheduler`, one target exactly as several. A run SHALL end in `{:ok, stats}` when no run failed in any kind, or in `{:error, %PropertyDamage.FailureReport{}}` for the first failing run. The report's `kind` SHALL be the failure kind: `:check_failed` (a check failed in a variant, including `@eventually` timeouts and startup and finalization checks), `:diverged` (ready sides of a `@compare` observation differ at the convergence bound), `:did_not_converge` (a side of a `@compare` observation is still pending at the bound), `:setup_failed` (a variant's adapter setup returned an error or raised, an injector or mock setup raised included) or `:execution_failed` (an adapter raised at a root or answered `{:error, _}` at a root, in every mode, or a stutter, placeholder or unknown failure) or `:latency_exceeded` (a variant's aggregate latency breached a `latency:` budget at campaign end; it SHALL NOT be shrunk and its `failed_at_index` SHALL be `nil`). The report SHALL carry `variant` (`%{index, name}`) and `failed_at_index`, the failing root, `nil` for a setup failure and a startup failure. `:execution_failed` is final: an adapter error is a failure and never an observation.
 
 #### Scenario: One target through the scheduler
 - **WHEN** `PropertyDamage.run/1` runs a linear sequence against one target
@@ -590,10 +587,6 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 - **AND** `PropertyDamage.execute/2`, `Replay.start/2` and `PropertyDamage.shrink_further/2` SHALL return `{:error, %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}}}`
 - **AND** `mix pd.replay` SHALL print it
 - **AND** no `{:adapter_setup_failed, _}` result SHALL exist
-
-#### Scenario: Branching keeps the linear engine
-- **WHEN** a branching sequence runs (one target only)
-- **THEN** its run, shrink and reproduction SHALL use the linear engine
 
 ### Requirement: Active Set of Variants and the Stop Rule (DR-046)
 
@@ -642,7 +635,7 @@ For every variant and every execution (a run, a shrink attempt or a replay), the
 
 ### Requirement: Engine Rules During Setup Commands (DR-048)
 
-While a variant executes setup commands, the engine SHALL resolve placeholders into that variant's registry, fold events into that variant's projections, run pollers and injectors, apply the per-command settle and adapter retry, and run checks (`@check` and `@eventually`). The engine SHALL NOT apply stutter or nemesis faults to a setup command, SHALL NOT record a latency sample for it, and SHALL NOT advance an `every: N` sampling counter with it. Events an injector delivers while setup commands run SHALL count toward `every: N` counters. Coverage SHALL report setup commands under a `setup` key. Telemetry command events SHALL carry `phase: :setup`.
+While a variant executes setup commands, the engine SHALL resolve placeholders into that variant's registry, fold events into that variant's projections, run pollers and injectors, apply the per-command settle and adapter retry, and run checks (`@check` and `@eventually`). The engine SHALL NOT apply stutter to a setup command, SHALL NOT record a latency sample for it, and SHALL NOT advance an `every: N` sampling counter with it. Events an injector delivers while setup commands run SHALL count toward `every: N` counters. Coverage SHALL report setup commands under a `setup` key. Telemetry command events SHALL carry `phase: :setup`.
 
 #### Scenario: A setup command's external id resolves
 - **WHEN** a setup command's adapter answer carries a server-assigned id for an `external()` field
@@ -653,9 +646,9 @@ While a variant executes setup commands, the engine SHALL resolve placeholders i
 - **WHEN** the setup commands run
 - **THEN** the check's counter SHALL still be zero when the first root starts
 
-#### Scenario: Faults and latency are off
-- **WHEN** a run enables stutter, a nemesis and `latency: true`
-- **THEN** no setup command SHALL be repeated by stutter, no fault SHALL be injected during setup commands, and no latency sample SHALL include a setup command
+#### Scenario: Stutter and latency are off
+- **WHEN** a run enables stutter and `latency: true`
+- **THEN** no setup command SHALL be repeated by stutter, and no latency sample SHALL include a setup command
 
 #### Scenario: Setup commands are never compared
 - **GIVEN** a `@compare every: Login` where `Login` is also a setup command
@@ -678,7 +671,7 @@ When a variant's last setup command has stepped, drained and settled, every `ext
 
 ### Requirement: Setup Failure (DR-048)
 
-A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Failure.Setup` with `cause`, `command`, `setup_index`, `field` and `detail`. Its causes SHALL be: the adapter's `setup/1` returning `{:error, _}` or raising (`:adapter_setup`); a setup command answering `{:error, _}` or raising (`:command`); a check failing on a setup command's event (`:check`); and the completion rule (`:unresolved_placeholder`). The report's `failed_at_index` SHALL be `nil`. A check failure whose triggering event belongs to a setup command SHALL be a setup failure wherever it is detected, including an `@eventually` window that a setup command's event opened and that times out after the first root started.
+A check body that raises, exits or throws SHALL fail that check (kind `:check_failed`) at every point the engine runs it, `@check at: :startup` included. A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Failure.Setup` with `cause`, `command`, `setup_index`, `field` and `detail`. Its causes SHALL be: the adapter's `setup/1` returning `{:error, _}` or raising (`:adapter_setup`); model code raising, exiting or throwing while the variant came up after `setup/1` returned `{:ok, _}`, such as a hand-written check-list entry without `:type` (`:model`); the variant process exiting while it came up, in a way no rescue sees (`:variant`); a setup command answering `{:error, _}` or raising (`:command`); a check failing on a setup command's event (`:check`); and the completion rule (`:unresolved_placeholder`). The report's `failed_at_index` SHALL be `nil`. A check failure whose triggering event belongs to a setup command SHALL be a setup failure wherever it is detected, including an `@eventually` window that a setup command's event opened and that times out after the first root started.
 
 #### Scenario: A setup command answers with an error
 - **WHEN** a setup command's adapter answer is `{:error, reason}`
@@ -714,7 +707,7 @@ A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Fail
 
 ### Requirement: Teardown Commands Are Best Effort (DR-048)
 
-The engine SHALL run a variant's teardown commands after every execution of that variant: after a pass, after a failure, after a setup failure (with whatever the setup commands created), after the variant is retired, and after every shrink attempt. It SHALL NOT run them for a variant whose `Adapter.setup/1` failed or whose process was killed. During teardown commands, stutter, nemesis and checks SHALL be off, placeholder resolution SHALL be on, events SHALL go to the event log without being folded into projections, and no latency sample SHALL be recorded. A teardown command whose placeholder never resolved SHALL be skipped with a warning, and an error or a raise SHALL be logged. Neither SHALL change the verdict.
+The engine SHALL run a variant's teardown commands after every execution of that variant: after a pass, after a failure, after a setup failure (with whatever the setup commands created), after the variant is retired, and after every shrink attempt. It SHALL NOT run them for a variant whose `Adapter.setup/1` failed or whose process was killed. During teardown commands, stutter and checks SHALL be off, placeholder resolution SHALL be on, events SHALL go to the event log without being folded into projections, and no latency sample SHALL be recorded. A teardown command whose placeholder never resolved SHALL be skipped with a warning, and an error or a raise SHALL be logged. Neither SHALL change the verdict.
 
 #### Scenario: Teardown after a setup failure
 - **WHEN** the second setup command fails after the first created a user
@@ -739,7 +732,7 @@ The engine SHALL run a variant's teardown commands after every execution of that
 
 ### Requirement: Setup and Teardown Commands in Reports and Replay (DR-048)
 
-`FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. A branching run SHALL execute the setup commands before its own prefix segment and the teardown commands after its suffix segment. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
+`FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.Capture.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
 
 #### Scenario: A report reproduces without re-drawing
 - **WHEN** `PropertyDamage.replay/2` runs a report
@@ -783,7 +776,7 @@ A leaf whose module has a `commands/0` entry with a `when:` that is false at the
 
 ### Requirement: Roots Are the Boundaries and Leaves Are Commands (DR-049)
 
-Each variant SHALL execute its own concrete sequence through the stepping engine. `Variant.advance_to/2` for root `r` SHALL step every leaf of root `r`, in order, before the scheduler runs the comparison at `r`. The lockstep boundaries, the convergence loop, the probe re-read and the active-set rule SHALL be per root. A leaf SHALL be an executed command: `@check every: Module` SHALL fire on a leaf of that module, `@check every: N` SHALL count steps per variant (leaves included), stutter, nemesis, per-command settle and adapter retry SHALL apply per leaf, and `terminate_early?/3` SHALL NOT be consulted for a leaf. `@compare` schedules, `max_commands` and `total_commands` SHALL count roots. A root with `execution: :probe` SHALL run as itself in every target. A leaf SHALL have a position of its own, `{:leaf, root_id}` with the leaf's offset, so a placeholder id never collides with the id of a root, a setup command or a branch segment.
+Each variant SHALL execute its own concrete sequence through the stepping engine. `Variant.advance_to/2` for root `r` SHALL step every leaf of root `r`, in order, before the scheduler runs the comparison at `r`. The lockstep boundaries, the convergence loop, the probe re-read and the active-set rule SHALL be per root. A leaf SHALL be an executed command: `@check every: Module` SHALL fire on a leaf of that module, `@check every: N` SHALL count steps per variant (leaves included), stutter, per-command settle and adapter retry SHALL apply per leaf, and `terminate_early?/3` SHALL NOT be consulted for a leaf. `@compare` schedules, `max_commands` and `total_commands` SHALL count roots. A root with `execution: :probe` SHALL run as itself in every target. A leaf SHALL have a position of its own, `{:leaf, root_id}` with the leaf's offset, so a placeholder id never collides with the id of a root, a setup command or a branch segment.
 
 #### Scenario: All leaves run before the comparison
 - **GIVEN** a root that one target runs as three leaves and another runs as itself
@@ -806,7 +799,7 @@ Each variant SHALL execute its own concrete sequence through the stepping engine
 
 ### Requirement: Leaf Validation at First Production (DR-049)
 
-The engine SHALL validate a leaf module the first time a process realizes it, with `validate_command_callbacks!/1`, and SHALL cache a pass per module per process. A failed validation SHALL NOT be cached: the next realization SHALL validate again and fail the same way. The failure SHALL name the root, the entry index, the leaf and the missing callback. The `overrides:` key check SHALL run at every realization, because it depends on the entry and not on the module. A leaf module that fails validation SHALL fail in the second process as in the first.
+The engine SHALL validate a leaf module the first time a process realizes it, with `Command.validate_callbacks!/1`, and SHALL cache a pass per module per process. A failed validation SHALL NOT be cached: the next realization SHALL validate again and fail the same way. The failure SHALL name the root, the entry index, the leaf and the missing callback. The `overrides:` key check SHALL run at every realization, because it depends on the entry and not on the module. A leaf module that fails validation SHALL fail in the second process as in the first.
 
 #### Scenario: A leaf without a generator
 - **WHEN** an entry names a module that lacks the command callbacks
@@ -861,7 +854,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 
 ### Requirement: Reports and Re-execution Paths Carry the Choices (DR-049, DR-050)
 
-`FailureReport.expansions` SHALL map each target name to one element per executed root, up to and including the failing root: `%{root: index, entry: "Root[i]" | nil | :forced | :identity, leaves: [modules]}`. The reporter SHALL print, beside a failure at root `r`, the entry each target ran at `r`, with the reference marked, and SHALL print `:identity` as "identity, by shrinking". `failed_at_index` SHALL stay the root index. `expansions` and `expansion_counts` SHALL describe the shrunk run. Every path that executes a failure again SHALL read what each target ran from the report's `replay` term (or, when the report has none, from the choices its trace records) and SHALL NOT pick again; the paths and their behavior are specified by the failure-analysis requirement "Re-execution Paths Read the Recorded Data (DR-050)". `RunTrace.capture/1` and the seed-library replay SHALL recompute the choices from the seed, execute them through the scheduler, and record them in the trace. Export SHALL emit the reference target's concrete leaves as the steps, SHALL say so in the header, and SHALL bind a root placeholder from the step of the leaf it was aliased to. `reproduction_command/1` SHALL be unchanged.
+`FailureReport.expansions` SHALL map each target name to one element per executed root, up to and including the failing root: `%{root: index, entry: "Root[i]" | nil | :forced | :identity, leaves: [modules]}`. The reporter SHALL print, beside a failure at root `r`, the entry each target ran at `r`, with the reference marked, and SHALL print `:identity` as "identity, by shrinking". `failed_at_index` SHALL stay the root index. `expansions` and `expansion_counts` SHALL describe the shrunk run. Every path that executes a failure again SHALL read what each target ran from the report's `replay` term (or, when the report has none, from the choices its trace records) and SHALL NOT pick again; the paths and their behavior are specified by the failure-analysis requirement "Re-execution Paths Read the Recorded Data (DR-050)". `RunTrace.Capture.capture/1` and the seed-library replay SHALL recompute the choices from the seed, execute them through the scheduler, and record them in the trace. Export SHALL emit the reference target's concrete leaves as the steps, SHALL say so in the header, and SHALL bind a root placeholder from the step of the leaf it was aliased to. `reproduction_command/1` SHALL be unchanged.
 
 #### Scenario: The report names each target's entry
 - **WHEN** a run fails at root 5 with target "second" on `Incr[1]` and the reference on `Incr[0]`
@@ -886,7 +879,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 
 `PropertyDamage.run/1` SHALL accept `only:` in exactly one of two shapes. `only: [run: n, variants: names, with_reference: boolean]` SHALL run run `n` (default 1, counted from 1) of the seed and nothing else, on the targets `variants:` names (default: every target) plus the reference unless `with_reference: false`. `with_reference: false` SHALL be legal only for exactly one named target other than the reference; that target SHALL run alone with the model's checks and no `@compare` function, and its sequence SHALL be the one `PropertyDamage.Expansion.for/5` regenerates for its name. `only: [replay: path]`, optionally with `variants:` and `with_reference:` under the same rules, SHALL load the replay artifact at `path` and execute the recorded setup commands and the commands each target ran at each recorded root, with no draw, ignoring each target's `expansion:`. Its `targets:` SHALL name exactly the targets the artifact records. Its `shrink:` SHALL default to `false`.
 
-`only:` SHALL be an option error naming the rule when: it holds both `run:` and `replay:` or an unknown key; `max_runs:` other than 1 or `branching:` is given beside it; `seed:` is given beside `replay:` (the artifact records its seed); `variants:` names a target that `targets:` lacks; `with_reference: false` names anything other than one non-reference target; or `replay:` is not a string. An `only:` run SHALL NOT replay the seed library.
+`only:` SHALL be an option error naming the rule when: it holds both `run:` and `replay:` or an unknown key; `max_runs:` other than 1 is given beside it; `seed:` is given beside `replay:` (the artifact records its seed); `variants:` names a target that `targets:` lacks; `with_reference: false` names anything other than one non-reference target; or `replay:` is not a string. An `only:` run SHALL NOT replay the seed library.
 
 `replay_dir:` SHALL be a non-empty string (default `"property_damage_replays"`) or `false`. A failing run SHALL write its replay artifact into that directory, creating it when missing, and `false` SHALL write none.
 
@@ -912,8 +905,8 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** `only: [variants: ["nope"]]` names a target `targets:` lacks
 - **THEN** `run/1` SHALL raise an option error that names "nope"
 
-#### Scenario: only beside max_runs or branching
-- **WHEN** `only:` is given with `max_runs: 3` or with `branching:`
+#### Scenario: only beside max_runs
+- **WHEN** `only:` is given with `max_runs: 3`
 - **THEN** `run/1` SHALL raise an option error that names both options
 
 #### Scenario: A replay that reproduces
@@ -938,3 +931,87 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 #### Scenario: replay_dir false
 - **WHEN** a run fails with `replay_dir: false`
 - **THEN** no file SHALL be written and the report's `replay_status` SHALL be `:disabled`
+
+### Requirement: Log Lines and Their Scopes (DR-054)
+
+`PropertyDamage.log(message, opts \\ [])`, a macro behind `require PropertyDamage`, SHALL write one log line for the failure report and record the file and line of its call. `opts` SHALL take only `tags:`, a literal list of atoms; any other option, a tag that is not an atom, or options that are not a literal keyword list SHALL be a compile error that names the offending option and says `tags:` is the only option. A message SHALL be stored as given: a string, any other value, or a 0-arity function, which the macro SHALL NOT wrap in a function on its own. The engine SHALL open a scope before it runs user code at every execution point: the adapter's `setup/1` (with the injector and mock setup beside it), each setup command, each root and each leaf, each settle and stutter attempt, a mock's `on_command/2` and `on_event/2` (under the scope of the command they are told of, so their lines are kept under its step), each teardown command, and the adapter's `teardown/1` (with the mock and injector teardown beside it). Every path that calls adapter code SHALL open one, including paths that build no failure report (`PropertyDamage.execute/2`, load-test workers, the IEx helpers, a `PropertyDamage.Replay` session), which SHALL drop their lines. `%PropertyDamage.Runtime{}` SHALL carry a `log` function, and `PropertyDamage.Runtime.log/3` SHALL write through it to the same place `PropertyDamage.log/2` writes. Each line SHALL go synchronously into the command's `Runtime.Sink`, and when the command ends it SHALL move into the run's `RunTrace.logs` under the step's `Sequence.Position` (`:adapter_setup` and `:adapter_teardown` for the adapter's `setup/1` and `teardown/1`). A line SHALL never enter the event log.
+
+#### Scenario: A Task the adapter starts logs to its step
+- **WHEN** `execute/3` starts a `Task` (or a `Task` inside a `Task`) that calls `PropertyDamage.log/2`
+- **THEN** the call SHALL find the scope in the first live process of its `$callers` that holds one, and the line SHALL be kept under the step that started the `Task`, once
+- **AND** a dead process in `$callers` SHALL NOT end the lookup, so a process whose parent `Task` exited while the step runs SHALL still log under that step
+- **AND** a process left running by a step that has ended SHALL find no scope and SHALL never write under a later step: the per-command `Task` that held the step's scope has exited, and an inline point admits only a chain that carries its token
+
+#### Scenario: A process an inline point left running finds no later point
+- **WHEN** a point that runs in a process outliving it (the adapter's `setup/1` or `teardown/1`, injector and mock setup and teardown, a mock's `on_command/2` or `on_event/2`) starts a process and leaves it running, and that process calls `PropertyDamage.log/2` during a later such point of the same holder
+- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`: the point admits a `$callers` chain only when the process directly below its holder in the chain was started by the holder while the point ran (the point marks its holder's `$callers` with a token of its own while it runs, and a process started then carries the token)
+- **AND** a `Task` the point starts while it runs SHALL log under that point
+
+#### Scenario: A call with no scope raises
+- **WHEN** `PropertyDamage.log/2` is called in a process that holds no scope and whose `$callers` hold none (a check, a projection, a `GenServer` the adapter called, a test process)
+- **THEN** it SHALL raise `PropertyDamage.Log.NoScopeError`, whose message names the call site (`file:line`), the calling process, and the three fixes: call it from code PropertyDamage runs, wrap the code in `PropertyDamage.Log.capture/1`, or log through `PropertyDamage.Runtime.log/3`
+- **AND** inside `execute/3`, raised directly or as the exit reason of a call into a process that raised it, the error SHALL reach the report as an adapter error classified `:test_code_error`
+
+#### Scenario: A GenServer logs through the runtime
+- **WHEN** a process the adapter did not start through `Task` calls `PropertyDamage.Runtime.log(runtime, message, tags: tags)` with the runtime `execute/3` received
+- **THEN** the line SHALL be kept under that command's step
+- **AND** a line written after the command ended SHALL be dropped without raising
+
+#### Scenario: A timeout loses no line
+- **WHEN** `execute/3` logs and then hangs past the adapter's `timeout/1`
+- **THEN** every line written before the timeout killed the `Task` SHALL be kept under the timed-out step
+
+#### Scenario: Each attempt records its number
+- **WHEN** a settle or stutter retry executes a command several times
+- **THEN** each line SHALL record the attempt that wrote it (1 for the first execution, then one more for each settle retry; a stutter retry numbers from 2)
+- **AND** the step SHALL keep the lines the retry cap lets it keep (see "Log Lines Keep a Step's First and Last Attempts")
+
+#### Scenario: Lines leave the event log and the projections unchanged
+- **WHEN** an adapter logs during a run
+- **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces
+
+### Requirement: Log.capture/1 Scopes Code Outside a Run (DR-054)
+
+`PropertyDamage.Log.capture(fun)`, with `fun` a 0-arity function, SHALL run `fun` in the calling process under a scope of its own and return `{result, lines}`: `fun`'s result and the `PropertyDamage.Log.Line` structs it logged, in the order written, each with attempt 1. The same `$callers` lookup as for a run's scopes SHALL apply, so a `Task` (or a `Task` inside a `Task`) started inside `fun` logs into the capture. A nested `capture/1` SHALL collect into the innermost one and the outer one SHALL get none of its lines. A `capture/1` inside an execution point SHALL keep its lines out of the step. An error, throw or exit in `fun` SHALL propagate and the lines written before it SHALL be dropped. A call after the capture returned, from a process it left running, SHALL raise `PropertyDamage.Log.NoScopeError`. An argument that is not a 0-arity function SHALL raise `ArgumentError`.
+
+#### Scenario: The lines come back in order
+- **WHEN** `fun` logs a string with a tag and then a map
+- **THEN** `capture/1` SHALL return `fun`'s result and both lines in that order, each a `PropertyDamage.Log.Line` with attempt 1
+
+#### Scenario: A nested capture keeps its own lines
+- **WHEN** a `capture/1` runs inside another and logs
+- **THEN** the inner call SHALL return the line and the outer call SHALL not hold it
+
+#### Scenario: A late call finds no scope
+- **WHEN** a process started inside `fun` calls `PropertyDamage.log/2` after the capture returned
+- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`
+
+### Requirement: Log Lines Keep a Step's First and Last Attempts (DR-054)
+
+For each step, the run SHALL keep the log lines of the first execution of its command and of the last `keep_attempts` executions after it (default 3). The executions of a step SHALL be ordered as they ran: the command's own settle attempts, then its stutter retries; the cap SHALL key an execution by which execution wrote it, not by the line's `attempt` number alone, because settle and stutter numbers overlap. The `Runtime.Sink` SHALL apply the cap as lines arrive: when a line of a newer execution arrives with the last executions full, it SHALL drop the oldest of them and count the execution and its lines. A line that arrives for an execution the cap no longer keeps SHALL be counted and not kept, and the gap SHALL count each dropped execution once, whether a newer execution pushed it out or its first line arrived after the cap could no longer keep it. The cap SHALL drop whole executions and SHALL never cut a line or a value. At any moment the sink and the kept list SHALL hold the lines of at most `keep_attempts + 1` executions of a step. The stutter retries SHALL write into a sink that continues the step's kept lines. One `PropertyDamage.Log.Gap` (`attempts`, `lines`, `timestamp`) SHALL stand in the step's lines between the first execution's lines and the kept ones when the cap dropped at least one line; an execution that logged nothing SHALL leave no gap. Events SHALL never be dropped by the cap. The lines of `PropertyDamage.Log.capture/1`, of an adapter's `setup/1` and `teardown/1` and of every other point that has no attempts SHALL never be capped. `log: [keep_attempts: n]` of `PropertyDamage.run/1`, of `PropertyDamage.shrink_further/2` and of `PropertyDamage.Replay.start/2` and `run/2` SHALL change the number of last executions kept and SHALL be a positive integer; a zero, a negative, a non-integer or an unknown key under `log:` (`only:` and `except:` are the tag filters of the printed report and never change which lines a run keeps) SHALL raise `NimbleOptions.ValidationError`. The option SHALL reach every execution of the run that keeps lines (exploration, shrink attempts, the reproduction, a replay), on every target. A report SHALL NOT record the run's value, so `shrink_further/2` SHALL use its own option, default 3, and SHALL validate it as `run/1` does.
+
+#### Scenario: Five attempts omit the second
+- **WHEN** a settle runs five attempts that each log two lines, under the default
+- **THEN** the step SHALL keep attempt 1 and attempts 3 to 5 and hold a gap of 1 attempt and 2 lines between them
+
+#### Scenario: Three hundred attempts
+- **WHEN** a settle runs 300 attempts under the default
+- **THEN** the step SHALL keep attempt 1 and attempts 298 to 300, and the gap SHALL count 296 attempts
+- **AND** under `log: [keep_attempts: 5]` the step SHALL keep attempt 1 and attempts 296 to 300, and the gap SHALL count 294 attempts
+- **AND** `shrink_further(report, log: [keep_attempts: 5])` and a `Replay.start(report, log: [keep_attempts: 5])` session SHALL keep the same attempts of that step
+
+#### Scenario: The sink stays bounded
+- **WHEN** 1,000 attempts of several lines each are written into one sink
+- **THEN** after every write the sink SHALL hold the lines of at most four attempts (`keep_attempts + 1` with `log: [keep_attempts: n]`)
+
+#### Scenario: A late writer counts as an attempt
+- **WHEN** under `log: [keep_attempts: 1]` executions 1, 3 and 4 log, so execution 3 is pushed into the gap, and execution 2 then logs its first line
+- **THEN** the gap SHALL count 2 attempts and 2 lines
+
+#### Scenario: A stutter retry is an attempt of the step
+- **WHEN** a command settles in four attempts and a stutter retry follows, under `log: [keep_attempts: 2]`
+- **THEN** the step SHALL keep the first settle attempt, the last settle attempt and the retry, and the gap SHALL count the two settle attempts between
+
+#### Scenario: A line is never cut
+- **WHEN** the first attempt logged a value that prints over several lines and a gap follows it
+- **THEN** the value SHALL stay whole before the gap, and the line after the gap SHALL be the first line of a kept attempt

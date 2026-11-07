@@ -64,8 +64,7 @@ The framework SHALL compare the targets of a run only through the boundary obser
 
 - **WHEN** a boundary observation diverges at the convergence bound
 - **THEN** the `:diverged` failure (`PropertyDamage.Failure.Divergence`) SHALL carry the observation's `using:` term as written (`{PropertyDamage.Equivalence, :within, [0.01]}`), `nil` when the values were compared under `==`
-- **AND** the failure report SHALL print the term beside the two values
-- **AND** the persistence format version SHALL stay 15 while 15 is unreleased
+- **AND** the failure report SHALL print the term on its `Compared` line, under the two values (DR-056)
 
 #### Scenario: A raise is a check failure
 
@@ -113,6 +112,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 - **WHEN** no side is pending and the sides still differ when the bound expires
 - **THEN** the framework SHALL report a failure of kind `:diverged` carrying the key, the root, the reference value, the variant value and the mismatch
+- **AND** the failure SHALL carry `waited_ms`, the time the comparison waited at the boundary, and `within_ms`, the bound it waited against, and the report SHALL state both (DR-055, DR-056)
 
 #### Scenario: A probe root is re-read
 
@@ -144,7 +144,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 ### Requirement: Boundary Counters (DR-046)
 
-For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them. A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
+For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the JSON export of a report and the `:json` format of `Formatter.format/3` SHALL hold them, keyed by the failure-name string (`Projection.function`); the printed report SHALL show the wait of the failing observation only (DR-055). A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
 
 #### Scenario: Counters of a passing run
 
@@ -200,7 +200,8 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 #### Scenario: An absolute bound
 
 - **WHEN** a target's `p95` exceeds `max: {n, unit}`
-- **THEN** the report SHALL have kind `:latency_exceeded`, name the target, the statistic, the measured value and the limit
+- **THEN** the report SHALL have kind `:latency_exceeded`, name the target in `variant`, and carry the statistic, the measured value and the limit
+- **AND** the printed Failure section SHALL show the statistic, the bound, the limit and the measured value, and a `Target` field only in a run of several targets (DR-056)
 - **AND** this SHALL hold for the reference and for a run with one target
 
 #### Scenario: A ratio bound
@@ -261,7 +262,7 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 
 ### Requirement: Variant Isolation (DR-044)
 
-Each target of a multi-target run SHALL run as a variant: one target over the shared concrete sequence, in its own process, through the per-command engine (`PropertyDamage.Executor.Stepping`). A variant SHALL own its projections, event log, copy of the placeholder registry, event queue, injectors, mocks and pollers. Checks, settle, stutter and nemesis SHALL work in every variant as they do in `PropertyDamage.run/1`.
+Each target of a multi-target run SHALL run as a variant: one target over the shared concrete sequence, in its own process, through the per-command engine (`PropertyDamage.Executor.Stepping`). A variant SHALL own its projections, event log, copy of the placeholder registry, event queue, injectors, mocks and pollers. Checks, settle and stutter SHALL work in every variant as they do in `PropertyDamage.run/1`.
 
 #### Scenario: Variants do not share state
 
@@ -385,7 +386,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 
 ### Requirement: Failures Name the Variant (DR-044, DR-045, DR-046)
 
-A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `FailureReport.kind_of/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
+A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `Failure.report_kind/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
 
 An adapter that raises or answers `{:error, _}` at a root SHALL be an `:execution_failed` failure in every mode and SHALL NOT be an observation. A failure of the reference SHALL stop the run. A failure of a non-reference variant at a root SHALL retire that variant at once: the framework SHALL finalize its pollers and run its `:teardown` checks and `Adapter.teardown/1` before the next root starts anywhere, and the other variants SHALL continue and be compared among themselves. The run SHALL stop when no non-reference variant remains. The report SHALL carry as the primary failure the first failure in root order and then target order, and SHALL list the other failures found in the run in `other_failures` (each with the variant, the root and the failure). The primary failure SHALL be the only shrink target. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. A variant that is retired, and the reference when its failure ends the run, SHALL have the first check it recorded under `check_mode: :record` listed at that check's root, as a finished variant's is.
 
@@ -426,7 +427,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **WHEN** the reference fails at root `r` under `concurrency: :serial`
 - **THEN** no variant after it in target order SHALL execute root `r`
 
-### Requirement: Failure Report Is the Result (DR-045, DR-046)
+### Requirement: Failure Report Is the Result (DR-045, DR-046, DR-055, DR-056)
 
 `PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency:`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `latency` (the option as given), `metrics` (per target name, `nil` when `latency:` is off), `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A setup failure (the adapter's `setup/1`, a setup command, or an unresolved `external()`) SHALL return a `:setup_failed` report whose `failed_at_index` is `nil` (DR-048). The report SHALL also carry `setup_commands` and `teardown_commands`, and `stats` SHALL count setup and teardown commands separately from `total_commands`. There SHALL be no `Differential.Result`.
 
@@ -447,11 +448,19 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **AND** `FailureReport.reproduction_command/1` SHALL print `compare: [converge_within: ms]`, `stutter:`, `max_commands:` and a `check_mode:` other than `:halt`
 - **AND** `shrink_further/2`, `mix pd.reshrink` and `PropertyDamage.Replay` SHALL run the failure again under the report's `check_mode`
 
+#### Scenario: A comparison failure keeps the reference's side (DR-055, DR-056)
+
+- **WHEN** a run ends with a failure of kind `:diverged` or `:did_not_converge`
+- **THEN** the report SHALL carry `reference_trace`, the reference target's `RunTrace` of the reported run, and `reference_state_at_failure`, the reference's projection state at the failing boundary, both taken from the result the scheduler already holds, with no further capture
+- **AND** a report of any other kind SHALL leave both `nil`
+- **AND** the printed report SHALL list the reference and the failing variant side by side and compare their states at that boundary
+
 #### Scenario: Other failures are listed
 
 - **WHEN** a run ends with failures in more than one variant
 - **THEN** `report.other_failures` SHALL list each failure other than the primary with its variant, its root and its `%Failure{}`
 - **AND** the terminal, markdown and JSON formats SHALL show them
+- **AND** the terminal and markdown formats SHALL print one `Other failure` field per failure, naming its kind, name and target once and its root only when it has one; a comparison failure SHALL print its two values as an `Also differed` line does, and no `left:`/`right:` text (DR-056)
 
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 
@@ -570,6 +579,47 @@ The `:random` pick at a root SHALL be a pure function of the run seed, the targe
 - **WHEN** a `:random` target is renamed
 - **THEN** its entries SHALL differ from the previous name's at some root of a long enough run
 
+### Requirement: Describing an Expansion Entry with `doc:` (DR-058)
+
+An entry of an `expansions/0` function MAY be `{list, opts}`, where `opts` is a non-empty keyword list of `weight:`, a positive integer, and `doc:`, a string that describes the whole route the entry takes, each at most once. Any other option, a repeated option, an empty list, a non-positive or non-integer `weight:` and a `doc:` that is not a string SHALL be an `ArgumentError` that names the entry's key and root and names both `weight:` and `doc:`. A realized choice SHALL carry the key `doc`: the `doc:` of the entry the target ran at the root, read from that entry, so a choice never carries the doc of another entry when shrinking realizes it again or a recorded run is replayed. `doc` SHALL be nil when the entry has no `doc:` and when no listed entry ran at the root: a root that is not listed, a root forced to run as itself, and a root a target runs as itself with no entry. `doc:` on a leaf of an entry SHALL be ignored, with one warning per leaf that names the entry, the leaf and `doc:`. A report file saved before choices carried `doc` SHALL load with `doc` as nil on every choice.
+
+#### Scenario: A doc beside a weight
+- **GIVEN** an expansion function that returns `{[Authorize, Capture], weight: 3, doc: "authorize, then capture"}` for a root
+- **WHEN** a target realizes that entry at the root
+- **THEN** the target's choice at the root SHALL have `doc: "authorize, then capture"`
+- **AND** the entry SHALL count with weight 3 in the draw
+
+#### Scenario: An unknown option
+- **WHEN** an expansion function returns `{[Authorize], note: "x"}` for a root
+- **THEN** the framework SHALL raise an `ArgumentError` that names the entry key, the root, `weight:` and `doc:`
+
+#### Scenario: A doc that is not a string
+- **WHEN** an expansion function returns `{[Authorize], doc: :text}` for a root
+- **THEN** the framework SHALL raise an `ArgumentError` that names `weight:` and `doc:`
+
+#### Scenario: The doc follows the entry through shrinking
+- **GIVEN** a failing run in which a target ran entry 1 at a root, and shrinking drops an earlier root so the function's list at that root loses an entry ahead of it and index 1 now names another entry
+- **WHEN** the shrunk report is built and the target still runs index 1 at the root
+- **THEN** the target's choice at the root SHALL carry the `doc:` of the entry it realized there, not the doc of the entry it ran before shrinking
+
+#### Scenario: The doc on replay
+- **GIVEN** a failure report whose replay file records the commands each target ran
+- **WHEN** the replay runs
+- **THEN** each target's choice at every root SHALL carry the `doc:` of the entry the function lists at the recorded index
+
+#### Scenario: No entry ran
+- **WHEN** a target runs a root as itself because the model does not list the root, or because no listed entry could be realized
+- **THEN** its choice at the root SHALL have `doc: nil`
+
+#### Scenario: A doc on a leaf
+- **WHEN** an entry lists a leaf as `{Capture, doc: "x"}`
+- **THEN** the run SHALL ignore the option and warn once for that leaf
+
+#### Scenario: A report saved before the key existed
+- **GIVEN** a report file whose choices hold no `doc`
+- **WHEN** it is loaded
+- **THEN** every choice SHALL have `doc: nil`
+
 ### Requirement: Root Placeholder Aliasing (DR-049)
 
 In a target whose entry at a root is not the identity, every placeholder that the root's simulation minted SHALL be aliased, in that target's registry, to the placeholder of exactly one leaf whose simulated events hold the same event module at the same field path. Zero matches or several matches SHALL be a generation error that names the root, the entry key, the field and the candidate leaves (each as leaf index, module and event index), raised before any `Adapter.setup/1`. Several events of one leaf SHALL count as several matches. Resolution SHALL then happen at execution from the leaf's real events, as for any placeholder. A `:reference` target SHALL rebuild the reference's aliases in its own registry. In the target's simulated state after the root, each aliased leaf placeholder SHALL be replaced by its root placeholder, so a later root's `simulate/2`, an expansion function, and a leaf's `when:` and `overrides:` read the same ids as in a target that ran the root as itself; this SHALL hold when the target realizes the entry, when it replays recorded leaves and when it copies the reference's leaves.
@@ -620,7 +670,7 @@ The mutation testing subsystem SHALL inject faults into adapter responses by wra
 - **WHEN** `PropertyDamage.Mutation.run/1` is called with a model, a `targets:` list of exactly one entry (DR-043) and configuration
 - **THEN** the framework SHALL generate mutations using the configured operators
 - **AND** SHALL execute full command sequences against each mutated adapter
-- **AND** SHALL classify each mutation as killed (detected) or survived (undetected)
+- **AND** SHALL classify each mutation as killed (a check detected it), killed by error (the run failed with an `:execution_failed` report, for example because the mutation made the adapter return an error; DR-059), survived (undetected) or timed out
 
 #### Scenario: Mutating a model with expansions (DR-049)
 
@@ -632,7 +682,9 @@ The mutation testing subsystem SHALL inject faults into adapter responses by wra
 #### Scenario: Mutation score calculation
 
 - **WHEN** mutation testing completes
-- **THEN** the framework SHALL calculate the mutation score as `killed_mutations / total_mutations`
+- **THEN** the framework SHALL calculate the mutation score as `killed / (total - killed_by_error)`, or 0.0 when that denominator is 0, with timeouts left in the denominator (DR-059)
+- **AND** SHALL apply the same rule to the score of each `by_command` and `by_operator` row
+- **AND** SHALL report the `killed_by_error` count next to `killed` and `survived` and state that the score excludes it
 - **AND** SHALL compare against the configured `target_score` (default 0.80)
 
 ### Requirement: Mutation Operators
@@ -726,7 +778,7 @@ The framework SHALL support multiple output formats for mutation testing reports
 
 ### Requirement: Run Comparison (DR-035)
 
-The framework SHALL compare two or more full `RunTrace` records (DR-033) of the same plan to help a human or an LLM localize regressions and flakiness. All compared traces MUST share a plan identity: equal `plan_fingerprint` (DR-036) and equal model; raw sequence equality is explicitly NOT the oracle, since the fingerprint is the canonical identity and excludes derived registry state. The framework SHALL refuse or clearly flag a comparison of traces that do not share plan identity, treating an unequal fingerprint or a differing `plan-generated` command-field value (DR-034) as the incomparability signal. Trace capture SHALL be provided by `RunTrace.capture/1` (run one full, unshrunk plan, pass or fail); comparison SHALL operate over `PropertyDamage.RunComparison`, which consumes traces and never runs a SUT. Comparison SHALL NOT consume shrunk failure reports: a shrunk sequence is a different, smaller plan that cannot be aligned against a full run (a `plan_source: :shrunk` trace is comparable only against traces of the same shrunk plan). Run comparison SHALL be the framework's flakiness facility: `RunComparison.investigate/1` SHALL provide single-seed flakiness sugar (same plan, N captures, a fresh recorded `run_nonce` per capture), and `RunComparison.scan/1` SHALL provide the corpus counterpart: for each of a list of seeds it captures N traces, reduces them to a per-seed verdict (flaky?, outcome partition, distinct failure signatures), and SHALL keep memory bounded by discarding a seed's traces before capturing the next, retaining the full comparison only for flaky seeds. A seed SHALL be judged flaky when its runs disagree on pass/fail or its failing runs carry distinct failure signatures. Rows SHALL be commands and their events (two levels; SUT-call / request-body rows are out of scope for this requirement); event-log entries carrying no command index (injector, telemetry) belong to no step and are excluded from comparison in this version (a stated limit), while nemesis and injected events attributed to commands (DR-030) do participate. Columns SHALL be runs, grouped by outcome (passing versus failing) but otherwise peers, so any run may be compared against any other. In addition to command and event rows, the comparison SHALL include per-command projection-**state** rows (DR-040): each projection's canonical (fold-order-independent) per-step state SHALL be flattened into leaf-path fields and classified by the same discriminative machinery, so a regression or flake visible only in derived state is localized and ranked. Because canonical state ignores async fold timing, an async fold-order difference between two runs SHALL NOT be able to manifest as a state divergence. A projection whose derived state varies WITHIN an outcome group (same plan, same outcome, different state) SHALL be surfaced as a possible non-pure-projection warning, distinct from the comparability guard.
+The framework SHALL compare two or more full `RunTrace` records (DR-033) of the same plan to help a human or an LLM localize regressions and flakiness. All compared traces MUST share a plan identity: equal `plan_fingerprint` (DR-036) and equal model; raw sequence equality is explicitly NOT the oracle, since the fingerprint is the canonical identity and excludes derived registry state. The framework SHALL refuse or clearly flag a comparison of traces that do not share plan identity, treating an unequal fingerprint or a differing `plan-generated` command-field value (DR-034) as the incomparability signal. Trace capture SHALL be provided by `RunTrace.Capture.capture/1` (run one full, unshrunk plan, pass or fail); comparison SHALL operate over `PropertyDamage.RunComparison`, which consumes traces and never runs a SUT. Comparison SHALL NOT consume shrunk failure reports: a shrunk sequence is a different, smaller plan that cannot be aligned against a full run (a `plan_source: :shrunk` trace is comparable only against traces of the same shrunk plan). Run comparison SHALL be the framework's flakiness facility: `RunComparison.investigate/1` SHALL provide single-seed flakiness sugar (same plan, N captures, a fresh recorded `run_nonce` per capture), and `RunComparison.scan/1` SHALL provide the corpus counterpart: for each of a list of seeds it captures N traces, reduces them to a per-seed verdict (flaky?, outcome partition, distinct failure signatures), and SHALL keep memory bounded by discarding a seed's traces before capturing the next, retaining the full comparison only for flaky seeds. A seed SHALL be judged flaky when its runs disagree on pass/fail or its failing runs carry distinct failure signatures. Rows SHALL be commands and their events (two levels; SUT-call / request-body rows are out of scope for this requirement); event-log entries carrying no command index (injector, telemetry) belong to no step and are excluded from comparison in this version (a stated limit), while injected events attributed to commands (DR-030) do participate. Columns SHALL be runs, grouped by outcome (passing versus failing) but otherwise peers, so any run may be compared against any other. In addition to command and event rows, the comparison SHALL include per-command projection-**state** rows (DR-040): each projection's canonical (fold-order-independent) per-step state SHALL be flattened into leaf-path fields and classified by the same discriminative machinery, so a regression or flake visible only in derived state is localized and ranked. Because canonical state ignores async fold timing, an async fold-order difference between two runs SHALL NOT be able to manifest as a state divergence. A projection whose derived state varies WITHIN an outcome group (same plan, same outcome, different state) SHALL be surfaced as a possible non-pure-projection warning, distinct from the comparability guard.
 
 #### Scenario: Comparability guard
 

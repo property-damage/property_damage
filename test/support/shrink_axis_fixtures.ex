@@ -223,7 +223,7 @@ defmodule PropertyDamage.Test.ShrinkAxis do
   defmodule PartsModel do
     @moduledoc false
     # Add roots only; the function does not list the root alone.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ShrinkAxis, as: A
 
@@ -243,7 +243,7 @@ defmodule PropertyDamage.Test.ShrinkAxis do
     @moduledoc false
     # An Open mints an account id; every Add credits the last account opened,
     # so the roots and their leaves hold a placeholder.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ShrinkAxis, as: A
 
@@ -267,7 +267,7 @@ defmodule PropertyDamage.Test.ShrinkAxis do
   defmodule StateModel do
     @moduledoc false
     # A Take offers its Pieces only once a Part ran in the target's own state.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ShrinkAxis, as: A
 
@@ -394,7 +394,7 @@ defmodule PropertyDamage.Test.ShrinkAxis do
 
     defmodule Model do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [G.Fork, G.Probe]

@@ -6,6 +6,7 @@ eventual consistency, including:
 - **Probe commands** - Query until data appears
 - **Async commands** - Create resource and poll until settled
 - **Mid-execution injection** - Emit events as they happen during polling
+- **Built-in resource poller** - Let `runtime.start_poller` poll in the background
 - **Adapter.Injector** - Handle webhook/callback events
 
 Three different waits appear in this guide, with three different bounds. They
@@ -90,6 +91,9 @@ end
 defmodule Warehouse.Adapter do
   use PropertyDamage.Adapter
 
+  # PropertyDamage.log/2 is a macro: it records the file and line of the call.
+  require PropertyDamage
+
   alias Warehouse.Commands.{ShipWidget, AwaitWidget}
   alias Warehouse.Events.{WidgetShipped, WidgetArrived}
 
@@ -116,6 +120,9 @@ defmodule Warehouse.Adapter do
   def execute(%AwaitWidget{sku: sku}, %{store: store}, _runtime) do
     ready_at = Agent.get(store, &Map.get(&1, sku))
     now = System.monotonic_time(:millisecond)
+
+    # One line per settle attempt: the report shows what each attempt saw.
+    PropertyDamage.log("AwaitWidget #{sku}: ready_at #{inspect(ready_at)}")
 
     cond do
       is_nil(ready_at) -> {:retry, :unknown_sku}
@@ -144,7 +151,7 @@ defmodule Warehouse.State do
 
   def apply(state, _), do: state
 
-  # Safety: a widget can only arrive once the probe has settled, and it can only
+  # safety: a widget can only arrive once the probe has settled, and it can only
   # arrive if it was shipped. This fires once per settled AwaitWidget probe.
   @check every: Warehouse.Events.WidgetArrived
   def assert_arrivals_were_shipped(state, %WidgetArrived{sku: sku}) do
@@ -157,8 +164,8 @@ defmodule Warehouse.State do
 end
 
 defmodule Warehouse.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Warehouse.Commands.{ShipWidget, AwaitWidget}
   alias Warehouse.Events.{WidgetShipped, WidgetArrived}
@@ -206,16 +213,22 @@ IO.inspect(result, label: "run result")
 ```
 
 Running it prints a passing result whose `check_fires` count is the number of
-`AwaitWidget` probes that actually settled (your exact count varies with the seed
-and command mix):
+`AwaitWidget` probes that actually settled (abridged: the result can carry more
+keys, such as `:coverage` or `:metrics` when you ask for them; your exact count
+varies with the seed and command mix):
 
 ```
 run result: {:ok,
  %{
    seed: 1,
-   check_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
+   targets: [%{index: 0, name: "Adapter"}],
    runs: 20,
-   total_commands: 120
+   setup_commands: 0,
+   teardown_commands: 0,
+   total_commands: 120,
+   check_fires: %{{Warehouse.State, :arrivals_were_shipped} => 58},
+   compare_counts: %{},
+   expansion_counts: %{"Adapter" => %{}}
  }}
 ```
 
@@ -242,7 +255,31 @@ Commands declare their behavior via the `:execution` key of `command_spec/1`:
 ### The `settle:` map
 
 The per-command `settle:` map tunes the settle loop of a `:probe` or `:async`
-command. Every key is optional and a missing key takes its default:
+command. The map merges per key over the framework defaults, so a key you omit
+keeps its default. `settle: %{timeout_ms: 1_000}` waits up to one second and
+keeps the default interval and backoff. A `settle:` set at call time in the
+model's command list merges the same way over one set in `use`.
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule MyApp.CheckStatus do
+  use PropertyDamage.Command, execution: :probe, settle: %{timeout_ms: 1_000}
+
+  defstruct [:id]
+
+  @impl true
+  def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 1})
+end
+
+%{timeout_ms: 1_000, interval_ms: 300, backoff: :linear} =
+  MyApp.CheckStatus.command_spec([]).settle
+```
+
+The full map spells out every key:
+
+```elixir
+settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
+```
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -256,6 +293,15 @@ passes. A timeout fails the run with a `:settle_timeout` failure holding the las
 retry reason. A `:sync` command that returns `{:retry, reason}` fails with
 `:retry_from_sync_command`, because only `:probe` and `:async` commands have a
 settle loop.
+
+Each settle attempt is a log scope: a `PropertyDamage.log/2` call in
+`execute/3` lands under the attempt that wrote it, as in the adapter of the
+[runnable example](#a-runnable-probe-example). A command that retries hundreds
+of times would flood the report, so the report keeps the lines of the first
+attempt and of the last three, and prints `... N attempts omitted (M lines)` where it
+dropped the rest, with `M` the number of log lines in the dropped attempts. `log: [keep_attempts: n]` on `PropertyDamage.run/1` keeps the
+last `n` attempts instead of three. An attempt that logs nothing leaves no
+gap. See [Log Lines in the Failure Report](log_lines.md#retried-commands).
 
 ## Probe Commands
 
@@ -271,8 +317,9 @@ Use probes for **read-only queries** that may need to wait for eventual consiste
 
 ```elixir
 defmodule MyTest.Commands.GetOrder do
-  # Probe semantics enables settle/retry logic; read-only commands are
-  # prioritized for removal during shrinking; settle tunes retry behavior.
+  # Probe semantics enables settle/retry logic; `shrink: :prefer_remove`
+  # makes the shrinker try removing this command first; settle tunes retry
+  # behavior.
   use PropertyDamage.Command,
     execution: :probe,
     shrink: :prefer_remove,
@@ -373,6 +420,13 @@ def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
 end
 ```
 
+Keeping the operation id in the process dictionary does not fix this. Each
+settle attempt runs `execute/3` in a fresh task, so a process-dictionary value
+dies with its attempt and the retry repeats the create. State that must survive
+between attempts lives in the adapter context (an `Agent` or ETS table started
+in `setup/1`). Or avoid the retry altogether: poll inside `execute/3`, call
+`runtime.inject`, or use `runtime.start_poller` (all below).
+
 ### Recommended Pattern: Internal Polling
 
 Handle the entire create-and-poll flow inside `execute/3`:
@@ -406,6 +460,15 @@ defmodule MyTest.Events.AuthorizationCreated do
   # authorization_id is server-generated
   defstruct [:account_id, :amount, :currency, :status, authorization_id: external()]
 end
+
+# The settled outcomes the adapters below return once the authorization resolves
+defmodule MyTest.Events.AuthorizationApproved do
+  defstruct [:authorization_id, :amount]
+end
+
+defmodule MyTest.Events.AuthorizationDeclined do
+  defstruct [:authorization_id, :reason]
+end
 ```
 
 The Model wires this command with account selection:
@@ -422,11 +485,21 @@ end
 
 ```elixir
 defmodule MyTest.HTTPAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
+
+  alias MyTest.Commands.CreateAuthorization
+  alias MyTest.Events.{AuthorizationCreated, AuthorizationApproved, AuthorizationDeclined}
 
   @poll_timeout_ms 10_000
   @poll_interval_ms 200
 
+  @impl true
+  def setup(config), do: {:ok, %{client: Req.new(base_url: config[:base_url])}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
   def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
     payload = %{
       account_id: cmd.account_id,
@@ -588,73 +661,52 @@ end
 - Event timeline accuracy matters for debugging/visualization
 - You want to emit `Created` event immediately, then `Settled` event after polling
 
-### Alternative: Process Dictionary for Retry State
+### Alternative: Built-in Resource Poller
 
-If you prefer using `{:retry, reason}` with the Settle module, track in-flight
-operations using the process dictionary:
+To keep `execute/3` short and still see the later events, start a background
+poller with `runtime.start_poller`. The command returns its first event at
+once. The poller injects the later events between commands, and the executor
+awaits every poller at the end of the sequence:
 
 ```elixir
-def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
-  # Use command hash as key to track this specific operation
-  cmd_key = :erlang.phash2({cmd.account_id, cmd.amount, cmd.currency})
+def execute(%CreateAuthorization{} = cmd, %{client: client}, runtime) do
+  {:ok, %{body: %{"id" => id}}} = Req.post(client, url: "/authorizations", json: %{amount: cmd.amount})
 
-  case Process.get({:pending_auth, cmd_key}) do
-    nil ->
-      # First call - create the authorization
-      create_authorization(cmd, cmd_key, ctx)
+  runtime.start_poller.(
+    poll_fn: fn -> Req.get(client, url: "/authorizations/#{id}") end,
+    interval_ms: 200,
+    timeout_ms: 10_000,
+    handler: fn
+      {:ok, %{body: %{"status" => "approved"}}} -> {:done, %AuthorizationApproved{authorization_id: id}}
+      {:ok, %{body: %{"status" => "declined"}}} -> {:done, %AuthorizationDeclined{authorization_id: id}}
+      _ -> :continue
+    end
+  )
 
-    authorization_id ->
-      # Retry call - just poll
-      poll_authorization(authorization_id, cmd, cmd_key, ctx)
-  end
-end
-
-defp create_authorization(cmd, cmd_key, ctx) do
-  case Req.post(ctx.client, url: "/authorizations", json: payload(cmd)) do
-    {:ok, %{body: %{"id" => id, "status" => "processing"}}} ->
-      # Store ID for subsequent retries
-      Process.put({:pending_auth, cmd_key}, id)
-      {:retry, :processing}
-
-    {:ok, %{body: %{"id" => id, "status" => "approved"}}} ->
-      {:ok, approved_events(id, cmd)}
-
-    {:ok, %{body: %{"id" => id, "status" => "declined", "reason" => r}}} ->
-      {:ok, declined_events(id, cmd, r)}
-  end
-end
-
-defp poll_authorization(authorization_id, cmd, cmd_key, ctx) do
-  case Req.get(ctx.client, url: "/authorizations/#{authorization_id}") do
-    {:ok, %{body: %{"status" => "approved"}}} ->
-      Process.delete({:pending_auth, cmd_key})
-      {:ok, approved_events(authorization_id, cmd)}
-
-    {:ok, %{body: %{"status" => "declined", "reason" => r}}} ->
-      Process.delete({:pending_auth, cmd_key})
-      {:ok, declined_events(authorization_id, cmd, r)}
-
-    {:ok, %{body: %{"status" => "processing"}}} ->
-      {:retry, :still_processing}
-  end
+  {:ok, [%AuthorizationCreated{authorization_id: id}]}
 end
 ```
+
+See the [Resource Polling guide](resource_polling.md) for the handler return
+values, timeouts and error handling.
 
 ### Async Shrinking Protection
 
-The `:async` semantics provides **shrinking protection**. When a test fails, the
-shrinker tries to minimize the command sequence. Async commands that create
-refs used by downstream commands are protected from removal:
+An `:async` command gets **shrinking protection**. When a test fails, the
+shrinker tries to minimize the command sequence. It skips removing an async
+command when a later command uses a value the async command produced through
+`external()`, because the later command would lose its input and the candidate
+would not reproduce the failure:
 
 ```
 Sequence:
-1. CreateAuthorization  → creates auth_ref     ← Protected (ref used below)
-2. GetAuthorization     → uses auth_ref        ← Can be removed (read-only)
-3. CaptureAuthorization → uses auth_ref        ← Uses the ref
+1. CreateAuthorization  → mints authorization_id   ← Protected (used below)
+2. GetAuthorization     → uses authorization_id    ← Can be removed (read-only)
+3. CaptureAuthorization → uses authorization_id    ← Needs the value
 
 During shrinking:
 - GetAuthorization may be removed (probe, read-only)
-- CreateAuthorization is kept because CaptureAuthorization needs its ref
+- CreateAuthorization is kept because CaptureAuthorization needs its value
 ```
 
 ## Adapter.Injector (Webhook Events)
@@ -682,18 +734,23 @@ defmodule MyTest.PaymentWebhookAdapter do
   @impl true
   def setup(config) do
     # Start a mock webhook server
-    {:ok, server} = Plug.Cowboy.http(
-      WebhookHandler,
+    # `Plug.Cowboy.shutdown/1` takes the listener ref, not the pid that
+    # `http/3` returns. Name the ref here so `teardown/1` can stop the listener.
+    ref = MyTest.WebhookHandler.HTTP
+
+    {:ok, _pid} = Plug.Cowboy.http(
+      MyTest.WebhookHandler,
       [event_queue: config.event_queue, adapter: __MODULE__],
+      ref: ref,
       port: config[:webhook_port] || 4001
     )
 
-    {:ok, %{server: server, event_queue: config.event_queue}}
+    {:ok, %{ref: ref, event_queue: config.event_queue}}
   end
 
   @impl true
-  def teardown(%{server: server}) do
-    Plug.Cowboy.shutdown(server)
+  def teardown(%{ref: ref}) do
+    Plug.Cowboy.shutdown(ref)
     :ok
   end
 
@@ -716,15 +773,18 @@ end
 
 ```elixir
 defmodule MyTest.WebhookHandler do
-  use Plug.Router
+  # Cowboy passes the options given to `Plug.Cowboy.http/3` to `init/1`,
+  # and `call/2` receives them. `copy_opts_to_assign` stores them in
+  # `conn.assigns.webhook_opts` so each route can read them.
+  use Plug.Router, copy_opts_to_assign: :webhook_opts
 
   plug Plug.Parsers, parsers: [:json], json_decoder: Jason
   plug :match
   plug :dispatch
 
   post "/webhooks/payment" do
-    event_queue = conn.private[:event_queue]
-    adapter = conn.private[:adapter]
+    event_queue = conn.assigns.webhook_opts[:event_queue]
+    adapter = conn.assigns.webhook_opts[:adapter]
 
     case adapter.to_event(conn.body_params) do
       {:ok, event} ->
@@ -812,12 +872,16 @@ event so the simulated projection state matches a live, correlated run (the
 
 ### Model Configuration
 
-Declare which events can be injected in your model:
+A model may declare which events can be injected. The callback is optional, and
+a model without it still folds injected events into its projections. Its only
+consumer is the validation check: every event listed in `injectable_events/0`
+must appear in the `@emits` of at least one injector, or validation fails.
 
 ```elixir
 defmodule MyTest.Model do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
+  @impl true
   def injectable_events do
     [PaymentApproved, PaymentDeclined]
   end
@@ -828,13 +892,28 @@ end
 
 ## Polling Adapter.Injector (Advanced)
 
-For systems where you must **actively poll** for status changes but want events
-processed through the injection system (e.g., between commands rather than
-blocking a single command), you can create a polling Adapter.Injector:
+For most polling needs, call `runtime.start_poller` from the main adapter's
+`execute/3` instead. The framework starts a `PropertyDamage.ResourcePoller`
+for you, routes its events through the injection system between commands, and
+awaits it at the end of the sequence. See the
+[Resource Polling guide](resource_polling.md).
+
+Write a polling Adapter.Injector by hand when one long-lived process must watch
+many resources across commands, or when the poll loop needs state that a
+`poll_fn` and `handler` pair cannot hold. The injector starts the poller in
+`setup/1`, and the poller pushes events to the shared `EventQueue` (e.g.,
+between commands rather than blocking a single command).
+
+The main adapter cannot reach the injector's context, so it cannot read a poller
+pid from it. Register the poller under a name instead. Any process on the node
+then reaches it by that name:
 
 ```elixir
 defmodule MyTest.AuthorizationPollerAdapter do
   use PropertyDamage.Adapter.Injector
+
+  alias MyTest.AuthorizationPoller
+  alias MyTest.Events.{AuthorizationApproved, AuthorizationDeclined}
 
   @emits [AuthorizationApproved, AuthorizationDeclined]
 
@@ -860,20 +939,18 @@ defmodule MyTest.AuthorizationPollerAdapter do
   def to_event(%AuthorizationApproved{} = event), do: {:ok, event}
   def to_event(%AuthorizationDeclined{} = event), do: {:ok, event}
   def to_event(_), do: :skip
-
-  # Called by main adapter after creating an authorization
-  def watch(poller, authorization_id) do
-    AuthorizationPoller.watch(poller, authorization_id)
-  end
 end
 
 defmodule MyTest.AuthorizationPoller do
   use GenServer
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+  alias MyTest.Events.{AuthorizationApproved, AuthorizationDeclined}
 
-  def watch(poller, authorization_id) do
-    GenServer.cast(poller, {:watch, authorization_id})
+  # The name lets the main adapter call watch/1 without holding a pid
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+
+  def watch(authorization_id) do
+    GenServer.cast(__MODULE__, {:watch, authorization_id})
   end
 
   @impl true
@@ -934,6 +1011,19 @@ defmodule MyTest.AuthorizationPoller do
 end
 ```
 
+The main adapter hands each new authorization to the poller by name:
+
+```elixir
+def execute(%CreateAuthorization{} = cmd, %{base_url: base_url}, _runtime) do
+  {:ok, %{body: %{"id" => id}}} = Req.post("#{base_url}/authorizations", json: %{amount: cmd.amount})
+  MyTest.AuthorizationPoller.watch(id)
+  {:ok, [%AuthorizationCreated{authorization_id: id}]}
+end
+```
+
+A registered name allows one poller per node, so several targets that each list
+this injector would collide on the name. In that case use `runtime.start_poller`.
+
 ## Writing an `@eventually` predicate
 
 The function an `@eventually` returns is polled on the projection state, and
@@ -973,15 +1063,15 @@ instead of waiting out the `timeout:` to report that it never became
 became true, and nothing else: with a total predicate, nothing else can have
 happened.
 
-## Safety vs Liveness: `@check at: :teardown`
+## Safety vs liveness: `@check at: :teardown`
 
 Verifying an eventually-consistent effect has two halves, and they need
 different tools:
 
-- **Liveness** ("the effect *eventually* happens") is what `@eventually`
+- **liveness** ("the effect *eventually* happens") is what `@eventually`
   expresses: its poller resolves the instant its predicate is first true, then
   stops. This is a reachability check.
-- **Safety** ("the effect *never* happens too much": at most once, never
+- **safety** ("the effect *never* happens too much": at most once, never
   exceeds N) is the dual. A `@eventually` predicate *cannot* express it: a value
   can pass *through* the correct number on its way to overshooting, and the
   poller resolves on that transient pass and stops watching. Its natural
@@ -1009,11 +1099,11 @@ defmodule JobProjection do
   end
   def apply(s, _), do: s
 
-  # Liveness: the effect eventually reaches the expected count.
+  # liveness: the effect eventually reaches the expected count.
   @eventually after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
   def eventually_applied(_s, %Enqueue{}), do: fn s -> s.applied >= s.expected end
 
-  # Safety: it never over-applies. Evaluated on the settled state.
+  # safety: it never over-applies. Evaluated on the settled state.
   @check at: :teardown
   def assert_effectively_once(state, _phase) do
     state.max_applied <= state.expected or
@@ -1039,6 +1129,127 @@ exactly-once. Detection is also observation-granular: a transient overshoot that
 *no event ever observes* (it exists only between polls and self-heals) is
 invisible to the framework. The settled checkpoint covers every *persistent*
 overshoot fully.
+
+### Recipe: nothing left pending
+
+A run can end with an operation still unfinished: the system accepted it and
+never completed it. `@eventually` and `@check at: :teardown` cover different
+halves of that case, and the recipe uses both:
+
+- `@eventually` per operation bounds the wait for one step the operation must
+  reach, such as "the job starts". It names the operation whose step never
+  happened, but a window that times out ends the run before the teardown
+  checkpoint.
+- A `@check at: :teardown` on your own projection judges the settled state. It
+  fails when any operation is not in its final status, including an operation
+  that no `@eventually` covers or whose `@eventually` was satisfied by an
+  earlier step.
+
+The projection tracks every operation by id and keeps its last status, so the
+teardown check reads the final folded state (see the accumulator contract
+above). Here `JobStarted` satisfies the `@eventually`, and only `JobCompleted`
+makes a job final:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Jobs.Events do
+  defmodule JobSubmitted, do: defstruct([:id])
+  defmodule JobStarted, do: defstruct([:id])
+  defmodule JobCompleted, do: defstruct([:id])
+end
+
+defmodule Jobs.Commands.SubmitJob do
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:id]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{id: StreamData.integer(1..1_000)}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Jobs.Adapter do
+  use PropertyDamage.Adapter
+
+  alias Jobs.Commands.SubmitJob
+  alias Jobs.Events.{JobSubmitted, JobStarted, JobCompleted}
+
+  @impl true
+  def setup(_config), do: {:ok, %{}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
+  def execute(%SubmitJob{id: id}, _ctx, _runtime) do
+    {:ok, [%JobSubmitted{id: id}, %JobStarted{id: id}, %JobCompleted{id: id}]}
+  end
+end
+
+defmodule Jobs.Projection do
+  use PropertyDamage.Model.Projection
+
+  alias Jobs.Events.{JobSubmitted, JobStarted, JobCompleted}
+
+  @impl true
+  def init, do: %{}
+
+  @impl true
+  def apply(jobs, %JobSubmitted{id: id}), do: Map.put(jobs, id, :submitted)
+  def apply(jobs, %JobStarted{id: id}), do: Map.put(jobs, id, :started)
+  def apply(jobs, %JobCompleted{id: id}), do: Map.put(jobs, id, :completed)
+  def apply(jobs, _event), do: jobs
+
+  # Each job is picked up within a bound.
+  @eventually after: JobSubmitted, timeout: {2, :seconds}, interval: {50, :milliseconds}
+  def job_started(_jobs, %JobSubmitted{id: id}) do
+    fn jobs -> Map.get(jobs, id) in [:started, :completed] end
+  end
+
+  # Nothing is left pending when the run settles.
+  @check at: :teardown
+  def nothing_left_pending(jobs, _phase) do
+    pending = for {id, status} <- Enum.sort(jobs), status != :completed, do: "job-#{id}"
+    pending == [] or PropertyDamage.fail!("jobs left pending", pending: pending)
+  end
+end
+
+defmodule Jobs.Model do
+  use PropertyDamage.Model
+
+  @impl true
+  def commands, do: [{Jobs.Commands.SubmitJob, weight: 1}]
+
+  @impl true
+  def command_sequence_projection, do: Jobs.Projection
+
+  @impl true
+  def check_projections, do: [Jobs.Projection]
+end
+
+{:ok, stats} =
+  PropertyDamage.run(
+    model: Jobs.Model,
+    targets: [Jobs.Adapter],
+    max_commands: 4,
+    max_runs: 5,
+    seed: 1
+  )
+
+IO.inspect(stats.check_fires, label: "check fires")
+```
+
+The adapter here completes every job, so the run passes and each check fires:
+`job_started` once per submitted job and `nothing_left_pending` once per run.
+Swap in an adapter that returns `JobSubmitted` and `JobStarted` for some job
+but never `JobCompleted`, and the `@eventually` is still satisfied, so the run
+fails at the teardown checkpoint with a failure named `nothing_left_pending`
+and the message `jobs left pending: %{pending: ["job-62"]}`. A job that never
+even starts fails earlier, as a `:poll_timeout` on `job_started`.
 
 ## Settle, Convergence and `@eventually`
 
@@ -1093,12 +1304,13 @@ slow and not wrong: raise the matching bound before you hunt for a bug.
 | **Probe** | Read-only query waiting for data | Return `{:retry, reason}` from adapter |
 | **Async (internal poll)** | Create + wait for completion | Poll inside `execute/3` |
 | **Async (runtime.inject)** | Create + wait, need accurate event timing | Call `runtime.inject.(event)` mid-execution |
-| **Async (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
 | **Adapter.Injector** | External system pushes webhooks | Implement `to_event/1` callback |
-| **Polling Adapter.Injector** | Poll but inject events between commands | Background GenServer + EventQueue |
+| **Resource poller** | Create + wait, polling in the background | Call `runtime.start_poller.(opts)` |
+| **Polling Adapter.Injector** | One long-lived watcher process for many resources | Background GenServer + EventQueue |
 
 Choose the simplest pattern that fits your use case:
 
 - **Most async create operations**: Use **internal polling** (simplest)
 - **Need intermediate state visibility**: Use **runtime.inject** for accurate event timing
+- **Polling without blocking the command**: Use **runtime.start_poller**, and reach for a hand-rolled polling Adapter.Injector only when one process must watch many resources
 - **External webhooks/callbacks**: Use **Adapter.Injector**

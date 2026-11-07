@@ -9,7 +9,6 @@ defmodule PropertyDamage.Integration do
   - Database reset between runs
   - Report generation (terminal, markdown, JUnit XML)
   - Bug hunting mode (run until N unique bugs found)
-  - Chaos testing with Toxiproxy
 
   ## Usage
 
@@ -52,7 +51,9 @@ defmodule PropertyDamage.Integration do
         }
       )
 
-  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`
+  Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`. The `:json`
+  format writes the run counts and, for each failure, its seed, check and error
+  message.
   """
 
   alias PropertyDamage.FailureIntelligence
@@ -155,7 +156,10 @@ defmodule PropertyDamage.Integration do
     `{AdapterModule, config:, injectors:, mocks:}`; see `PropertyDamage.Target`
   - `:stop_after` - Stop after finding this many unique bugs (default: 10)
   - `:max_runs` - Maximum runs before giving up (default: :unlimited)
+  - `:max_commands` - Max commands per run (default: 50)
   - `:save_to` - Directory to save discovered bugs (optional)
+  - `:health_check` - Health check configuration, checked before the hunt as
+    `run/1` does (optional)
   - `:verbose` - Print progress (default: true)
 
   ## Returns
@@ -169,6 +173,7 @@ defmodule PropertyDamage.Integration do
     [target] = Keyword.fetch!(opts, :targets)
     stop_after = Keyword.get(opts, :stop_after, 10)
     max_runs = Keyword.get(opts, :max_runs, :unlimited)
+    max_commands = Keyword.get(opts, :max_commands, 50)
     save_to = Keyword.get(opts, :save_to)
     verbose = Keyword.get(opts, :verbose, true)
 
@@ -183,11 +188,17 @@ defmodule PropertyDamage.Integration do
       IO.puts("")
     end
 
+    case Keyword.get(opts, :health_check) do
+      nil -> :ok
+      health_opts -> perform_health_check(health_opts, verbose)
+    end
+
     hunt_loop(
       model: model,
       target: target,
       stop_after: stop_after,
       max_runs: max_runs,
+      max_commands: max_commands,
       save_to: save_to,
       verbose: verbose,
       bugs: [],
@@ -230,12 +241,14 @@ defmodule PropertyDamage.Integration do
   - `:terminal` - Print to console
   - `:markdown` - Generate markdown file
   - `:junit` - Generate JUnit XML for CI
-  - `:json` - Generate JSON report
+  - `:json` - Generate a JSON file with the run counts and, per failure, its
+    seed, check and error message
 
   ## Options
 
   - `:format` - Report format (required)
-  - `:path` - Output file path (required for file formats)
+  - `:path` - Output file path (required for file formats); its directory is
+    created when missing
   """
   @spec generate_report(map(), keyword() | map()) :: :ok
   def generate_report(result, opts) when is_list(opts) do
@@ -248,25 +261,30 @@ defmodule PropertyDamage.Integration do
 
   def generate_report(result, %{format: :markdown, path: path}) do
     content = format_markdown_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("Report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :junit, path: path}) do
     content = format_junit_report(result)
-    File.write!(path, content)
+    write_report!(path, content)
     IO.puts("JUnit report saved to: #{path}")
   end
 
   def generate_report(result, %{format: :json, path: path}) do
-    content = Jason.encode!(result, pretty: true)
-    File.write!(path, content)
+    content = result |> json_report() |> Jason.encode!(pretty: true)
+    write_report!(path, content)
     IO.puts("JSON report saved to: #{path}")
   end
 
   # ============================================================================
   # Private Functions
   # ============================================================================
+
+  defp write_report!(path, content) do
+    path |> Path.dirname() |> File.mkdir_p!()
+    File.write!(path, content)
+  end
 
   defp print_header(model, %{adapter: adapter, config: config}, max_runs) do
     IO.puts("\n")
@@ -465,7 +483,7 @@ defmodule PropertyDamage.Integration do
     path = Path.join(dir, filename)
 
     content = Jason.encode!(sanitize_for_json(failure), pretty: true)
-    File.write!(path, content)
+    write_report!(path, content)
   end
 
   defp sanitize_for_json(data) when is_map(data) do
@@ -559,7 +577,7 @@ defmodule PropertyDamage.Integration do
           PropertyDamage.run(
             model: opts[:model],
             targets: [PropertyDamage.Target.to_entry(opts[:target])],
-            max_commands: 50,
+            max_commands: opts[:max_commands],
             max_runs: 1
           )
 
@@ -624,6 +642,11 @@ defmodule PropertyDamage.Integration do
     end
   end
 
+  defp pass_rate(%{total_runs: 0}), do: "n/a"
+
+  defp pass_rate(%{passed: passed, total_runs: total}),
+    do: "#{Float.round(passed / total * 100, 1)}%"
+
   defp print_terminal_report(result) do
     IO.puts("")
     IO.puts(String.duplicate("═", 65))
@@ -638,7 +661,7 @@ defmodule PropertyDamage.Integration do
     IO.puts("  Total runs: #{result.total_runs}")
     IO.puts("  Passed:     #{result.passed}")
     IO.puts("  Failed:     #{result.failed}")
-    IO.puts("  Pass rate:  #{Float.round(result.passed / result.total_runs * 100, 1)}%")
+    IO.puts("  Pass rate:  #{pass_rate(result)}")
 
     if result.failed > 0 do
       IO.puts("")
@@ -675,7 +698,7 @@ defmodule PropertyDamage.Integration do
     | Total Runs | #{result.total_runs} |
     | Passed | #{result.passed} |
     | Failed | #{result.failed} |
-    | Pass Rate | #{Float.round(result.passed / result.total_runs * 100, 1)}% |
+    | Pass Rate | #{pass_rate(result)} |
 
     #{format_failures_markdown(result.failures)}
 
@@ -708,6 +731,29 @@ defmodule PropertyDamage.Integration do
     """
   end
 
+  # The JSON report holds the data the Markdown report shows, as plain values:
+  # a failure report is a struct with no JSON encoding.
+  defp json_report(result) do
+    %{
+      success: result.success,
+      model: inspect(result.model),
+      adapter: inspect(result.adapter),
+      duration_ms: result.duration_ms,
+      total_runs: result.total_runs,
+      passed: result.passed,
+      failed: result.failed,
+      failures: Enum.map(result.failures, &json_failure/1)
+    }
+  end
+
+  defp json_failure(failure) do
+    %{
+      seed: failure.seed,
+      check: inspect(PropertyDamage.FailureReport.check_name(failure)),
+      error: PropertyDamage.FailureReport.failure_message(failure)
+    }
+  end
+
   defp format_junit_report(result) do
     failures_xml =
       result.failures
@@ -722,7 +768,7 @@ defmodule PropertyDamage.Integration do
       end)
 
     passed_xml =
-      1..result.passed
+      1..result.passed//1
       |> Enum.map_join("", fn n ->
         """
             <testcase name="run_#{n}" classname="#{inspect(result.model)}" time="0"/>

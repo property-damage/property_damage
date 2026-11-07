@@ -23,7 +23,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
   defmodule MixedModel do
     @moduledoc false
     # Two root command modules, so `by_command` has two entries.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [PropertyDamage.Test.Lockstep.Step, PropertyDamage.Test.Lockstep.ProbeStep]
@@ -260,7 +260,9 @@ defmodule PropertyDamage.LatencyBudgetTest do
       assert detail.statistic == :p95
       assert detail.bound == :max_ratio
       assert detail.limit == @tiny
-      assert detail.value > 1.0
+      # The slow variant sleeps at least 5 ms per command, so its p95 has that
+      # floor whatever the scheduler does to the reference.
+      assert report.metrics["slow"].p95 >= 5_000
       assert_in_delta detail.value, report.metrics["slow"].p95 / report.metrics["ref"].p95, 1.0e-6
       assert detail.reference_value == report.metrics["ref"].p95
       assert detail.metrics == report.metrics["slow"]
@@ -270,7 +272,8 @@ defmodule PropertyDamage.LatencyBudgetTest do
 
     test "a generous max_ratio passes" do
       assert {:ok, stats} = run(slow_pair(), latency: [p95: [max_ratio: @huge]])
-      assert stats.metrics["slow"].p95 > stats.metrics["ref"].p95
+      assert stats.metrics["slow"].p95 >= 5_000
+      assert stats.metrics["ref"].p95 > 0
     end
 
     test "max compares with the duration converted to microseconds" do
@@ -371,12 +374,12 @@ defmodule PropertyDamage.LatencyBudgetTest do
   describe "report" do
     @describetag :tmp_dir
 
-    test "a latency report persists at format version 15 and a version-11 file is refused",
+    test "a latency report persists at format version 18 and a version-11 file is refused",
          %{tmp_dir: dir} do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 15::8, _rest::binary>> = binary} = File.read(path)
+      assert {:ok, <<"PD", 18::8, _rest::binary>> = binary} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :latency_exceeded
@@ -387,7 +390,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
       File.write!(old, <<"PD", 11::8, rest::binary>>)
-      assert {:error, {:unsupported_format_version, 11, 15}} = Persistence.load(old)
+      assert {:error, {:unsupported_format_version, 11, 18}} = Persistence.load(old)
     end
   end
 
@@ -405,7 +408,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
 
       for format <- [:terminal, :markdown, :json] do
         text = FailureReport.Formatter.format(report, format)
-        assert text =~ "Latency Exceeded"
+        assert text =~ ~r/Latency Exceeded|latency exceeded/
         assert text =~ "p95 max_ratio:"
       end
 

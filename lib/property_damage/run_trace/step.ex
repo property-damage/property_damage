@@ -14,12 +14,10 @@ defmodule PropertyDamage.RunTrace.Step do
 
   ## Fields
 
-  - `position` — the command's canonical `Sequence.Position` (section + offset),
-    unambiguous across parallel branches.
+  - `position` — the command's canonical `Sequence.Position` (section + offset).
   - `flattened_index` — the command's `Sequence.to_list/1` reading-order ordinal.
     This is what labels, exporters, and diff alignment key on. It is the *derived*
-    view of the location; `position` is authoritative. For branch commands it
-    differs from the executor command index.
+    view of the location; `position` is authoritative.
   - `command` — the command struct as it appears in the *plan* (symbolic: it may
     still carry unresolved `%Placeholder{}` / mint markers). This is what
     renderers and exporters read.
@@ -28,21 +26,27 @@ defmodule PropertyDamage.RunTrace.Step do
     (e.g. a synthesized or hand-built trace). Added by DR-033; `command` keeps
     its symbolic meaning so existing renderers are unaffected.
   - `entries` — the `EventLog.Entry` structs observed for this command, in log
-    order: the log entries whose `(command_index, branch_id)` resolves to this
-    step's `position`. Everything *attributed* to the command by its index,
-    including its own output plus any mock / nemesis / stutter events recorded
+    order: the log entries whose `command_index` resolves to this step's
+    `position`. Everything *attributed* to the command by its index,
+    including its own output plus any mock / stutter events recorded
     against it. Full entries (not bare events) are kept so per-event provenance
     survives: each entry carries its `source`
-    (`:command` / `:nemesis` / `:mock` / `:stutter` / `:resource_poller`) and
-    `branch_id`. The bare event struct is `entry.event`. Injector / telemetry
+    (`:command` / `:mock` / `:stutter` / `:resource_poller`). The bare event struct is `entry.event`. Injector / telemetry
     events carry no command index and belong to no step (see
     `PropertyDamage.RunTrace.async_entries/1`).
+  - `logs` — the `PropertyDamage.Log.Line` structs the command's user code
+    wrote (DR-054), in the order written: the lines the trace keeps under
+    this step's `position`. A step that ran several attempts (a settle or
+    stutter retry) keeps the lines of its first attempt and of its last
+    `keep_attempts`; one `PropertyDamage.Log.Gap` stands between them for the
+    attempts the cap dropped, with their count. Lines are not events and
+    never appear in `entries`. `[]` for a step that logged nothing.
   - `label` — the command's human-readable label (`command_labels` for this
     `flattened_index`), or `nil` if the model produced none.
   - `failed?` — `true` for the single step where a failure was localized, and
     `false` everywhere else. At most one step in a timeline is `failed?`; a
-    passing run, or a non-localized failure (teardown / whole-run /
-    linearization), has none.
+    passing run, or a non-localized failure (teardown or whole-run check), has
+    none.
 
   Structural only: a `Step` carries no projection state. On a `FailureReport`
   the authoritative state snapshots stay on the report (`state_before_failure`,
@@ -58,6 +62,7 @@ defmodule PropertyDamage.RunTrace.Step do
           command: struct(),
           executed_command: struct() | nil,
           entries: [Entry.t()],
+          logs: [PropertyDamage.Log.Line.t() | PropertyDamage.Log.Gap.t()],
           label: String.t() | nil,
           failed?: boolean()
         }
@@ -70,6 +75,7 @@ defmodule PropertyDamage.RunTrace.Step do
     :executed_command,
     :entries,
     :label,
-    :failed?
+    :failed?,
+    logs: []
   ]
 end

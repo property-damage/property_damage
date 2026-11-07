@@ -2,19 +2,7 @@ defmodule PropertyDamage.Validation do
   @moduledoc false
 
   alias PropertyDamage.Error
-  alias PropertyDamage.Nemesis
-
-  # Callbacks a regular command module must implement. Single source of truth
-  # shared by validate_command_callbacks!/1 and the validate!/3 command check.
-  @required_command_callbacks [{:generator, 1}]
-
-  # A nemesis module listed in commands/0 generates through `new!/2`, not
-  # `generator/1` (DR-031): it does not `use PropertyDamage.Command`, and the
-  # generation path (PropertyDamage.Generator.get_command_generator/3) branches
-  # on nemesis_module?/1 to call new!/2. Validate the callback generation
-  # actually calls, so the documented "nemesis directly in commands/0" usage
-  # passes validation instead of raising a spurious missing-generator/1 error.
-  @required_nemesis_callbacks [{:new!, 2}]
+  alias PropertyDamage.Model.Projection.Checks
 
   @doc """
   Validate test configuration.
@@ -27,7 +15,7 @@ defmodule PropertyDamage.Validation do
   - `model` - Model module
   - `adapter` - Adapter module
   - `opts` - Options:
-    - `:injectors` - List of InjectorAdapter modules
+    - `:injectors` - List of `PropertyDamage.Adapter.Injector` modules
 
   ## Returns
 
@@ -56,9 +44,12 @@ defmodule PropertyDamage.Validation do
       raise ArgumentError, "Validation failed:\n  - #{error_msg}"
     end
 
-    # A removed lifecycle hook, or a nemesis among the setup or teardown
-    # commands, fails here as it fails PropertyDamage.run/1.
+    # A removed lifecycle hook fails here as it fails PropertyDamage.run/1.
     PropertyDamage.Model.check_lifecycle!(model)
+
+    # A module listed twice in commands/0 fails here as it fails
+    # PropertyDamage.run/1.
+    PropertyDamage.Model.check_listings!(model)
 
     # The shape of expansions/0 and the @compare it needs fail here as they
     # fail PropertyDamage.run/1.
@@ -84,8 +75,29 @@ defmodule PropertyDamage.Validation do
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
     warnings = warnings ++ sequence_warnings(model)
+    warnings = warnings ++ simulator_warnings(model)
 
     {:ok, warnings}
+  end
+
+  @doc """
+  Warns when the model defines no `simulator/0`.
+
+  Without a simulator no placeholders are minted during generation, so a
+  command whose `when:` depends on a value the system mints (an `external()`
+  field) is never generated.
+  """
+  @spec simulator_warnings(module()) :: [String.t()]
+  def simulator_warnings(model) do
+    if PropertyDamage.ModuleCheck.exports?(model, :simulator, 0) do
+      []
+    else
+      [
+        "Model defines no simulator/0: without a simulator no placeholders are minted " <>
+          "during generation, so a command whose `when:` depends on a value the system " <>
+          "mints (an `external()` field) is never generated."
+      ]
+    end
   end
 
   @doc """
@@ -220,7 +232,7 @@ defmodule PropertyDamage.Validation do
       end
 
       # Validate required callbacks
-      validate_command_callbacks!(cmd)
+      PropertyDamage.Command.validate_callbacks!(cmd)
     end
 
     :ok
@@ -247,22 +259,6 @@ defmodule PropertyDamage.Validation do
 
   defp validate_command_spec!(invalid) do
     raise ArgumentError, Error.format_config_error(:invalid_command_spec, invalid)
-  end
-
-  @doc """
-  Validates that a command module implements required callbacks.
-  """
-  @spec validate_command_callbacks!(module()) :: :ok
-  def validate_command_callbacks!(cmd) do
-    # generator/1 for regular commands, new!/2 for nemesis modules (DR-031).
-    for {callback, arity} <- required_command_callbacks(cmd) do
-      unless PropertyDamage.ModuleCheck.exports?(cmd, callback, arity) do
-        raise ArgumentError,
-              Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
-      end
-    end
-
-    :ok
   end
 
   @doc """
@@ -314,12 +310,7 @@ defmodule PropertyDamage.Validation do
     IO.puts(io, "Extra Projections (#{length(extra_projs)}):")
 
     for proj <- extra_projs do
-      checks =
-        if PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0) do
-          proj.__checks__()
-        else
-          []
-        end
+      checks = Checks.list(proj)
 
       IO.puts(io, "  - #{inspect(proj)} (#{length(checks)} checks)")
     end
@@ -474,22 +465,12 @@ defmodule PropertyDamage.Validation do
   end
 
   # First missing required command callback ({callback, arity}), or nil when the
-  # command implements them all. Mirrors validate_command_callbacks!/1 but
+  # command implements them all. Mirrors Command.validate_callbacks!/1 but
   # accumulates rather than raising, matching the validate!/3 error-collection.
   defp missing_command_callback(cmd) do
-    Enum.find(required_command_callbacks(cmd), fn {callback, arity} ->
+    Enum.find(PropertyDamage.Command.required_callbacks(), fn {callback, arity} ->
       not PropertyDamage.ModuleCheck.exports?(cmd, callback, arity)
     end)
-  end
-
-  # Which callbacks a command module in commands/0 must implement. Nemesis
-  # modules generate via new!/2 (DR-031); every other command via generator/1.
-  defp required_command_callbacks(cmd) do
-    if Nemesis.nemesis_module?(cmd) do
-      @required_nemesis_callbacks
-    else
-      @required_command_callbacks
-    end
   end
 
   defp validate_projections(model) do
@@ -524,7 +505,7 @@ defmodule PropertyDamage.Validation do
       for event <- injectable, event not in emitted, reduce: [] do
         acc ->
           [
-            "Injectable event #{inspect(event)} not covered by any InjectorAdapter @emits"
+            "Injectable event #{inspect(event)} not covered by any injector adapter @emits"
             | acc
           ]
       end
@@ -633,8 +614,7 @@ defmodule PropertyDamage.Validation do
         else: []
 
     for proj <- projections,
-        PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
-        check <- proj.__checks__(),
+        check <- Checks.list(proj),
         mod <- check_handled_modules(check),
         uniq: true do
       mod
@@ -663,8 +643,7 @@ defmodule PropertyDamage.Validation do
 
     handled_events =
       for proj <- extra_projs,
-          PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
-          check <- proj.__checks__(),
+          check <- Checks.list(proj),
           mod <- check_handled_modules(check) do
         mod
       end

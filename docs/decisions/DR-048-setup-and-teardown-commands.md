@@ -183,7 +183,7 @@ This record settles it.
       from `total_commands`, which counts roots.
     - `PropertyDamage.replay/2` and `Analysis.isolate_trigger/2` execute the
       report's setup commands before the sequence and its teardown commands
-      after it. `RunTrace.capture/1` draws them from its seed, as a run does.
+      after it. `RunTrace.Capture.capture/1` draws them from its seed, as a run does.
       All three stay single-target.
     - A branching run (single target) executes the setup commands before its
       own prefix segment and the teardown commands after its suffix segment.

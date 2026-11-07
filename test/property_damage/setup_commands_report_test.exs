@@ -194,15 +194,14 @@ defmodule PropertyDamage.SetupCommandsReportTest do
 
       refute printed =~ "not localized"
 
-      formatted = Formatter.format(report, :terminal, color: false)
-
-      assert formatted =~
-               "setup command 1 (PropertyDamage.Test.SetupCommands.Login), cause: command"
-
-      markdown = Formatter.format(report, :markdown)
-
-      assert markdown =~
-               "setup command 1 (PropertyDamage.Test.SetupCommands.Login), cause: command"
+      # The report labels the setup command and names the cause.
+      for text <- [
+            Formatter.format(report, :terminal, color: false),
+            Formatter.format(report, :markdown)
+          ] do
+        assert text =~ ~r/^At\s+\[setup 1\] %PropertyDamage\.Test\.SetupCommands\.Login\{/m
+        assert text =~ ~r/^Cause\s+command$/m
+      end
     end
 
     test "names the field of an unresolved placeholder" do

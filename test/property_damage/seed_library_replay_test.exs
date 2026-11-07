@@ -47,7 +47,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
     def check_projections, do: [Switchable]
@@ -71,7 +71,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   # Cmd roots with one setup command and one teardown command.
   defmodule FixtureModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser}
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
@@ -260,6 +260,35 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     assert output =~ "Disable with: seed_library: false"
     assert output =~ "halted exploration"
     assert output =~ "Still failing:"
+  end
+
+  describe "unwritable library location" do
+    @describetag :capture_log
+
+    test "a missing directory is created and the failing seed is saved" do
+      dir = TmpPath.unique("pd_replay_dir")
+      path = Path.join(dir, "seeds.json")
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      assert {:error, %PropertyDamage.FailureReport{seed: seed}} =
+               run(seed_library: path, verbose: false)
+
+      assert %{seed: ^seed} = entry(path, seed)
+    end
+
+    test "a failed save is reported even without verbose" do
+      blocker = tmp_path("blocker")
+      File.write!(blocker, "not a directory")
+      path = Path.join(blocker, "seeds.json")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, %PropertyDamage.FailureReport{}} =
+                   run(seed_library: path, verbose: false)
+        end)
+
+      assert log =~ "seed_library could not be saved to #{path}"
+    end
   end
 
   describe "replay error boundaries" do

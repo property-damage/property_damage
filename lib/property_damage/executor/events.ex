@@ -65,7 +65,6 @@ defmodule PropertyDamage.Executor.Events do
         command_index,
         event_log,
         projections,
-        branch_id,
         fold_counter
       ) do
     Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
@@ -76,8 +75,6 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: source,
             injector_adapter: nil,
-            nemesis_module: nil,
-            branch_id: branch_id,
             fold_index: fc
           },
           command_index
@@ -92,19 +89,17 @@ defmodule PropertyDamage.Executor.Events do
         event_queue,
         event_log,
         projections,
-        branch_id,
         fold_counter,
         matchers \\ []
       )
 
-  def process_injector_events(nil, event_log, projections, _branch_id, fold_counter, _matchers),
+  def process_injector_events(nil, event_log, projections, fold_counter, _matchers),
     do: {projections, event_log, fold_counter}
 
   def process_injector_events(
         event_queue,
         event_log,
         projections,
-        branch_id,
         fold_counter,
         matchers
       ) do
@@ -120,8 +115,7 @@ defmodule PropertyDamage.Executor.Events do
               queue_entry.event,
               queue_entry.command_index,
               queue_entry.poller_id,
-              timestamp: queue_entry.timestamp,
-              branch_id: queue_entry.branch_id || branch_id
+              timestamp: queue_entry.timestamp
             )
 
           _ ->
@@ -133,9 +127,7 @@ defmodule PropertyDamage.Executor.Events do
                 timestamp: queue_entry.timestamp,
                 event: queue_entry.event,
                 source: :injector,
-                injector_adapter: queue_entry.adapter_module,
-                nemesis_module: nil,
-                branch_id: branch_id
+                injector_adapter: queue_entry.adapter_module
               },
               correlate(queue_entry.event, matchers)
             )
@@ -181,21 +173,62 @@ defmodule PropertyDamage.Executor.Events do
     _ -> false
   end
 
-  # Flush and process events from mock service adapters
-  def process_mock_events(nil, _command_index, event_log, projections, _branch_id, fold_counter),
-    do: {projections, event_log, fold_counter}
+  # Flush and process events from mock service adapters. Each mock's
+  # on_event/2 runs under a scope of its own, and the lines it wrote come
+  # back fourth, for the caller to keep under the command the events belong
+  # to (DR-054).
+  #
+  # When a mock's on_event/2 raises, exits or throws (the registry answers
+  # `{:error, {module, :on_event, reason}}`), or a projection rejects a mock
+  # event, folding stops and the result is `{:error, error, lines}`:
+  # `{:mock_callback, reason}` or `{:projection, %ProjectionError{},
+  # stacktrace}`, with the lines written up to then, so the caller can fail
+  # the step and keep them.
+  def process_mock_events(nil, _command_index, event_log, projections, fold_counter),
+    do: {projections, event_log, fold_counter, []}
 
   def process_mock_events(
         mock_registry,
         command_index,
         event_log,
         projections,
-        branch_id,
         fold_counter
       ) do
-    events = MockServiceRegistry.flush_events(mock_registry)
+    case MockServiceRegistry.flush_events(mock_registry) do
+      [] ->
+        {projections, event_log, fold_counter, []}
 
-    Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
+      events ->
+        {folded, lines} =
+          PropertyDamage.Log.collect(fn sink ->
+            fold_mock_events(
+              events,
+              {mock_registry, PropertyDamage.Log.writer(sink, 1)},
+              command_index,
+              {projections, event_log, fold_counter}
+            )
+          end)
+
+        case folded do
+          {:ok, {projections, event_log, fold_counter}} ->
+            {projections, event_log, fold_counter, lines}
+
+          {:error, error} ->
+            {:error, error, lines}
+        end
+    end
+  end
+
+  # The folded mock events of `process_mock_events/5`, or a raise of
+  # `MockEventsError` carrying its error and lines, for a caller whose
+  # failure path is a rescue.
+  def folded_or_raise!({:error, error, lines}),
+    do: raise(__MODULE__.MockEventsError, error: error, lines: lines)
+
+  def folded_or_raise!(folded), do: folded
+
+  defp fold_mock_events(events, {mock_registry, log}, command_index, folded) do
+    Enum.reduce_while(events, {:ok, folded}, fn event, {:ok, {projs, log_entries, fc}} ->
       entry =
         Entry.attribute(
           %Entry{
@@ -203,18 +236,32 @@ defmodule PropertyDamage.Executor.Events do
             event: event,
             source: :mock,
             injector_adapter: nil,
-            nemesis_module: nil,
-            branch_id: branch_id,
             fold_index: fc
           },
           command_index
         )
 
       # Notify mock registry of the event so mocks can react
-      MockServiceRegistry.notify_event(mock_registry, event)
+      case MockServiceRegistry.notify_event(mock_registry, event, log) do
+        :ok ->
+          new_projs = update_projections(projs, event)
+          {:cont, {:ok, {new_projs, [entry | log_entries], fc + 1}}}
 
-      new_projs = update_projections(projs, event)
-      {new_projs, [entry | log], fc + 1}
+        {:error, reason} ->
+          {:halt, {:error, {:mock_callback, reason}}}
+      end
     end)
+  rescue
+    e in PropertyDamage.ProjectionError -> {:error, {:projection, e, __STACKTRACE__}}
   end
+end
+
+defmodule PropertyDamage.Executor.Events.MockEventsError do
+  @moduledoc false
+  # Raised by `Events.folded_or_raise!/1`: the error that stopped folding a
+  # step's mock events and the lines the mocks' on_event/2 wrote before it.
+  defexception [:error, lines: []]
+
+  @impl true
+  def message(%__MODULE__{error: error}), do: "mock events could not be folded: #{inspect(error)}"
 end

@@ -31,7 +31,7 @@ defmodule PropertyDamage.CoverageTest do
   end
 
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -137,7 +137,34 @@ defmodule PropertyDamage.CoverageTest do
     end
   end
 
-  describe "Coverage.from_result/2 on aggregate run results (WP-C4 d)" do
+  describe "Coverage.record/2 on a passing run result without coverage data" do
+    test "raises an ArgumentError naming coverage: true" do
+      stats = %{runs: 100, check_fires: %{}}
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Coverage.record(Coverage.new(TestModel), {:ok, stats})
+        end
+
+      assert error.message =~ "coverage: true"
+    end
+
+    test "raises the same message as from_result/2" do
+      stats = %{runs: 100, check_fires: %{}}
+
+      record_error =
+        assert_raise ArgumentError, fn ->
+          Coverage.record(Coverage.new(TestModel), {:ok, stats})
+        end
+
+      from_result_error =
+        assert_raise ArgumentError, fn -> Coverage.from_result({:ok, stats}, TestModel) end
+
+      assert record_error.message == from_result_error.message
+    end
+  end
+
+  describe "Coverage.from_result/2 on aggregate run results" do
     test "returns the merged tracker carried by an aggregate {:ok, stats}" do
       # A multi-run PropertyDamage.run(coverage: true) returns aggregate stats
       # with a pre-merged :coverage tracker, not a single sequence result. RED
@@ -343,6 +370,30 @@ defmodule PropertyDamage.CoverageTest do
       assert output =~ "Update"
     end
 
+    test "matrix format prints the count of a command that follows itself" do
+      tracker =
+        Coverage.record(
+          Coverage.new(TestModel),
+          mock_result([
+            %TestCommand.Create{id: "1"},
+            %TestCommand.Update{id: "1", value: "a"},
+            %TestCommand.Update{id: "1", value: "b"},
+            %TestCommand.Update{id: "1", value: "c"}
+          ])
+        )
+
+      [create_row, update_row] =
+        tracker
+        |> Coverage.format(:matrix)
+        |> String.split("\n")
+        |> Enum.filter(&String.match?(&1, ~r/^(Create|Update)\s{2}/))
+
+      # Update follows Update twice
+      assert update_row =~ ~r/^Update\s+2\s*$/
+      # Create never follows itself, so its diagonal keeps the dot
+      assert create_row =~ ~r/^Create\s+·/
+    end
+
     test "full format includes everything" do
       tracker = Coverage.new(TestModel)
       tracker = Coverage.record(tracker, mock_result([%TestCommand.Create{id: "1"}]))
@@ -429,6 +480,24 @@ defmodule PropertyDamage.CoverageTest do
       output = Coverage.format(tracker, :state_classes)
       assert output =~ "State Class Transition Matrix"
       assert output =~ "test_class"
+    end
+
+    test "state_classes format prints the count of a same-class transition" do
+      tracker = %{
+        Coverage.new(TestModel)
+        | state_class_counts: %{a: 4, b: 1},
+          state_class_transitions: %{{:a, :a} => 3, {:a, :b} => 1}
+      }
+
+      [row_a, row_b] =
+        tracker
+        |> Coverage.format(:state_classes)
+        |> String.split("\n")
+        |> Enum.filter(&String.match?(&1, ~r/^[ab]\s{2}/))
+
+      assert row_a =~ ~r/^a\s+3\s+░░░░/
+      # a class with no same-class transition keeps the dot
+      assert row_b =~ ~r/^b\s+·/
     end
   end
 

@@ -155,7 +155,7 @@ defmodule PropertyDamage.Scheduler do
   finalizes its run.
 
   A failure's kind is derived from its `reason` by
-  `PropertyDamage.FailureReport.kind_of/1`, so a report's `kind` always agrees
+  `PropertyDamage.Failure.report_kind/1`, so a report's `kind` always agrees
   with its `failure_reason`.
 
   When a failure ends the run, under `:serial` no other target executes the
@@ -165,10 +165,11 @@ defmodule PropertyDamage.Scheduler do
   root.
   """
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     Comparison,
     Failure,
-    FailureReport,
     Model,
     PlaceholderRegistry,
     Target,
@@ -185,9 +186,12 @@ defmodule PropertyDamage.Scheduler do
   failure belongs to, `nil` for a setup failure or a failed `:startup` check.
   A check that raised and an adapter that raised hold the exception alone in
   `reason`'s detail; its stacktrace is in `stacktrace` (`nil` for every other
-  failure).
+  failure). A target whose adapter `setup/1` failed has no result, so its
+  failure carries the log lines that setup wrote in `logs` (DR-054); no
+  other failure has the key.
   """
   @type failure :: %{
+          optional(:logs) => PropertyDamage.Log.logs(),
           kind: :check_failed | :setup_failed | :execution_failed | :diverged | :did_not_converge,
           variant: variant(),
           run: non_neg_integer(),
@@ -201,7 +205,9 @@ defmodule PropertyDamage.Scheduler do
   in target order (none when the reference's `setup/1` failed; a `nil` result
   and no latencies for another target whose `setup/1` failed). Each result is what
   `PropertyDamage.Executor.run/4` reports for that target's run; a retired
-  target's is the result it had when it left the run. `failure` is the
+  target's is the result it had when it left the run. A result's `logs` hold
+  every log line the target's user code wrote (DR-054), its adapter's
+  `setup/1` and `teardown/1` included. `failure` is the
   primary failure and `other_failures` the run's other failures, in root
   order, then target order (see "Which targets go on after a failure").
   `compare_counts` holds, per boundary observation the model declares, the
@@ -255,6 +261,9 @@ defmodule PropertyDamage.Scheduler do
     * `:mint_epoch` - the mint epoch every target's run uses for client-minted
       values (DR-034); optional, default `0`, the exploration run's epoch
     * `:stutter_config`, `:check_mode` - passed to every variant (optional)
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines besides the first attempt's, passed to every
+      variant (optional, default 3, DR-054)
     * `:setup_commands`, `:teardown_commands` - the sequence's setup and
       teardown commands, run by every variant before root 0 and after the
       final boundary (optional, default `[]`)
@@ -315,6 +324,7 @@ defmodule PropertyDamage.Scheduler do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       registry: Keyword.get(opts, :placeholder_registry) || PlaceholderRegistry.build(commands),
       variants: Keyword.get(opts, :variants)
     }
@@ -356,11 +366,16 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant} ->
           {:cont, {:ok, %{run | active: run.active ++ [variant]}}}
 
-        {:error, reason} when target.index == 0 ->
-          {:halt, {:error, failure(config, target, nil, Failure.setup_failed(reason))}}
+        {:error, reason, logs} when target.index == 0 ->
+          failure = failure(config, target, nil, setup_failure(reason))
+          {:halt, {:error, Map.put(failure, :logs, logs)}}
 
-        {:error, reason} ->
-          failure = failure(config, target, nil, Failure.setup_failed(reason))
+        {:error, reason, logs} ->
+          failure =
+            config
+            |> failure(target, nil, setup_failure(reason))
+            |> Map.put(:logs, logs)
+
           gone = %{pid: nil, target: target, retired: {nil, []}}
 
           {:cont,
@@ -392,6 +407,7 @@ defmodule PropertyDamage.Scheduler do
         run_nonce: config.run_nonce,
         stutter_config: config.stutter_config,
         check_mode: config.check_mode,
+        keep_attempts: config.keep_attempts,
         measure_latency: config.measure_latency,
         mint_epoch: config.mint_epoch
       )
@@ -403,13 +419,25 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant}
 
       {:ok, {:error, reason}} ->
+        logs = release_variant(variant)
         stop_variant(variant)
-        {:error, setup_reason(reason)}
+        {:error, setup_reason(reason), logs}
 
+      # The variant process died inside its setup call. The adapter's
+      # `setup/1`, an injector's or a mock's setup, and model code all run
+      # there, and each of them raises, exits or throws into a rescue, so
+      # only an exit that no rescue sees reaches this branch: an untrappable
+      # kill, or the crash of a process linked to the variant. Which code
+      # caused it is not known, so the cause is the variant itself.
       {:crashed, reason} ->
-        {:error, reason}
+        {:error, Failure.setup_failed(:variant, detail: reason), %{}}
     end
   end
+
+  # A model fault arrives as the `%Failure{}` the variant built; anything
+  # else is what the adapter's `setup/1` answered.
+  defp setup_failure(%Failure{} = failure), do: failure
+  defp setup_failure(reason), do: Failure.setup_failed(reason)
 
   # A setup that raised is reported by the exception itself.
   defp setup_reason({:raised, exception}), do: exception
@@ -579,8 +607,7 @@ defmodule PropertyDamage.Scheduler do
     {result, failure, teardown_failures} =
       case variant.pid && call(variant.pid, &Variant.retire/1) do
         {:ok, {:ok, result, teardown_failures}} ->
-          result = with_teardown_entries(result, variant)
-          stop_variant(variant)
+          result = result |> with_teardown_entries(variant) |> end_variant(variant)
           {result, with_result_reason(failure, result), teardown_failures}
 
         _crashed_or_gone ->
@@ -867,8 +894,7 @@ defmodule PropertyDamage.Scheduler do
 
     case call(variant.pid, &Variant.finish/1) do
       {:ok, result} ->
-        result = with_teardown_entries(result, variant)
-        stop_variant(variant)
+        result = result |> with_teardown_entries(variant) |> end_variant(variant)
         {result, latency, {:finished, result}}
 
       {:crashed, reason} ->
@@ -912,11 +938,14 @@ defmodule PropertyDamage.Scheduler do
   # A recorded check failure as a `%Failure{}`; an `@eventually` window that
   # ended early keeps its poll context (DR-052).
   defp recorded_failure(%{context: context} = recorded) when is_map(context) do
-    failure = Failure.check_failed(recorded.check_name, recorded.reason)
+    failure = recorded_check_failed(recorded)
     %{failure | type: %{failure.type | context: context}}
   end
 
-  defp recorded_failure(recorded), do: Failure.check_failed(recorded.check_name, recorded.reason)
+  defp recorded_failure(recorded), do: recorded_check_failed(recorded)
+
+  defp recorded_check_failed(recorded),
+    do: Failure.check_failed(recorded.check_name, recorded.reason, recorded[:projection])
 
   # Whether `finalize_failure/3` reports a check `check_mode: :record`
   # recorded.
@@ -938,7 +967,7 @@ defmodule PropertyDamage.Scheduler do
         _ -> {Failure.adapter_error(failure.reason), nil}
       end
 
-    %{failure | kind: FailureReport.kind_of(reason), reason: reason, stacktrace: stacktrace}
+    %{failure | kind: Failure.report_kind(reason), reason: reason, stacktrace: stacktrace}
   end
 
   defp latencies(%{measure_latency: false}, _variant), do: []
@@ -959,6 +988,25 @@ defmodule PropertyDamage.Scheduler do
 
       _no_entries ->
         result
+    end
+  end
+
+  # Releases and stops the variant; the result takes every log line the
+  # variant holds, its adapter's teardown/1 lines included (DR-054).
+  defp end_variant(result, variant) do
+    logs = release_variant(variant)
+    stop_variant(variant)
+
+    case result do
+      %{} -> Map.put(result, :logs, logs)
+      other -> other
+    end
+  end
+
+  defp release_variant(variant) do
+    case call(variant.pid, &Variant.release/1) do
+      {:ok, {:ok, logs}} -> logs
+      {:crashed, _reason} -> %{}
     end
   end
 
@@ -986,7 +1034,7 @@ defmodule PropertyDamage.Scheduler do
   defp exit_reason(reason), do: {:exit, reason}
 
   # Every failure's kind comes from its reason by the one mapping a report
-  # uses (`FailureReport.kind_of/1`), so the two always agree. A variant
+  # uses (`Failure.report_kind/1`), so the two always agree. A variant
   # reports an adapter raise by the bare exception; `with_failure_reason/2`
   # swaps in the engine's `%Failure{}` for it and derives the kind again.
   # A reason that embeds `{exception, stacktrace}` (a check that raised, on
@@ -996,7 +1044,7 @@ defmodule PropertyDamage.Scheduler do
     {reason, stacktrace} = Finalization.extract_stacktrace(reason)
 
     %{
-      kind: FailureReport.kind_of(reason) || :execution_failed,
+      kind: Failure.report_kind(reason) || :execution_failed,
       variant: variant_of(target),
       run: config.run_number,
       root: root,

@@ -96,8 +96,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
   end
 
   defmodule RoutingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands do
       [

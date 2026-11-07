@@ -9,11 +9,12 @@ defmodule SequenceValidityTest do
   use ExUnit.Case, async: true
 
   alias GiteaBench.Commands.{CreateIssue, CreateLabel, CreateRepo, CreateUser}
+  alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Validator
 
   # The shrinker's rule: a candidate whose validation raises is invalid.
   defp valid?(commands) do
-    Validator.valid_sequence?(commands, GiteaBench.Model)
+    Validator.valid_sequence?(Sequence.linear(commands), GiteaBench.Model)
   rescue
     _ -> false
   end
@@ -27,7 +28,7 @@ defmodule SequenceValidityTest do
     refute valid?(commands)
 
     assert_raise ArgumentError, ~r/"u0"/, fn ->
-      Validator.valid_sequence?(commands, GiteaBench.Model)
+      Validator.valid_sequence?(Sequence.linear(commands), GiteaBench.Model)
     end
   end
 

@@ -11,6 +11,17 @@ defmodule PropertyDamage.Analysis do
   - **Trigger Isolation**: Find the minimal change that eliminates the failure
   - **Test Generation**: Generate reproducible test code from failures
 
+  ## Roles
+
+  `explain/1` infers a command's role from the placeholders alone. The failing
+  command is the `:trigger`. A command that produces a value the failing
+  command consumes, directly or through other placeholders, is a
+  `:dependency`. Any other command has the role `:unknown`: no placeholder
+  links it to the failure. When the failure is localized, the shrinker kept it
+  because removing it lost the failure, so it may set up state the failing
+  command reads (a deposit that only supplies a balance). `explain/1` does not
+  infer that dependency, so such a command stays out of the dependency chain.
+
   ## Usage
 
       {:error, failure} = PropertyDamage.run(model: M, targets: [A])
@@ -24,6 +35,8 @@ defmodule PropertyDamage.Analysis do
       # Generate a test case
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
+
+  alias PropertyDamage.Failure.Naming
 
   alias PropertyDamage.{
     Executor,
@@ -53,20 +66,48 @@ defmodule PropertyDamage.Analysis do
   - Which command triggers the failure
   - Why each other command must be present
 
+  Each entry in `:commands` carries the command struct under `:command`, its
+  module's short name under `:command_name`, and any `%Placeholder{}` fields
+  under `:placeholders` (field name to a label).
+
   ## Example
 
       PropertyDamage.Analysis.explain(failure)
-      # Returns:
+      # Returns a map like this one, from a model where `Use` consumes an id
+      # that `Create` produced and a check fails after `Use`:
       # %{
+      #   summary: "Shrunk to 2 commands.\nFailure triggered by: Use at index 1\n" <>
+      #     "Dependencies: 1 command(s) required to set up state\n" <>
+      #     "Failure type: Invariant Violation: no_use_allowed",
       #   commands: [
-      #     %{index: 0, command: "CreateAccount", role: :dependency,
-      #       reason: "Creates account used by command 2"},
-      #     %{index: 1, command: "CreateAuthorization", role: :dependency,
-      #       reason: "Creates pending hold affecting available balance"},
-      #     %{index: 2, command: "CreditAccount", role: :trigger,
-      #       reason: "Causes currency_consistency check to fail"}
+      #     %{
+      #       index: 0,
+      #       command_name: "Create",
+      #       command: %Create{label: ""},
+      #       role: :dependency,
+      #       reason: "Provides state or values required by the failing command",
+      #       placeholders: %{}
+      #     },
+      #     %{
+      #       index: 1,
+      #       command_name: "Use",
+      #       command: %Use{target: <Placeholder:id@pre0/evt0>},
+      #       role: :trigger,
+      #       reason: "Triggers no_use_allowed failure",
+      #       placeholders: %{
+      #         # The position is the producer's place in the generated sequence
+      #         # before shrinking, so it can differ from the producer's index above.
+      #         target: "placeholder:id@%PropertyDamage.Sequence.Position{section: :prefix, offset: 0}"
+      #       }
+      #     }
       #   ],
-      #   failure: %{type: :check_failed, check: :currency_consistency, ...}
+      #   failure: %{
+      #     type: :check_failed,
+      #     check: :no_use_allowed,
+      #     message: "a Use command ran",
+      #     command_index: 1
+      #   },
+      #   dependency_chain: ["[0] Create", "[1] Use"]
       # }
   """
   @spec explain(FailureReport.t()) :: map()
@@ -76,8 +117,8 @@ defmodule PropertyDamage.Analysis do
 
     # The dependency graph is built over the flattened command list and indexed
     # by flattened (reading) order, so the failing node must be the flattened
-    # index. failed_at_index is an executor index and diverges from it for
-    # branch failures, so read it off the already-materialized failed step
+    # index. failed_at_index is an executor index and diverges from it when a
+    # root ran as an expansion's leaves, so read it off the already-materialized failed step
     # (nil for a non-localized failure).
     failed_at = Enum.find_value(steps, fn step -> step.failed? && step.flattened_index end)
 
@@ -147,7 +188,7 @@ defmodule PropertyDamage.Analysis do
         [
           "[#{cmd.index}] #{cmd.command_name} #{role_marker}",
           "    #{cmd.reason}",
-          format_refs(cmd.refs),
+          format_placeholders(cmd.placeholders),
           ""
         ]
         |> Enum.reject(&is_nil/1)
@@ -186,16 +227,19 @@ defmodule PropertyDamage.Analysis do
           {:dependency, "Provides state or values required by the failing command"}
 
         not localized? ->
-          # The failure was not localized to a specific command (teardown /
-          # whole-run / linearization check), so no per-command role applies.
+          # The failure was not localized to a specific command (teardown or
+          # whole-run check), so no per-command role applies.
           {:unknown, "Failure not localized to a specific command"}
 
         true ->
-          # Not an ancestor and not the trigger - shouldn't be in shrunk sequence
-          {:unknown, "Unknown role - may indicate shrinking issue"}
+          # No placeholder links it to the failing command, yet the shrinker
+          # kept it: removing it lost the failure, so it may set up state the
+          # failing command reads.
+          {:unknown,
+           "Kept by shrinking: removing it lost the failure; it may set up state the failing command reads"}
       end
 
-    refs = extract_refs(cmd)
+    placeholders = extract_placeholders(cmd)
 
     %{
       index: idx,
@@ -203,11 +247,11 @@ defmodule PropertyDamage.Analysis do
       command: cmd,
       role: role,
       reason: reason,
-      refs: refs
+      placeholders: placeholders
     }
   end
 
-  defp extract_refs(cmd) do
+  defp extract_placeholders(cmd) do
     cmd
     |> Map.from_struct()
     |> Enum.filter(fn {_k, v} -> match?(%Placeholder{}, v) end)
@@ -220,11 +264,11 @@ defmodule PropertyDamage.Analysis do
     "placeholder:#{path_str}@#{inspect(position)}"
   end
 
-  defp format_refs(refs) when map_size(refs) == 0, do: nil
+  defp format_placeholders(placeholders) when map_size(placeholders) == 0, do: nil
 
-  defp format_refs(refs) do
-    ref_strs = Enum.map(refs, fn {k, v} -> "#{k}=#{v}" end)
-    "    Refs: #{Enum.join(ref_strs, ", ")}"
+  defp format_placeholders(placeholders) do
+    labels = Enum.map(placeholders, fn {k, v} -> "#{k}=#{v}" end)
+    "    Placeholders: #{Enum.join(labels, ", ")}"
   end
 
   defp build_summary(command_explanations, report) do
@@ -240,7 +284,7 @@ defmodule PropertyDamage.Analysis do
     |> String.trim()
   end
 
-  # A non-localized failure (teardown / whole-run / linearization check) has no
+  # A non-localized failure (teardown or whole-run check) has no
   # failing node to trace a chain from, so there is nothing to build.
   defp build_dependency_chain(nil, _graph, _commands), do: []
 
@@ -279,7 +323,7 @@ defmodule PropertyDamage.Analysis do
   # registry's `producer_link` maps each CURRENT producer position to the
   # placeholder ids it produces (already remapped by the shrinker), and
   # `Sequence.indexed/1` is the single owner of the position -> flattened-index
-  # mapping (branching-aware). Positions absent from the plan (dropped
+  # mapping. Positions absent from the plan (dropped
   # producers) contribute nothing. Returns nil when there is no registry (an
   # unshrunk report, or a model without placeholders), so `Graph.build/2` falls
   # back to the embedded-position fallback, which is correct in that case.
@@ -335,6 +379,9 @@ defmodule PropertyDamage.Analysis do
     `config:`); see
     `PropertyDamage.Target`
 
+  The re-execution simulates the report's commands with the atom markers the
+  run named through `external_markers:`, which the report records.
+
   ## Returns
 
   `{:ok, map}`, or `{:error, reason}`: `:not_applicable` for a divergence or
@@ -342,20 +389,29 @@ defmodule PropertyDamage.Analysis do
   blame, `:missing_model_or_target` when the report records no model or no
   target. The map contains:
   - `:trigger_command` - The command that triggers the failure
+  - `:trigger_index` - Its flattened index in the shrunk sequence
   - `:changes` - List of changes that eliminate the failure
   - `:likely_cause` - Inferred cause based on the changes
 
   ## Example
 
       PropertyDamage.Analysis.isolate_trigger(failure)
-      # %{
-      #   trigger_command: %CreditAccount{...},
-      #   changes: [
-      #     %{field: :currency, original: "EUR", fixed: "USD",
-      #       description: "Changing currency from EUR to USD eliminates failure"}
-      #   ],
-      #   likely_cause: "Currency mismatch: account currency (USD) differs from operation currency (EUR)"
-      # }
+      # Returns this for a model where a check fails once a deposit total
+      # reaches 3 and the shrunk sequence is one `Deposit{amount: 4}`:
+      # {:ok,
+      #  %{
+      #    trigger_command: %Deposit{amount: 4},
+      #    trigger_index: 0,
+      #    changes: [
+      #      %{field: :amount, original: 4, fixed: 0,
+      #        description: "Changing amount from 4 to 0 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 1,
+      #        description: "Changing amount from 4 to 1 eliminates failure"},
+      #      %{field: :amount, original: 4, fixed: 2,
+      #        description: "Changing amount from 4 to 2 eliminates failure"}
+      #    ],
+      #    likely_cause: "Amount-related issue: original amount 4 causes failure"
+      #  }}
   """
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
@@ -363,14 +419,15 @@ defmodule PropertyDamage.Analysis do
     commands = Sequence.to_list(sequence)
     # `commands` is the flattened list the modified sequence is re-run against,
     # so the trigger is addressed by its step's flattened index (not the
-    # executor failed_at_index, which diverges for branch failures).
+    # executor failed_at_index, which diverges from it when a root ran as an
+    # expansion's leaves).
     step = FailureReport.failure_step(report)
     model = report.model
     reference = FailureReport.reference_target(report)
 
     cond do
       is_nil(step) ->
-        # Non-localized failure (teardown / whole-run / linearization): there is
+        # Non-localized failure (teardown or whole-run check): there is
         # no single trigger command to vary.
         {:error, :failure_not_localized}
 
@@ -409,7 +466,7 @@ defmodule PropertyDamage.Analysis do
     }
 
     changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
-    trigger_result(report, trigger_cmd, commands, failed_at, changes)
+    trigger_result(trigger_cmd, failed_at, changes)
   end
 
   # The trigger among the reference's concrete commands: the command where
@@ -442,17 +499,17 @@ defmodule PropertyDamage.Analysis do
         }
 
         changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
-        trigger_result(report, step.command, commands, step.flattened_index, changes)
+        trigger_result(step.command, step.flattened_index, changes)
     end
   end
 
-  defp trigger_result(report, trigger_cmd, commands, failed_at, changes) do
+  defp trigger_result(trigger_cmd, failed_at, changes) do
     {:ok,
      %{
        trigger_command: trigger_cmd,
        trigger_index: failed_at,
        changes: changes,
-       likely_cause: infer_cause(changes, trigger_cmd, commands, report)
+       likely_cause: infer_cause(changes)
      }}
   end
 
@@ -548,7 +605,13 @@ defmodule PropertyDamage.Analysis do
   end
 
   defp eliminates?(commands, run) do
-    if Validator.valid_sequence?(commands, run.model, run.setup_commands) do
+    candidate =
+      commands
+      |> Sequence.linear()
+      |> Sequence.with_registry(run.registry)
+      |> Map.put(:setup, run.setup_commands)
+
+    if Validator.valid_sequence?(candidate, run.model) do
       sequence = Sequence.with_registry(Sequence.linear(regenerate_keys(commands)), run.registry)
 
       case Executor.run(sequence, run.model, run.target.adapter,
@@ -586,7 +649,7 @@ defmodule PropertyDamage.Analysis do
   defp generate_variations(_field, original, _commands, _failed_at) when is_integer(original) do
     # For integers, try 0 and some nearby values
     variations = [0, 1, original - 1, original + 1, div(original, 2)]
-    Enum.filter(variations, &(&1 != original and &1 >= 0))
+    variations |> Enum.filter(&(&1 != original and &1 >= 0)) |> Enum.uniq()
   end
 
   defp generate_variations(_field, _original, _commands, _failed_at) do
@@ -594,19 +657,8 @@ defmodule PropertyDamage.Analysis do
     []
   end
 
-  defp infer_cause(changes, trigger_cmd, commands, _report) do
+  defp infer_cause(changes) do
     cond do
-      # Currency mismatch pattern
-      currency_change = Enum.find(changes, &(&1.field == :currency)) ->
-        # Find what the account's currency is
-        account_currency = find_account_currency(trigger_cmd, commands)
-
-        if account_currency do
-          "Currency mismatch: operation uses #{inspect(currency_change.original)} but account uses #{inspect(account_currency)}"
-        else
-          "Currency mismatch detected - changing currency eliminates failure"
-        end
-
       # Amount-related pattern
       amount_change = Enum.find(changes, &(&1.field == :amount)) ->
         "Amount-related issue: original amount #{amount_change.original} causes failure"
@@ -620,26 +672,6 @@ defmodule PropertyDamage.Analysis do
         change = hd(changes)
 
         "Changing #{change.field} from #{inspect(change.original)} to #{inspect(change.fixed)} eliminates failure"
-    end
-  end
-
-  defp find_account_currency(trigger_cmd, commands) do
-    account_ref = Map.get(trigger_cmd, :account_ref)
-
-    if account_ref do
-      # Find the CreateAccount command that creates this ref
-      Enum.find_value(commands, fn cmd ->
-        cmd_module = cmd.__struct__
-        name = cmd_module |> Module.split() |> List.last()
-
-        if name == "CreateAccount" do
-          cmd_ref = Map.get(cmd, :account_ref)
-
-          if cmd_ref && cmd_ref.ref == account_ref.ref do
-            Map.get(cmd, :currency)
-          end
-        end
-      end)
     end
   end
 
@@ -835,7 +867,7 @@ defmodule PropertyDamage.Analysis do
   defp failure_label(report) do
     case FailureReport.check_name(report) do
       nil -> to_string(FailureReport.failure_type(report))
-      name -> FailureReport.format_name(name)
+      name -> Naming.format_name(name)
     end
   end
 end

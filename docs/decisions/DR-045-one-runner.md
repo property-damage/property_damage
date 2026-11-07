@@ -1,6 +1,6 @@
 # DR-045: One Runner for One or More Targets
 
-**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10. Amended by DR-047: `metrics:`, `percentiles:` and `warmup_runs:` are removed (see the note under item 2) and `:latency_exceeded` is produced. Under `check_mode: :record`, a check failure at an earlier root, or at the same root in the same or an earlier target, is the primary failure and the divergence is listed in `other_failures`; it no longer replaces the divergence. Amended by DR-048: `setup_once/1`, `setup_each/1` and their teardowns are removed in favor of setup and teardown commands, `:setup_failed` carries a `Failure.Setup` with a cause, and persistence is version 11.
+**Status:** Accepted. Amended by DR-063 (2026-11-06): the branching mode this record names (item 11 and the open question about several targets) is removed. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10. Amended by DR-047: `metrics:`, `percentiles:` and `warmup_runs:` are removed (see the note under item 2) and `:latency_exceeded` is produced. Under `check_mode: :record`, a check failure at an earlier root, or at the same root in the same or an earlier target, is the primary failure and the divergence is listed in `other_failures`; it no longer replaces the divergence. Amended by DR-048: `setup_once/1`, `setup_each/1` and their teardowns are removed in favor of setup and teardown commands, `:setup_failed` carries a `Failure.Setup` with a cause, and persistence is version 11.
 **Date:** 2026-10-06
 
 ## Context
@@ -80,9 +80,9 @@ a note that two targets disagreed.
    replaces it), `stutter:` when it was set and `max_commands:` when it is not
    the default, so the printed command regenerates and judges the same run.
    `shrink_further/2` re-shrinks under the report's `equivalence` and
-   `stutter`. `adapter` is removed. `kind_of/1`, `reference_target/1` and
+   `stutter`. `adapter` is removed. `Failure.report_kind/1`, `reference_target/1` and
    `targets_source/1` are new. A report's `kind` is always
-   `kind_of(failure_reason)`: the scheduler derives every failure's kind from
+   `Failure.report_kind(failure_reason)`: the scheduler derives every failure's kind from
    its reason with that one mapping, so a resource poller error found while
    the run finalizes is `:execution_failed`, not `:check_failed`.
 8. **Shrinking is variant-aware.** The failure identity is

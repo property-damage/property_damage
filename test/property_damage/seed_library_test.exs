@@ -32,6 +32,22 @@ defmodule PropertyDamage.SeedLibraryTest do
       assert hd(loaded.entries).consecutive_passes == 0
     end
 
+    test "returns an error for valid JSON without entries" do
+      path = tmp_path("no_entries")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, "{}")
+
+      assert {:error, {:invalid_library, _reason}} = SeedLibrary.load(path)
+    end
+
+    test "returns an error for a library of another version" do
+      path = tmp_path("other_version")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, ~s({"version": 999, "entries": []}))
+
+      assert {:error, {:invalid_library, _reason}} = SeedLibrary.load(path)
+    end
+
     test "tolerates a pre-DR-023 file with the old status/run_count fields" do
       path = tmp_path("legacy")
       on_exit(fn -> File.rm(path) end)
@@ -64,6 +80,15 @@ defmodule PropertyDamage.SeedLibraryTest do
       assert entry.failure_type == :check_failed
       assert entry.check_name == :balance
       refute Map.has_key?(entry, :status)
+    end
+
+    test "loads a version-1 library's entries as a current library" do
+      path = tmp_path("version_1")
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, ~s({"version": 1, "entries": [{"seed": 7}, {"seed": 8}]}))
+
+      assert {:ok, %{version: 2, entries: entries}} = SeedLibrary.load(path)
+      assert Enum.map(entries, & &1.seed) == [7, 8]
     end
   end
 
@@ -130,6 +155,30 @@ defmodule PropertyDamage.SeedLibraryTest do
 
       siblings = Path.wildcard(path <> ".tmp*")
       assert siblings == [], "expected no leftover temp files, got: #{inspect(siblings)}"
+    end
+  end
+
+  describe "save/2 (directory)" do
+    test "creates a missing directory and saves the seed" do
+      dir = TmpPath.unique("pd_seeds_dir")
+      path = Path.join([dir, "nested", "seeds.json"])
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 42, model: "M")
+
+      assert :ok = SeedLibrary.save(lib, path)
+      assert {:ok, loaded} = SeedLibrary.load(path)
+      assert Enum.map(loaded.entries, & &1.seed) == [42]
+    end
+
+    test "returns an error when the directory cannot be created" do
+      blocker = tmp_path("blocker")
+      File.write!(blocker, "not a directory")
+      on_exit(fn -> File.rm(blocker) end)
+
+      {:ok, lib} = SeedLibrary.add_seed(SeedLibrary.new(), 42, model: "M")
+
+      assert {:error, _reason} = SeedLibrary.save(lib, Path.join(blocker, "seeds.json"))
     end
   end
 

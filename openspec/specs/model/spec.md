@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -21,6 +21,24 @@ Models SHALL implement two required callbacks: `commands/0` returning a list of 
 - **WHEN** a model implements `command_sequence_projection/0`
 - **THEN** it returns a single projection module
 - **AND** this projection's state drives command filtering, selection, and simulation
+
+### Requirement: Declaring a Model (DR-058)
+
+A model SHALL be declared with `use PropertyDamage.Model`, which sets the `PropertyDamage.Model` behaviour. `use PropertyDamage.Model` SHALL reject any option at compile time. A module that declares `@behaviour PropertyDamage.Model` directly SHALL still be accepted as a model.
+
+#### Scenario: Use sets the behaviour
+- **WHEN** a module declares `use PropertyDamage.Model`
+- **THEN** `PropertyDamage.Model` is listed among the module's behaviours
+
+#### Scenario: Use with options is rejected
+- **WHEN** a module declares `use PropertyDamage.Model, foo: 1`
+- **THEN** compilation raises an `ArgumentError` that names `use PropertyDamage.Model`
+- **AND** the message says the macro takes no options
+
+#### Scenario: Bare behaviour declaration still runs
+- **WHEN** a module declares `@behaviour PropertyDamage.Model` directly and implements the required callbacks
+- **THEN** the framework accepts the module as a model
+- **AND** a run against it behaves as for a module declared with `use PropertyDamage.Model`
 
 ### Requirement: Command Specification Formats
 
@@ -118,6 +136,12 @@ Models MAY define a simulator module that predicts expected events for each comm
 - **WHEN** a model does not implement `simulator/0`
 - **THEN** the framework operates without event prediction during generation
 
+#### Scenario: No simulator and a placeholder-dependent predicate
+- **GIVEN** a model that defines no `simulator/0`
+- **WHEN** `mix pd.validate` checks the model
+- **THEN** it SHALL warn that no placeholders are minted during generation
+- **AND** the warning SHALL say that a command whose `when:` depends on a value the system mints (an `external()` field) is never generated
+
 ### Requirement: Setup and Teardown Commands
 
 Models MAY implement `setup_each/0` and `teardown_each/0`, both defaulting to `[]`. Each SHALL return command specs in the grammar of `commands/0` (`Module` or `{Module, opts}`, with `overrides:`), typed `PropertyDamage.Model.sequence`. The model MUST NOT perform side effects for fixtures: a fixture is a command, so only the adapter realizes it (DR-048).
@@ -178,7 +202,7 @@ A setup or teardown command SHALL NOT be a comparison boundary, SHALL NOT be exp
 
 ### Requirement: Removed Lifecycle Hooks Are Rejected
 
-A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`, `setup_once/0` or `teardown_once/0` SHALL fail at run start with an error that names the replacement. A model that lists a nemesis module in `setup_each/0` or `teardown_each/0` SHALL fail with a validation error, because faults are never injected during setup or teardown commands.
+A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`, `setup_once/0` or `teardown_once/0` SHALL fail at run start with an error that names the replacement.
 
 #### Scenario: A removed hook fails at run start
 - **WHEN** a model defines `setup_each/1`
@@ -188,10 +212,6 @@ A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardow
 #### Scenario: A once hook has no replacement hook
 - **WHEN** a model defines `setup_once/0`
 - **THEN** the error says once-per-campaign setup belongs in an idempotent `Adapter.setup/1` or in the caller's wrapper
-
-#### Scenario: A nemesis among the setup commands
-- **WHEN** `setup_each/0` lists a nemesis module
-- **THEN** validation fails with an error that names the callback and the module
 
 ### Requirement: Expansions Callback (DR-049)
 
@@ -231,7 +251,7 @@ A model MAY implement `expansions/0`, returning `[{Root, fun}]` with one pair pe
 
 ### Requirement: Expansion Types and Order (DR-049)
 
-`PropertyDamage.Model` SHALL define the types `command_spec` (`module | {module, opts}`), `sequence` (a list of command specs that run in order, every entry), `identity` (a list holding the root struct) and `choices(item)` (a list from which one item is picked by weight). `commands/0` SHALL return `choices(command_spec)`, `setup_each/0` and `teardown_each/0` SHALL return `sequence`, and `expansions/0` SHALL return pairs of a root module and a function from a root struct and a state to `choices(sequence | identity)`. The order of `commands/0` SHALL carry no meaning. The order of the list that an expansion function returns SHALL be the shrink preference, simplest first, and the documentation of `expansions/0` SHALL say so.
+`PropertyDamage.Model` SHALL define the types `command_spec` (`module | {module, opts}`), `sequence` (a list of command specs that run in order, every entry), `identity` (a list holding the root struct), `choices(item)` (a list from which one item is picked by weight) and `expansion_choices` (a list of sequences or the identity, each alone or with the options `weight:` and `doc:`). `commands/0` SHALL return `choices(command_spec)`, `setup_each/0` and `teardown_each/0` SHALL return `sequence`, and `expansions/0` SHALL return pairs of a root module and a function from a root struct and a state to `expansion_choices`. The order of `commands/0` SHALL carry no meaning. The order of the list that an expansion function returns SHALL be the shrink preference, simplest first, and the documentation of `expansions/0` SHALL say so.
 
 #### Scenario: Weights default to 1
 - **WHEN** an entry has no `weight:`
@@ -243,12 +263,11 @@ A model MAY implement `expansions/0`, returning `[{Root, fun}]` with one pair pe
 
 ### Requirement: Expansion Load Rules (DR-049)
 
-At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and `mix pd.validate`, the framework SHALL enforce four rules.
+At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and `mix pd.validate`, the framework SHALL enforce three rules.
 
 1. A model that defines `expansions/0` SHALL declare at least one `@compare` whose schedule reaches the final boundary (`every: 1`, the default, or a schedule that names `:end`), with one target too.
 2. A module that `expansions/0` lists SHALL be in `commands/0`, SHALL NOT be listed twice, and SHALL NOT be a root with `execution: :probe`.
-3. A model that defines `expansions/0` SHALL NOT be run with the `branching:` option.
-4. An `expansions/0` function SHALL have arity 2.
+3. An `expansions/0` function SHALL have arity 2.
 
 #### Scenario: No comparison reaches the end
 - **WHEN** a model defines `expansions/0` and declares no `@compare` that reaches the end
@@ -267,10 +286,6 @@ At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and 
 #### Scenario: A module listed twice
 - **WHEN** `expansions/0` lists one module in two pairs
 - **THEN** the run SHALL fail with an error that names the module
-
-#### Scenario: Branching with expansions
-- **WHEN** a run passes `branching:` for a model that defines `expansions/0`
-- **THEN** the run SHALL fail with an option error that names both
 
 ### Requirement: Arity-2 Overrides Only Inside Expansion Sequences (DR-049)
 
@@ -381,3 +396,67 @@ The framework SHALL resolve command specs by calling `command_spec/1` when avail
 - **WHEN** a command module does not export `command_spec/1`
 - **THEN** the framework builds a spec from the framework defaults
 - **AND** merges Model-provided overrides on top of the default-derived spec
+
+#### Scenario: One spec table serves every reader
+- **GIVEN** a model that lists `{Charge, shrink: :prefer_keep, execution: :async}` in `commands/0`
+- **WHEN** the framework builds the model's spec table with `Model.spec_table/1`
+- **THEN** the table SHALL hold the setup commands, the teardown commands and the `commands/0` entries, each resolved with the options its entry carries
+- **AND** a module listed in `commands/0` and also in a setup or teardown list SHALL take the `commands/0` entry
+- **AND** execution, settle, stutter, shrinking and sequence validation SHALL all read that one table, so the `shrink:` and `execution:` set on the listing apply in each
+
+#### Scenario: A command the table does not hold
+- **GIVEN** a command module the model does not name, such as a leaf an expansion generates or a command in a hand-built sequence
+- **WHEN** the framework looks it up with `Model.spec_for/2`
+- **THEN** the lookup SHALL resolve the module through its own `command_spec/1`, or the framework defaults when it has none, as an entry with no options
+- **AND** a plain map, which is not a command module, SHALL resolve to the framework defaults and run `:sync`
+
+#### Scenario: A module listed twice in commands/0
+- **WHEN** `commands/0` lists one module more than once, with different options or with identical ones
+- **THEN** building the spec table SHALL raise an `ArgumentError` that names both listings and asks for one merged entry
+- **AND** `PropertyDamage.run/1` SHALL reject the model with the same message before any `Adapter.setup/1`
+- **AND** `mix pd.validate` SHALL report the same message as an error
+- **AND** a setup or teardown list MAY repeat a module
+
+### Requirement: Declared Docs Capture (DR-058)
+
+A module that invokes `use PropertyDamage.Model` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Model` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
+
+#### Scenario: A module compiled from a script keeps its docs
+- **GIVEN** a model module that invokes `use PropertyDamage.Model` and is compiled from a script
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `{:ok, docs}` with the moduledoc, the absolute path of the script, and the doc and first-clause line of each function
+- **AND** `Code.fetch_docs/1` finds no docs for the same module
+
+#### Scenario: Hidden and missing docs read differently
+- **GIVEN** a model with one function marked `@doc false` and one function with no `@doc`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with the module
+- **THEN** the hidden function reads `doc: false` and the undocumented function reads `doc: nil`
+
+#### Scenario: A function written before use is a compile error
+- **GIVEN** a module that defines a function before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of the `use`
+- **AND** the message names each such function as `name/arity`
+
+#### Scenario: A function that another use defines before use is a compile error
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model`
+- **AND** the message names each default that `use GenServer` defines, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A function that another use defines stays a compile error when the module overrides it
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model`
+- **AND** the module overrides every default that `use GenServer` defines after `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model`
+- **AND** the message names each overridden default, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A macro or a `__`-prefixed function before use compiles
+- **GIVEN** a module that defines a macro and a function whose name starts with `__` before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation succeeds and the captured map holds neither of them
+
+#### Scenario: A beam stripped of its attributes has no docs
+- **GIVEN** a module that invokes `use PropertyDamage.Model`, compiled from a script, whose beam is stripped with `:beam_lib.strip/1`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `:unavailable` without raising

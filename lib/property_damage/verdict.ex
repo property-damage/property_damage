@@ -113,6 +113,13 @@ defmodule PropertyDamage.Verdict do
   def read(_value, _kind), do: :pass
 
   @doc false
+  # The exception that stands for an exit or throw out of user code that
+  # `rescue` cannot see, so a check body that exits or throws fails like one
+  # that raises. The message shows the kind and the reason.
+  @spec caught(:exit | :throw | :error, term()) :: Exception.t()
+  def caught(kind, reason), do: %ErlangError{original: {kind, reason}}
+
+  @doc false
   # The verdict of a `@check` function named `name` that returned `value`:
   # `:pass`, or `{:fail, exception}` where a falsy return fails with the
   # message of DR-052 item 4.

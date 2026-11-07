@@ -22,11 +22,18 @@ defmodule PropertyDamage.Executor.Stutter do
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.Timeout
+  alias PropertyDamage.Log.Cap
   alias PropertyDamage.Stutter
 
   @doc false
-  # Execute stutter retries after successful first execution
-  # Returns {:ok, event_log} or {:error, :idempotency_violation, details}
+  # Execute stutter retries after successful first execution.
+  # Returns {outcome, lines}: the outcome is {:ok, event_log} or
+  # {:error, :idempotency_violation | :stutter_execution_failed, details}, and
+  # the lines are the step's whole list of log lines (DR-054) once the retries
+  # wrote theirs, each recording its attempt (2 for the first retry); nil when
+  # no retry ran. The retries are attempts of the same step: they continue the
+  # step's kept lines under the same cap, so the step still holds the lines of
+  # at most `keep_attempts + 1` attempts.
   def maybe_execute_stutter_retries(
         command,
         resolved_command,
@@ -41,29 +48,40 @@ defmodule PropertyDamage.Executor.Stutter do
     rng = stutter_rng(Map.get(state, :rng_seed), index)
 
     # The resolved command spec carries the static stutter metadata (DR-028):
-    # `:idempotent` eligibility. nil for plain-map
-    # / spec-less commands, where the policy falls back to its defaults.
-    spec =
-      if is_struct(command) do
-        Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
-      end
+    # `:idempotent` eligibility. A command the model's table does not hold
+    # resolves through its own `command_spec/1`.
+    spec = PropertyDamage.Model.spec_for(Map.get(state, :command_specs, %{}), command)
 
     {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng, spec)
 
     if do_stutter? do
-      execute_stutter_retries(
-        resolved_command,
-        original_events,
-        index,
-        event_log,
-        stutter_config,
-        adapter,
-        adapter_context,
-        state.branch_id,
-        rng
+      # The retries run after the command's own sink closed, so they write
+      # their lines into a sink of their own, seeded with the step's lines.
+      seed = Map.get(Map.get(state, :logs, %{}), Map.get(state, :current_position), [])
+
+      sink_opts = [
+        keep_attempts: Map.get(state, :keep_attempts) || Cap.default_keep_attempts(),
+        phase: :stutter,
+        lines: seed
+      ]
+
+      PropertyDamage.Log.collect(
+        fn sink ->
+          execute_stutter_retries(
+            resolved_command,
+            original_events,
+            index,
+            event_log,
+            stutter_config,
+            adapter,
+            adapter_context,
+            {rng, sink}
+          )
+        end,
+        sink_opts
       )
     else
-      {:ok, event_log}
+      {{:ok, event_log}, nil}
     end
   end
 
@@ -83,8 +101,7 @@ defmodule PropertyDamage.Executor.Stutter do
          stutter_config,
          adapter,
          adapter_context,
-         branch_id,
-         rng
+         {rng, sink}
        ) do
     {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
     idempotency_key = Stutter.get_idempotency_key(resolved_command)
@@ -103,7 +120,11 @@ defmodule PropertyDamage.Executor.Stutter do
         # retries run after the per-command injection window has closed, so
         # inject/start_poller raise if an adapter reaches for them here.
         stutter_ctx = Stutter.build_context(attempt, true, idempotency_key)
-        runtime = Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
+
+        runtime = %{
+          Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
+          | log: PropertyDamage.Log.writer(sink, attempt)
+        }
 
         # Execute retry (bounded by adapter.timeout/1, DR-032)
         result =
@@ -125,8 +146,7 @@ defmodule PropertyDamage.Executor.Stutter do
       resolved_command,
       index,
       event_log,
-      stutter_config,
-      branch_id
+      stutter_config
     )
   end
 
@@ -136,8 +156,7 @@ defmodule PropertyDamage.Executor.Stutter do
          command,
          index,
          event_log,
-         stutter_config,
-         branch_id
+         stutter_config
        ) do
     # Check for execution errors
     case Enum.find(retry_results, &match?({:error, _, _}, &1)) do
@@ -152,8 +171,7 @@ defmodule PropertyDamage.Executor.Stutter do
           command,
           index,
           event_log,
-          stutter_config,
-          branch_id
+          stutter_config
         )
     end
   end
@@ -164,8 +182,7 @@ defmodule PropertyDamage.Executor.Stutter do
          command,
          index,
          event_log,
-         stutter_config,
-         branch_id
+         stutter_config
        ) do
     # Compare each retry's events with original
     comparisons =
@@ -200,7 +217,7 @@ defmodule PropertyDamage.Executor.Stutter do
             # Record each retry event as a stutter entry
             Enum.reduce(retry_events, log, fn event, inner_log ->
               entry =
-                Entry.from_stutter(event, index, attempt, comparison, branch_id: branch_id)
+                Entry.from_stutter(event, index, attempt, comparison)
 
               [entry | inner_log]
             end)

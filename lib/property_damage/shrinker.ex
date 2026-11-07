@@ -59,28 +59,12 @@ defmodule PropertyDamage.Shrinker do
   failure, and the attempt counts against the budget.
 
   A further property also holds: the failure occurs at the **same or an earlier
-  command index** (the failing root) than in the original. On the linear path
-  the shrinker checks it: a candidate whose failure happens at a root
-  generated after the current failing root is not adopted, whatever its
-  signature. It also holds structurally there, because the shrinker first
-  truncates the sequence at the failure point
-  (`Enum.take(commands, failed_at_index + 1)`), so every later candidate is a
-  subset of that prefix.
-
-  On the branching path the index is likewise not asserted. The original
-  `failed_at_index` is a branch-relative coordinate (`branch_start_index +
-  position`) that is not directly comparable to the linear index obtained when a
-  branching sequence is flattened, so it is **not** reused for truncation: when
-  `try_convert_to_linear` decides a race is not required, it takes the failure
-  index from its own linear re-run of the flattened sequence (which is
-  self-consistent with that sequence) and hands *that* to `shrink_linear`, so
-  the truncation targets the real failure point. The truncation is verified by
-  an attempt regardless, so even a stale or nil index can only fall back to
-  leaving the full flattened sequence, never accept a later-failing
-  candidate. Combined with the subset/simplification property of every branching
-  strategy (branch removal, branch-content shrinking, prefix/suffix shrinking,
-  and argument shrinking), the same-or-earlier-index guarantee holds structurally
-  here as well.
+  command index** (the failing root) than in the original. The shrinker
+  checks it: a candidate whose failure happens at a root generated after the
+  current failing root is not adopted, whatever its signature. It also holds
+  structurally, because the shrinker first truncates the sequence at the
+  failure point (`Enum.take(commands, failed_at_index + 1)`), so every later
+  candidate is a subset of that prefix.
 
   ## Determinism
 
@@ -92,25 +76,9 @@ defmodule PropertyDamage.Shrinker do
   This ensures reproducibility: the same seed always produces the same
   shrunk sequence, making CI failures reliably reproducible locally.
 
-  ## Sequence Types
-
-  The Shrinker handles both linear and branching sequences:
-
-  ### Linear Sequences
-
-  Traditional shrinking: remove commands and simplify arguments.
-
-  ### Branching Sequences
-
-  Additional strategies:
-  - Remove entire branches (if failure persists)
-  - Shrink individual branches
-  - Convert to linear (if race not required for failure)
-  - Reduce branch count
-
   ## Shrink Cycle
 
-  A linear sequence is first truncated after the failing root. Then the
+  A sequence is first truncated after the failing root. Then the
   shrinker runs four phases in order, each on what the previous phase left,
   and repeats the cycle until a whole cycle adopts no candidate or the budget
   (`PropertyDamage.Shrinker.Config`) is spent:
@@ -156,22 +124,21 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
-    Executor,
     Expansion,
     Failure,
     Generator,
+    Model,
     Placeholder,
     PlaceholderRegistry,
     ReplayArtifact,
     Scheduler,
     Sequence,
     Settle,
-    Stutter,
-    Telemetry
+    Stutter
   }
-
-  alias PropertyDamage.Runtime.RunServices
 
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Sequence.Validator
@@ -211,8 +178,17 @@ defmodule PropertyDamage.Shrinker do
           expansion: map() | nil,
           iterations: non_neg_integer(),
           time_ms: non_neg_integer(),
-          cycles: non_neg_integer()
+          cycles: non_neg_integer(),
+          stop: stop_reason()
         }
+
+  @typedoc """
+  Why the shrinker stopped: `:done` when it finished inside its budget,
+  `:max_iterations` or `:max_time` when that budget ran out first. When both
+  ran out, or the last cycle ended exactly at the iteration cap,
+  `:max_iterations` wins; a budget stop does not claim minimality.
+  """
+  @type stop_reason :: :done | :max_iterations | :max_time
 
   @doc """
   Extract a failure signature from a failure reason and the index of the target
@@ -222,9 +198,7 @@ defmodule PropertyDamage.Shrinker do
   """
   #
   # A `%Failure{}` already carries its (globally-unique) kind and, for named
-  # kinds, its name; the envelope's `branch_id` is deliberately NOT part of the
-  # signature, so a branch failure is equivalent to the same failure on the
-  # linear path (matching the old branch-unwrapping behaviour). The `name` keeps
+  # kinds, its name. The `name` keeps
   # distinct checks from being conflated, and keeps an async-observed
   # check failure equivalent to a teardown failure of the same check.
   @spec failure_signature(Failure.t() | term(), non_neg_integer()) :: failure_signature()
@@ -267,13 +241,10 @@ defmodule PropertyDamage.Shrinker do
   @doc """
   Shrink a failing command sequence.
 
-  Every candidate is a fresh execution of the run's targets. A linear candidate
-  runs through `PropertyDamage.Scheduler.run/1` with every target, which sets
-  each target up and tears it down again, so nothing (an event queue, a mock
-  registry, adapter state) carries over from one attempt to the next. A
-  branching candidate runs on the one target through
-  `PropertyDamage.Executor.run/4`, with its own event queue, injectors and mocks
-  per attempt.
+  Every candidate is a fresh execution of the run's targets. A candidate runs
+  through `PropertyDamage.Scheduler.run/1` with every target, which sets each
+  target up and tears it down again, so nothing (an event queue, a mock
+  registry, adapter state) carries over from one attempt to the next.
 
   The setup commands are never part of a candidate: no strategy removes,
   reorders or simplifies one, and every attempt executes the sequence's setup
@@ -346,7 +317,7 @@ defmodule PropertyDamage.Shrinker do
     - `:variant_index` - Index of the target the failure happened in (default `0`)
     - `:model` - Model module (required)
     - `:targets` - The run's `[%PropertyDamage.Target{}]`, reference first
-      (required); a branching sequence takes exactly one
+      (required)
     - `:concurrency`, `:compare`, `:check_mode` - as on `PropertyDamage.run/1`
       (defaults `:serial`, `[converge_within: 5_000]`, `:halt`)
     - `:rng_seed` - The run's effective seed: each attempt runs as run 0 of it,
@@ -355,35 +326,31 @@ defmodule PropertyDamage.Shrinker do
     - `:run_nonce` - The run nonce for client-minted values (DR-034)
     - `:mint_epoch_counter` - `:atomics` counter every attempt draws a fresh
       mint epoch from (DR-034; default a new counter, so epochs start at 1)
-    - `:expansion` - What every target ran for the failing linear sequence
+    - `:expansion` - What every target ran for the failing sequence
       (the run's expansion choices, or a report trace's
       `%{name => [choice]}`); default `nil`, every root runs as itself
     - `:root_ids` - The stable id of each root of `sequence`, the ids
       `:expansion` keys its choices by (default: each root's index)
     - `:stutter_config` - The run's stutter configuration; a stutter failure is
       reproduced with stutter forced on (DR-029)
+    - `:external_markers` - The run's atom markers (see `PropertyDamage.External`).
+      The teardown draw, the expansion walk and the replay check of every
+      candidate simulate commands again, and each turns an event field holding
+      one of these atoms into a placeholder, as generation did (default `[]`)
     - `:config` - Shrinker.Config struct (default: Config.new())
 
   ## Returns
 
   A shrink_result map: the minimal failing sequence, what every target runs
-  for it (`expansion`, nil for a branching sequence), the number of
+  for it (`expansion`), the number of
   candidates tried (`iterations`), the time spent, and the number of shrink
   cycles run (`cycles`; the last one adopted nothing unless the budget ran
-  out).
+  out) and why it stopped (`stop`, see `t:stop_reason/0`).
   """
   @spec shrink(Sequence.t() | [struct()], keyword()) :: shrink_result()
   def shrink(sequence_or_commands, opts)
 
-  def shrink(%Sequence{branches: nil} = sequence, opts) do
-    # Linear sequence
-    shrink_linear(sequence, opts)
-  end
-
-  def shrink(%Sequence{} = sequence, opts) do
-    # Branching sequence
-    shrink_branching(sequence, opts)
-  end
+  def shrink(%Sequence{} = sequence, opts), do: shrink_linear(sequence, opts)
 
   # Backwards compatibility: accept list of commands
   def shrink(commands, opts) when is_list(commands) do
@@ -420,8 +387,7 @@ defmodule PropertyDamage.Shrinker do
 
     # Truncating at the failure point is an optimization, not an assumption
     # we may act on blindly: the index can be nil (poll timeouts, record
-    # mode) or branch-relative (converted branching sequences), so the
-    # truncated base must be VERIFIED to still fail before it replaces the
+    # mode), so the truncated base must be VERIFIED to still fail before it replaces the
     # full sequence. The verification is an attempt like any other: it counts
     # whether it reproduces or not, and it runs only while the budget lasts.
     shrink_state =
@@ -444,7 +410,7 @@ defmodule PropertyDamage.Shrinker do
     # replayed) still resolves its externals, and the teardown commands generated
     # for its own roots.
     shrunk =
-      %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
+      %{sequence | prefix: shrink_state.commands}
       |> Sequence.with_registry(remap_registry(shrink_state.registry, shrink_state.positions))
       |> with_teardown(shrink_state)
 
@@ -453,7 +419,8 @@ defmodule PropertyDamage.Shrinker do
       expansion: carried_expansion(shrunk, shrink_state.positions, shrink_state),
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time,
-      cycles: shrink_state.cycles
+      cycles: shrink_state.cycles,
+      stop: stop_reason(shrink_state, end_time)
     }
   end
 
@@ -488,11 +455,15 @@ defmodule PropertyDamage.Shrinker do
 
     %{
       model: Keyword.fetch!(opts, :model),
+      # Every command's spec as the model lists it, built once per shrink.
+      specs: Model.spec_table(Keyword.fetch!(opts, :model)),
       targets: Keyword.fetch!(opts, :targets),
       concurrency: Keyword.get(opts, :concurrency, :serial),
       compare: Keyword.get(opts, :compare, converge_within: 5_000),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       config: Keyword.get(opts, :config, Config.new()),
+      external_markers: Keyword.get(opts, :external_markers, []),
       iterations: 0,
       # Candidates adopted so far, and the shrink cycles run.
       adopted: 0,
@@ -550,7 +521,8 @@ defmodule PropertyDamage.Shrinker do
     {:ok,
      Expansion.expand(state.model, candidate, state.targets, state.rng_seed,
        root_ids: root_ids,
-       carry: state.carry
+       carry: state.carry,
+       external_markers: state.external_markers
      )}
   rescue
     ArgumentError -> :invalid
@@ -856,392 +828,6 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # ============================================================================
-  # Branching Sequence Shrinking
-  # ============================================================================
-
-  defp shrink_branching(sequence, opts) do
-    shrink_state =
-      opts
-      |> base_state()
-      |> Map.merge(%{
-        sequence: sequence,
-        # The placeholder registry (DR-021), whose producer_link is keyed by the
-        # ORIGINAL structured positions. Kept pristine; each candidate is executed
-        # with a copy remapped onto the candidate's own positions (see
-        # still_fails_branch?), and the final result carries the same remap.
-        registry: sequence.registry,
-        # A structural mirror of `sequence` holding each surviving command's
-        # ORIGINAL Position (a %Sequence{} of positions, parallel to `sequence`).
-        # Kept in lockstep with every removal so we can rebuild the original ->
-        # candidate position map the registry remap needs. This is the branching
-        # analogue of shrink_linear's parallel `positions` list.
-        positions: initial_branch_positions(sequence),
-        failed_at_index: Keyword.fetch!(opts, :failed_at_index),
-        setup_commands: sequence.setup
-      })
-
-    # Strategy 1: Try converting to linear (maybe race isn't needed)
-    shrink_state = try_convert_to_linear(shrink_state)
-
-    # Strategy 2: Remove entire branches
-    shrink_state = try_remove_branches(shrink_state)
-
-    # Strategy 3: Shrink individual branches
-    shrink_state = shrink_branch_contents(shrink_state)
-
-    # Strategy 4: Shrink prefix and suffix
-    shrink_state = shrink_prefix_suffix(shrink_state)
-
-    # Strategy 5: Argument shrinking (if enabled)
-    shrink_state =
-      if shrink_state.config.shrink_arguments do
-        shrink_branch_arguments(shrink_state)
-      else
-        shrink_state
-      end
-
-    end_time = System.monotonic_time(:millisecond)
-
-    %{
-      # Carry the remapped registry so the shrunk sequence (reported and
-      # replayed) still resolves its externals against its own positions.
-      sequence:
-        shrink_state.sequence
-        |> Sequence.with_registry(
-          remap_branch_registry(
-            shrink_state.registry,
-            shrink_state.positions,
-            shrink_state.sequence
-          )
-        )
-        |> with_teardown(shrink_state),
-      expansion: nil,
-      iterations: shrink_state.iterations,
-      time_ms: end_time - shrink_state.start_time,
-      # The branching strategies run once each.
-      cycles: 0
-    }
-  end
-
-  # The original structured positions of a branching sequence, laid out as a
-  # %Sequence{} mirror so removals stay in lockstep with the command sequence
-  # (DR-021). Each slot holds the Position that keys the registry's producer_link.
-  defp initial_branch_positions(%Sequence{prefix: prefix, branches: branches, suffix: suffix}) do
-    %Sequence{
-      prefix: prefix |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.prefix(i) end),
-      branches:
-        (branches || [])
-        |> Enum.with_index()
-        |> Enum.map(fn {branch, id} ->
-          branch |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.branch(id, i) end)
-        end),
-      suffix: suffix |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.suffix(i) end)
-    }
-  end
-
-  # Remap a registry's producer_link from original positions onto the positions
-  # `candidate_seq` will actually run at (DR-021). `positions` mirrors
-  # `candidate_seq` structurally and holds each command's original position, so
-  # zipping its reading-order flattening against `candidate_seq`'s own canonical
-  # positions gives the original -> candidate map. A producer whose command was
-  # removed is absent from `positions` and so is dropped, exactly as on the
-  # linear path.
-  defp remap_branch_registry(nil, _positions, _candidate_seq), do: nil
-
-  defp remap_branch_registry(registry, positions, candidate_seq) do
-    orig_positions = Sequence.to_list(positions)
-
-    new_positions =
-      candidate_seq |> Sequence.indexed() |> Enum.map(fn {position, _idx, _cmd} -> position end)
-
-    orig_to_new = orig_positions |> Enum.zip(new_positions) |> Map.new()
-    PlaceholderRegistry.remap_positions(registry, orig_to_new)
-  end
-
-  defp try_convert_to_linear(state) do
-    if exceeded_limits?(state) do
-      state
-    else
-      # Try flattening to linear sequence. The registry's producer_link is keyed
-      # by the branch-structured positions, so it must be remapped onto the flat
-      # prefix positions the flattened sequence runs at (DR-021); otherwise a
-      # consumer strands and the linear re-run fails with a different signature,
-      # spuriously blocking the (valid) conversion.
-      linear_base = %{
-        Sequence.linear(Sequence.to_list(state.sequence))
-        | setup: state.setup_commands
-      }
-
-      linear_registry = remap_branch_registry(state.registry, state.positions, linear_base)
-      linear_seq = Sequence.with_registry(linear_base, linear_registry)
-      state = increment_iterations(state)
-
-      case linear_run_result(linear_seq, state) do
-        {:reproduces, linear_failed_at_index} ->
-          # Race not required - convert to linear and continue with linear
-          # shrinking. Hand shrink_linear the failure index from THIS linear
-          # re-run, not the original `state.failed_at_index`: the latter is a
-          # branch-relative coordinate (`branch_start_index + position`) that is
-          # smaller than the failing command's position in the flattened
-          # sequence, so it would truncate too short, drop the failing command,
-          # and leave the full flatten to the (budget-bounded) one-by-one
-          # fixpoint. The linear index is self-consistent with `linear_seq`, so
-          # Phase-1 truncation targets the real failure point.
-          linear_result =
-            shrink_linear(linear_seq,
-              failed_at_index: linear_failed_at_index,
-              model: state.model,
-              targets: state.targets,
-              concurrency: state.concurrency,
-              compare: state.compare,
-              check_mode: state.check_mode,
-              # The converted shrink spends what is left of this shrink's
-              # budget, so the two together stay within it.
-              config: remaining_budget(state),
-              failure_reason: reconstruct_failure_reason(state.original_signature),
-              variant_index: signature_variant(state.original_signature),
-              # Carry stutter reproduction into the converted-linear shrink. The
-              # config is already forced (re-forcing is idempotent).
-              stutter_config: state.stutter_config,
-              rng_seed: state.rng_seed,
-              # One mint-epoch counter for every attempt of this shrink (DR-034).
-              run_nonce: state.run_nonce,
-              mint_epoch_counter: state.mint_epoch_counter
-            )
-
-          # shrink_linear returns a linear sequence carrying a registry already
-          # remapped onto its own compact prefix positions. Re-base the tracking
-          # state on that so the remaining (branch-guarded no-op, plus prefix/
-          # suffix and argument) strategies and the final remap keep operating on
-          # a consistent registry/positions pair.
-          converted = linear_result.sequence
-
-          %{
-            state
-            | sequence: converted,
-              registry: converted.registry,
-              positions: initial_branch_positions(converted),
-              iterations: state.iterations + linear_result.iterations
-          }
-
-        :no_reproduce ->
-          state
-      end
-    end
-  end
-
-  defp try_remove_branches(state) do
-    %Sequence{branches: branches} = state.sequence
-
-    if is_nil(branches) or length(branches) <= 2 or exceeded_limits?(state) do
-      state
-    else
-      # Try removing each branch
-      do_remove_branches(state, 0)
-    end
-  end
-
-  defp do_remove_branches(state, index) do
-    %Sequence{branches: branches} = state.sequence
-
-    if is_nil(branches) or index >= length(branches) or exceeded_limits?(state) do
-      state
-    else
-      # Try removing branch at index
-      new_branches = List.delete_at(branches, index)
-
-      if length(new_branches) >= 2 do
-        candidate = %{state.sequence | branches: new_branches}
-        # Drop the same branch from the position mirror so the two stay aligned.
-        candidate_positions = %{
-          state.positions
-          | branches: List.delete_at(state.positions.branches, index)
-        }
-
-        state = increment_iterations(state)
-
-        if still_fails_branch?(candidate, candidate_positions, state) do
-          new_state = %{state | sequence: candidate, positions: candidate_positions}
-          do_remove_branches(new_state, index)
-        else
-          do_remove_branches(state, index + 1)
-        end
-      else
-        state
-      end
-    end
-  end
-
-  defp shrink_branch_contents(state) do
-    %Sequence{branches: branches} = state.sequence
-
-    if is_nil(branches) or exceeded_limits?(state) do
-      state
-    else
-      # Shrink each branch individually
-      {new_branches, new_state} =
-        Enum.reduce(Enum.with_index(branches), {[], state}, fn {branch, idx}, {acc, s} ->
-          if exceeded_limits?(s) do
-            {[branch | acc], s}
-          else
-            {shrunk_branch, updated_state} = shrink_single_branch(branch, idx, s)
-            {[shrunk_branch | acc], updated_state}
-          end
-        end)
-
-      new_branches = Enum.reverse(new_branches)
-      %{new_state | sequence: %{state.sequence | branches: new_branches}}
-    end
-  end
-
-  defp shrink_single_branch(branch, branch_idx, state) do
-    # Try removing commands from this branch, prioritizing probe commands
-    prioritized_indices = sort_indices_by_shrink_priority(branch)
-    do_shrink_single_branch(branch, branch_idx, state, prioritized_indices)
-  end
-
-  defp do_shrink_single_branch(branch, _branch_idx, state, []) do
-    {branch, state}
-  end
-
-  defp do_shrink_single_branch(branch, _branch_idx, state, _indices)
-       when length(branch) <= 1 do
-    {branch, state}
-  end
-
-  defp do_shrink_single_branch(branch, branch_idx, state, [index | rest_indices]) do
-    if exceeded_limits?(state) do
-      {branch, state}
-    else
-      # Try removing command at index. The branch is replaced BY POSITION:
-      # value-matching would also mutate a structurally identical sibling.
-      candidate_branch = List.delete_at(branch, index)
-      new_branches = List.replace_at(state.sequence.branches, branch_idx, candidate_branch)
-      candidate_seq = %{state.sequence | branches: new_branches}
-
-      # Mirror the same by-position removal in the position tracker.
-      pos_branch = Enum.at(state.positions.branches, branch_idx)
-      candidate_pos_branch = List.delete_at(pos_branch, index)
-
-      new_pos_branches =
-        List.replace_at(state.positions.branches, branch_idx, candidate_pos_branch)
-
-      candidate_positions = %{state.positions | branches: new_pos_branches}
-
-      state = increment_iterations(state)
-
-      if still_fails_branch?(candidate_seq, candidate_positions, state) do
-        new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
-        # Recompute priorities for the shrunk branch
-        new_prioritized = sort_indices_by_shrink_priority(candidate_branch)
-        do_shrink_single_branch(candidate_branch, branch_idx, new_state, new_prioritized)
-      else
-        do_shrink_single_branch(branch, branch_idx, state, rest_indices)
-      end
-    end
-  end
-
-  defp shrink_prefix_suffix(state) do
-    if exceeded_limits?(state) do
-      state
-    else
-      # Shrink prefix
-      state = shrink_seq_part(state, :prefix)
-      # Shrink suffix
-      shrink_seq_part(state, :suffix)
-    end
-  end
-
-  defp shrink_seq_part(state, part) do
-    commands = Map.get(state.sequence, part)
-    # Prioritize probe commands for removal
-    prioritized_indices = sort_indices_by_shrink_priority(commands)
-    do_shrink_seq_part(state, part, commands, prioritized_indices)
-  end
-
-  defp do_shrink_seq_part(state, _part, _commands, []) do
-    state
-  end
-
-  defp do_shrink_seq_part(state, _part, commands, _indices)
-       when commands == [] do
-    state
-  end
-
-  defp do_shrink_seq_part(state, part, commands, [index | rest_indices]) do
-    if exceeded_limits?(state) do
-      state
-    else
-      candidate_commands = List.delete_at(commands, index)
-      candidate_seq = Map.put(state.sequence, part, candidate_commands)
-
-      # Mirror the removal in the position tracker's matching section.
-      pos_commands = Map.get(state.positions, part)
-      candidate_positions = Map.put(state.positions, part, List.delete_at(pos_commands, index))
-
-      state = increment_iterations(state)
-
-      if still_fails_branch?(candidate_seq, candidate_positions, state) do
-        new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
-        # Recompute priorities for the shrunk commands
-        new_prioritized = sort_indices_by_shrink_priority(candidate_commands)
-        do_shrink_seq_part(new_state, part, candidate_commands, new_prioritized)
-      else
-        do_shrink_seq_part(state, part, commands, rest_indices)
-      end
-    end
-  end
-
-  defp shrink_branch_arguments(state) do
-    # Shrink arguments in all parts of the sequence
-    all_commands = Sequence.to_list(state.sequence)
-    shrunk_commands = Enum.map(all_commands, &shrink_command_args/1)
-
-    # A candidate equal to the sequence is not an attempt, and no attempt
-    # runs once the budget is spent.
-    if shrunk_commands == all_commands or exceeded_limits?(state) do
-      state
-    else
-      # Rebuild sequence with shrunk commands
-      # This is a simplification - proper implementation would track positions
-      candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
-
-      state = increment_iterations(state)
-
-      # Argument shrinking replaces commands in place, so the structure (and thus
-      # the position tracker) is unchanged.
-      if still_fails_branch?(candidate, state.positions, state) do
-        %{state | sequence: candidate}
-      else
-        state
-      end
-    end
-  end
-
-  defp rebuild_sequence_with_commands(%Sequence{branches: nil} = seq, commands) do
-    %{seq | prefix: commands, suffix: []}
-  end
-
-  defp rebuild_sequence_with_commands(seq, commands) do
-    # Simple rebuild - take prefix, then branches, then suffix
-    prefix_len = length(seq.prefix)
-    branch_lens = Enum.map(seq.branches, &length/1)
-    total_branch_len = Enum.sum(branch_lens)
-
-    {prefix, rest} = Enum.split(commands, prefix_len)
-    {branch_commands, suffix} = Enum.split(rest, total_branch_len)
-
-    # Redistribute branch commands
-    {branches, _} =
-      Enum.reduce(branch_lens, {[], branch_commands}, fn len, {acc, remaining} ->
-        {branch, rest} = Enum.split(remaining, len)
-        {[branch | acc], rest}
-      end)
-
-    %{seq | prefix: prefix, branches: Enum.reverse(branches), suffix: suffix}
-  end
-
-  # ============================================================================
   # Linear Shrinking Helpers (original implementation)
   # ============================================================================
 
@@ -1293,7 +879,7 @@ defmodule PropertyDamage.Shrinker do
       state
     else
       # Drop this level's nodes, then pull back any ancestors that surviving
-      # nodes still depend on so refs stay resolvable. Everything here is in
+      # nodes still depend on so placeholders stay resolvable. Everything here is in
       # the original index space, which `graph` agrees with.
       candidate_keep = MapSet.difference(kept, MapSet.new(level))
 
@@ -1313,7 +899,8 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             try_remove_levels(adopted, original, orig_positions, graph, rest, expanded)
 
@@ -1334,7 +921,7 @@ defmodule PropertyDamage.Shrinker do
   defp do_linear_shrink_fixpoint(state) do
     original_count = length(state.commands)
     # Get indices sorted by shrink priority (probe commands first)
-    prioritized_indices = sort_indices_by_shrink_priority(state.commands)
+    prioritized_indices = sort_indices_by_shrink_priority(state.commands, state.specs)
     state = do_linear_shrink(state, prioritized_indices)
     new_count = length(state.commands)
 
@@ -1349,31 +936,23 @@ defmodule PropertyDamage.Shrinker do
   # Sort command indices by shrink priority.
   # Commands with :prefer_remove (probes, read-only) are prioritized for removal.
   # Commands with :prefer_keep are removed last.
-  # Reads the :shrink key from the command's resolved spec; spec-less commands
-  # default to :neutral.
-  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
-    case Map.get(resolved_shrink_spec(cmd.__struct__), :shrink, :neutral) do
+  # Reads the :shrink key from the command's spec in the model's spec table, so
+  # an option on the command's listing in commands/0 counts.
+  defp shrink_priority_for_command(cmd, specs) when is_struct(cmd) do
+    case Map.get(Model.spec_for(specs, cmd), :shrink, :neutral) do
       :prefer_remove -> 0
       :neutral -> 1
       :prefer_keep -> 2
     end
   end
 
-  defp shrink_priority_for_command(_cmd), do: 1
+  defp shrink_priority_for_command(_cmd, _specs), do: 1
 
-  defp resolved_shrink_spec(module) do
-    if PropertyDamage.ModuleCheck.exports?(module, :command_spec, 1) do
-      module.command_spec([])
-    else
-      PropertyDamage.Command.framework_defaults()
-    end
-  end
-
-  defp sort_indices_by_shrink_priority(commands) do
+  defp sort_indices_by_shrink_priority(commands, specs) do
     commands
     |> Enum.with_index()
     |> Enum.sort_by(fn {cmd, _idx} ->
-      shrink_priority_for_command(cmd)
+      shrink_priority_for_command(cmd, specs)
     end)
     |> Enum.map(fn {_cmd, idx} -> idx end)
   end
@@ -1392,7 +971,7 @@ defmodule PropertyDamage.Shrinker do
 
       # Skip if this is a protected async command (its external is still
       # consumed downstream)
-      if protected_async?(command, position, state.registry, remaining) do
+      if protected_async?(command, position, state, remaining) do
         do_linear_shrink(state, rest_indices)
       else
         candidate = List.delete_at(state.commands, index)
@@ -1400,10 +979,11 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             # Command was removed, recompute priorities for remaining commands
-            do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate))
+            do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate, state.specs))
 
           _rejected ->
             do_linear_shrink(state, rest_indices)
@@ -1431,7 +1011,8 @@ defmodule PropertyDamage.Shrinker do
         state = increment_iterations(state)
 
         # Argument shrinking replaces in place, so positions are unchanged.
-        case valid_candidate?(candidate, state) && adopt(candidate, state.positions, state) do
+        case valid_candidate?(candidate, state.positions, state) &&
+               adopt(candidate, state.positions, state) do
           %{} = adopted -> do_shrink_arguments(adopted, index)
           _rejected -> do_shrink_arguments(state, index + 1)
         end
@@ -1484,8 +1065,14 @@ defmodule PropertyDamage.Shrinker do
   # over a candidate the shrinker made up, such as an argument halved to 0 or a
   # key no earlier command created. Model code may raise on such a candidate;
   # that makes the candidate invalid, not the run a failure.
-  defp valid_candidate?(commands, state) do
-    Validator.valid_sequence?(commands, state.model, state.setup_commands)
+  defp valid_candidate?(commands, positions, state) do
+    sequence =
+      commands
+      |> Sequence.linear()
+      |> Sequence.with_registry(remap_registry(state.registry, positions))
+      |> Map.put(:setup, state.setup_commands)
+
+    Validator.valid_sequence?(sequence, state.model, external_markers: state.external_markers)
   rescue
     _ -> false
   end
@@ -1501,7 +1088,10 @@ defmodule PropertyDamage.Shrinker do
 
   # The teardown commands generated against `sequence`'s roots, with the run seed.
   defp with_teardown(%Sequence{} = sequence, state),
-    do: Generator.teardown_commands(state.model, sequence, state.rng_seed)
+    do:
+      Generator.teardown_commands(state.model, sequence, state.rng_seed,
+        external_markers: state.external_markers
+      )
 
   # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across
   # this shrink's attempts (and never 0, the exploration run's epoch), so each
@@ -1551,29 +1141,6 @@ defmodule PropertyDamage.Shrinker do
 
   defp later?(_offset, _failing), do: false
 
-  # Like still_fails_branch?/3, but also surfaces the LINEAR failure index from
-  # the re-run so the caller can hand shrink_linear a truncation coordinate that
-  # is consistent with the (flattened) candidate sequence. Returns
-  # `{:reproduces, linear_failed_at_index}` when the candidate reproduces the
-  # equivalent failure (the index may be nil for poll/record-mode or
-  # setup-level failures, which shrink_linear tolerates by skipping
-  # truncation), or `:no_reproduce` otherwise. Used only at the
-  # convert-to-linear seam; the other branch strategies need only the boolean.
-  defp linear_run_result(sequence, state) do
-    # Regenerate idempotency keys to ensure fresh SUT state
-    sequence = regenerate_sequence_idempotency_keys(sequence)
-
-    case run_linear_attempt(Sequence.to_list(sequence), nil, sequence.registry, state) do
-      {:failed, reason, variant_index, root} ->
-        if check_failure_equivalence(reason, variant_index, state.original_signature),
-          do: {:reproduces, root},
-          else: :no_reproduce
-
-      _passed_or_not_run ->
-        :no_reproduce
-    end
-  end
-
   # One linear shrink attempt: the candidate, with the sequence's setup
   # commands and teardown commands generated for it, on every target through the
   # scheduler, which sets each target up and tears it down. Returns
@@ -1598,14 +1165,13 @@ defmodule PropertyDamage.Shrinker do
   # placeholder its commands hold, the leaves every target runs included,
   # is registered by the registry the artifact's re-execution rebuilds by
   # simulating the setup commands and the roots again
-  # (`PropertyDamage.ReplayArtifact.unregistered/4`). A simulator whose
+  # (`PropertyDamage.ReplayArtifact.unregistered/5`). A simulator whose
   # events depend on the state may mint nothing for a root once an earlier
   # root is gone, while the candidate still holds what the original run
   # minted there. Such a candidate is invalid: a shrunk failure it led to
   # could not be replayed from its own artifact. A simulator that raises on
   # the candidate makes it invalid too. A placeholder the rebuild misses for
-  # the sequence the shrink started from (one minted in a parallel branch,
-  # say) does not count: the shrink cannot lose what that sequence never had.
+  # the sequence the shrink started from does not count: the shrink cannot lose what that sequence never had.
   defp replayable?(commands, positions, expansion, state) do
     commands
     |> unreplayable(positions, expansion, state)
@@ -1629,7 +1195,10 @@ defmodule PropertyDamage.Shrinker do
           do: leaf
 
     held = state.setup_commands ++ commands ++ leaves
-    ReplayArtifact.unregistered(state.model, state.setup_commands, roots, held)
+
+    ReplayArtifact.unregistered(state.model, state.setup_commands, roots, held,
+      external_markers: state.external_markers
+    )
   end
 
   # The placeholder ids the registry rebuilt for the sequence the shrink
@@ -1673,6 +1242,7 @@ defmodule PropertyDamage.Shrinker do
         concurrency: state.concurrency,
         compare: state.compare,
         stutter_config: state.stutter_config,
+        keep_attempts: state.keep_attempts,
         check_mode: state.check_mode
       )
 
@@ -1689,71 +1259,15 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  # A branching candidate the model rejects (see "Invalid Candidates" in the
-  # moduledoc) never runs, as on the linear path: its commands, in reading
-  # order, go through the same validation.
-  defp still_fails_branch?(sequence, positions, state) do
-    valid_candidate?(Sequence.to_list(sequence), state) and
-      runs_failing_branch?(sequence, positions, state)
-  end
-
-  defp runs_failing_branch?(sequence, positions, state) do
-    # Regenerate idempotency keys to ensure fresh SUT state
-    sequence = regenerate_sequence_idempotency_keys(sequence)
-
-    # Attach a registry whose producer_link is remapped onto THIS candidate's
-    # positions (DR-021), so externals resolve against the shrunk sequence's
-    # own indices instead of the stale original ones.
-    sequence =
-      candidate(sequence, remap_branch_registry(state.registry, positions, sequence), state)
-
-    # A branching sequence runs on its one target, through the linear
-    # engine, with its own event queue, injectors and mocks per attempt.
-    [target] = state.targets
-
-    run_result =
-      RunServices.with_services(target, fn event_queue, mock_registry ->
-        Executor.run(sequence, state.model, target.adapter,
-          config: target.config,
-          event_queue: event_queue,
-          mock_registry: mock_registry,
-          stutter_config: state.stutter_config,
-          rng_seed: state.rng_seed,
-          run_nonce: state.run_nonce,
-          mint_epoch: next_mint_epoch(state),
-          telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0),
-          setup_commands: sequence.setup,
-          teardown_commands: sequence.teardown
-        )
-      end)
-
-    case run_result do
-      {:ok, %{success: true}} ->
-        false
-
-      # A setup failure (of a setup command, a check on its event, or the
-      # completion rule) says nothing about the roots.
-      {:ok, %{failure_reason: %Failure{type: %Failure.Setup{}}}} ->
-        false
-
-      {:ok, result} ->
-        check_failure_equivalence(result.failure_reason, 0, state.original_signature)
-
-      # The adapter's setup/1 failed: a setup failure of the one target.
-      {:error, _reason} ->
-        false
-    end
-  end
-
   # Check if a failure matches the original signature
   defp check_failure_equivalence(failure_reason, variant_index, nil) do
     # No original signature: we can't prove equivalence, so for backwards
     # compatibility we accept any failure EXCEPT ones that are unmistakably
-    # shrink artifacts. A dangling-ref / ref-resolution error only appears
+    # shrink artifacts. A placeholder-resolution error only appears
     # because a producing command was removed; accepting it would pass off a
     # different bug as the "minimal repro". (When a signature IS present, the
     # comparison below already rejects these unless the original was itself a
-    # ref-resolution error.)
+    # placeholder-resolution error.)
     elem(failure_signature(failure_reason, variant_index), 0) != :placeholder_resolution
   end
 
@@ -1765,23 +1279,6 @@ defmodule PropertyDamage.Shrinker do
     failure_signature(failure_reason, variant_index) == original_signature
   end
 
-  # Reconstruct a minimal %Failure{} from a signature for passing to nested
-  # shrink calls, which only consult its signature (kind + name) for equivalence;
-  # the target travels separately as the variant index. The rebuilt failure
-  # yields the signature it was built from, a divergence's name included.
-  defp reconstruct_failure_reason(nil), do: nil
-
-  defp reconstruct_failure_reason({:check_failed, name, _variant_index}) do
-    Failure.check_failed(name, "")
-  end
-
-  defp reconstruct_failure_reason({kind, name, _variant_index}) do
-    Failure.from_signature(kind, name)
-  end
-
-  defp signature_variant(nil), do: 0
-  defp signature_variant({_kind, _name, variant_index}), do: variant_index
-
   defp exceeded_limits?(state) do
     now = System.monotonic_time(:millisecond)
     elapsed = now - state.start_time
@@ -1790,15 +1287,14 @@ defmodule PropertyDamage.Shrinker do
       elapsed >= state.config.max_time_ms
   end
 
-  # The config with what is left of the state's iteration and time budget.
-  defp remaining_budget(state) do
-    elapsed = System.monotonic_time(:millisecond) - state.start_time
-
-    %{
-      state.config
-      | max_iterations: max(state.config.max_iterations - state.iterations, 0),
-        max_time_ms: max(state.config.max_time_ms - elapsed, 0)
-    }
+  # Which budget, if any, ended the shrink at time `now`. The iteration cap is
+  # checked first, so it wins when both ran out.
+  defp stop_reason(state, now) do
+    cond do
+      state.iterations >= state.config.max_iterations -> :max_iterations
+      now - state.start_time >= state.config.max_time_ms -> :max_time
+      true -> :done
+    end
   end
 
   defp increment_iterations(state) do
@@ -1813,10 +1309,10 @@ defmodule PropertyDamage.Shrinker do
   # shrink-cost optimization. The produced placeholders are identified by the
   # command's structured position (DR-021), and a downstream consumer embeds a
   # placeholder carrying the same id.
-  defp protected_async?(command, position, registry, downstream_commands) do
+  defp protected_async?(command, position, state, downstream_commands) do
     with true <- is_struct(command),
-         true <- Settle.get_semantics(command) == :async,
-         %PlaceholderRegistry{} <- registry,
+         true <- Settle.get_semantics(Model.spec_for(state.specs, command)) == :async,
+         %PlaceholderRegistry{} = registry <- state.registry,
          produced_ids = PlaceholderRegistry.ids_at_position(registry, position),
          false <- produced_ids == [] do
       downstream_ids =
@@ -1837,11 +1333,6 @@ defmodule PropertyDamage.Shrinker do
   # Regenerate idempotency keys for a list of commands to ensure fresh SUT state
   defp regenerate_idempotency_keys(commands) do
     Enum.map(commands, &regenerate_command_idempotency_key/1)
-  end
-
-  # Regenerate idempotency keys for a sequence (handles branching)
-  defp regenerate_sequence_idempotency_keys(%Sequence{} = sequence) do
-    Sequence.map(sequence, &regenerate_command_idempotency_key/1)
   end
 
   # Regenerate the idempotency key for a single command

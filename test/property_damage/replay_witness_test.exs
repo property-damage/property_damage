@@ -43,11 +43,11 @@ defmodule PropertyDamage.ReplayWitnessTest do
     assert replay_call =~ "only: [replay: #{inspect(path)}]"
 
     assert R.last_lines(report, 5) == [
-             FailureReport.reproduction_command(report),
-             "Regenerate the failing variant:",
-             expansion_call,
-             "Replay the shrunk failure:",
-             replay_call
+             R.printed(report, FailureReport.reproduction_command(report)),
+             "# Regenerate the failing variant:",
+             R.printed(report, expansion_call),
+             "# Replay the shrunk failure:",
+             R.printed(report, replay_call)
            ]
 
     # Replaying the artifact reproduces the failure at the same root.
@@ -89,7 +89,7 @@ defmodule PropertyDamage.ReplayWitnessTest do
 
     # The loader refuses an unknown format and a function in the file.
     text = File.read!(path)
-    version_zero = String.replace(text, "artifact, format 1", "artifact, format 0")
+    version_zero = String.replace(text, "artifact, format 2", "artifact, format 0")
     assert {:error, _reason} = R.parse_artifact(version_zero)
 
     with_function = replace_in_term(text, "run: 1", "run: fn -> 1 end")

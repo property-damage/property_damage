@@ -2,8 +2,8 @@ defmodule PropertyDamage.Executor.Finalization do
   @moduledoc false
   # Run-result finalization for the executor (DR-029).
   #
-  # Owns the finalize chain that runs after the last command of a (linear or
-  # merged-branch) run, in order:
+  # Owns the finalize chain that runs after the last command of a run, in
+  # order:
   #
   #   finalize_pollers (@eventually drain + async checks)
   #     -> finalize_resource_pollers
@@ -30,9 +30,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # Result Finalization
   # ============================================================================
 
-  def finalize_result(result, linearization \\ nil)
-
-  def finalize_result({:failed, index, reason, state}, linearization) do
+  def finalize_result({:failed, index, reason, state}) do
     # Stop any active pollers when we fail early
     pollers = Map.get(state, :active_pollers, [])
     Enum.each(pollers, &StatePoller.stop/1)
@@ -67,14 +65,14 @@ defmodule PropertyDamage.Executor.Finalization do
       failed_at_index: failed_at_index,
       failure_reason: normalized_reason,
       stacktrace: stacktrace,
-      linearization: linearization,
       check_failures: check_failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
-  def finalize_result(state, linearization) do
+  def finalize_result(state) do
     # Finalize all active state pollers - wait for them to complete. The drain
     # also evaluates async @check every: checks on events that arrive
     # during the @eventually await window (DR-025); a :halt violation there is
@@ -85,26 +83,27 @@ defmodule PropertyDamage.Executor.Finalization do
       # DR-025: an async every: check tripped during the @eventually await
       # drain under :halt mode. Report it at the observing event's command_index,
       # ahead of any poll timeout (a more proximate, more actionable failure).
-      {name, reason, command_index} ->
+      {name, projection, reason, command_index} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        {normalized, stacktrace} = extract_stacktrace(Failure.check_failed(name, reason))
+
+        {normalized, stacktrace} =
+          extract_stacktrace(Failure.check_failed(name, reason, projection))
 
         async_failure_result(
           state,
           normalized,
           stacktrace,
           command_index,
-          linearization,
           Enum.reverse(check_failures)
         )
 
       nil ->
-        finalize_after_pollers(state, check_failures, halt_failure, linearization)
+        finalize_after_pollers(state, check_failures, halt_failure)
     end
   end
 
-  defp finalize_after_pollers(state, check_failures, halt_failure, linearization) do
+  defp finalize_after_pollers(state, check_failures, halt_failure) do
     # Check if any state poller halted the run in :halt mode. Both timeouts
     # and errors are halt-worthy; the error case previously fell through and
     # was reported as success.
@@ -122,7 +121,6 @@ defmodule PropertyDamage.Executor.Finalization do
           failure,
           stacktrace,
           Map.get(info.triggered_by, :command_index),
-          linearization,
           check_failures
         )
 
@@ -133,7 +131,6 @@ defmodule PropertyDamage.Executor.Finalization do
         poller_failure_result(
           state,
           Failure.poll_timeout(info),
-          linearization,
           check_failures
         )
 
@@ -144,7 +141,6 @@ defmodule PropertyDamage.Executor.Finalization do
         poller_failure_result(
           state,
           Failure.poll_error(reason),
-          linearization,
           check_failures
         )
 
@@ -163,8 +159,10 @@ defmodule PropertyDamage.Executor.Finalization do
         case settle_event_queue(state, check_failures) do
           # DR-025: an async every: check tripped on a drained event under
           # :halt mode — report it at the observing event's command_index.
-          {:halt, name, reason, command_index, state, failures} ->
-            {normalized, stacktrace} = extract_stacktrace(Failure.check_failed(name, reason))
+          {:halt, name, projection, reason, command_index, state, failures} ->
+            {normalized, stacktrace} =
+              extract_stacktrace(Failure.check_failed(name, reason, projection))
+
             combined_failures = Enum.reverse(failures) ++ resource_failures
 
             async_failure_result(
@@ -172,8 +170,18 @@ defmodule PropertyDamage.Executor.Finalization do
               normalized,
               stacktrace,
               command_index,
-              linearization,
               combined_failures
+            )
+
+          {:failed, failure, command_index, state, failures} ->
+            {normalized, stacktrace} = extract_stacktrace(failure)
+
+            async_failure_result(
+              state,
+              normalized,
+              stacktrace,
+              command_index,
+              Enum.reverse(failures) ++ resource_failures
             )
 
           {:ok, state, failures} ->
@@ -181,8 +189,7 @@ defmodule PropertyDamage.Executor.Finalization do
               state,
               failures,
               resource_failures,
-              resource_halt,
-              linearization
+              resource_halt
             )
         end
     end
@@ -191,7 +198,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # The clean-completion tail after the settle drain (DR-024 teardown checkpoint
   # path). Split out so the DR-025 async-halt branch in settle can short-circuit.
   # `failures` is the run's accumulated :record failures (newest first).
-  defp finalize_after_settle(state, failures, resource_failures, resource_halt, linearization) do
+  defp finalize_after_settle(state, failures, resource_failures, resource_halt) do
     # Reverse so they read in chronological order, like the event log.
     combined_failures = Enum.reverse(failures) ++ resource_failures
 
@@ -201,7 +208,6 @@ defmodule PropertyDamage.Executor.Finalization do
         poller_failure_result(
           state,
           Failure.resource_poller_error(reason),
-          linearization,
           combined_failures
         )
 
@@ -213,15 +219,14 @@ defmodule PropertyDamage.Executor.Finalization do
         # hoist): a liveness timeout is itself a not-settled outcome, so
         # there is no settled state to check.
         case Executor.run_phase_checks(state, :teardown) do
-          {:halt, name, reason, teardown_counters} ->
+          {:halt, name, projection, reason, teardown_counters} ->
             {normalized, stacktrace} =
-              extract_stacktrace(Failure.check_failed(name, reason))
+              extract_stacktrace(Failure.check_failed(name, reason, projection))
 
             teardown_failure_result(
               %{state | check_counters: teardown_counters},
               normalized,
               stacktrace,
-              linearization,
               combined_failures
             )
 
@@ -242,10 +247,10 @@ defmodule PropertyDamage.Executor.Finalization do
               failed_at_index: nil,
               failure_reason: nil,
               stacktrace: nil,
-              linearization: linearization,
               check_failures: all_failures,
               check_counters: teardown_counters,
-              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+              logs: Map.get(state, :logs, %{})
             }
         end
     end
@@ -254,7 +259,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # Shared shape for poller/record-mode failures. Crucially includes
   # :projections_before — its absence used to crash handle_failure with a
   # KeyError before any report could be built.
-  defp poller_failure_result(state, failure_reason, linearization, failures) do
+  defp poller_failure_result(state, failure_reason, failures) do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
@@ -266,10 +271,10 @@ defmodule PropertyDamage.Executor.Finalization do
       failed_at_index: poller_failure_index(failure_reason),
       failure_reason: failure_reason,
       stacktrace: nil,
-      linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -286,7 +291,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # settled state (failed_at_index nil — no command failed), distinct from a
   # poll timeout. Adapter.teardown/1 still runs afterward (it is owned by run/4's
   # `after` block), so a failing safety check never leaks SUT resources.
-  defp teardown_failure_result(state, failure_reason, stacktrace, linearization, failures) do
+  defp teardown_failure_result(state, failure_reason, stacktrace, failures) do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
@@ -296,10 +301,10 @@ defmodule PropertyDamage.Executor.Finalization do
       failed_at_index: nil,
       failure_reason: failure_reason,
       stacktrace: stacktrace,
-      linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -313,7 +318,6 @@ defmodule PropertyDamage.Executor.Finalization do
          failure_reason,
          stacktrace,
          command_index,
-         linearization,
          failures
        ) do
     %{
@@ -325,10 +329,10 @@ defmodule PropertyDamage.Executor.Finalization do
       failed_at_index: command_index,
       failure_reason: failure_reason,
       stacktrace: stacktrace,
-      linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -338,8 +342,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
   # Split an embedded {exception, stacktrace} out of a %Failure{}'s detail,
   # returning the failure with a bare-exception (or bare-message) detail plus the
-  # separated stacktrace. The envelope's `branch_id` rides along untouched, so a
-  # branch failure is normalized by the same clauses as a linear one. Public so
+  # separated stacktrace. Public so
   # the scheduler splits the failures its variants report the same way.
   @doc false
   @spec extract_stacktrace(Failure.t() | term()) :: {Failure.t() | term(), list() | nil}
@@ -376,7 +379,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # queue is absent or empty.
   # Threads the run's accumulated :record `failures` (newest-first) through the
   # async check. Returns {:ok, state, failures} on a clean drain, or
-  # {:halt, name, reason, command_index, state, failures} when an async
+  # {:halt, name, projection, reason, command_index, state, failures} when an async
   # `@check every:` check fails under :halt mode on a drained event
   # (DR-025). In :record/:log/:disabled modes it never halts; any :record
   # failures are prepended onto `failures`.
@@ -390,23 +393,36 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :event_queue),
         log_before,
         projs_before,
-        Map.get(state, :branch_id),
         Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
       )
 
-    # A mock event pushed after the last command's own flush belongs to it.
-    {projections, event_log, fold_counter} =
+    # A mock event pushed after the last command's own flush belongs to it,
+    # and so do the lines the mocks' on_event/2 writes (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
       Executor.Events.process_mock_events(
         Map.get(state, :mock_registry),
         Map.get(state, :last_command_index),
         event_log,
         projections,
-        Map.get(state, :branch_id),
         fold_counter
       )
+      |> Executor.Events.folded_or_raise!()
 
-    state = %{state | projections: projections, event_log: event_log, fold_counter: fold_counter}
+    logs =
+      PropertyDamage.Log.append(
+        Map.get(state, :logs, %{}),
+        Map.get(state, :current_position),
+        mock_lines
+      )
+
+    state =
+      Map.merge(state, %{
+        projections: projections,
+        event_log: event_log,
+        fold_counter: fold_counter,
+        logs: logs
+      })
 
     case Executor.check_async(
            Map.fetch!(state, :model),
@@ -421,9 +437,30 @@ defmodule PropertyDamage.Executor.Finalization do
       {:ok, counters, failures} ->
         {:ok, %{state | check_counters: counters}, failures}
 
-      {:halt, name, reason, command_index, counters} ->
-        {:halt, name, reason, command_index, %{state | check_counters: counters}, failures}
+      {:halt, name, projection, reason, command_index, counters} ->
+        {:halt, name, projection, reason, command_index, %{state | check_counters: counters},
+         failures}
     end
+  rescue
+    # A mock's on_event/2 that raised fails the last command, whose events
+    # the mock was told of, and its lines stay under that command. A
+    # projection that rejected a mock event raises on, as before.
+    e in Executor.Events.MockEventsError ->
+      case e.error do
+        {:projection, exception, stacktrace} ->
+          reraise exception, stacktrace
+
+        error ->
+          logs =
+            PropertyDamage.Log.append(
+              Map.get(state, :logs, %{}),
+              Map.get(state, :current_position),
+              e.lines
+            )
+
+          {:failed, Executor.mock_events_failure(error), Map.get(state, :last_command_index),
+           Map.put(state, :logs, logs), failures}
+      end
   end
 
   # ============================================================================
@@ -546,7 +583,6 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :event_queue),
         log_before,
         projs_before,
-        nil,
         Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
       )
@@ -564,7 +600,7 @@ defmodule PropertyDamage.Executor.Finalization do
       # DR-025: an async every: check tripped during the await window under
       # :halt mode. Stop pollers and surface via :async_halt (checked in
       # finalize_result, ahead of any poll timeout).
-      {:halt, name, reason, idx, counters} ->
+      {:halt, name, projection, reason, idx, counters} ->
         Enum.each(pollers, &StatePoller.stop/1)
 
         halted_state = %{
@@ -572,7 +608,7 @@ defmodule PropertyDamage.Executor.Finalization do
           | projections: projections,
             event_log: event_log,
             check_counters: counters,
-            async_halt: {name, reason, idx},
+            async_halt: {name, projection, reason, idx},
             fold_counter: fold_counter
         }
 
@@ -702,12 +738,27 @@ defmodule PropertyDamage.Executor.Finalization do
 
   # Format resource poller errors for logging
   # Uses Exception.message/1 for exceptions, inspect for other terms
+  defp format_resource_poller_error({:poll_fn_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "poll_fn #{escape_verb(kind)}: #{inspect(reason)}"
+  end
+
   defp format_resource_poller_error({:poll_fn_error, exception, _stacktrace}) do
     "poll_fn raised: #{Exception.message(exception)}"
   end
 
+  defp format_resource_poller_error({:handler_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "handler #{escape_verb(kind)}: #{inspect(reason)}"
+  end
+
   defp format_resource_poller_error({:handler_error, exception, _stacktrace}) do
     "handler raised: #{Exception.message(exception)}"
+  end
+
+  defp format_resource_poller_error({:on_timeout_error, {kind, reason}, _stacktrace})
+       when kind in [:exit, :throw] do
+    "on_timeout #{escape_verb(kind)}: #{inspect(reason)}"
   end
 
   defp format_resource_poller_error({:on_timeout_error, exception, _stacktrace}) do
@@ -726,9 +777,13 @@ defmodule PropertyDamage.Executor.Finalization do
     inspect(reason)
   end
 
+  defp escape_verb(:exit), do: "exited"
+  defp escape_verb(:throw), do: "threw"
+
   defp timeout_to_failure({:timeout, _id, info}) do
     %{
       check_name: info.triggered_by.check_name,
+      projection: Map.get(info, :projection),
       reason: Failure.poll_timeout(info),
       command: nil,
       # DR-030: attribute the liveness timeout to the command whose event opened
@@ -745,6 +800,7 @@ defmodule PropertyDamage.Executor.Finalization do
   defp timeout_to_failure({:failed, _id, info}) do
     %{
       check_name: info.triggered_by.check_name,
+      projection: Map.get(info, :projection),
       reason: Failure.eventually_failed(info) |> Failure.detail(),
       context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms},
       command: nil,

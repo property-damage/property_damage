@@ -30,7 +30,13 @@ defmodule MyAdapter do
   use PropertyDamage.Adapter
 
   @impl true
-  def execute(%CreateAuthorization{user_id: user_id, amount: amount} = cmd, ctx, runtime) do
+  def setup(config), do: {:ok, %{client: Req.new(base_url: config[:base_url])}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
+  def execute(%CreateAuthorization{user_id: user_id, amount: amount}, ctx, runtime) do
     # Step 1: Create the authorization (returns immediately)
     {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
       Req.post(ctx.client, url: "/authorizations", json: %{
@@ -45,20 +51,25 @@ defmodule MyAdapter do
       end,
       interval_ms: 500,
       timeout_ms: 30_000,
-      handler: fn response ->
-        case response.body["status"] do
-          "processing" ->
-            :continue
+      # poll_fn returns Req's result, so the handler matches {:ok, response}
+      # or {:error, exception}.
+      handler: fn
+        {:ok, %{body: %{"status" => "processing"}}} ->
+          :continue
 
-          "pending_review" ->
-            {:inject, %AuthorizationPendingReview{id: id}}
+        {:ok, %{body: %{"status" => "pending_review"}}} ->
+          {:inject, %AuthorizationPendingReview{id: id}}
 
-          "approved" ->
-            {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
+        {:ok, %{body: %{"status" => "approved"}}} ->
+          {:done, %AuthorizationApproved{id: id, approved_at: DateTime.utc_now()}}
 
-          "declined" ->
-            {:done, %AuthorizationDeclined{id: id, reason: response.body["decline_reason"]}}
-        end
+        {:ok, %{body: %{"status" => "declined"} = body}} ->
+          {:done, %AuthorizationDeclined{id: id, reason: body["decline_reason"]}}
+
+        # A transport error (timeout, refused connection) is usually transient,
+        # so keep polling until `timeout_ms` instead of stopping the poller.
+        {:error, _reason} ->
+          :continue
       end
     )
 
@@ -68,9 +79,26 @@ defmodule MyAdapter do
 end
 ```
 
+## Logging From a Poller
+
+`poll_fn` and `handler` run in a `GenServer` that `start_poller` starts, not in
+the process of the command. `PropertyDamage.log/2` finds its log scope only in
+the calling process and its `$callers` chain, and a `GenServer` carries no
+`$callers`. A `PropertyDamage.log/2` call inside `poll_fn` or `handler` therefore
+raises `PropertyDamage.Log.NoScopeError`, and the poller reports that raise as
+`{:poll_fn_error, ...}` or `{:handler_error, ...}`.
+
+`PropertyDamage.Runtime.log/3` does not raise there, but it drops a line written
+after the command ended, and a poller usually runs past that point. To record
+progress from a poller, inject an event from `handler` (`{:inject, event}`), which shows up in the
+report beside the events of the command, or put the reason in the
+`{:error, reason}` that [`on_timeout`](#timeout-handling) returns. To log from
+the command itself, see [Log Lines in the Failure Report](log_lines.md).
+
 ## Handler Return Values
 
-The handler function receives the response from `poll_fn` and must return one of:
+The handler function receives the value `poll_fn` returned (in the examples below,
+the `{:ok, response} | {:error, exception}` result of `Req.get/2`) and must return one of:
 
 | Return | Behavior |
 |--------|----------|
@@ -96,41 +124,40 @@ cleaner log output in `:log` check mode.
 
 **Track intermediate states:**
 ```elixir
-handler: fn response ->
-  case response.body["status"] do
-    "queued" -> :continue
-    "processing" -> {:inject, %ProcessingStarted{id: id}}
-    "completed" -> {:done, %ProcessingCompleted{id: id}}
-  end
+handler: fn
+  {:ok, %{body: %{"status" => "queued"}}} -> :continue
+  {:ok, %{body: %{"status" => "processing"}}} -> {:inject, %ProcessingStarted{id: id}}
+  {:ok, %{body: %{"status" => "completed"}}} -> {:done, %ProcessingCompleted{id: id}}
+  {:error, _reason} -> :continue
 end
 ```
 
 **Emit batch of final events:**
 ```elixir
-handler: fn response ->
-  case response.body["status"] do
-    "pending" -> :continue
-    "completed" ->
-      items = response.body["items"]
-      events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
-      {:done, events ++ [%BatchCompleted{count: length(items)}]}
-  end
+handler: fn
+  {:ok, %{body: %{"status" => "pending"}}} ->
+    :continue
+
+  {:ok, %{body: %{"status" => "completed", "items" => items}}} ->
+    events = Enum.map(items, &%ItemProcessed{id: &1["id"]})
+    {:done, events ++ [%BatchCompleted{count: length(items)}]}
+
+  {:error, _reason} ->
+    :continue
 end
 ```
 
 **Handle errors gracefully:**
 ```elixir
-handler: fn response ->
-  case response do
-    {:ok, %{status: 200, body: body}} ->
-      if body["completed"], do: {:done, %Completed{}}, else: :continue
+handler: fn
+  {:ok, %{status: 200, body: body}} ->
+    if body["completed"], do: {:done, %Completed{}}, else: :continue
 
-    {:ok, %{status: 404}} ->
-      {:error, :resource_not_found}
+  {:ok, %{status: 404}} ->
+    {:error, :resource_not_found}
 
-    {:error, reason} ->
-      {:error, {:http_error, reason}}
-  end
+  {:error, _reason} ->
+    :continue
 end
 ```
 
@@ -189,10 +216,10 @@ Example:
 %{
   elapsed_ms: 30050,           # Just over 30 seconds
   poll_count: 60,              # Polled 60 times at 500ms intervals
-  last_poll_result: %{         # Last response from poll_fn
+  last_poll_result: {:ok, %{   # Last value poll_fn returned (here a Req result)
     status: 200,
     body: %{"status" => "processing"}
-  }
+  }}
 }
 ```
 
@@ -216,7 +243,11 @@ on_timeout: fn info ->
     resource: "authorization",
     elapsed_ms: info.elapsed_ms,
     poll_count: info.poll_count,
-    last_status: info.last_poll_result[:status]
+    last_status:
+      case info.last_poll_result do
+        {:ok, %{status: status}} -> status
+        _ -> nil
+      end
   }}
 end
 ```
@@ -235,14 +266,17 @@ its stacktrace and reported as `{:on_timeout_error, exception, stacktrace}`.
 
 ## Error Handling
 
-Errors from pollers are handled based on `check_mode`:
+The executor collects poller results once, at the end of the sequence. A
+poller error never interrupts the commands that run after it. Every command in
+the sequence still executes, and `check_mode` decides what happens when the
+executor collects the error:
 
 | Mode | Behavior |
 |------|----------|
-| `:halt` | First error stops execution, reported as failure |
-| `:record` | Errors recorded, sequence continues, all failures reported at end |
-| `:log` | Errors logged as warnings, sequence continues |
-| `:disabled` | Errors ignored |
+| `:halt` | The run fails with a resource poller error when the sequence ends. The first failed poller is the one reported |
+| `:record` | Every poller error becomes a recorded failure (check name `resource_poller`) when the sequence ends |
+| `:log` | Errors are logged as warnings, and the run passes, unless a callback threw or exited (see [Log Mode Formatting](#log-mode-formatting)) |
+| `:disabled` | Errors are ignored |
 
 ### Error Types
 
@@ -252,16 +286,25 @@ are explicitly returned:
 | Error | Has Stacktrace? | Cause |
 |-------|-----------------|-------|
 | `{:poll_fn_error, exception, stacktrace}` | Yes | `poll_fn` raised an exception |
+| `{:poll_fn_error, {kind, reason}, stacktrace}` | Yes | `poll_fn` threw or exited, so `kind` is `:throw` or `:exit` |
 | `{:handler_error, exception, stacktrace}` | Yes | `handler` raised an exception |
+| `{:handler_error, {kind, reason}, stacktrace}` | Yes | `handler` threw or exited |
 | `{:on_timeout_error, exception, stacktrace}` | Yes | `on_timeout` function raised |
+| `{:on_timeout_error, {kind, reason}, stacktrace}` | Yes | `on_timeout` function threw or exited |
 | `{:timeout, timeout_info}` | No | Polling timed out with `on_timeout: :fail` |
 | Custom `reason` | No | Handler or `on_timeout` returned `{:error, reason}` |
 
 ### Log Mode Formatting
 
+A `poll_fn`, handler or `on_timeout` function must return a value or raise. If it throws or exits,
+the `:log` formatter calls `Exception.message/1` on the `{kind, reason}` tuple,
+and that call crashes the run instead of logging a warning. `:halt` and
+`:record` modes report the tuple.
+
 In `:log` mode, errors are formatted for clean log output:
 
-- **Raised exceptions**: Shows exception type and message
+- **Raised exceptions**: Shows which callback raised and the exception message
+  (the exception type is not printed)
   ```
   [warning] Resource poller #Ref<...> error: handler raised: invalid response format
   ```
@@ -290,13 +333,19 @@ test "authorization polling" do
   ctx = %{client: mock_client}
 
   # Framework keys live on the runtime handle
+  test_pid = self()
+
   runtime = %PropertyDamage.Runtime{
     inject: fn _ -> :ok end,
     start_poller: fn opts ->
-      ResourcePoller.start(Keyword.merge(opts, [
+      poller = ResourcePoller.start(Keyword.merge(opts, [
         event_queue: queue,
         command_index: 0
       ]))
+
+      # Hand the poller handle to the test so it can await it
+      send(test_pid, {:poller, poller})
+      poller
     end
   }
 
@@ -305,10 +354,11 @@ test "authorization polling" do
 
   # Initial event returned immediately
   assert [%AuthorizationCreated{}] = events
+  assert_receive {:poller, poller}
 
-  # Wait for poller to complete
-  # (In real tests, the executor does this automatically)
-  Process.sleep(100)
+  # Wait for the poller to finish
+  # (In real runs, the executor does this at the end of the sequence)
+  assert {:success, _id} = ResourcePoller.await(poller)
 
   # Check injected events
   entries = EventQueue.drain(queue)
@@ -334,5 +384,5 @@ end
 
 - `PropertyDamage.ResourcePoller` - Module documentation
 - `PropertyDamage.Adapter` - Adapter behaviour and runtime handle
-- `PropertyDamage.Runtime` - Runtime handle providing `inject`, `start_poller`, and `stutter`
+- `PropertyDamage.Runtime` - Runtime handle whose fields are `inject`, `start_poller`, `stutter`, `mock_registry`, and `log`
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) - Related guide

@@ -13,10 +13,10 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
 - **Server-Generated Values**: Commands can reference `external()` results from earlier commands
-- **Branching Sequences**: Prefix, branches and suffix, run one branch at a time and checked for linearizability against the model (no race detection yet)
-- **Linearization Checking**: Verify parallel results are sequentially explainable
 - **Idempotency Testing**: Built-in stutter testing for retry safety
-- **Rich Failure Reports**: Comprehensive diagnostics when tests fail
+- **Rich Failure Reports**: Comprehensive diagnostics when tests fail, with your own log lines attached
+- **HTML Failure Page**: One self-contained page per failing run, with one column per target
+- **Failure Explanation**: `mix pd.explain` hands a failure page to a model or agent and embeds the explanation it writes
 - **Failure Persistence**: Save failures for later analysis and regression testing
 - **Step-by-Step Replay**: Debug failures by executing commands one at a time
 - **Seed Library**: Replay recently-failing seeds first; a self-pruning working set
@@ -25,10 +25,12 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Run Comparison**: Compare full traces of the same plan to localize where passing and failing runs diverge
 - **Failure Bisection**: `mix pd.bisect` drives `git bisect` to find the commit where a saved failure first reproduces
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
-- **OpenAPI Scaffolding**: Generate command modules from API specifications
-- **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
+- **OpenAPI Scaffolding**: Generate commands, events, an adapter, a model and a state projection from an API specification
+- **Load Testing**: Drive generated sequences from many workers at once with `PropertyDamage.LoadTest` (see the [load testing guide](guides/load_testing.md))
+- **Mutation Testing**: Inject bugs into the events your adapter returns with `PropertyDamage.Mutation`, to check that your tests catch them (see the [mutation testing guide](guides/mutation_testing.md))
 - **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
 - **Path Equivalence Testing**: List command sequences that mean the same as a command (`expansions/0`); each target picks its own path and the targets' `@compare` observations must agree, and a divergence shrinks to the one path that matters and replays from a file
+- **Mix Tasks**: `pd.replay`, `pd.reshrink`, `pd.bisect`, `pd.audit`, `pd.explain`, `pd.integration`, `pd.scaffold`, `pd.validate` and the `pd.gen.*` generators
 
 ## Installation
 
@@ -45,7 +47,15 @@ end
 
 (Your command generators call `StreamData` directly, so add it as a dependency too.)
 
+To use a checkout of PropertyDamage instead of a published release, point the dependency at its path. This form fits a checkout that sits next to your project, as in [Explaining a failure page](#explaining-a-failure-page):
+
+```elixir
+{:property_damage, path: "../property_damage"}
+```
+
 ## Quick Start
+
+Each module in steps 1 to 6 goes in its own file under `lib/my_app/` (for example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run: put the call in a script such as `run.exs` and start it with `mix run run.exs`. The ExUnit form goes in a test module under `test/`, so `mix test` runs it.
 
 ### 1. Define Events
 
@@ -73,6 +83,7 @@ overrides) lives in the Model, not here:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
+  @moduledoc "Create a user with a random name and email."
   use PropertyDamage.Command
 
   defstruct [:name, :email]
@@ -101,6 +112,7 @@ are invariants, checked at the configured points:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.Users do
+  @moduledoc "Tracks the users the system has created."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.UserCreated
@@ -118,6 +130,7 @@ defmodule MyApp.Projections.Users do
   # Checked after every command. Assert a property your SUT must never violate.
   # (Don't assert uniqueness of a client-supplied field like emails -- the
   # generator can legitimately repeat them; assert on what the SUT guarantees.)
+  @doc "Every user has a non-empty email."
   @check every: 1
   def assert_emails_present(state, _cmd_or_event) do
     Enum.all?(state.users, fn {_id, u} -> u.email not in [nil, ""] end) or
@@ -160,7 +173,8 @@ selection weights, `when:` preconditions, and `overrides:` generator overrides:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  @moduledoc "A user registry: users are created and each keeps an email."
+  use PropertyDamage.Model
 
   @impl true
   def commands do
@@ -183,6 +197,11 @@ defmodule MyApp.TestModel do
   def simulator, do: MyApp.Simulator
 end
 ```
+
+The `@moduledoc` and `@doc` lines above feed the failure page's "What this
+checks" section, which prints them when a run fails; without them the page
+shows "no description" lines. See
+[What this checks](guides/debugging_failures.md#what-this-checks).
 
 ### 6. Define an Adapter
 
@@ -242,6 +261,21 @@ case PropertyDamage.run(
 end
 ```
 
+In an ExUnit suite, use `PropertyDamage.ExUnit` instead. It takes the same options as `run/1`, and a failing test prints the full failure report:
+
+```elixir
+defmodule MyApp.SystemTest do
+  use ExUnit.Case
+  use PropertyDamage.ExUnit
+
+  property_damage "system maintains invariants",
+    model: MyApp.TestModel,
+    targets: [MyApp.TestAdapter],
+    max_commands: 50,
+    max_runs: 100
+end
+```
+
 ## Debugging Failures
 
 When PropertyDamage finds a failure, it provides rich tools for understanding what went wrong.
@@ -259,6 +293,42 @@ test_code = PropertyDamage.generate_test(failure, format: :exunit)
 File.write!("test/regression_test.exs", test_code)
 ```
 
+A failure report can also carry your own lines, such as the requests an adapter
+sends: call `PropertyDamage.log/2`, as the [log lines guide](guides/log_lines.md)
+shows.
+
+To read a failure in a browser instead, set the `report_html:` run option or the
+`PD_REPORT_HTML` environment variable to a directory. Each failing run then writes
+an HTML page there, with an `index.html` that browses them. See
+[Explaining a failure page](#explaining-a-failure-page) and the
+[debugging guide](guides/debugging_failures.md).
+
+### Replay the shrunk failure
+
+Every failing run writes a replay artifact into the `replay_dir:` directory
+(default `property_damage_replays`; `replay_dir: false` writes none). The directory is an ephemeral working set that prunes itself, so add it to your `.gitignore`. The file is
+named `<model>_seed<seed>.replay.exs`, where `<model>` is the last segment of the
+model's module name. If that name already holds a different failure or other
+targets, the file gets a `_<k>` suffix (`<model>_seed<seed>_2.replay.exs`). The printed report ends with the call that runs it again
+without generating anything:
+
+```elixir
+PropertyDamage.run(
+  model: MyApp.TestModel,
+  targets: [MyApp.TestAdapter],
+  only: [replay: "property_damage_replays/TestModel_seed12345.replay.exs"]
+)
+```
+
+Pass the same `targets:` the report printed, and no `seed:` (the artifact records
+it). The artifact also records the run's `external_markers:`. Shrinking is off by default in a replay. A replay that fails the same way
+returns `{:error, report}`. A replay that passes returns `{:ok, stats}` with
+`stats.replay` set to `:not_reproduced`.
+
+A failure that the `stutter:` option found does not reproduce this way, because the
+artifact records no stutter and the replay passes. To reproduce it, run the original
+call again with the same `seed:` and `stutter:` options.
+
 ### Interactive Shrinking
 
 If the initial shrinking didn't produce a minimal sequence:
@@ -270,6 +340,8 @@ If the initial shrinking didn't produce a minimal sequence:
   max_time_ms: 120_000
 )
 ```
+
+`shrink_further/2` uses the `external_markers:` the failure report records.
 
 Strategies:
 - `:quick` - Fast, may miss some reductions
@@ -289,7 +361,8 @@ for step <- steps do
 
   case step.result do
     :ok -> IO.puts("  OK")
-    {:check_failed, check, msg} -> IO.puts("  FAILED: #{msg}")
+    {:check_failed, check, error} -> IO.puts("  FAILED #{check}: #{Exception.message(error)}")
+    {:error, reason} -> IO.puts("  ERROR: #{inspect(reason)}")
   end
 end
 ```
@@ -302,9 +375,12 @@ alias PropertyDamage.Replay
 {:ok, session} = Replay.start(failure)
 {:ok, session, step1} = Replay.step(session)
 IO.inspect(Replay.current_state(session))
-{:ok, session, step2} = Replay.step(session)
-# ... continue stepping
-Replay.stop(session)
+
+# A failure that shrinks to one command has no second step: `{:done, session}`
+case Replay.step(session) do
+  {:ok, session, _step2} -> Replay.stop(session)  # or keep calling Replay.step/1 here
+  {:done, session} -> Replay.stop(session)
+end
 ```
 
 ### Visual Debugging Tools
@@ -317,13 +393,68 @@ diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
 
 # Compare full traces of the same plan to localize where the runs diverge
-before = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 comparison = PropertyDamage.RunComparison.compare([before, after_])
 IO.inspect(comparison.ranking)  # most discriminating field first
 ```
 
 See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Run Comparison](#run-comparison) for detailed documentation.
+
+### Explaining a failure page
+
+Every HTML failure page carries a bundle: a machine-readable copy of the failure, with the docs and source of the modules behind it. The `pd-explain` skill gives the bundle to an agent. The agent writes an explanation of the failure, and the page then opens on an Explanation tab next to the Run view.
+
+To install the skill, link it into your project. The link keeps the skill in step with the PropertyDamage you installed. Run the `ln -s` command from your project's `.claude/skills/` directory, which the first command below creates if your project has none. The link target is a path relative to that directory, so count the levels up from `.claude/skills/` to the PropertyDamage checkout.
+
+With a path dependency, take a checkout that sits next to your project:
+
+```text
+dev/
+  my_app/                 your project
+    .claude/
+      skills/             run the command here
+  property_damage/        the checkout
+```
+
+From `dev/my_app/.claude/skills/`, `..` is `.claude`, `../..` is `my_app` and `../../..` is `dev`. Three levels up reach `dev`, where `property_damage` sits:
+
+```bash
+# run from your project root
+mkdir -p .claude/skills
+cd .claude/skills
+ln -s ../../../property_damage/priv/claude/skills/pd-explain pd-explain
+```
+
+If the checkout lives elsewhere, keep `../../` (it reaches your project root) and replace what follows with the path from the project root to the checkout, then `/priv/claude/skills/pd-explain`. For a checkout two directories above the project, that is `../../../../property_damage/priv/claude/skills/pd-explain`.
+
+With a Hex dependency, the package sits in your project's `deps/` directory, so two levels up from `.claude/skills/` are enough:
+
+```bash
+# run from your project root
+mkdir -p .claude/skills
+cd .claude/skills
+ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
+```
+
+The skill drives `mix pd.explain`, which reads one page and loads no project code:
+
+- `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation for the page's bundle at the current prompt version. An explanation made for an older prompt version does not count, so the task writes the files again.
+- `mix pd.explain PAGE --files` does the same as the first bullet and never runs a command. A project may set `config :property_damage, explain_with: CMD` so that `mix pd.explain PAGE` runs `CMD`; `--files` ignores that config, so a caller that writes the explanation itself still gets the files.
+- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice. Mix can print compile messages and, for a path dependency, `==> dep` banners before the prompt, so set `MIX_QUIET=1` when you pipe the output.
+- `mix pd.explain PAGE --apply FILE` (or `--apply -` for standard input) checks an explanation written as JSON and, if it passes, embeds it in the page. If it fails, it prints every problem and leaves the page untouched.
+
+The JSON shape of an explanation is described in the generated `PAGE.explain/instructions.md`. You can write the file by hand from that description and pass it to `--apply`, with no agent involved.
+
+To skip the agent, name a command with `--with`. The task sends it the prompt on standard input and reads the explanation from its output:
+
+```bash
+mix pd.explain PAGE --with "my-agent --print"
+```
+
+Each attempt runs the command once, up to 3 attempts by default (`--attempts N` changes the count), and the command may cost money each time. A CI job that runs `--with` pays for the command on every failure.
+
+To have every CI failure leave a page, set `PD_REPORT_HTML` to a directory in the CI job, for example `PD_REPORT_HTML=failure_pages mix test`. The `report_html:` run option does the same for one run, and the environment variable replaces it when set and not blank. PropertyDamage writes no page by default. See the [debugging guide](guides/debugging_failures.md#explaining-the-report) for the Explanation view.
 
 ## Failure Persistence
 
@@ -333,7 +464,7 @@ Save failures for later analysis or to build a regression suite:
 # Save a failure
 {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
-# => {:ok, "failures/20251226T143000-check_failed-UniqueEmails-seed512902757.pd"}
+# => {:ok, "failures/20251226T143000-check_failed-emails_present-seed512902757.pd"}
 
 # Load and analyze later
 {:ok, loaded} = PropertyDamage.load_failure(path)
@@ -376,15 +507,14 @@ Track how thoroughly your model is being exercised:
 ```elixir
 alias PropertyDamage.Coverage
 
-# Single run coverage
-result = PropertyDamage.run(model: M, targets: [A])
-coverage = PropertyDamage.coverage(result, M)
+# Single run coverage: `coverage: true` attaches the tracker to the success stats
+{:ok, stats} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+coverage = stats.coverage
 IO.puts(Coverage.format(coverage))
 
-# Track across multiple runs
-tracker = Coverage.new(M)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
+# Track across multiple runs: merge the trackers
+{:ok, stats2} = PropertyDamage.run(model: M, targets: [A], coverage: true)
+tracker = Coverage.merge(stats.coverage, stats2.coverage)
 
 # Check thresholds in CI
 unless Coverage.meets_threshold?(tracker, command: 80, transition: 50) do
@@ -409,7 +539,7 @@ IO.puts(Coverage.format(tracker, :matrix))
 # Full - includes everything
 IO.puts(Coverage.format(tracker, :full))
 
-# State classes (when classifier is set)
+# State classes (needs a tracker built with Coverage.new/2 and state_classifier:, see below)
 IO.puts(Coverage.format(tracker, :state_classes))
 ```
 
@@ -433,78 +563,129 @@ top = Coverage.top_transitions(tracker, 5)
 
 ### State Class Coverage
 
-For more meaningful coverage, define a state classifier to group concrete states into abstract classes:
+A state classifier groups concrete states into abstract classes. `Coverage.record/2` classifies one state per recorded failing run: the merged projection state at the failure. Counts accumulate across all recorded runs. A transition pairs the class of the previous recorded run with the class of the current one, so it spans runs, not steps inside a run. Nothing is classified while a run executes.
+
+The classifier is an option of `Coverage.new/2` only (not of `run/1`), and `record/2` takes a failing run's `{:error, report}`. A passing `run/1` result has no failure state to classify, and `coverage: true` / `stats.coverage` records no state classes.
 
 ```elixir
 # Define a classifier function
 classifier = fn state ->
   cond do
     state.accounts == %{} -> :no_accounts
-    Enum.all?(state.accounts, fn {_, a} -> a.balance == 0 end) -> :all_zero_balance
-    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :has_negative
-    true -> :has_positive
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < -50 end) -> :deeply_overdrawn
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :slightly_overdrawn
+    true -> :in_credit
   end
 end
 
-# Create tracker with classifier
+# Record the failing runs of several seeds (shrink: false keeps the state of the
+# first failure, so the failing states differ from seed to seed)
 tracker = Coverage.new(MyModel, state_classifier: classifier)
-tracker = Coverage.record(tracker, result1)
-tracker = Coverage.record(tracker, result2)
 
-# View state class distribution
-counts = Coverage.state_class_counts(tracker)
-# => %{no_accounts: 5, all_zero_balance: 12, has_positive: 83}
+tracker =
+  Enum.reduce(1..6, tracker, fn seed, tracker ->
+    opts = [model: MyModel, targets: [MyAdapter], seed: seed, shrink: false]
+    {:error, report} = PropertyDamage.run(opts)
+    Coverage.record(tracker, {:error, report})
+  end)
 
-# View state class transitions (what state classes lead to what)
-transitions = Coverage.state_class_transitions(tracker)
-# => %{{:no_accounts, :all_zero_balance} => 5, {:all_zero_balance, :has_positive} => 10, ...}
+# Failing-state classes seen, and how often (one possible outcome; the
+# classes and counts depend on the model and the seeds)
+Coverage.state_class_counts(tracker)
+# => %{deeply_overdrawn: 4, slightly_overdrawn: 2}
 
-# Get state class matrix for visualization
-state_matrix = Coverage.state_class_matrix(tracker)
+# Class of one recorded failure followed by the class of the next
+Coverage.state_class_transitions(tracker)
+# => %{
+#      {:deeply_overdrawn, :deeply_overdrawn} => 3,
+#      {:slightly_overdrawn, :deeply_overdrawn} => 1,
+#      {:slightly_overdrawn, :slightly_overdrawn} => 1
+#    }
 
-# Format with state class matrix
+# The same transitions as a nested map, for visualization
+Coverage.state_class_matrix(tracker)
+
+# Format with the state class matrix
 IO.puts(Coverage.format(tracker, :state_classes))
+# State Class Transition Matrix
+# ────────────────────────────────────────────────────────────
+#                     → deeply_overdrawn    slightly_overdrawn
+# deeply_overdrawn    3
+# slightly_overdrawn  ░░░░                1
+#
+# State class counts:
+#   deeply_overdrawn: 4x
+#   slightly_overdrawn: 2x
 ```
 
-State class coverage helps answer: "Have we tested all interesting state configurations?"
+A cell off the diagonal shows a bar (`░░░░` for 1 to 4 transitions, `▓▓▓▓` for 5 to 9, `████` for 10 or more). A diagonal cell, a transition from a class to itself, shows its count, or `·` when there is none.
+
+The transitions pair consecutive recorded results, so six recorded failures give five transitions. The section answers two questions: which classes of final failing state were seen, and how often one followed another across the recorded failures.
 
 ## OpenAPI Scaffolding
 
-Generate command modules from an OpenAPI specification:
+Generate a test suite from an OpenAPI specification:
 
 ```bash
 # Generate from a local file
-mix pd.scaffold --from openapi.json --output lib/my_app_test/commands/
+mix pd.scaffold --from openapi.json --output lib/my_app_test --namespace MyAppTest
 
 # Generate from a URL
-mix pd.scaffold --from https://api.example.com/openapi.json --output lib/
+mix pd.scaffold --from https://api.example.com/openapi.json --output lib/my_app_test --namespace MyAppTest
 
 # Only specific operations
 mix pd.scaffold --from openapi.json --operations createUser,updateUser
 
+# Only commands and events (no adapter, model or projection)
+mix pd.scaffold --from openapi.json --commands-only
+
 # Preview without writing
 mix pd.scaffold --from openapi.json --dry-run
+
+# Regenerate over existing files (overwrites them)
+mix pd.scaffold --from openapi.json --output lib/my_app_test --namespace MyAppTest --force
 ```
 
-Generated commands include:
-- Struct fields from request body schemas
-- Type hints from OpenAPI types
-- Placeholder generators based on field types
-- Adapter execution hints
+A rerun that would touch an existing file exits 1, names the files and writes nothing unless you pass `--force`. `--force` overwrites every file the run generates, so it discards your edits to them.
+
+The task writes:
+- One command module per operation, with struct fields from the request body schema, type hints, placeholder generators and adapter execution hints
+- One event module per operation whose 200, 201 or 202 response has a JSON schema (operations that share an event name share one module)
+- An adapter, a model and a state projection (skipped with `--commands-only`)
+
+Pass `--namespace` so the module names come out clean, for example `MyAppTest.Commands.CreateUser`. Without it, the task infers the namespace from `--output`. The [scaffolding guide](guides/scaffolding.md) walks through the generated files.
 
 ## Model Validation
 
 Validate your model before running tests:
 
 ```bash
-mix pd.validate --model MyApp.TestModel
+mix pd.validate MyApp.TestModel MyApp.TestAdapter
 ```
 
-This checks:
-- All commands implement required callbacks
-- Projections handle their declared events
-- Checks reference valid projections
-- No circular dependencies
+To validate against several targets, pass the same list as the `targets:` run
+option instead of an adapter:
+
+```bash
+mix pd.validate MyApp.TestModel --targets "[MyApp.TestAdapter]"
+```
+
+It fails on:
+- A missing model, adapter, command or projection module, or a missing required callback
+- Injectable events that no injector adapter covers
+- A removed lifecycle hook
+
+It warns about:
+- Commands that declare no `:observables` (the Quick Start's `CreateUser` does)
+- A model with a single command (the Quick Start model has one)
+- Events that no check projection handles
+- Two targets that share an adapter and an identical `config:`
+
+The task prints a summary of `Model:`, the adapter (one `Adapter:` line for a single adapter, or a `Targets:` list with one line per target), `Commands:` (the number of commands the model lists) and `Extra:` (the number of check projections from `check_projections/0`).
+
+`--verbose` shows more detail and `--strict` turns warnings into errors. On the Quick Start model, `--strict` prints `FAILED: 2 warning(s) in strict mode`. For a
+model with `expansions/0`, `--seeds N` sets how many root sequences to sample
+(default 100) and `--seed S` samples the seeds S, S+1, and so on.
 
 ## Configuration
 
@@ -522,10 +703,14 @@ PropertyDamage.run(
   seed: 12345,             # Deterministic seed (optional)
 
   # Shrinking
-  shrink_timeout_ms: 30_000,
-  max_shrink_iterations: 1000,
+  shrinker_config: %PropertyDamage.Shrinker.Config{max_iterations: 1000, max_time_ms: 30_000},
 
-  # Idempotency (see the idempotency guide)
+  # Failure page: a failing run writes an HTML page, plus an index.html, into this
+  # directory (default false; the PD_REPORT_HTML environment variable replaces it)
+  report_html: "failure_pages",
+
+  # Idempotency (see the idempotency guide). On the Quick Start model this fails
+  # the run with an idempotency violation: its adapter mints a new id on every call.
   stutter: [probability: 0.1]
 )
 ```
@@ -534,14 +719,15 @@ PropertyDamage.run(
 
 ```elixir
 defmodule MyModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]
   def command_sequence_projection, do: MyStateProjection
-  def check_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
+  def check_projections, do: [MyExtraProjection, ...]  # Projections whose checks run
+  def expansions, do: [{CommandModule, fn command, state -> ... end}]  # Equivalent sequences
   def injectable_events, do: []  # For Adapter.Injector
   def simulator, do: MySimulatorModule  # Returns module implementing Simulator behaviour
   def setup_each, do: []     # Setup commands: run before the first root of every run/shrink attempt
@@ -550,321 +736,73 @@ defmodule MyModel do
 end
 ```
 
-## Parallel Execution
-
-PropertyDamage supports branching sequences: a prefix, two or more branches and
-a suffix, run on one target with the branches executed one after another, then
-checked for linearizability against the model's simulator. The branches never
-overlap at the system under test, so this path does not detect races; see the
-limits in the [Parallel Testing](guides/parallel_testing.md) guide.
-
-### Enabling Branching Sequences
-
-```elixir
-PropertyDamage.run(
-  model: MyApp.TestModel,
-  targets: [MyApp.TestAdapter],
-  max_commands: 50,
-  max_runs: 100,
-  branching: [
-    branch_probability: 0.3,   # Probability of creating branch points
-    max_branches: 3,           # Max parallel branches
-    max_branch_length: 5,      # Max commands per branch
-    min_prefix_length: 3       # Min commands before branching
-  ]
-)
-```
-
-### How It Works
-
-A branching sequence has three parts:
-
-1. **Prefix**: Commands executed sequentially before branching
-2. **Branches**: Command lists executed one branch at a time, each from the forked post-prefix state
-3. **Suffix**: Commands executed after branches merge
-
-```
-Prefix:  [cmd1, cmd2]
-                |
-       +--------+--------+
-       |                 |
-Branch A: [cmd3a, cmd4a] | Branch B: [cmd3b]
-       |                 |
-       +--------+--------+
-                |
-Suffix: [cmd5]
-```
-
-### Linearization Checking
-
-After the branches have run, PropertyDamage verifies that the observed events
-can be explained by some ordering of the branch commands that keeps each
-branch's own order, against the model's simulator. If no valid ordering exists,
-a `:linearization_failed` error is raised.
-
-```elixir
-alias PropertyDamage.Linearization
-
-# Check complexity before verification
-case Linearization.feasibility(branches) do
-  :ok -> IO.puts("Manageable linearization space")
-  {:warning, count} -> IO.puts("#{count} possible orderings")
-end
-
-# Count possible linearizations
-count = Linearization.linearization_count([[cmd1, cmd2], [cmd3]])
-# => 3 (possible orderings: [1,2,3], [1,3,2], [3,1,2])
-```
-
-### Shrinking Branching Sequences
-
-The shrinker handles branching sequences with special strategies:
-
-1. **Convert to linear**: If the failure does not need the branch structure
-2. **Remove branches**: Eliminate unnecessary parallel branches
-3. **Shrink branches**: Remove commands within individual branches
-4. **Shrink prefix/suffix**: Remove non-essential sequential commands
-
-### Ref Constraints in Parallel Execution
-
-Symbolic references follow strict rules in branching sequences:
-
-- Refs from prefix can be used in any branch
-- Refs from one branch **cannot** be used in another branch
-- Refs from branches can be used in suffix
-
-```elixir
-# Valid: prefix ref used in branch
-prefix = [CreateUser.new()]  # Creates :user_ref
-branches = [[GetUser.new(user_ref: :user_ref)], [UpdateUser.new(user_ref: :user_ref)]]
-
-# Invalid: cross-branch ref usage
-branches = [[CreateItem.new()],  # Creates :item_ref
-            [ViewItem.new(item_ref: :item_ref)]]  # ERROR: :item_ref not visible
-```
-
 ## Eventual Consistency (Async Support)
 
 For systems with eventual consistency, PropertyDamage provides probe and async
-command semantics with automatic settle/retry logic.
+commands with automatic settle/retry logic.
 
-### Command Semantics
+### Execution Modes
 
-Commands can declare their semantics via the `semantics/0` callback:
+A command declares how it executes in its `use` options, and may tune the retry loop:
 
 ```elixir
 defmodule MyTest.Commands.GetOrderStatus do
-  @behaviour PropertyDamage.Command
+  # A probe queries state and may need to retry until it settles
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    settle: %{
+      timeout_ms: 5_000,     # Max time to wait
+      interval_ms: 200,      # Time between retries
+      backoff: :exponential  # :linear or :exponential
+    }
 
   defstruct [:order_id]
 
-  # This is a probe - it queries state and may need to retry
-  def semantics, do: :probe
-
-  # Configure settle behavior
-  def settle_config do
-    %{
-      timeout_ms: 5_000,    # Max time to wait
-      interval_ms: 200,     # Time between retries
-      backoff: :exponential # :linear or :exponential
-    }
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{order_id: StreamData.string(:alphanumeric, min_length: 1)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  def read_only?, do: true
 end
 ```
 
-### Semantics Types
-
-| Semantics | Purpose | Settle Behavior |
-|-----------|---------|-----------------|
+| `execution:` | Purpose | Settle Behavior |
+|--------------|---------|-----------------|
 | `:sync` | Mutates state (default) | Execute once |
 | `:probe` | Queries state | Retry until success or timeout |
 | `:async` | Waits for async completion | Retry until complete |
 
 ### Adapter Integration
 
-Adapters return settle-compatible results for probes:
+The adapter asks for a retry with `{:retry, reason}`. The framework runs the
+retry loop and calls `execute/3` again, so the adapter never sleeps or polls:
 
 ```elixir
-def execute(%GetOrderStatus{order_id: id}, ctx) do
+def execute(%GetOrderStatus{order_id: id}, _context, _runtime) do
   case MyAPI.get_order(id) do
     {:ok, %{status: "pending"}} ->
-      {:retry, :still_pending}  # Keep trying
+      {:retry, :still_pending}  # Not settled yet: call me again
 
     {:ok, order} ->
-      {:ok, order}  # Success - stop retrying
+      {:ok, [%OrderStatusObserved{order_id: id, status: order.status}]}  # Settled: stop retrying
 
     {:error, :not_found} ->
-      {:retry, :not_found}  # Keep trying
+      {:retry, :not_found}
 
     {:error, reason} ->
-      {:error, reason}  # Hard failure - stop immediately
+      {:error, reason}  # Hard failure: stop immediately
   end
 end
 ```
+
+A `:sync` command must not return `{:retry, _}`: the run fails with a
+`:retry_from_sync_command` failure.
 
 See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
 for complete documentation including bridge commands, `Adapter.Injector`, and
 handling async operations that require polling.
-
-## Fault Injection (Nemesis)
-
-Test system resilience by injecting faults like network partitions, latency,
-and node crashes.
-
-### Defining a Nemesis Command
-
-```elixir
-defmodule MyTest.Nemesis.PartitionNetwork do
-  @behaviour PropertyDamage.Nemesis
-
-  defstruct [:partition_type, :duration_ms]
-
-  @impl true
-  def precondition(_state), do: true
-
-  @impl true
-  def inject(%__MODULE__{partition_type: type}, ctx) do
-    :ok = Toxiproxy.partition(ctx.proxy, type)
-    {:ok, [%NetworkPartitioned{type: type}]}
-  end
-
-  @impl true
-  def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.proxy, type)
-    {:ok, [%NetworkRestored{type: type}]}
-  end
-
-  # Auto-restore after duration
-  def auto_restore?, do: true
-  def duration_ms(%__MODULE__{duration_ms: d}), do: d
-end
-```
-
-### Using Nemesis in Models
-
-Add nemesis commands with lower weights:
-
-```elixir
-def commands do
-  [
-    {CreateOrder, weight: 5},
-    {ProcessPayment, weight: 3},
-    {PartitionNetwork, weight: 1},   # Fault injection
-    {InjectLatency, weight: 1}
-  ]
-end
-```
-
-### Built-in Nemesis Operations
-
-PropertyDamage includes ready-to-use nemesis operations for common fault injection scenarios:
-
-#### Network Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `NetworkLatency` | Add latency (50-500ms) with optional jitter |
-| `NetworkPartition` | Block traffic (full, upstream, downstream) |
-| `PacketLoss` | Drop percentage of packets (5-50%) |
-
-```elixir
-# Add network latency
-alias PropertyDamage.Nemesis.NetworkLatency
-
-def commands do
-  [
-    {CreateOrder, weight: 5},
-    {NetworkLatency, weight: 1}  # Uses defaults: 100ms latency, 5s duration
-  ]
-end
-
-# Or customize
-%NetworkLatency{latency_ms: 200, jitter_ms: 50, duration_ms: 10_000}
-```
-
-> **Scope.** The built-in nemeses fault the SUT's *network path* only. They
-> deliberately do not stress the local BEAM/host (CPU, memory, OS resources),
-> kill local processes, or install a virtual clock: those affect the test
-> harness's own VM rather than an external SUT driven through an adapter. To
-> fault an in-process collaborator, do it in your own adapter/command code.
-
-#### Integration with Toxiproxy
-
-Network operations integrate with [Toxiproxy](https://github.com/Shopify/toxiproxy) when available:
-
-```elixir
-# Configure in adapter context
-context = %{
-  toxiproxy: %{
-    proxy_name: "my_service",
-    api_url: "http://localhost:8474"
-  }
-}
-
-# Nemesis operations will automatically use Toxiproxy
-# Falls back to simulated mode if not configured
-```
-
-> **Caveat — chaos is only as real as its backend.** Network operations
-> (`NetworkPartition`, `PacketLoss`, `NetworkLatency`) require Toxiproxy to
-> inject a real fault. Without it they currently fall back to a *simulated*
-> mode that emits the fault event but injects nothing at the transport layer,
-> so a test can pass with zero fault actually applied. Treat un-backed network
-> nemesis as documentation, not evidence; the Redis bench's nemesis audit
-> exercises each operation against a live SUT.
-
-### Adjusting Invariants During Faults
-
-```elixir
-@check every: 1
-def assert_latency_sla(state, _cmd_or_event) do
-  # Skip SLA check during partition
-  partitioned? = Map.get(state.active_faults, :network_partition, false)
-
-  partitioned? or state.last_latency_ms < 100 or
-    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-end
-```
-
-## Liveness Checking
-
-Detect deadlocks, livelocks, and starvation with the Liveness projection.
-
-### Configuration
-
-```elixir
-defmodule MyModel do
-  def check_projections do
-    [
-      {PropertyDamage.Model.Projection.Liveness, [
-        max_pending_duration_ms: 10_000,
-        check_interval: 10,
-        required_completions: %{
-          CreateTransfer => [TransferCompleted, TransferFailed],
-          CreateOrder => [OrderConfirmed, OrderRejected]
-        }
-      ]}
-    ]
-  end
-end
-```
-
-### How It Works
-
-1. **Track starts**: When `CreateTransfer` executes, mark operation as pending
-2. **Track completions**: When `TransferCompleted` or `TransferFailed` arrives, mark complete
-3. **Check timeouts**: Periodically check for operations pending too long
-4. **Report stuck**: If any operation exceeds `max_pending_duration_ms`, fail
-
-### What It Detects
-
-| Issue | Symptom |
-|-------|---------|
-| Deadlock | Operations never complete |
-| Livelock | System busy but no progress |
-| Starvation | Some operations always timeout |
 
 ## Visual Sequence Diagrams
 
@@ -889,7 +827,7 @@ IO.puts(diagram)
 # From sequence and event log
 diagram = PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
   title: "Account Creation Flow",
-  highlight_failure: true
+  failed_at_index: 2
 )
 
 # Save to file
@@ -921,7 +859,9 @@ sequenceDiagram
 - `:title` - Custom diagram title
 - `:show_state` - Include state participant
 - `:max_value_length` - Truncate long values (default: 50)
-- `:highlight_failure` - Visual failure markers (default: true)
+- `:failed_at_index` - `generate/4` only: the flattened index of the failing
+  command, which marks that step as the failure (`from_failure_report/3` takes
+  the failure point from the report)
 
 ## Run Comparison
 
@@ -930,7 +870,7 @@ diverge, ranking field differences by how strongly they discriminate the
 outcomes. This targets two use cases: **regression localization** (a plan passed
 on one revision of the SUT and fails on another) and **flakiness localization**
 (a plan fails one time in N). Both need full, unshrunk, same-plan runs, which is
-what `PropertyDamage.RunTrace.capture/1` produces and a `FailureReport` (a shrunk
+what `PropertyDamage.RunTrace.Capture.capture/1` produces and a `FailureReport` (a shrunk
 sequence) is not.
 
 Capture is `RunTrace`'s job; comparison is `RunComparison`'s. The comparator is
@@ -942,8 +882,8 @@ pure data-in/data-out and never runs a SUT.
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides ⇒ identical plan (comparable by fingerprint).
-before = RunTrace.capture(model: M, targets: [A.Fixed], seed: 123)
-after_ = RunTrace.capture(model: M, targets: [A.Buggy], seed: 123)
+before = RunTrace.Capture.capture(model: M, targets: [A.Fixed], seed: 123)
+after_ = RunTrace.Capture.capture(model: M, targets: [A.Buggy], seed: 123)
 
 comparison = RunComparison.compare([before, after_])
 
@@ -962,7 +902,8 @@ fingerprint or model).
 ### Reading the Ranking
 
 Each ranked entry is a `%RunComparison.Field{}` with a `location`
-(`{:command, position, path}` or `{:event, ...}`), a `classification`, a
+(`{:command, position, path}`, `{:event, ...}`, or
+`{:state, position, module, path}` for projection state), a `classification`, a
 `provenance`, and `values` (a `%{trace_index => value}` map):
 
 | Classification | Meaning |
@@ -1031,6 +972,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 
 # Generate ExUnit regression test
 test_code = PropertyDamage.Export.to_exunit(failure)
+File.mkdir_p!("test/regressions")
 File.write!("test/regressions/seed_#{failure.seed}_test.exs", test_code)
 
 # Generate standalone scripts
@@ -1061,13 +1003,13 @@ notebook = PropertyDamage.Export.to_livebook(failure,
 ```elixir
 # Save single format
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", :exunit)
-# => {:ok, "exports/reproduce_512902757.exs"}
+# => {:ok, "exports/reproduce_512902757_02e399f6_test.exs"}
 
 {:ok, path} = PropertyDamage.Export.save(failure, "exports/", {:script, :curl},
   base_url: "http://localhost:4000",
   adapter: MyHTTPAdapter
 )
-# => {:ok, "exports/reproduce_512902757.sh"}
+# => {:ok, "exports/reproduce_512902757_02e399f6.sh"}
 
 # Save all formats at once
 {:ok, paths} = PropertyDamage.Export.save_all(failure, "exports/",
@@ -1076,11 +1018,11 @@ notebook = PropertyDamage.Export.to_livebook(failure,
   script_languages: [:elixir, :curl, :python]
 )
 # => {:ok, %{
-#   exunit: "exports/reproduce_512902757.exs",
-#   livebook: "exports/reproduce_512902757.livemd",
-#   script_elixir: "exports/reproduce_512902757.exs",
-#   script_curl: "exports/reproduce_512902757.sh",
-#   script_python: "exports/reproduce_512902757.py"
+#   exunit: "exports/reproduce_512902757_02e399f6_test.exs",
+#   livebook: "exports/reproduce_512902757_02e399f6.livemd",
+#   script_elixir: "exports/reproduce_512902757_02e399f6.exs",
+#   script_curl: "exports/reproduce_512902757_02e399f6.sh",
+#   script_python: "exports/reproduce_512902757_02e399f6.py"
 # }}
 ```
 
@@ -1090,12 +1032,13 @@ For scripts to make HTTP calls, your adapter needs to implement `http_spec/2`:
 
 ```elixir
 defmodule MyHTTPAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
 
   alias PropertyDamage.Export.HTTPSpec
 
-  # Standard adapter callbacks...
-  def execute(cmd, ctx), do: # ...
+  # Standard adapter callbacks (setup/1, execute/3, teardown/1)...
+  @impl true
+  def execute(cmd, ctx, runtime), do: # ...
 
   # Optional: HTTP mapping for export
   def http_spec(%CreateAccount{currency: curr}, _ctx) do
@@ -1106,20 +1049,20 @@ defmodule MyHTTPAdapter do
     }
   end
 
-  def http_spec(%CreditAccount{account_ref: ref, amount: amt}, _ctx) do
+  def http_spec(%CreditAccount{account_id: id, amount: amt}, _ctx) do
     %HTTPSpec{
       method: :post,
       path: "/api/accounts/:account_id/credit",
-      path_params: %{account_id: ref},
+      path_params: %{account_id: id},
       body: %{amount: amt}
     }
   end
 
-  def http_spec(%DebitAccount{account_ref: ref, amount: amt}, _ctx) do
+  def http_spec(%DebitAccount{account_id: id, amount: amt}, _ctx) do
     %HTTPSpec{
       method: :post,
       path: "/api/accounts/:account_id/debit",
-      path_params: %{account_id: ref},
+      path_params: %{account_id: id},
       body: %{amount: amt}
     }
   end
@@ -1131,7 +1074,7 @@ end
 Generated LiveBook notebooks include:
 
 - **Setup section**: Installs dependencies (Req, Jason)
-- **State tracking**: Tracks refs and model state alongside execution
+- **State tracking**: Tracks placeholders and model state alongside execution
 - **Step-by-step commands**: Each command in its own cell with HTTP call
 - **Failure marker**: Highlights the command that caused the failure
 - **Exploration section**: Space to experiment with variations
@@ -1151,31 +1094,57 @@ notebook = PropertyDamage.Export.to_livebook(failure,
 #!/bin/bash
 # Failure Reproduction Script
 # Generated: 2025-12-26T14:30:00Z
-# Failure: NonNegativeBalance check failed
+# Failure: check_failed
 # Seed: 512902757
+#
+# Prerequisites: curl, jq
+# Run with: bash reproduce_512902757_1a2b3c4d.sh
 
-set -e
+set -e  # Exit on error
+
 BASE_URL="${BASE_URL:-http://localhost:4000}"
 
+
+echo ""
 echo "=== Step 1: CreateAccount ==="
-RESP1=$(curl -s -X POST "$BASE_URL/api/accounts" \
+# Command: %CreateAccount{currency: "USD"}
+RESP1=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts" \
   -H "Content-Type: application/json" \
   -d '{"currency": "USD"}')
 echo "$RESP1"
-REF_account_0=$(echo "$RESP1" | jq -r '.data.id // .id // empty')
+accountcreated_id_0=$(echo "$RESP1" | jq -r '.id // empty')
+if [ -n "$accountcreated_id_0" ]; then
+  echo "  -> bound accountcreated_id_0: $accountcreated_id_0"
+fi
 
+echo ""
 echo "=== Step 2: CreditAccount ==="
-RESP2=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/credit" \
+# Command: %CreditAccount{account_id: external(AccountCreated.id), amount: 100}
+RESP2=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts/$accountcreated_id_0/credit" \
   -H "Content-Type: application/json" \
   -d '{"amount": 100}')
 echo "$RESP2"
 
+echo ""
 echo "=== Step 3: DebitAccount (FAILURE POINT) ==="
-RESP3=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/debit" \
+# Command: %DebitAccount{account_id: external(AccountCreated.id), amount: 200}
+RESP3=$(curl -s \
+  -X POST \
+  "$BASE_URL/api/accounts/$accountcreated_id_0/debit" \
   -H "Content-Type: application/json" \
   -d '{"amount": 200}')
 echo "$RESP3"
+
+echo ""
+echo "=== Reproduction Complete ==="
+echo "Seed: 512902757"
 ```
+
+The exporter names each variable after the event and field the value came from (`accountcreated_id_0`), and later steps use it in their URLs and bodies.
 
 ## Automatic Regression Management
 
@@ -1244,6 +1213,8 @@ PropertyDamage.run(
     fn report -> Logger.warning("Failure found: #{report.seed}") end
   ])
 )
+# The handler module needs `require Logger`; a handler that raises is rescued
+# and its failure is not logged.
 ```
 
 ### Batch Processing
@@ -1265,17 +1236,18 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 
 ### Options
 
+These are the options of the `regression:` option of `PropertyDamage.run/1`. `Regression.process_batch/2` takes its own list, which also includes `:description` and `:dedup_source`.
+
 | Option | Description |
 |--------|-------------|
 | `:save_failures` | Directory to save failure files |
 | `:seed_library` | Path to seed library JSON file |
 | `:generate_tests` | Directory for ExUnit test files |
 | `:tags` | Tags for seed library entries (default: `[:auto_detected]`) |
-| `:description` | Description for seed library entries |
 | `:dedup` | Enable deduplication (default: false) |
 | `:dedup_threshold` | Similarity threshold (default: 0.90) |
-| `:dedup_source` | Where to check: `:failures`, `:library`, or `:both` |
 | `:verbose` | Print actions taken (default: false) |
+| `:targets` | Single-entry target for generated regression tests (default: the run's target) |
 
 ## Differential Testing
 
@@ -1360,7 +1332,7 @@ def orders(state, _root), do: state.orders |> normalize() |> drop_keys([:fees])
 @compare every: 1, using: {PropertyDamage.Equivalence, :within, [1]}
 def total_cents(state, _root), do: state.total_cents
 
-# A relation of your own: a verdict, truthy to agree, false or {:fail, reason} to disagree
+# A relation of your own: a verdict, truthy to agree, `false`, `nil` or `{:fail, reason}` to disagree
 @compare every: 1, using: :same_members
 def members(state, _root), do: state.members
 
@@ -1413,8 +1385,7 @@ benches/oban_bench/
 
 ### redis_bench
 
-[Redis](https://redis.io) over the network with live [Toxiproxy](https://github.com/Shopify/toxiproxy)
-fault injection: the external-SUT + nemesis rung. Provisions via Docker.
+[Redis](https://redis.io) over the network: the external-SUT rung. Provisions via Docker.
 
 ```
 benches/redis_bench/
@@ -1433,15 +1404,18 @@ benches/gitea_bench/
 ## Guides
 
 The full set of guides (getting started, writing commands and invariants,
-debugging, chaos engineering, differential and dual-transport testing, and more)
+debugging, differential and dual-transport testing, and more)
 is browsable in the `guides/` directory and rendered on
 [HexDocs](https://hexdocs.pm/property_damage). New here? Start with
-[Getting Started](guides/getting_started.md).
+[Getting Started](guides/getting_started.md). To add your own lines to the
+failure report, see the [log lines guide](guides/log_lines.md).
 
 ## Agent Skills
 
 The repository carries [Claude Code skills](https://code.claude.com/docs/en/skills)
-in `.claude/skills/`, grouped by name prefix for two distinct audiences:
+in `.claude/skills/`, grouped by name prefix for two distinct audiences. One
+skill, `pd-explain`, also ships in the Hex package under `priv/`; you link it
+instead of copying it (see [Explaining a failure page](#explaining-a-failure-page)).
 
 - **`pd-*` (library users).** Judgment-heavy workflows for testing *your* system
   with PropertyDamage: authoring a correct model and invariants, diagnosing shrunk
@@ -1453,76 +1427,50 @@ in `.claude/skills/`, grouped by name prefix for two distinct audiences:
     an existing spec-backed model. The runnable examples in its reference docs
     are executed by the documentation-verification gate, so the skill's
     templates are held to the same standard as the guides.
+  - **`pd-explain`**: explains an HTML failure page: it runs `mix pd.explain`,
+    writes an explanation from the page's bundle and applies it. It ships in the
+    Hex package under `priv/claude/skills/pd-explain` and is linked, not copied.
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use `pd-*` skills in your application, copy them from
-the git tag matching your installed version. Skills track the API of their release, so skills from a newer
-tag may reference APIs your version does not have:
+To use the other `pd-*` skills in your application, copy them from this
+repository. No published release carries them yet, so copy from `main`; once
+a release ships them, copy from that release's tag instead. Skills track the
+API of the commit you copy them from, so skills from `main` may reference
+APIs a released version does not have:
 
 ```bash
-git clone --depth 1 --branch v0.2.0 https://github.com/property-damage/property_damage /tmp/pd
+git clone --depth 1 https://github.com/property-damage/property_damage /tmp/pd
+mkdir -p your_app/.claude/skills
 cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
 ```
 
-Skills are not part of the hex package; this repository is the distribution channel.
+If you already have a checkout (a path dependency), copy from it instead of cloning. The path in the `cp` command below assumes the checkout sits next to your project, so adapt it to where your checkout lives. From your project root:
+
+```bash
+mkdir -p .claude/skills
+cp -r ../property_damage/.claude/skills/pd-* .claude/skills/
+```
+
+The Hex package ships only `pd-explain` (under `priv/claude/skills`). Every other skill, including `pd-model-interview`, comes from this repository, which is its distribution channel.
 
 ## Architecture
 
-```
-PropertyDamage
-├── Core Types (Tier 0)
-│   ├── Command      - Operation behaviour
-│   ├── Model        - Test model behaviour
-│   │   ├── Projection   - State reducer behaviour
-│   │   └── Simulator    - Symbolic execution behaviour
-│   └── Sequence     - Linear and branching command sequences
-│
-├── Execution (Tier 1)
-│   ├── Adapter      - SUT bridge behaviour
-│   │   └── Injector - External event injection behaviour
-│   ├── Executor     - Command execution (linear and parallel)
-│   ├── Linearization - Parallel execution verification
-│   ├── Settle       - Probe/async retry for eventual consistency
-│   ├── Nemesis      - Fault injection behaviour + built-in operations
-│   └── EventQueue   - Event coordination
-│
-├── Shrinking (Tier 2)
-│   ├── Shrinker     - Sequence minimization (supports branching)
-│   ├── Validator    - Sequence validation
-│   └── Graph        - Dependency analysis
-│
-├── Diagnostics
-│   ├── FailureReport - Structured failure + formatter
-│   ├── Replay       - Step-by-step execution
-│   ├── Coverage     - Metrics tracking
-│   ├── Diagram      - Visual sequence diagrams
-│   ├── RunTrace     - Full outcome-neutral record of one run
-│   └── RunComparison - Same-plan trace comparison and divergence ranking
-│
-├── Export
-│   ├── Export       - Main API (to_exunit, to_script)
-│   ├── HTTPSpec     - HTTP call description struct
-│   ├── ExUnit       - ExUnit test generation
-│   └── Script       - Elixir / curl / Python scripts
-│
-├── Comparison
-│   ├── Scheduler    - Runs one sequence on every target in lockstep
-│   ├── Variant      - One target's execution in its own process
-│   ├── Comparison   - Convergence loop over the `@compare` observations
-│   └── Equivalence  - `using:` relations and helpers (`within/3`, `by_key/1`, `normalize/1`, `drop_keys/2`)
-│
-└── Utilities
-    ├── Persistence  - Save/load failures
-    ├── SeedLibrary  - Seed management
-    ├── Regression   - Automatic regression test management
-    └── Scaffold     - OpenAPI code generation
-```
+The framework has these layers:
+
+- **Contracts you write:** `PropertyDamage.Command`, `PropertyDamage.Model`, `PropertyDamage.Model.Projection` and `PropertyDamage.Adapter`.
+- **Generation:** `PropertyDamage.Generator` and `PropertyDamage.Expansion` build command sequences.
+- **Execution:** `PropertyDamage.Scheduler`, `PropertyDamage.Variant` and `PropertyDamage.Executor` run a sequence on one or more targets. `PropertyDamage.Settle` retries commands on eventually consistent systems.
+- **Shrinking:** `PropertyDamage.Shrinker` reduces a failing sequence.
+- **Diagnostics:** `PropertyDamage.RunTrace`, `PropertyDamage.Failure`, `PropertyDamage.FailureReport`, `PropertyDamage.RunComparison`, `PropertyDamage.Replay`, `PropertyDamage.Coverage` and `PropertyDamage.Diagram`.
+- **Export and persistence:** `PropertyDamage.Export`, `PropertyDamage.Persistence`, `PropertyDamage.SeedLibrary` and `PropertyDamage.Regression`.
+- **Measurement:** `PropertyDamage.Mutation` and `PropertyDamage.LoadTest`.
+- **Tooling:** `mix pd.scaffold` generates code from an OpenAPI spec.
 
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
 > docs front page: invariant suggestions, failure intelligence
-> (clustering/verification), production forensics, and Livebook visualization.
+> (clustering/verification), and production forensics.
 > They compile and have moduledocs, but have not been validated against a real
 > SUT yet. Use them at your own risk.
 

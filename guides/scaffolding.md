@@ -17,7 +17,7 @@ you at a complete, runnable worked example that ships in this repository.
 
 Save this minimal OpenAPI 3 document as `widgets.json`. It has two operations
 (create and fetch), a path parameter, a request body with an enum, and a
-server-generated `id` — enough to exercise every part of the generator:
+server-generated `id`, enough to exercise every part of the generator:
 
 ```json
 {
@@ -122,6 +122,9 @@ Adapter:
 
 Model:
   - WidgetTest.Model
+
+Projection:
+  - WidgetTest.Projections.State
 ```
 
 Drop `--dry-run` to write the files:
@@ -146,13 +149,16 @@ Generating adapter...
 Generating model...
   lib/widget_test/model.ex
 
+Generating projection...
+  lib/widget_test/projections/state.ex
+
 ✓ Generated 2 commands in lib/widget_test
 
 Next steps:
   1. Review and customize generators in command generator/1 callbacks
   2. Define events/3 (command, status, response) to map responses to events
   3. Add when:/overrides: options in Model's commands() for preconditions
-  4. Implement simulate/2 in Model for expected events
+  4. Add a simulator module with simulate/2 and name it in the Model's simulator/0
   5. Configure authentication in adapter
 ```
 
@@ -167,13 +173,14 @@ That is your first visible result: a complete test scaffold on disk, already
 | `--output` | Output directory (default `lib/generated/`). |
 | `--namespace` | Module prefix; inferred from `--output` if omitted. |
 | `--operations` | Comma-separated `operationId`s to generate a subset. |
-| `--commands-only` | Emit only command modules, no adapter/model. |
+| `--commands-only` | Write only the command and event modules, with no adapter, model or projection. It refuses to overwrite existing command or event files, like a full run. |
 | `--base-url` | Override the spec's `servers` URL. |
 | `--dry-run` | Print the plan without writing files. |
+| `--force` | Overwrite files that already exist. Without it, the task refuses and names them. |
 
 ## 3. Tour the generated code
 
-### Commands — one per operation
+### Commands: one per operation
 
 Each operation becomes a `PropertyDamage.Command` with a `StreamData` generator
 inferred from the schema (an enum becomes `member_of`, a bounded string becomes
@@ -187,7 +194,7 @@ defmodule WidgetTest.Commands.CreateWidget do
   ...
   """
 
-  use PropertyDamage.Command
+  use PropertyDamage.Command, observables: [WidgetTest.Events.WidgetCreated]
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:color, :name]
@@ -202,7 +209,8 @@ defmodule WidgetTest.Commands.CreateWidget do
     |> StreamData.fixed_map()
   end
 
-  # Map an HTTP response to events (fill this in — next step 2).
+  # Map an HTTP response to events. The adapter calls this for every
+  # completed HTTP response (fill this in: next step 2).
   def events(command, status, response) do
     _ = {command, status, response}
     []
@@ -214,10 +222,10 @@ end
 ```
 
 `GetWidget` is generated the same way; because it is a read, it is emitted with
-`use PropertyDamage.Command, shrink: :prefer_remove` (the shrinker drops reads
-first) and its path parameter shows up as `def __path_params__, do: [:id]`.
+`use PropertyDamage.Command, shrink: :prefer_remove, observables:
+[WidgetTest.Events.WidgetRetrieved]` (the shrinker drops reads first) and its path parameter shows up as `def __path_params__, do: [:id]`.
 
-### Events — from response schemas
+### Events: from response schemas
 
 Every 2xx response schema becomes an event struct. A field named `id` is treated
 as **server-generated** and defaults to `external()`, PropertyDamage's marker for
@@ -235,15 +243,19 @@ defmodule WidgetTest.Events.WidgetCreated do
 
   defstruct [:color, :name, id: external()]
 
-  # color: string (optional)
-  # id: UUID (required)
-  # name: string (required)
+  # color: string (set by events/3; may be :unset)
+  # id: UUID (set by events/3; may be :unset)
+  # name: string (set by events/3; may be :unset)
 end
 ```
 
-### Adapter — drives the real API
+The trailing comments list each response field and its type. The `events/3` you
+write in the command sets them, and a field may be `:unset` when your mapping
+does not record it.
 
-The adapter has one `execute/2` clause per command that builds the URL (filling
+### Adapter: drives the real API
+
+The adapter has one `execute/3` clause per command that builds the URL (filling
 path params), body, and query string, then calls the API. It prefers
 [`Req`](https://hex.pm/packages/req) when present and falls back to Erlang's
 built-in `:httpc`, so no HTTP dependency is required. Note the contract: **every
@@ -255,25 +267,31 @@ can assert on, not an error.
 @impl true
 def execute(%Commands.CreateWidget{} = cmd, ctx, _runtime) do
   url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
-  full_url = if (q = build_query(cmd)) != "", do: url <> "?" <> q, else: url
+  query = build_query(cmd)
+  full_url = if query != "", do: url <> "?" <> query, else: url
   body = build_body(cmd)
+  headers = []
 
-  case http_request(:post, full_url, body, []) do
+  case http_request(:post, full_url, body, headers) do
     {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
     {:error, reason} -> {:error, reason}
   end
 end
 ```
 
+The adapter also defines `http_spec/2`, which describes each command as an HTTP
+call so `PropertyDamage.Export` can turn a failure into curl, Python or Elixir
+scripts.
+
 If the spec declares `securitySchemes`, the adapter also gets a
 `build_auth_headers/1` helper and its moduledoc shows the matching
 target `config:` keys (`bearer_token:`, `api_key:`, `basic_auth:`).
 
-### Model — command weights, projection slots
+### Model: command weights, projection slots
 
 The model lists the commands with inferred weights (reads > creates > updates >
-deletes) and leaves you two `TODO`s: the state projection and any check
-projections.
+deletes) and names a starter state projection, `Projections.State`, that
+ignores every event. A `TODO` marks where to add check projections.
 
 ```elixir
 def commands do
@@ -284,37 +302,44 @@ def commands do
 end
 
 @impl true
-def command_sequence_projection do
-  raise "command_sequence_projection/0 not implemented - add your state projection module"
-end
+def command_sequence_projection, do: Projections.State
 ```
 
 ## 4. Fill in what the spec cannot know
 
 The scaffold gets you a faithful *client*; you still supply the *meaning*. The
-generated files' "next steps" footer lists exactly what is left:
+task's printed "Next steps" footer (shown in step 2; the task prints it and
+writes it to no file) lists five items. The steps below take them in a different
+order. Item 1 (review the generators) is the tour in section 3, and item 3 (`when:`
+and `overrides:`) goes with the simulator in item 4 below. The steps also add the
+projection and the optional expansions.
 
-1. **Map responses to events** — implement each command's `events/3`. Keying on
+1. **Map responses to events**: implement each command's `events/3`. Keying on
    status is the norm:
 
    ```elixir
-   def events(_command, 201, %{"id" => id, "name" => name, "color" => color}) do
+   def events(_command, 201, %{"id" => id, "name" => name} = body) do
+     color = Map.get(body, "color", :unset)
      [%WidgetTest.Events.WidgetCreated{id: id, name: name, color: color}]
    end
 
    def events(_command, _status, _body), do: []
    ```
 
-2. **Write a state projection with invariants** — this is the part that catches
+2. **Write a state projection with invariants**: this is the part that catches
    bugs. It reduces events into model state and asserts properties with
    `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
-   Catalogs*.
+   Catalogs*. Replace the generated `@moduledoc` of the model and projection
+   and add `@doc` to each check, because the failure report quotes them.
 
-3. **Wire the projection into the model** — replace the `raise` in
-   `command_sequence_projection/0`, and list check projections.
+3. **Wire the projection into the model**: fill in the generated
+   `Projections.State` (or point `command_sequence_projection/0` at your own
+   module), and list check projections.
 
-4. **Add a simulator** (`simulate/2`) if you want state-dependent command
-   selection (`when:`/`overrides:`) during the symbolic phase.
+4. **Add a simulator**: a module with `simulate/2`, named by the model's
+   `simulator/0`. You need it if you want state-dependent command
+   selection during the symbolic phase: the `when:` and `overrides:` options
+   in the model's `commands/0` read the state that the simulator's events build.
 
 5. **Point the adapter at your API** via `targets: [{Adapter, config: %{base_url: ...}}]` and
    any auth keys.
@@ -337,22 +362,25 @@ generated files' "next steps" footer lists exactly what is left:
 
 The `openapi_bench` project in this repository is a complete, CI-gated worked
 example of exactly this flow. Its `lib/generated/` is real `mix pd.scaffold`
-output (from `spec/openapi.json`, a tiny key/value register API) with only the
-documented next-steps filled in; the invariant lives in a hand-written
+output (from `spec/openapi.json`, a tiny key/value register API) with the
+documented next-steps filled in by hand, inside the generated files (each
+command's `events/3`, the adapter's `setup/1` and the model wiring); the invariant lives in a hand-written
 projection (`OpenapiBench.Consistency`). The System Under Test is an in-process
 HTTP server, so you can run the whole loop with no external services:
 
 ```console
 $ cd benches/openapi_bench
 $ mix test
-...........
+...
 Finished in 1.7 seconds (0.00s async, 1.7s sync)
-18 tests, 0 failures
+N tests, 0 failures
 ```
 
+The timing and test count above are abridged and vary by release.
+
 The payoff is `seeded_bug_test.exs`. The bench can flip a `bug` flag that makes
-the SUT answer `PUT` with `200` but silently drop the write. The **unmodified
-generated client** catches the resulting read-consistency violation and the
+the SUT answer `PUT` with `200` but silently drop the write. The **generated
+client with its next-step fill-ins** catches the resulting read-consistency violation and the
 shrinker reduces it to the minimal reproduction:
 
 ```elixir
@@ -366,7 +394,7 @@ shrinker reduces it to the minimal reproduction:
 PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 ```
 
-produces:
+produces a result like this (the keys and values vary with the seed; the `Failure` and `Failure.Check` structs have more fields (`branch_id`, `context`, `projection`), left out here):
 
 ```elixir
 [
@@ -393,17 +421,19 @@ honest proof that the generated code drives the API for real.
 
 ## Regenerating
 
-Re-running `mix pd.scaffold` overwrites the generated files. Keep your fill-ins
+Re-running `mix pd.scaffold` refuses to touch existing files unless you pass `--force`, which overwrites the generated files. Keep your fill-ins
 (events/3, projections, model wiring) in separate modules or under version
-control so a regeneration only touches the generated base. `openapi_bench`
-follows this convention: the generated client is regenerated verbatim, while the
-projection and simulator are hand-written alongside it.
+control so a regeneration only touches the generated base. `openapi_bench` does
+not follow this convention for its `events/3` clauses, adapter `setup/1` and
+model wiring, which live inside `lib/generated/`, so a `--force` run there would
+overwrite them. Only its projection and simulator are hand-written in separate
+modules.
 
 ## Where to go next
 
-- **Writing Effective Invariants** — the projection checks that catch bugs.
-- **Coverage and Invariant Catalogs** — prove your invariants are actually
+- **Writing Effective Invariants**: the projection checks that catch bugs.
+- **Coverage and Invariant Catalogs**: prove your invariants are actually
   exercised (anti-vacuity).
-- **Writing Commands** — how `external()` values flow from one command to the
+- **Writing Commands**: how `external()` values flow from one command to the
   next.
-- **Debugging Failures** — read, replay, and export the failures you find.
+- **Debugging Failures**: read, replay, and export the failures you find.

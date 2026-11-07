@@ -20,7 +20,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 #### Scenario: Sequence execution events
 
 - **WHEN** a command sequence starts execution
-- **THEN** the system SHALL emit `[:property_damage, :sequence, :start]` with run_number, command_count, and branching flag
+- **THEN** the system SHALL emit `[:property_damage, :sequence, :start]` with run_number and command_count
 - **AND** when the sequence completes, it SHALL emit `[:property_damage, :sequence, :stop]` with duration, success flag, commands_executed count and `variant`, the failing target (`nil` when the run passed) (DR-045)
 
 #### Scenario: Command execution events
@@ -29,7 +29,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 - **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, run_number and `variant` (`%{index, name}`)
 - **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, events_count and `variant`
 - **AND** shrink attempts SHALL use `run_number: 0` and the reproduction run SHALL use the `run_number` of the run that found the failure (DR-045)
-- **AND** a root command's `index` SHALL count across the whole run: a branching sequence numbers its prefix, then each branch from the index after the prefix, then its suffix from the index after every branch command
+- **AND** a root command's `index` SHALL count across the whole run
 
 #### Scenario: Check execution events
 
@@ -133,6 +133,20 @@ The system SHALL expose the catalog of invariants a model verifies and report wh
 - **WHEN** `PropertyDamage.check_catalog(model)` is called
 - **THEN** the system SHALL return every invariant the model verifies, unioned across its projections and keyed by `{projection, id}` so two projections MAY reuse an `id` for distinct invariants
 
+### Requirement: Log Lines Reach Only the Failure Report (DR-054)
+
+A line written with `PropertyDamage.log/2` or `PropertyDamage.Runtime.log/3` SHALL be kept for the failure report and SHALL go nowhere else. The system SHALL NOT forward a line to `Logger`, SHALL NOT print one during a run, and SHALL NOT give a line a level. A run that passes SHALL print none of its lines.
+
+#### Scenario: A passing run prints no line
+
+- **WHEN** an adapter logs a line in every command and the run passes
+- **THEN** no line SHALL reach the console, a `Logger` backend or the progress reporter
+
+#### Scenario: A failing run prints lines only in its report
+
+- **WHEN** the same run fails
+- **THEN** the lines of the reported run SHALL appear in the failure report under the steps that wrote them, and nowhere else
+
 ### Requirement: Progress Reporting
 
 The system SHALL report progress for long-running operations (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1` and the load-test runner) through a single derived projection: a `%PropertyDamage.Progress{}` value fanned out to zero or more consumers. The projection SHALL be a view of authoritative state, never its source; an operation's return value remains the source of truth, and a terminal `*Result` payload carries a copy of it for consumers.
@@ -208,26 +222,22 @@ The system SHALL generate visual sequence diagrams from test executions in Merma
 - **WHEN** `Diagram.from_failure_report(report, format)` is called
 - **THEN** the diagram SHALL show the command execution flow, events returned from the SUT, and the failure point
 
-#### Scenario: State changes in diagrams
+#### Scenario: State participant in diagrams
 
 - **WHEN** the `:show_state` option is `true`
-- **THEN** the diagram SHALL include state changes after each command
+- **THEN** the Mermaid and PlantUML diagrams SHALL declare a `State` participant
+- **AND** the diagram SHALL draw no state-change lines, and the WebSequence format SHALL ignore the option
 
 #### Scenario: Failure highlighting
 
-- **WHEN** the `:highlight_failure` option is `true` (default)
+- **WHEN** a diagram is generated for a failing sequence
 - **THEN** the command that triggered the failure SHALL be visually distinguished in the diagram
 - **AND** the violated check or error SHALL be annotated
-
-#### Scenario: Branch visualization
-
-- **WHEN** the `:show_branches` option is `true` (default) and the sequence contains parallel branches
-- **THEN** the diagram SHALL show the branching execution flow
 
 #### Scenario: Configurable options
 
 - **WHEN** a diagram is generated
-- **THEN** the system SHALL accept options for title, show_state, show_timestamps, max_value_length (default 50), highlight_failure, and show_branches
+- **THEN** the system SHALL accept options for title, show_state and max_value_length (default 50)
 
 ### Requirement: Progress and Telemetry Name the Variant (DR-045)
 

@@ -3,13 +3,10 @@ defmodule PropertyDamage.Sequence.Position do
   The structured location of a command within a `PropertyDamage.Sequence`.
 
   A position names *which section* of the sequence a command lives in and its
-  *offset within that section*. This gives every command a canonical identity
-  that is unambiguous across parallel branches: two commands in different
-  branches can share an executor `command_index`, but never a position.
+  *offset within that section*. This gives every command a canonical identity:
+  a root and a setup command can share an offset, but never a position.
 
       %Sequence.Position{section: :prefix, offset: 0}
-      %Sequence.Position{section: {:branch, 1}, offset: 2}
-      %Sequence.Position{section: :suffix, offset: 0}
       %Sequence.Position{section: :setup, offset: 1}
       %Sequence.Position{section: :teardown, offset: 0}
 
@@ -22,30 +19,25 @@ defmodule PropertyDamage.Sequence.Position do
   The `:setup` and `:teardown` sections hold the model's setup commands
   (`c:PropertyDamage.Model.setup_each/0`) and teardown commands
   (`c:PropertyDamage.Model.teardown_each/0`). They are not roots: a root's
-  section is `:prefix`, `{:branch, b}` or `:suffix`.
+  section is `:prefix`.
 
   This is *the* position vocabulary (DR-039): the whole framework speaks it, from
   the generator's minting and the executor's `current_position` through the
   placeholder registry, the shrinker's remap, the determinism audit, and the
   failure-query interface. There is no raw-tuple encoding to reify anymore; use
-  the `prefix/1`, `branch/2`, and `suffix/1` constructors to mint one.
+  the `prefix/1`, `setup/1`, `teardown/1` and `leaf/2` constructors to mint one.
 
-  Distinct from a command's *flattened index* (its `Sequence.to_list/1`
-  reading-order ordinal): a position is not derivable from a lone flattened
-  index and vice versa. `Sequence.indexed/1` owns the contextual mapping between
-  the two, and `Sequence.position_at/3` resolves an executor command index to a
-  position.
+  Distinct from a command's index (its `Sequence.to_list/1` ordinal):
+  `Sequence.indexed/1` pairs the two, and `Sequence.position_at/2` resolves an
+  executor command index to a position.
   """
 
   @typedoc """
-  Which section of a sequence a command lives in: the `:prefix`, the `:suffix`,
-  a specific parallel branch identified by its `branch_id`, or the setup or
-  teardown commands.
+  Which section of a sequence a command lives in: the `:prefix` (the roots),
+  the leaves of one root's expansion, or the setup or teardown commands.
   """
   @type section ::
           :prefix
-          | :suffix
-          | {:branch, non_neg_integer()}
           | {:leaf, non_neg_integer()}
           | :setup
           | :teardown
@@ -61,14 +53,6 @@ defmodule PropertyDamage.Sequence.Position do
   @doc "A prefix position at `offset` (DR-039)."
   @spec prefix(non_neg_integer()) :: t()
   def prefix(offset), do: %__MODULE__{section: :prefix, offset: offset}
-
-  @doc "A position in branch `branch_id` at `offset` (DR-039)."
-  @spec branch(non_neg_integer(), non_neg_integer()) :: t()
-  def branch(branch_id, offset), do: %__MODULE__{section: {:branch, branch_id}, offset: offset}
-
-  @doc "A suffix position at `offset` (DR-039)."
-  @spec suffix(non_neg_integer()) :: t()
-  def suffix(offset), do: %__MODULE__{section: :suffix, offset: offset}
 
   @doc "The position of the setup command at `offset`."
   @spec setup(non_neg_integer()) :: t()
@@ -87,7 +71,7 @@ defmodule PropertyDamage.Sequence.Position do
   @spec leaf(non_neg_integer(), non_neg_integer()) :: t()
   def leaf(root, leaf_index), do: %__MODULE__{section: {:leaf, root}, offset: leaf_index}
 
-  @doc "Whether `position` belongs to a root (prefix, branch or suffix) or a root's leaf."
+  @doc "Whether `position` belongs to a root or a root's leaf."
   @spec root?(t()) :: boolean()
   def root?(%__MODULE__{section: section}), do: section not in [:setup, :teardown]
 
@@ -95,14 +79,49 @@ defmodule PropertyDamage.Sequence.Position do
   Human-readable prose for a position (DR-039).
 
   The shared phrasing used by the determinism audit and `mix pd.audit`:
-  `"prefix position 0"`, `"branch 1 position 2"`, `"suffix position 0"`,
-  `"setup position 0"`, `"teardown position 0"`, `"leaf 1 of root 3"`.
+  `"prefix position 0"`, `"setup position 0"`, `"teardown position 0"`, `"leaf 1 of root 3"`.
   """
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{section: :prefix, offset: i}), do: "prefix position #{i}"
-  def describe(%__MODULE__{section: {:branch, b}, offset: i}), do: "branch #{b} position #{i}"
-  def describe(%__MODULE__{section: :suffix, offset: i}), do: "suffix position #{i}"
   def describe(%__MODULE__{section: :setup, offset: i}), do: "setup position #{i}"
   def describe(%__MODULE__{section: :teardown, offset: i}), do: "teardown position #{i}"
   def describe(%__MODULE__{section: {:leaf, r}, offset: i}), do: "leaf #{i} of root #{r}"
+
+  @doc """
+  The label the failure report prints for the command at `position` (DR-055,
+  DR-056).
+
+  A root is `[i]`, a leaf `[i.j]` under its root, and a setup or teardown command `[setup i]` or
+  `[teardown i]`. Every index counts from 0.
+
+  `root` is the reading-order index (see `PropertyDamage.Sequence.indexed/1`)
+  of the root the command is or belongs to. A leaf needs it, because its
+  position names the root by its index as generated, which shrinking does not
+  renumber: a leaf of the root printed as `[0]` is `[0.1]`, never `[2.1]`.
+  Without `root`, a leaf position raises an `ArgumentError`. The other
+  sections ignore `root`.
+
+      iex> alias PropertyDamage.Sequence.Position
+      iex> Position.label(Position.prefix(1))
+      "[1]"
+      iex> Position.label(Position.leaf(2, 1), 0)
+      "[0.1]"
+      iex> Position.label(Position.setup(1))
+      "[setup 1]"
+      iex> Position.label(Position.teardown(0))
+      "[teardown 0]"
+  """
+  @spec label(t(), non_neg_integer() | nil) :: String.t()
+  def label(position, root \\ nil)
+  def label(%__MODULE__{section: :prefix, offset: i}, _root), do: "[#{i}]"
+  def label(%__MODULE__{section: :setup, offset: i}, _root), do: "[setup #{i}]"
+  def label(%__MODULE__{section: :teardown, offset: i}, _root), do: "[teardown #{i}]"
+
+  def label(%__MODULE__{section: {:leaf, _id}, offset: j}, root) when is_integer(root),
+    do: "[#{root}.#{j}]"
+
+  def label(%__MODULE__{} = position, nil) do
+    raise ArgumentError,
+          "the label of #{describe(position)} needs the reading-order index of its root"
+  end
 end

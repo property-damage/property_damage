@@ -15,9 +15,12 @@ defmodule PropertyDamage.SeedLibrary do
   pointer, not a durable test of a behavior.
 
   - **Durable regressions belong to the Export subsystem.** Exporting a failure
-    to an ExUnit test (`PropertyDamage.Export`) freezes the concrete shrunk
-    sequence, which survives generator changes. Use that for anything you want
-    to keep.
+    to an ExUnit test (`PropertyDamage.Export`) gives you a test you can commit.
+    If the report has a replay artifact, the test replays that file by path. It
+    runs the commands the file records, so a generator change does not alter
+    them, as long as you keep the file. Without an artifact, the test re-runs
+    the report's seed, and a generator change can send that seed down a
+    different sequence. Use the export for anything you want to keep.
   - **The library self-cleans.** Each entry tracks a `consecutive_passes`
     streak; an entry is pruned once it reaches the configured threshold
     (default 3). Genuinely-fixed seeds pass repeatedly and age out; flaky seeds
@@ -59,6 +62,8 @@ defmodule PropertyDamage.SeedLibrary do
   metadata: they appear in the console banner and in `stats/1`/`format/1` but
   participate in no verdict logic.
   """
+
+  alias PropertyDamage.Failure.Naming
 
   @library_version 2
   @default_file "property_damage_seeds.json"
@@ -250,14 +255,17 @@ defmodule PropertyDamage.SeedLibrary do
   @doc """
   Load a seed library from a JSON file.
 
-  Tolerates libraries written by older versions: missing fields (including the
-  pre-DR-023 `status`/`run_count`/`fail_count` tri-state) are dropped and a
-  fresh `consecutive_passes` streak of 0 is assumed.
+  Loads a library of version 1 or #{@library_version}. A version-1 entry keeps
+  its seed and descriptive fields: the pre-DR-023 `status`, `run_count` and
+  `fail_count` fields are dropped, and its `consecutive_passes` streak starts
+  at 0. Returns `{:error, {:invalid_library, reason}}` for valid JSON without
+  an `entries` list, or with a `version` that is neither.
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, term()}
   def load(path \\ @default_file) do
     with {:ok, content} <- File.read(path),
-         {:ok, data} <- Jason.decode(content, keys: :atoms) do
+         {:ok, data} <- Jason.decode(content, keys: :atoms),
+         :ok <- validate_library(data) do
       entries = Enum.map(data.entries, &load_entry/1)
       {:ok, %{version: @library_version, entries: entries}}
     else
@@ -268,6 +276,15 @@ defmodule PropertyDamage.SeedLibrary do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_library(%{version: version, entries: entries})
+       when version in [1, @library_version] and is_list(entries),
+       do: :ok
+
+  defp validate_library(%{entries: entries} = data) when is_list(entries),
+    do: {:error, {:invalid_library, {:unsupported_version, Map.get(data, :version)}}}
+
+  defp validate_library(_data), do: {:error, {:invalid_library, :missing_entries}}
 
   defp load_entry(entry) do
     %{
@@ -290,13 +307,18 @@ defmodule PropertyDamage.SeedLibrary do
   The write is **atomic**: the JSON is written to a temporary file in the same
   directory and then renamed over the destination, so a concurrent reader never
   observes a partially-written file.
+
+  Creates the destination's directory when it is missing. Returns
+  `{:error, reason}` when the directory or the file cannot be written; it never
+  raises and never depends on a `verbose:` setting.
   """
   @spec save(t(), Path.t()) :: :ok | {:error, term()}
   def save(library, path \\ @default_file) do
     json = Jason.encode!(library, pretty: true)
     tmp = path <> ".tmp.#{System.unique_integer([:positive])}"
 
-    with :ok <- File.write(tmp, json),
+    with :ok <- path |> Path.dirname() |> File.mkdir_p(),
+         :ok <- File.write(tmp, json),
          :ok <- File.rename(tmp, path) do
       :ok
     else
@@ -352,7 +374,7 @@ defmodule PropertyDamage.SeedLibrary do
   # label; any other name is kept.
   defp descriptive_name({projection, function} = key)
        when is_atom(projection) and is_atom(function),
-       do: key |> PropertyDamage.FailureReport.format_name() |> String.to_atom()
+       do: key |> Naming.format_name() |> String.to_atom()
 
   defp descriptive_name(name), do: name
 

@@ -37,64 +37,6 @@ defmodule PropertyDamage.FailureReport.StepTest do
     )
   end
 
-  # A branched failure report. Structure:
-  #   prefix : [P0]
-  #   branch0: [B0a, B1a]
-  #   branch1: [B0b, B1b]   <- B1b FAILS
-  #   suffix : [S0]
-  # Executor indices overlap across branches (both first commands are index 1),
-  # so branch_id is the only disambiguator. The failure is at branch 1's second
-  # command: executor index 2, branch_id 1, flattened index 4.
-  defp branched_report do
-    seq =
-      Sequence.branching(
-        [%Cmd{id: :p0}],
-        [[%Cmd{id: :b0a}, %Cmd{id: :b1a}], [%Cmd{id: :b0b}, %Cmd{id: :b1b}]],
-        [%Cmd{id: :s0}]
-      )
-
-    FailureReport.new(
-      seed: 1,
-      run_number: 1,
-      original_sequence: seq,
-      shrunk_sequence: seq,
-      failed_at_index: 2,
-      failure_reason: Failure.in_branch(Failure.check_failed(:Inv, "boom"), 1),
-      event_log: [
-        %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :p0}, source: :command},
-        %Entry{
-          timestamp: 2,
-          command_index: 1,
-          branch_id: 0,
-          event: %Ev{tag: :b0a},
-          source: :command
-        },
-        %Entry{
-          timestamp: 3,
-          command_index: 2,
-          branch_id: 0,
-          event: %Ev{tag: :b1a},
-          source: :command
-        },
-        %Entry{
-          timestamp: 4,
-          command_index: 1,
-          branch_id: 1,
-          event: %Ev{tag: :b0b},
-          source: :command
-        },
-        %Entry{
-          timestamp: 5,
-          command_index: 2,
-          branch_id: 1,
-          event: %Ev{tag: :b1b},
-          source: :command
-        },
-        %Entry{timestamp: 6, command_index: 5, event: %Ev{tag: :s0}, source: :command}
-      ]
-    )
-  end
-
   # A non-localized failure (e.g. a teardown safety check): failed_at_index nil.
   defp teardown_report do
     FailureReport.new(
@@ -140,34 +82,6 @@ defmodule PropertyDamage.FailureReport.StepTest do
                Enum.any?(step.entries, &(&1.event.tag == :async))
              end)
     end
-
-    test "disambiguates entries across branches that share a command_index" do
-      steps = FailureReport.steps(branched_report())
-
-      by_position = Map.new(steps, &{&1.position, &1})
-      events_at = fn position -> Enum.map(by_position[position].entries, & &1.event) end
-
-      # Both branches' first command have executor command_index 1; each step
-      # must get only its own branch's event.
-      assert events_at.(%Position{section: {:branch, 0}, offset: 0}) == [%Ev{tag: :b0a}]
-      assert events_at.(%Position{section: {:branch, 1}, offset: 0}) == [%Ev{tag: :b0b}]
-      assert events_at.(%Position{section: {:branch, 0}, offset: 1}) == [%Ev{tag: :b1a}]
-      assert events_at.(%Position{section: {:branch, 1}, offset: 1}) == [%Ev{tag: :b1b}]
-    end
-
-    test "marks exactly the localized failure step, by position not by index" do
-      steps = FailureReport.steps(branched_report())
-
-      failed = Enum.filter(steps, & &1.failed?)
-
-      # Exactly one failed step, and it is B1b: flattened index 4, NOT the
-      # executor index 2. A naive flattened_index == failed_at_index check would
-      # wrongly flag branch 0's second command (flattened index 2).
-      assert [step] = failed
-      assert step.command == %Cmd{id: :b1b}
-      assert step.position == %Position{section: {:branch, 1}, offset: 1}
-      assert step.flattened_index == 4
-    end
   end
 
   describe "failure_step/1" do
@@ -188,11 +102,6 @@ defmodule PropertyDamage.FailureReport.StepTest do
       assert FailureReport.failure_index(linear_report()) == 1
     end
 
-    test "branch failure: flattened index, not the executor failed_at_index" do
-      # B1b failed: executor failed_at_index 2, but flattened index 4.
-      assert FailureReport.failure_index(branched_report()) == 4
-    end
-
     test "non-localized failure: nil" do
       assert FailureReport.failure_index(teardown_report()) == nil
     end
@@ -210,17 +119,6 @@ defmodule PropertyDamage.FailureReport.StepTest do
       assert Enum.map(entries, & &1.source) == [:command, :command, :command]
       assert Enum.map(entries, & &1.event) == [%Ev{tag: :e0}, %Ev{tag: :e1}, %Ev{tag: :e2}]
     end
-
-    test "branch id and source are preserved on each entry" do
-      steps = FailureReport.steps(branched_report())
-      by_position = Map.new(steps, &{&1.position, &1})
-
-      assert [%Entry{source: :command, branch_id: 1, event: %Ev{tag: :b1b}}] =
-               by_position[%Position{section: {:branch, 1}, offset: 1}].entries
-
-      assert [%Entry{source: :command, branch_id: 0, event: %Ev{tag: :b0a}}] =
-               by_position[%Position{section: {:branch, 0}, offset: 0}].entries
-    end
   end
 
   describe "event_entries_at/2" do
@@ -237,13 +135,12 @@ defmodule PropertyDamage.FailureReport.StepTest do
     end
 
     test "addresses entries by Position" do
-      report = branched_report()
+      report = linear_report()
 
-      assert [%Entry{branch_id: 1, event: %Ev{tag: :b1b}}] =
-               FailureReport.event_entries_at(report, %Position{section: {:branch, 1}, offset: 1})
+      assert [%Entry{source: :command, event: %Ev{tag: :e1}}] =
+               FailureReport.event_entries_at(report, %Position{section: :prefix, offset: 1})
 
-      assert [%Entry{event: %Ev{tag: :s0}}] =
-               FailureReport.event_entries_at(report, %Position{section: :suffix, offset: 0})
+      assert FailureReport.event_entries_at(report, %Position{section: :prefix, offset: 9}) == []
     end
   end
 end

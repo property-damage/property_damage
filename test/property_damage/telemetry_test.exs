@@ -64,7 +64,7 @@ defmodule PropertyDamage.TelemetryTest do
     end
 
     test "sequence_start emits telemetry event" do
-      Telemetry.sequence_start(%{run_number: 5, command_count: 10, branching: false})
+      Telemetry.sequence_start(%{run_number: 5, command_count: 10})
 
       assert_receive {:telemetry_event, [:property_damage, :sequence, :start], measurements,
                       metadata}

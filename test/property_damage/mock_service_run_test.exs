@@ -165,8 +165,8 @@ defmodule PropertyDamage.MockServiceRunTest do
   # --- models ----------------------------------------------------------------
 
   defmodule HappyModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Charge]
     @impl true
@@ -180,8 +180,8 @@ defmodule PropertyDamage.MockServiceRunTest do
   end
 
   defmodule BuggyModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [{Charge, overrides: fn _ -> %{amount: StreamData.constant(80)} end}]
     @impl true

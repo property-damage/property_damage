@@ -25,7 +25,7 @@ defmodule PropertyDamage.CompareObservationsTest do
 
   @source """
   defmodule #{inspect(@model)} do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: PropertyDamage.Test.Compare.commands(:pay)

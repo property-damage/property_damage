@@ -2,6 +2,10 @@ defmodule PropertyDamage.Model do
   @moduledoc """
   Behaviour for models in stateful property-based testing.
 
+  Declare a model with `use PropertyDamage.Model`, which sets this behaviour.
+  A module that declares `@behaviour PropertyDamage.Model` directly is still a
+  model and still runs.
+
   A model ties together all the components needed for testing: which commands
   can be generated, which projections track state and checks, and the
   setup and teardown commands every run executes around its roots.
@@ -50,7 +54,7 @@ defmodule PropertyDamage.Model do
   ## Example
 
       defmodule MyTest.OrderModel do
-        @behaviour PropertyDamage.Model
+        use PropertyDamage.Model
 
         alias MyTest.Commands.{CreateOrder, ViewOrder, CancelOrder}
         alias MyTest.Projections.{ModelState, OrderBalances}
@@ -138,8 +142,8 @@ defmodule PropertyDamage.Model do
   For inline implementation, have the model implement both behaviours:
 
       defmodule MyModel do
-        @behaviour PropertyDamage.Model
         @behaviour PropertyDamage.Model.Simulator
+        use PropertyDamage.Model
 
         def simulator, do: __MODULE__
 
@@ -172,7 +176,7 @@ defmodule PropertyDamage.Model do
 
       Adapter.setup/1
         @check at: :startup checks
-        setup commands            (checks on; stutter and faults off)
+        setup commands            (checks on; stutter off)
         roots 0..n-1              (compared at each root boundary)
         final boundary, then finalization and @check at: :teardown checks
         teardown commands         (no checks; events logged, not folded)
@@ -183,10 +187,6 @@ defmodule PropertyDamage.Model do
   fails a check, or leaves an `external()` unresolved is a setup failure (kind
   `:setup_failed`). A teardown command never fails a run: an error or an
   unresolved placeholder is logged.
-
-  The sequence the setup commands form is unrelated to a branching sequence's
-  prefix (`PropertyDamage.Sequence`): it is the setup prefix of every run,
-  branching or not.
 
   ## Terminal States
 
@@ -207,6 +207,29 @@ defmodule PropertyDamage.Model do
 
   If not implemented, the framework runs until `max_commands` is reached.
   """
+
+  alias PropertyDamage.Model.Projection.Check
+  alias PropertyDamage.Model.Projection.Checks
+
+  @doc """
+  Declares the using module as a model by setting the `PropertyDamage.Model`
+  behaviour. The model keeps its docs and source path, readable with
+  `PropertyDamage.Docs.fetch/1`.
+
+  Takes no options; any option raises `ArgumentError` at compile time.
+  """
+  defmacro __using__(opts) do
+    if opts != [] do
+      raise ArgumentError,
+            "use PropertyDamage.Model takes no options, got: #{Macro.to_string(opts)}"
+    end
+
+    quote do
+      @behaviour PropertyDamage.Model
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Model)
+    end
+  end
 
   @typedoc """
   Command specification options.
@@ -241,6 +264,11 @@ defmodule PropertyDamage.Model do
   Each command can be specified as:
   - `Module` - Simple module, weight 1, always enabled
   - `{Module, opts}` - Module with options (weight, when, overrides)
+
+  List each module once: a second entry for the same module is an error, so
+  merge the options into one entry. A `shrink:` or `execution:` on the entry
+  applies to the module wherever the framework reads its spec (see
+  `spec_table/1`).
 
   ## Examples
 
@@ -317,8 +345,8 @@ defmodule PropertyDamage.Model do
 
   @typedoc """
   A sequence of command entries, written as `commands/0` entries are
-  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:` and
-  `weight:` are ignored.
+  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:`,
+  `weight:` and `doc:` are ignored.
   """
   @type sequence :: [command_spec()]
 
@@ -327,6 +355,19 @@ defmodule PropertyDamage.Model do
   received, alone in a list.
   """
   @type identity :: [struct()]
+
+  @typedoc """
+  The expansions an expansion function returns to choose from: each one a
+  `t:sequence/0` or the `t:identity/0`, alone or as `{expansion, opts}`.
+  The options are `weight:`, a positive integer (default 1), and `doc:`, a
+  string that describes the whole route the expansion runs. Only an
+  expansion takes `doc:`; a `commands/0` entry does not.
+  """
+  @type expansion_choices :: [
+          sequence()
+          | identity()
+          | {sequence() | identity(), [weight: pos_integer(), doc: String.t()]}
+        ]
 
   @doc """
   The setup commands: run in every target after the adapter's `setup/1` and
@@ -370,12 +411,15 @@ defmodule PropertyDamage.Model do
   not be an `execution: :probe` command, and a module may be listed once.
 
   `fun` takes the root command as generated and the variant's simulated state
-  at that root, and returns the expansions to choose from: each one a
-  `t:sequence/0` of leaf commands, or `{sequence, weight: n}`. The identity is
-  the received root struct alone in its list (`[root]` or
-  `{[root], weight: n}`); the struct may appear nowhere else. Nothing is
-  chosen that is not listed. The list order is the shrink preference,
-  simplest first, and by convention the identity comes first.
+  at that root, and returns the expansions to choose from (see
+  `t:expansion_choices/0`): each one a `t:sequence/0` of leaf commands, or
+  `{sequence, opts}` with `weight: n`, `doc: text`, or both. A `doc:`
+  describes the whole route, not one leaf, and stays with its expansion
+  through shrinking and replay. The identity is the received root struct
+  alone in its list (`[root]` or `{[root], weight: n}`); the struct may
+  appear nowhere else. Nothing is chosen that is not listed. The list order
+  is the shrink preference, simplest first, and by convention the identity
+  comes first.
 
       def expansions, do: [{Pay, &pay_expansions/2}]
 
@@ -397,8 +441,9 @@ defmodule PropertyDamage.Model do
   before the next leaf. An `overrides:` function of arity 2 also receives the
   earlier leaves of the same sequence as `%{command: leaf, events: events}`
   maps with their simulated events, so a leaf can take a sibling's
-  `external()` value (resolved per target at execution). `when:` and `weight:`
-  on a leaf are ignored, and `mix pd.validate --seeds` warns about them.
+  `external()` value (resolved per target at execution). `when:`, `weight:`
+  and `doc:` on a leaf are ignored, and `mix pd.validate --seeds` warns about
+  them.
 
   A leaf whose module has a `commands/0` entry whose `when:` is false at the
   leaf's position withdraws its expansion, and the choice is made again among
@@ -420,7 +465,7 @@ defmodule PropertyDamage.Model do
 
   Optional - a model without it runs every root as itself.
   """
-  @callback expansions() :: [{module(), (struct(), map() -> choices(sequence() | identity()))}]
+  @callback expansions() :: [{module(), (struct(), map() -> expansion_choices())}]
 
   @doc """
   Decides whether to end the sequence being generated before `max_commands`.
@@ -665,6 +710,105 @@ defmodule PropertyDamage.Model do
   @spec teardown_commands(module()) :: [normalized_command()]
   def teardown_commands(model), do: sequence_commands(model, :teardown_each)
 
+  @doc """
+  The resolved spec of every command module the model names, as
+  `%{module => spec}`.
+
+  The table holds the setup commands, the teardown commands and the
+  `commands/0` entries, each resolved with the options its entry carries, so a
+  `shrink:`, `execution:` or `settle:` set on a listing applies wherever the
+  framework reads the spec: execution, shrinking and validation. A module
+  listed in `commands/0` and also in a setup or teardown list takes the
+  `commands/0` entry. A setup or teardown list may repeat a module.
+
+  Raises `ArgumentError` when `commands/0` lists a module more than once (see
+  `check_listings!/1`), or when an entry is malformed.
+
+  A module the model does not name (a leaf an expansion generates) is not in
+  the table: look specs up with `spec_for/2`.
+  """
+  @spec spec_table(module()) :: %{module() => map()}
+  def spec_table(model) do
+    check_listings!(model)
+
+    try do
+      sequences = setup_commands(model) ++ teardown_commands(model)
+
+      (sequences ++ normalize_commands(model.commands()))
+      |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
+    rescue
+      # An empty table would silently drop every command's settle, stutter and
+      # shrink semantics, so a misconfigured model fails here.
+      e -> reraise ArgumentError, [message: spec_table_error(model, e)], __STACKTRACE__
+    end
+  end
+
+  @doc """
+  The spec of a command in a table built by `spec_table/1`.
+
+  `command` is a command struct or a command module. A module the table does
+  not hold resolves through its own `command_spec/1` (or the framework
+  defaults), as an entry with no options. A plain map is not a command module:
+  it gets the framework defaults, so it runs `:sync`.
+  """
+  @spec spec_for(%{module() => map()}, module() | struct() | map()) :: map()
+  def spec_for(table, %module{}), do: spec_for(table, module)
+
+  def spec_for(table, module) when is_atom(module) do
+    case table do
+      %{^module => spec} -> spec
+      _ -> resolve_spec(module, [])
+    end
+  end
+
+  def spec_for(_table, command) when is_map(command),
+    do: PropertyDamage.Command.framework_defaults()
+
+  @doc """
+  Raise an `ArgumentError` when `commands/0` lists a module more than once.
+
+  Two listings of one module would leave the framework to guess which options
+  win, so the message names both listings and asks for one merged entry. A
+  model with no `commands/0` passes. `setup_each/0` and `teardown_each/0` are
+  not checked: a setup sequence may run one command twice.
+  """
+  @spec check_listings!(module()) :: :ok
+  def check_listings!(model) do
+    Code.ensure_loaded(model)
+
+    if PropertyDamage.ModuleCheck.exports?(model, :commands, 0) do
+      model.commands()
+      |> Enum.group_by(&entry_module/1)
+      |> Enum.find(fn {module, entries} -> module != nil and length(entries) > 1 end)
+      |> case do
+        nil -> :ok
+        {module, entries} -> raise ArgumentError, repeated_listing_message(model, module, entries)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp repeated_listing_message(model, module, entries) do
+    "#{inspect(model)}.commands/0 lists #{inspect(module)} more than once: " <>
+      "#{Enum.map_join(entries, " and ", &inspect/1)}. " <>
+      "Merge them into one entry."
+  end
+
+  defp spec_table_error(model, error) do
+    """
+    Could not build command specs for model #{inspect(model)}: #{Exception.message(error)}
+
+    Suggestions:
+      - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
+    {module, opts} tuples (such as {module, weight: 3}), or %{command: module, ...} maps.
+      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
+    overrides have the expected shape.
+      - Verify every listed command module is defined and uses `PropertyDamage.Command`.
+    """
+    |> String.trim()
+  end
+
   defp sequence_commands(model, callback) do
     if Code.ensure_loaded?(model) and function_exported?(model, callback, 0) do
       model |> apply(callback, []) |> normalize_commands()
@@ -685,8 +829,7 @@ defmodule PropertyDamage.Model do
 
   @doc """
   Raise an `ArgumentError` when `model` defines a removed lifecycle hook
-  (`setup_each/1`, `teardown_each/1`, `setup_once/0,1`, `teardown_once/0,1`)
-  or lists a nemesis module among its setup or teardown commands.
+  (`setup_each/1`, `teardown_each/1`, `setup_once/0,1`, `teardown_once/0,1`).
 
   Runs before any target is set up, so a stale model fails before it touches a
   system.
@@ -700,16 +843,6 @@ defmodule PropertyDamage.Model do
          end) do
       [] -> :ok
       hooks -> raise ArgumentError, removed_hooks_message(model, hooks)
-    end
-
-    for callback <- [:setup_each, :teardown_each],
-        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
-        module <- Enum.map(apply(model, callback, []), &entry_module/1),
-        is_atom(module) and PropertyDamage.Nemesis.nemesis_module?(module) do
-      raise ArgumentError,
-            "#{inspect(model)}.#{callback}/0 lists the nemesis #{inspect(module)}: " <>
-              "faults are never injected before the first root or during teardown, " <>
-              "so list it in commands/0 instead."
     end
 
     :ok
@@ -788,7 +921,8 @@ defmodule PropertyDamage.Model do
         PropertyDamage.ModuleCheck.exports?(projection, :__invariants__, 0),
         {id, invariant} <- projection.__invariants__() do
       checks =
-        projection.__checks__()
+        projection
+        |> Checks.list()
         |> Enum.filter(&(&1.invariant_id == id))
         |> Enum.map(fn a -> %{name: a.name, kind: check_kind(a)} end)
 
@@ -797,7 +931,11 @@ defmodule PropertyDamage.Model do
     |> Enum.sort_by(fn entry -> {inspect(entry.projection), entry.id} end)
   end
 
-  defp check_kind(%{type: :polling}), do: :eventual
-  defp check_kind(%{type: :synchronous, trigger: %{type: :at}}), do: :lifecycle
-  defp check_kind(%{type: :synchronous}), do: :synchronous
+  defp check_kind(check) do
+    case Check.kind_for(check) do
+      :eventually -> :eventual
+      :phase -> :lifecycle
+      :step -> :synchronous
+    end
+  end
 end

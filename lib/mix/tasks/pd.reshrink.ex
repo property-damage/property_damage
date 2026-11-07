@@ -16,6 +16,9 @@ defmodule Mix.Tasks.Pd.Reshrink do
   The failure file records which model and targets produced it, so no
   `--model` / `--adapter` flags are needed. Those modules must be compiled and
   loadable in the current project, otherwise the file cannot be decoded. The
+  task starts the project's applications before it re-shrinks, as `mix run`
+  does. The re-shrink uses the atom markers the run named through
+  `external_markers:`, which the file records. The
   re-shrink runs every target the failure records, with the failure's
   `concurrency`, and keeps the failure's kind and failing target.
 
@@ -74,6 +77,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
 
   use Mix.Task
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.Mix.TaskSupport
   alias PropertyDamage.Sequence
 
@@ -119,9 +123,12 @@ defmodule Mix.Tasks.Pd.Reshrink do
   defp dispatch([path], opts) do
     case parse_strategy(opts) do
       {:ok, strategy} ->
-        # Ensure the project (and the model/adapter the file references) is
-        # compiled before we try to decode terms that name those modules.
+        # Compile the project (and the model/adapter the file references)
+        # before we try to decode terms that name those modules. Then start
+        # its applications: the shrinker reruns the engine, which emits
+        # telemetry events and fails if the `:telemetry` application is down.
         Mix.Task.run("compile", [])
+        Mix.Task.run("app.start")
         # Compile writes .beam files but does not load them; load the SUT app's
         # modules so the atoms/structs the failure file references exist before
         # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
@@ -273,7 +280,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   end
 
   defp check_suffix(nil), do: ""
-  defp check_suffix(check), do: " (#{PropertyDamage.FailureReport.format_name(check)})"
+  defp check_suffix(check), do: " (#{Naming.format_name(check)})"
 
   defp print_load_warnings(warnings) do
     print_color(:yellow, "Load warnings:\n")

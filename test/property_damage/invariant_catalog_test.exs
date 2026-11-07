@@ -48,7 +48,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule GateModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -119,7 +119,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule InlineModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -168,7 +168,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   # ReuseProjectionA is listed BOTH as the command-sequence projection and as an
   # check projection (a doubly-listed projection); the catalog must dedup it.
   defmodule ReuseModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -203,7 +203,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule LifecycleModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -246,7 +246,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule FailingModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -274,52 +274,6 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   # ===========================================================================
-  # Per-check fire counts merge across parallel branches (execution-engine)
-  # ===========================================================================
-
-  defmodule BranchProjection do
-    use PropertyDamage.Model.Projection
-    @impl true
-    def init, do: %{}
-
-    @check every: :command
-    def assert_cmd(_state, _), do: :ok
-  end
-
-  defmodule BranchModel do
-    @behaviour PropertyDamage.Model
-    @impl true
-    def commands, do: [Tick]
-    @impl true
-    def command_sequence_projection, do: BranchProjection
-  end
-
-  test "fire counts ride the additive branch merge across the branch boundary" do
-    alias PropertyDamage.{Executor, Sequence}
-
-    # Synchronous checks are disabled INSIDE branches by design (branch
-    # correctness is decided by the linearization check, not per-branch
-    # sampling), so branch commands contribute a zero delta. The merge must
-    # nonetheless preserve the prefix and suffix firings exactly: prefix (1
-    # command) + suffix (1 command) = 2, with the two branch commands neither
-    # lost nor double-counted.
-    seq = Sequence.branching([%Tick{}], [[%Tick{}], [%Tick{}]], [%Tick{}])
-
-    {:ok, queue} = PropertyDamage.EventQueue.start_link()
-
-    result =
-      try do
-        {:ok, result} = Executor.run(seq, BranchModel, TickAdapter, event_queue: queue)
-        result
-      after
-        PropertyDamage.EventQueue.stop(queue)
-      end
-
-    fired = Map.get(result.check_counters, {:fired, BranchProjection, :cmd}, 0)
-    assert fired == 2
-  end
-
-  # ===========================================================================
   # Whole-run accumulation across sequences (guards the single-result bug)
   # ===========================================================================
 
@@ -333,7 +287,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule WholeRunModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -390,7 +344,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule PollModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Start]
     @impl true

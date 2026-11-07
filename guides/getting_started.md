@@ -26,6 +26,14 @@ def deps do
 end
 ```
 
+The command generators in this guide call `StreamData` functions directly, so
+your project lists `:stream_data` itself.
+
+Each module in Steps 1 to 6 goes in its own file under `lib/my_app/` (for
+example `lib/my_app/commands/create_user.ex`). Step 7 shows how to start a run;
+its test module goes under `test/` (for example `test/property_test.exs`), so
+`mix test` runs it.
+
 ## Core Concepts
 
 PropertyDamage has five key components:
@@ -77,6 +85,7 @@ Commands represent operations. Each command implements the
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
+  @moduledoc "Create a user with a random name and email."
   use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -100,8 +109,9 @@ end
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
 
-> The `UpdateUser` and `DeleteUser` commands (referenced by the model and adapter
-> below) follow the same pattern and are left as an exercise.
+> The `UpdateUser` and `DeleteUser` commands (mentioned only in comments in the
+> model and adapter below) follow the same pattern and are left as an exercise.
+> The run in this guide does not need them.
 
 ### Key Command Surface
 
@@ -116,6 +126,7 @@ Projections are state reducers. They process events and maintain state:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.ModelState do
+  @moduledoc "Tracks the users the system has created, updated and deleted."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.{UserCreated, UserUpdated, UserDeleted}
@@ -143,11 +154,12 @@ end
 ## Step 4: Define Invariants
 
 Invariants are checks that should always hold. Define them in check
-projections using `@check` and `assert_*` functions:
+projections using `@check` functions. By convention their names start with `assert_`, but any name works:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.UserInvariants do
+  @moduledoc "Checks that every user the system creates has a unique email."
   use PropertyDamage.Model.Projection
 
   alias MyApp.Events.UserCreated
@@ -163,7 +175,8 @@ defmodule MyApp.Projections.UserInvariants do
   def apply(state, _), do: state
 
   # Checks use @check to specify when to run
-  # and assert_* naming convention
+  # (the assert_ prefix is a convention, not a requirement)
+  @doc "No two users share an email address."
   @check every: 1
   def assert_emails_unique(_state, _cmd_or_event) do
     # In a real system, duplicate emails would be caught at creation time.
@@ -173,14 +186,38 @@ defmodule MyApp.Projections.UserInvariants do
 end
 ```
 
+The failure report shows a check by its function name without the `assert_`
+prefix, so a failing `assert_emails_unique` appears as `emails_unique`.
+
+Optional: to see a failure, replace the body of `assert_emails_unique` with a
+check that fails on purpose, then run as in Step 7 with
+`report_html: "_build/pd_reports"` and open the page it writes (see
+[Understanding Results](#understanding-results)). Restore the `:ok` body
+afterward.
+
+```elixir
+def assert_emails_unique(state, _cmd_or_event) do
+  if MapSet.size(state.emails) >= 1 do
+    {:fail, "broken on purpose: a user exists"}
+  else
+    :ok
+  end
+end
+```
+
 ## Step 5: Define the Model
 
-The model ties everything together:
+The model ties everything together. Every module that calls
+`use PropertyDamage.Model`, `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` or `use PropertyDamage.Adapter` must put that line first, before any `def`, `defp`
+or other `use` that defines functions (such as `use GenServer`). Otherwise the
+module does not compile.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  @moduledoc "A user registry: users are created, and every email stays unique."
+  use PropertyDamage.Model
 
   alias MyApp.Commands.CreateUser
   alias MyApp.Projections.{ModelState, UserInvariants}
@@ -205,22 +242,36 @@ defmodule MyApp.TestModel do
 end
 ```
 
+The `@moduledoc` and `@doc` lines in Steps 2 to 5 are not decoration. When a run
+fails, the report's "What this checks" section prints the model's `@moduledoc`,
+the check function's `@doc` and the `@moduledoc` of the check's projection and of
+the failing command. A module without one prints a "no description" line
+instead, so a first failure page stays empty of context. See
+[What this checks](debugging_failures.md#what-this-checks) for what each
+item reads.
+
 The model above implements four callbacks, but only two are **required**:
 `commands/0` and `command_sequence_projection/0`. Every other `PropertyDamage.Model`
 callback is optional (they are listed in `@optional_callbacks`), so a minimal
 model is just those two. The optional ones:
 
-- `check_projections/0` — invariant projections to run; defaults to `[]`.
-- `injectable_events/0` — events that arrive from outside command execution
+- `check_projections/0`: invariant projections to run; defaults to `[]`.
+- `injectable_events/0`: events that arrive from outside command execution
   (webhooks, callbacks) rather than from commands; defaults to `[]`.
-- `simulator/0` — a separate simulator module for sequence generation (defaults
-  to the model itself).
-- `setup_each/0`, `teardown_each/0` — setup commands and teardown commands: a
+- `simulator/0`: the simulator module for sequence generation. It has no
+  default: without `simulator/0` the generator predicts no events, so projection
+  state stays at `init/0` while the sequence is generated and any `when:` guard
+  that reads state never opens. A model whose commands need no such guard can
+  leave it out.
+- `setup_each/0`, `teardown_each/0`: setup commands and teardown commands: a
   fixture such as "a user is logged in" is a command that runs before the first
   root of every run (or after the last), and each target's adapter decides how
   to do it. Both default to `[]`. See
   [Writing Commands](writing_commands.md#setup-and-teardown-commands).
-- `terminate_early?/3` — a predicate to stop generating a sequence early.
+- `terminate_early?/3`: a predicate to stop generating a sequence early.
+- `expansions/0`: command sequences a root command may run as, per target, when
+  they mean the same as the root. A model without it has none. See
+  [Writing Commands](writing_commands.md#expansions-one-root-several-commands).
 
 This example spells out `check_projections/0` and `injectable_events/0`
 (even though `injectable_events` returns `[]`) to show their shape; you can drop
@@ -308,6 +359,9 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 
 ### Basic Run
 
+Put the call in a script such as `run.exs` and start it with `mix run run.exs`,
+or paste it into `iex -S mix`.
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
@@ -318,22 +372,31 @@ PropertyDamage.run(
 )
 ```
 
+A passing run returns `{:ok, stats}` and prints nothing. A failing run returns
+`{:error, report}`; [Reading the report](debugging_failures.md#reading-the-report)
+shows what the report holds.
+
 ### In ExUnit
+
+`use PropertyDamage.ExUnit` gives you `property_damage/2`, which takes the same
+options as `PropertyDamage.run/1`. When the run fails, the test's failure message
+is the full failure report:
 
 ```elixir
 defmodule MyApp.PropertyTest do
   use ExUnit.Case
+  use PropertyDamage.ExUnit
 
-  test "system maintains invariants" do
-    assert {:ok, _stats} =
-             PropertyDamage.run(
-               model: MyApp.TestModel,
-               targets: [MyApp.TestAdapter],
-               max_runs: 100
-             )
-  end
+  property_damage "system maintains invariants",
+    model: MyApp.TestModel,
+    targets: [MyApp.TestAdapter],
+    max_runs: 100
 end
 ```
+
+A plain `test` that asserts on `PropertyDamage.run/1` also works, but a failed
+`assert {:ok, _stats} = PropertyDamage.run(...)` shows only a compact summary of
+the report. Use it when the test needs the result for more than pass or fail.
 
 ### Verbose Mode
 
@@ -352,35 +415,32 @@ checks) use step-by-step replay; see the
 
 ## Understanding Results
 
-When tests pass:
+When tests pass, `PropertyDamage.run/1` returns `{:ok, stats}` and prints
+nothing. `stats.runs` is the number of runs and `stats.seed` the seed they
+started from. Add `verbose: true` to print a summary and one progress line per
+run.
 
-```
-Run 1/100: 23 commands, PASSED
-Run 2/100: 18 commands, PASSED
-...
-100/100 runs passed!
-```
+When tests fail, `PropertyDamage.run/1` returns `{:error, report}` and does not
+print the report. The report holds the shrunk failure, its events, the state it
+left and the calls that reproduce it. To read it in full, call
+`IO.inspect(report, pretty: true)`. A `property_damage/2` test prints the full
+report when it fails, but a failed `assert {:ok, _stats} = ...` in ExUnit shows
+only a compact summary of it.
 
-When tests fail:
-
-```
-Run 42/100: 31 commands, FAILED!
-
-Shrinking...
-Minimal failing sequence (3 commands):
-  [0] CreateUser{email: "test@example.com", name: "Alice"}
-      => user_id: "user_123"
-  [1] CreateUser{email: "test@example.com", name: "Bob"}
-      => FAILED: duplicate email
-
-Invariant violated: UserInvariants.emails_unique
-
-Seed: 987654321 (use this to reproduce)
-```
+To read the failure as an HTML page, pass `report_html: "_build/pd_reports"` to
+the run, or set the environment variable `PD_REPORT_HTML` to a directory (the
+variable wins when both are set). Each failing run then writes a page there, and
+the directory's `index.html` browses them all; see
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
+[Reading the report](debugging_failures.md#reading-the-report) walks through a
+real one. Shrinking can simplify a command's values to ones your generator
+would never draw, such as an empty string for a name that needs five
+characters; the shrunk failure still fails the same way. To put your own lines
+in the report, such as the requests an adapter sends, call
+`PropertyDamage.log/2`; see the [log lines guide](log_lines.md).
 
 ## Next Steps
 
 - [Writing Effective Invariants](writing_invariants.md)
 - [Debugging Failures](debugging_failures.md)
-- [Chaos Engineering with Nemesis](chaos_engineering.md)
 - See `benches/` for complete, CI-gated working examples against real software

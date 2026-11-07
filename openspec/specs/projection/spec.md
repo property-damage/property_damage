@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining checks that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to check-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands), DR-052 (A Check's Verdict Is Its Return Value)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands), DR-052 (A Check's Verdict Is Its Return Value), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -51,7 +51,7 @@ Projections SHALL receive both commands and events through their `apply/2` callb
 
 Projections SHALL support synchronous checks decorated with the `@check` module attribute. Triggered checks run immediately when their condition is met. Check functions take two arguments: the current projection state and the command or event that triggered the check.
 
-A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously (a resource-poller or injector-adapter event, a mock-service event, or a nemesis event) is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
+A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously (a resource-poller or injector-adapter event, or a mock-service event) is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
 
 #### Scenario: Trigger every step
 - **WHEN** a check is decorated with `@check every: 1`
@@ -64,11 +64,11 @@ A `@check every:` check fires on **every observed event** regardless of how the 
 #### Scenario: Trigger every event
 - **WHEN** a check is decorated with `@check every: :event`
 - **THEN** it runs after any event is processed but not after commands
-- **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, mock-service, and nemesis events), not only a command's own returned events
+- **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, and mock-service events), not only a command's own returned events
 
 #### Scenario: Trigger fires on an asynchronously-observed event
 - **WHEN** a projection declares `@check every: :event` (or `every: 1`, or `every: SomeEvent`)
-- **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, a mock service, or a nemesis)
+- **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, or a mock service)
 - **THEN** the check SHALL be evaluated on the projection state after that event is folded in
 
 #### Scenario: every: :command does not fire on events
@@ -287,12 +287,12 @@ For a root that runs as an expansion, a `@check every: Module` SHALL fire on a l
 
 ### Requirement: Check Detection and Metadata
 
-The framework SHALL detect checks at compile time using an `@on_definition` hook. Check metadata SHALL be stored and accessible via the `__checks__/0` function on the projection module.
+The framework SHALL detect checks at compile time using an `@on_definition` hook. Each check SHALL be stored as a `PropertyDamage.Model.Projection.Check` struct with a `kind` of `:step` (`@check every:`), `:phase` (`@check at:`) or `:eventually` (`@eventually`), derived once from the check's type and trigger. `PropertyDamage.Model.Projection.Checks.list/1` SHALL return a projection's checks, and an empty list for a module that does not use the projection macros.
 
 #### Scenario: Checks discovered at compile time
 - **WHEN** a projection module is compiled
 - **THEN** all functions preceded by `@check` or `@eventually` are recorded as checks
-- **AND** their metadata is stored in the module's `__checks__/0` function
+- **AND** each is recorded as a `Check` struct readable through `PropertyDamage.Model.Projection.Checks.list/1`
 
 #### Scenario: Synchronous check metadata
 - **WHEN** a synchronous check is detected
@@ -409,4 +409,48 @@ The `use PropertyDamage.Model.Projection` macro SHALL set up the check detection
 - **WHEN** a module invokes `use PropertyDamage.Model.Projection`
 - **THEN** the module declares `@behaviour PropertyDamage.Model.Projection`
 - **AND** check detection hooks are registered
-- **AND** the `__checks__/0` function is generated at compile time
+- **AND** the check list is generated at compile time
+
+### Requirement: Declared Docs Capture (DR-058)
+
+A module that invokes `use PropertyDamage.Model.Projection` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Model.Projection` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
+
+#### Scenario: A module compiled from a script keeps its docs
+- **GIVEN** a projection module that invokes `use PropertyDamage.Model.Projection` and is compiled from a script
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `{:ok, docs}` with the moduledoc, the absolute path of the script, and the doc and first-clause line of each function
+- **AND** `Code.fetch_docs/1` finds no docs for the same module
+
+#### Scenario: Hidden and missing docs read differently
+- **GIVEN** a projection with one function marked `@doc false` and one function with no `@doc`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with the module
+- **THEN** the hidden function reads `doc: false` and the undocumented function reads `doc: nil`
+
+#### Scenario: A function written before use is a compile error
+- **GIVEN** a module that defines a function before it invokes `use PropertyDamage.Model.Projection`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of the `use`
+- **AND** the message names each such function as `name/arity`
+
+#### Scenario: A function that another use defines before use is a compile error
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model.Projection`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model.Projection`
+- **AND** the message names each default that `use GenServer` defines, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A function that another use defines stays a compile error when the module overrides it
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model.Projection`
+- **AND** the module overrides every default that `use GenServer` defines after `use PropertyDamage.Model.Projection`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model.Projection`
+- **AND** the message names each overridden default, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A macro or a `__`-prefixed function before use compiles
+- **GIVEN** a module that defines a macro and a function whose name starts with `__` before it invokes `use PropertyDamage.Model.Projection`
+- **WHEN** the module is compiled
+- **THEN** compilation succeeds and the captured map holds neither of them
+
+#### Scenario: A beam stripped of its attributes has no docs
+- **GIVEN** a module that invokes `use PropertyDamage.Model.Projection`, compiled from a script, whose beam is stripped with `:beam_lib.strip/1`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `:unavailable` without raising

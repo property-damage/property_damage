@@ -133,8 +133,8 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     @moduledoc false
     # Open runs as Reserve then Confirm; Confirm produces the root's Opened id.
     # Use looks its account up in state, as a model's simulator does.
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -177,8 +177,8 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     @moduledoc false
     # Model, with Use rewritten as Touch: the expansion function and Touch's
     # `overrides:` look the root's id up in the target's state.
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     defdelegate commands, to: Model
@@ -242,8 +242,8 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     @moduledoc false
     # ReaderModel with a check that keeps a rewritten Open and a Use after it
     # through shrinking, so a second target follows the reference's rewrite.
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     defdelegate commands, to: ReaderModel
@@ -276,8 +276,8 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     # ReaderModel with Touch listed as a command whose `when:` reads the
     # accounts the rewritten Open produced: a leaf's precondition is its
     # module's `commands/0` `when:`, evaluated against the target's state.
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     def commands do

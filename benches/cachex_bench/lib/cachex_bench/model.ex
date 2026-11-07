@@ -105,7 +105,7 @@ defmodule CachexBench.Model do
   under `k`, which `CachexBench.Projection.expected_contents/2` compares after
   every root.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias CachexBench.Commands.{ClearCache, DelKey, GetKey, Incr, PutKey}
 

@@ -1,6 +1,6 @@
 # DR-035: Run Comparison over Full Traces
 
-**Status:** Accepted. Amended by DR-043: the `adapter:` option of `RunTrace.capture/1` and `RunComparison.investigate/1` is now a `targets:` entry. Amended by DR-045: `Differential.Equivalence` is now `PropertyDamage.Comparison`. Amended by DR-046: `PropertyDamage.Comparison` no longer has `equivalent?/3`, `normalize/1`, `ignore_fields/1` or `only_fields/1`; the helpers are `PropertyDamage.Equivalence.by_key/1`, `normalize/1` and `drop_keys/2`.
+**Status:** Accepted. Amended by DR-043: the `adapter:` option of `RunTrace.Capture.capture/1` and `RunComparison.investigate/1` is now a `targets:` entry. Amended by DR-045: `Differential.Equivalence` is now `PropertyDamage.Comparison`. Amended by DR-046: `PropertyDamage.Comparison` no longer has `equivalent?/3`, `normalize/1`, `ignore_fields/1` or `only_fields/1`; the helpers are `PropertyDamage.Equivalence.by_key/1`, `normalize/1` and `drop_keys/2`.
 **Date:** 2026-07-02
 
 > Part of the run-comparison campaign (with DR-033, DR-034, DR-036).
@@ -65,7 +65,7 @@
    inserted-event noise.
 
 5. **Capture is `RunTrace`'s job; comparison is `RunComparison`'s.**
-   `RunTrace.capture(model:, adapter:, seed:, run_number:, run_nonce:, ...)`
+   `RunTrace.Capture.capture(model:, adapter:, seed:, run_number:, run_nonce:, ...)`
    runs ONE full, unshrunk plan and returns its trace, pass or fail (the
    comparator never runs a SUT). `RunComparison.compare([trace], opts)`
    returns a pure `%RunComparison{}` (aligned table + ranking + header).
@@ -136,7 +136,7 @@ Differential onto provenance classification is deliberate future work.
 - Delete `lib/property_damage/diff.ex` + `test/property_damage/diff_test.exs`
   (zero other callers, verified). New `lib/property_damage/run_comparison.ex`
   (+ submodules for alignment, classification, HTML rendering);
-  `RunTrace.capture/1` beside the trace type.
+  `RunTrace.Capture.capture/1` beside the trace type.
 - The comparison core is pure data-in/data-out and testable without a SUT:
   guard tests (unequal fingerprint refuses; mixed failure signatures
   flagged), alignment tests (inserted event yields one LCS gap, not a

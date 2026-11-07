@@ -1,6 +1,7 @@
 defmodule PropertyDamage.ValidationExtendedTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Command
   alias PropertyDamage.Options
   alias PropertyDamage.Validation
 
@@ -12,6 +13,13 @@ defmodule PropertyDamage.ValidationExtendedTest do
     defstruct [:id]
 
     def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 1})
+    def events(_cmd, _response), do: []
+  end
+
+  defmodule OtherValidCommand do
+    defstruct [:id]
+
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 2})
     def events(_cmd, _response), do: []
   end
 
@@ -31,8 +39,8 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule ValidModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands do
@@ -53,7 +61,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule EmptyModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: []
@@ -66,7 +74,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule InvalidWeightModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -228,17 +236,17 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   # ============================================================================
-  # validate_command_callbacks! Tests
+  # Command.validate_callbacks! Tests
   # ============================================================================
 
-  describe "Validation.validate_command_callbacks!/1" do
+  describe "Command.validate_callbacks!/1" do
     test "passes with valid command" do
-      assert :ok = Validation.validate_command_callbacks!(ValidCommand)
+      assert :ok = Command.validate_callbacks!(ValidCommand)
     end
 
     test "raises on missing callback" do
       assert_raise ArgumentError, ~r/Missing Command Callback/, fn ->
-        Validation.validate_command_callbacks!(InvalidCommand)
+        Command.validate_callbacks!(InvalidCommand)
       end
     end
   end
@@ -342,7 +350,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   # ============================================================================
 
   defmodule SingleCommandModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [PropertyDamage.ValidationExtendedTest.ValidCommand]
@@ -355,13 +363,13 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule UnbalancedWeightModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
       [
         {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 100},
-        {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 1}
+        {PropertyDamage.ValidationExtendedTest.OtherValidCommand, weight: 1}
       ]
     end
 

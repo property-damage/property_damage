@@ -25,7 +25,7 @@ defmodule PropertyDamage.ReplayArtifactKeyRefusalTest.Fixtures do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias PropertyDamage.ReplayArtifactKeyRefusalTest.Fixtures
       alias PropertyDamage.Test.ReplayFixtures, as: R
@@ -72,7 +72,7 @@ defmodule PropertyDamage.ReplayArtifactKeyRefusalTest do
     assert {:refused, %{target: "second", root: 0, leaf: 0, field: field}} = report.replay
 
     [label, last] = R.last_lines(report, 2)
-    assert label == "Replay the shrunk failure:"
+    assert label == "# Replay the shrunk failure:"
     assert last =~ "refused"
     assert last =~ "payload"
     assert last =~ "[key "

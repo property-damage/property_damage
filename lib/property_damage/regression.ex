@@ -471,6 +471,7 @@ defmodule PropertyDamage.Regression do
 
       directory ->
         result = Persistence.save(failure, directory)
+        warn_write_failure(result, "failure", directory)
 
         if verbose do
           case result do
@@ -490,6 +491,7 @@ defmodule PropertyDamage.Regression do
 
       path ->
         result = do_add_to_library(failure, path, opts)
+        warn_write_failure(result, "seed_library", path)
 
         if verbose do
           case result do
@@ -505,23 +507,43 @@ defmodule PropertyDamage.Regression do
     end
   end
 
+  # A duplicate seed is an expected no-op; any other error means the write did
+  # not happen, so report it whatever `verbose:` says.
+  defp warn_write_failure({:error, {:duplicate_seed, _}}, _label, _path), do: :ok
+
+  defp warn_write_failure({:error, {:seed_library_unreadable, path, reason}}, _label, _path) do
+    require Logger
+
+    Logger.warning(
+      "PropertyDamage seed_library at #{path} exists but could not be read " <>
+        "(#{inspect(reason)}); the file was left unchanged and the seed was not added"
+    )
+  end
+
+  defp warn_write_failure({:error, reason}, label, path) do
+    require Logger
+
+    Logger.warning("PropertyDamage #{label} could not be saved to #{path}: #{inspect(reason)}")
+  end
+
+  defp warn_write_failure(_result, _label, _path), do: :ok
+
   defp maybe_generate_test(failure, opts, verbose) do
     case Keyword.get(opts, :generate_tests) do
       nil ->
         nil
 
       directory ->
-        # Forward the full option set to the exporter. The ExUnit generator reads
-        # the keys it understands (e.g. :targets, :model) and ignores the
-        # regression-control keys, so a caller can shape the generated test rather
-        # than only supply :targets.
-        result =
-          Export.save(
-            failure,
-            directory,
-            :exunit,
-            PropertyDamage.Options.with_target_entries(opts)
-          )
+        # Forward the options the ExUnit export takes (e.g. :targets); the
+        # exporter validates its options and rejects the regression-control keys.
+        exunit_opts =
+          opts
+          |> PropertyDamage.Options.with_target_entries()
+          |> Keyword.take(PropertyDamage.Options.export_option_keys(:exunit))
+
+        result = Export.save(failure, directory, :exunit, exunit_opts)
+
+        warn_write_failure(result, "generated test", directory)
 
         if verbose do
           case result do
@@ -541,23 +563,25 @@ defmodule PropertyDamage.Regression do
     tags = Keyword.get(opts, :tags, [:auto_detected])
     description = Keyword.get(opts, :description)
 
-    # Load or create library
-    library =
+    with {:ok, library} <- load_or_create_library(path),
+         {:ok, updated_library} <-
+           SeedLibrary.add(library, failure, tags: tags, description: description),
+         :ok <- SeedLibrary.save(updated_library, path) do
+      {:ok, path}
+    end
+  end
+
+  # A missing file starts a new library. A file that exists but does not load
+  # (corrupt, or written by another version) is reported and left untouched,
+  # because saving over it would lose its seeds.
+  defp load_or_create_library(path) do
+    if File.exists?(path) do
       case SeedLibrary.load(path) do
-        {:ok, lib} -> lib
-        {:error, _} -> SeedLibrary.new()
+        {:ok, library} -> {:ok, library}
+        {:error, reason} -> {:error, {:seed_library_unreadable, path, reason}}
       end
-
-    # Add failure
-    case SeedLibrary.add(library, failure, tags: tags, description: description) do
-      {:ok, updated_library} ->
-        case SeedLibrary.save(updated_library, path) do
-          :ok -> {:ok, path}
-          error -> error
-        end
-
-      error ->
-        error
+    else
+      {:ok, SeedLibrary.new()}
     end
   end
 

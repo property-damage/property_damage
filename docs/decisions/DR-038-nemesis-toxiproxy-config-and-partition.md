@@ -1,6 +1,6 @@
 # DR-038: Nemesis Toxiproxy config source and partition semantics
 
-**Status:** Accepted
+**Status:** Superseded by DR-062 (was: Accepted)
 **Date:** 2026-07-03
 
 > Refines the built-in network nemeses (`NetworkLatency`, `NetworkPartition`,

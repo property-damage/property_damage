@@ -112,6 +112,18 @@ defmodule PropertyDamage.Mutation.Analysis do
         suggestions
       end
 
+    suggestions =
+      case report.killed_by_error || 0 do
+        0 ->
+          suggestions
+
+        count ->
+          suggestions ++
+            [
+              "#{count} mutations made the adapter return an error and were killed by the failed run, not by a check. The score excludes them; add checks to measure the rest."
+            ]
+      end
+
     # Suggestions based on survived mutations
     suggestions = suggestions ++ analyze_survived_mutations(report.survived_mutations)
 

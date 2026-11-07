@@ -28,7 +28,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
     def check_projections, do: [AlwaysFail]

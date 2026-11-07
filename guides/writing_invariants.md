@@ -80,6 +80,43 @@ defp balance_ok!({id, account}),
   do: account.balance >= 0 or PropertyDamage.fail!("overdrawn", id: id)
 ```
 
+### Describing a Check
+
+When a check fails, the failure report explains what the check was for. Its
+"What this checks" section prints the `@doc` of the failing check (or of the
+`@eventually` or `@compare` observation), next to the docs of the model, the
+projection and the command. A check without a `@doc` prints a line that names
+the fix instead: `(no description: add @doc to Mod.fun/2)`. Write the `@doc`
+for the person who reads the failure, in a sentence or two that states the
+property. Put it above the `@check` attribute:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule MyApp.Projections.Balance do
+  use PropertyDamage.Model.Projection
+
+  defmodule Deposited do
+    defstruct [:amount]
+  end
+
+  @impl true
+  def init, do: %{balance: 0}
+
+  @impl true
+  def apply(state, %Deposited{amount: amount}), do: %{state | balance: state.balance + amount}
+  def apply(state, _event), do: state
+
+  @doc """
+  An account balance never goes below zero.
+  """
+  @check every: 1
+  def balance_non_negative(state, _cmd_or_event), do: state.balance >= 0
+end
+```
+
+The terminal report, the Markdown and JSON formats, and the HTML page
+(`report_html:` or `PD_REPORT_HTML`) all carry the section.
+
 ## What Makes a Good Invariant?
 
 Good invariants are:
@@ -233,9 +270,9 @@ decorating attribute, and each answers a different question.
 
 | Kind | Question | Looks at | Schedule | Fails when |
 |------|----------|----------|----------|------------|
-| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, :event}`, `{N, Module}`, `{N, [Modules]}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
-| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
+| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`, `[Modules, :end]`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
 When to pick which:
 
@@ -263,10 +300,10 @@ way. In all three a truthy return is good, a raise is a failure, and
 
 The sections below teach `@check` first, then `@eventually`, then `@compare`.
 
-## Check Triggers
+## Check Schedules
 
-Control when checks are run using the `@check` attribute. The trigger
-takes an `every:` key:
+Control when a check runs with the schedule on its `@check` attribute. The
+`every:` key sets it:
 
 ```elixir
 # Check after every step (every: 1)
@@ -290,8 +327,10 @@ end
 
 Supported `every:` forms: `1` (every step), `N` (every Nth step),
 `:command`/`:event` (after any command/event), `Module`/`[Modules]` (after a
-specific module), and `{N, target}` variants. Sample with `every: N` for
-expensive checks.
+specific module), and the counted forms `{N, :command}` (every Nth command),
+`{N, :event}` (every Nth event), `{N, Module}` (every Nth command or event of
+that module) and `{N, [Modules]}` (every Nth of any listed module). Sample with
+`every: N` for expensive checks.
 
 ### Lifecycle-boundary checks (`at:`)
 
@@ -371,12 +410,13 @@ end
 ```
 
 `every:` takes the same schedule vocabulary as `@check` (`1`, `N`,
-`{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
+`{N, Module}`, `Module`, `[Modules]`) plus `:end` or `[Modules, :end]` for the
+final boundary.
 Values agree under `==` unless `using:` names another relation: `:fun` (a
 function of the projection, public or private), `{Mod, :fun}` or
 `{Mod, :fun, args}`, each called with the reference's value and the variant's
 value first (DR-051). The relation's return is a verdict: truthy when the
-values agree, `false` or `{:fail, reason}` when they do not. Normalize in the
+values agree, `false`, `nil` or `{:fail, reason}` when they do not. Normalize in the
 observation body and keep `using:` for relations that are not equalities,
 such as a tolerance:
 
@@ -456,21 +496,6 @@ defmodule MyApp.Projections.AuditInvariants do
     Enum.empty?(state.suspicious_patterns) or
       PropertyDamage.fail!("Suspicious patterns detected", patterns: state.suspicious_patterns)
   end
-end
-```
-
-## Relaxing Invariants During Faults
-
-When using nemesis (chaos engineering), some invariants may not apply:
-
-```elixir
-@check every: 1
-def assert_latency_within_sla(state, _cmd_or_event) do
-  # Skip SLA check during active network partition
-  partitioned? = Map.get(state.active_faults, :network_partition, false)
-
-  partitioned? or state.last_latency_ms < 100 or
-    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
 end
 ```
 
@@ -569,7 +594,7 @@ end
 
 A long mutation run can be slow, so pass an `on_progress` function to watch it.
 It receives a `%PropertyDamage.Progress{}` projection (DR-022): a `MutationUpdate`
-per mutation as it is killed, survived, or timed out, then a terminal
+per mutation as it is killed, killed by an error, survived, or timed out, then a terminal
 `MutationResult` carrying a copy of the final report. The same stream drives
 `verbose:` and the `[:property_damage, :mutation, :progress | :result]` telemetry
 events.
@@ -597,7 +622,7 @@ The authoritative report is still the `{:ok, report}` return value;
 ## Next Steps
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs
+- [Coverage and Invariant Catalogs](coverage_and_catalogs.md) - The invariant catalog and `@invariant id:` coverage
 - [Differential Testing](differential_testing.md) - Comparing targets through `@compare`
 - [Path Equivalence Testing](path_equivalence_testing.md) - The same `@compare` observations across equivalent command sequences
-- [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis
 - See `PropertyDamage.Suggestions` for invariant recommendations

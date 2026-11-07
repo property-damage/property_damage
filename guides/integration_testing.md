@@ -116,7 +116,11 @@ First failure:
 
 (Seeds are random per run, so yours will differ.) Each entry in
 `result.failures` is a `PropertyDamage.FailureReport` you can inspect, replay, or
-save; see [Debugging Failures](debugging_failures.md).
+save; see [Debugging Failures](debugging_failures.md). To read a failure as a
+page in a browser, set `PD_REPORT_HTML=_build/pd_reports` before the run
+(`PropertyDamage.Integration.run/1` and `mix pd.integration` read the variable;
+`PropertyDamage.run/1` also takes a `report_html:` option). See
+[The report in a browser](debugging_failures.md#the-report-in-a-browser).
 
 ## The `mix pd.integration` Task
 
@@ -130,30 +134,44 @@ must already be running **separately** and be reachable over the network.
 |--------|-------------|
 | `--model` | Your PropertyDamage model module (e.g., `MyApp.Model`) |
 | `--adapter` | Your adapter module (e.g., `MyApp.HTTPAdapter`) |
-| `--url` | Base URL of the running service |
+| `--url` | Base URL of the running service (required unless the `PROPERTYDAMAGE_BASE_URL` environment variable is set) |
 
 ### Optional Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--runs` | Number of test sequences to run | 100 |
+| `--runs` | Number of test sequences to run | `PROPERTYDAMAGE_RUNS`, else 100 |
 | `--commands` | Maximum commands per sequence | 50 |
 | `--health` | Health check URL to wait for | `{url}/api/health` |
 | `--report` | Report format: `terminal`, `markdown`, `junit`, `json` | terminal |
 | `--report-path` | Output path for report file | auto-generated |
 | `--save-failures` | Directory to save failing sequences | - |
 | `--stop-on-fail` | Stop immediately on first failure | false |
-| `--hunt N` | Bug hunt mode: run until N unique bugs found | - |
-| `--quiet` | Suppress progress output | false |
+| `--hunt N` | Bug hunt mode: run until N unique bugs are found (see [Bug hunt mode](#bug-hunt-mode)) | - |
+| `--verbose` | Show detailed progress | true |
+| `--quiet` | Suppress progress output (overrides `--verbose`) | false |
+
+The task reads two environment variables: `PROPERTYDAMAGE_BASE_URL` supplies the
+base URL when `--url` is absent, and `PROPERTYDAMAGE_RUNS` supplies the default
+run count when `--runs` is absent.
 
 ### About the health check
 
-`mix pd.integration` **always** performs a health check before the first run and
-has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
+`mix pd.integration` performs a health check before the first run, with or
+without `--hunt`, and has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
 until it answers with a `2xx` status. Point `--health` at any endpoint your
 service answers with `2xx`. If your service has no health route, use the
 programmatic `PropertyDamage.Integration.run/1` shown above instead: there the
 `:health_check` option is optional.
+
+### Bug hunt mode
+
+With `--hunt N`, the task runs the health check, then hunts until it finds N
+unique bugs. `--runs` caps the hunt: it stops after that many runs even with
+fewer than N bugs. Without `--runs` the hunt has no run limit
+(`PROPERTYDAMAGE_RUNS` does not apply), so if the service has fewer than N bugs
+it runs until you stop it with Ctrl+C. `--commands` caps each run of the hunt
+as it caps a test run. `--report` and `--stop-on-fail` do not apply to a hunt.
 
 ### Running the task against the bench
 
@@ -235,10 +253,19 @@ mix pd.integration \
 ## Programmatic API
 
 The quick start already used `PropertyDamage.Integration.run/1`. Its full option
-set:
+set.
+
+If you run these blocks in the same IEx session as the bug run above, that run
+left the SUT empty and dropping writes, so the health check on `/kv/0` below
+would fail. Reset the SUT (without the bug) and seed that key first:
 
 ```elixir
-{:ok, result} =
+OpenapiBench.Server.reset(false)
+OpenapiBench.Store.put(0, 1)
+```
+
+```elixir
+run_result =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}],
@@ -248,18 +275,19 @@ set:
     health_check: %{
       url: "http://localhost:4010/kv/0",
       timeout_ms: 30_000,
-      retries: 30
+      retries: 30,
+      interval_ms: 1_000
     },
-    # Optional: write a report file.
+    # Optional: write a report file (its directory is created if missing).
     report: %{format: :markdown, path: "reports/integration.md"},
-    # Optional: save each failing sequence as JSON here.
+    # Optional: save each failing sequence as JSON here (created if missing).
     save_failures: "bugs/"
   )
 
-if result.success do
-  IO.puts("All #{result.total_runs} runs passed!")
-else
-  IO.puts("#{result.failed} runs failed")
+# `run/1` returns {:error, result} when any run fails, so match both shapes.
+case run_result do
+  {:ok, result} -> IO.puts("All #{result.total_runs} runs passed!")
+  {:error, result} -> IO.puts("#{result.failed} of #{result.total_runs} runs failed")
 end
 ```
 
@@ -274,17 +302,23 @@ failures (deduplicated by fingerprint), rather than a fixed number of runs:
     model: OpenapiBench.Generated.Model,
     targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}],
     stop_after: 3,
-    max_runs: :unlimited,
+    max_runs: 500,
     save_to: "discovered_bugs/"
   )
 
-# Each bug is %{fingerprint, failure, occurrences, first_seen_run}.
+# Each bug is %{fingerprint, failure, occurrences, first_seen_run}. The list
+# can hold fewer than `stop_after` entries, or none.
 for bug <- bugs do
   IO.puts("#{inspect(bug.fingerprint.check_name)}: " <>
           "seed #{bug.failure.seed}, seen #{bug.occurrences}x " <>
           "(first on run #{bug.first_seen_run})")
 end
 ```
+
+Always set a finite `max_runs:`. The default is `:unlimited`, so a hunt that
+never reaches `stop_after` unique bugs runs until you interrupt it. When the
+bound is reached first, `hunt_bugs/1` still returns `{:ok, bugs}` with the bugs
+found so far, which can be fewer than `stop_after` or an empty list.
 
 ## Report Formats
 
@@ -336,8 +370,9 @@ For programmatic analysis:
   "total_runs": 10,
   "passed": 10,
   "failed": 0,
-  "model": "Elixir.OpenapiBench.Generated.Model",
-  "adapter": "Elixir.OpenapiBench.Generated.Adapter",
+  "model": "OpenapiBench.Generated.Model",
+  "adapter": "OpenapiBench.Generated.Adapter",
+  "duration_ms": 205,
   "failures": []
 }
 ```
@@ -373,31 +408,51 @@ mix pd.integration --model MyApp.Model --adapter MyApp.HTTPAdapter \
   --url http://localhost:4000 --save-failures bugs/
 ```
 
-To keep a shrunk, replayable `.pd` failure instead, save it from a
-`PropertyDamage.run` failure report (see [Static Regression
-Tests](static_regression_tests.md)), then replay it:
+To keep a shrunk, replayable `.pd` failure instead, save one of the failure
+reports in `result.failures` (see [Static Regression
+Tests](static_regression_tests.md)). `PropertyDamage.save_failure/2` names the
+file after the time, the failure kind, the check and the seed, and returns its
+path:
 
-```bash
-# Re-run the failing sequence against the SUT and print a verdict. The exit code
-# answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
-mix pd.replay bugs/read_consistent-seed352687743.pd
-
-# Show per-step events and projection state
-mix pd.replay bugs/read_consistent-seed352687743.pd --verbose
+```elixir
+{:ok, path} = PropertyDamage.save_failure(hd(result.failures), "failures/")
+# path == "failures/20261104T002751-check_failed-read_consistent-seed920551348.pd"
+# (your time and seed differ)
 ```
 
-The `.pd` file records its own model and adapter, so no `--model` / `--adapter`
+Then replay it. Against the bench, set `PD_OPENAPI_URL` as for the task above,
+so the replay resets the running server:
+
+```bash
+# Re-run the failing sequence against the SUT and print a verdict. Exit codes:
+# 0 = fixed, 1 = the bug still reproduces, 125 = the replay could not run (the
+# project does not compile, the file fails to load or records no model or
+# target, or the target's setup fails), 2 = usage
+# error.
+mix pd.replay failures/20261104T002751-check_failed-read_consistent-seed920551348.pd
+
+# Show per-step events and projection state
+mix pd.replay failures/20261104T002751-check_failed-read_consistent-seed920551348.pd --verbose
+```
+
+The `.pd` file records its own model and targets, so no `--model` / `--adapter`
 flags are needed; those modules just have to be compiled in the current project.
 Because the exit code is a regression signal, `mix pd.replay` drops straight into
 a CI gate or a `git bisect`.
 
-For custom adapter config (e.g. a different base URL) or stutter, replay
-programmatically:
+For custom adapter config (e.g. a different base URL), replay
+programmatically. `targets:` replaces the recorded target config whole, so
+carry over every recorded key the failure depends on (here `bug: true`), or
+the replay runs against a different system and may pass:
 
 ```elixir
-{:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
-PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
+{:ok, failure} = PropertyDamage.load_failure("failures/20261104T002751-check_failed-read_consistent-seed920551348.pd")
+PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}])
 ```
+
+Replay does not apply stutter. To re-shrink a failure that stutter found, use
+`PropertyDamage.shrink_further/2`, which re-applies the report's `stutter:`
+configuration (see [Idempotency Testing](idempotency_testing.md)).
 
 ## Cleaning Up a Shared Target
 
@@ -467,8 +522,8 @@ defmodule Shared.Notes do
 end
 
 defmodule Shared.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Shared.Commands.{CreateNote, Remove}
   alias Shared.Events.{NoteCreated, NotesRemoved}
@@ -562,7 +617,7 @@ jobs:
         run: docker compose up -d
 
       - uses: erlef/setup-beam@v1
-        overrides:
+        with:
           elixir-version: '1.17'
           otp-version: '27'
 
@@ -580,7 +635,7 @@ jobs:
       - name: Publish results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
-        overrides:
+        with:
           files: reports/*.xml
 ```
 
@@ -611,10 +666,8 @@ Health check (...)... ✗ FAILED
 
 - Look for time-dependent behavior or shared state not reset between runs
 - Use a `:reset_fn`, or reset the service in an idempotent `Adapter.setup/1`
-- See [Chaos Engineering](chaos_engineering.md) to deliberately surface races
 
 ## Next Steps
 
 - [Writing Effective Invariants](writing_invariants.md) - Improve test quality
 - [Debugging Failures](debugging_failures.md) - Analyze and fix bugs
-- [Chaos Engineering](chaos_engineering.md) - Fault injection testing

@@ -25,7 +25,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [C]
     @impl true

@@ -13,7 +13,7 @@ defmodule PropertyDamage.RunTrace do
   Identity / reproduction:
 
   - `seed`, `run_number` — the base seed and exploration run number; the plan is
-    a pure function of `Generator.run_seed(seed, run_number)`.
+    a pure function of `PropertyDamage.Generator.run_seed(seed, run_number)`.
   - `run_nonce`, `mint_epoch` — the client-minted-value axes (DR-034). Hold
     `(seed, run_number)` and vary `run_nonce` for identical plan / fresh minted
     values; pin all four on a pristine SUT for byte-exact reproduction.
@@ -34,7 +34,7 @@ defmodule PropertyDamage.RunTrace do
   Execution record:
 
   - `executed` — the concrete commands actually sent, post placeholder/mint
-    resolution, keyed branch-aware by `%Sequence.Position{}`.
+    resolution, keyed by `%Sequence.Position{}`.
   - `event_log` — the complete `EventLog.Entry` list with per-entry provenance.
     Each entry's `fold_index` records the run's real fold order (DR-040).
   - `command_labels` — flattened index → label (as the report computes it).
@@ -43,22 +43,24 @@ defmodule PropertyDamage.RunTrace do
     the entries' `fold_index` this is enough to replay the run's true fold order,
     which is what the faithful per-step state timeline (`state_at/2`,
     `state_timeline/1`) does.
-  - `linearization` — the verified branch linearization (a tagged
-    `[{branch_id, offset, command}]` list) when one was found, else `nil`
-    (linear runs, or a branching run with no verified order). Recorded so the
-    per-step timeline can fold merged-branch state in the same order the executor
-    did (DR-040).
   - `expansion` — when the run's targets ran roots as expansions
     (`c:PropertyDamage.Model.expansions/0`): per target name, what it ran at
     each root (the entry, the concrete commands, and the seed key and aliases
     the leaves were realized with); `nil` otherwise. The steps of a root a
     target ran as leaves are its leaves (see `build_steps/5`).
   - `outcome` — `:pass` or `{:fail, reason}`.
+  - `logs` — the log lines the run's user code wrote (DR-054), by the step
+    they belong to: a `Sequence.Position` for a command, `:adapter_setup` and
+    `:adapter_teardown` for the adapter's `setup/1` and `teardown/1`, each list
+    in the order written (`PropertyDamage.Log`), a `PropertyDamage.Log.Gap` in
+    the place of the settle or stutter attempts the retry cap dropped. Lines never enter
+    `event_log`. They live only in memory: only the trace of a reported run
+    keeps them, `PropertyDamage.Persistence` saves a trace with `logs: %{}`
+    and loads every trace with `logs: %{}`, so a trace read from a file shows
+    none until a replay runs the failure again.
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{Executor, Expansion, Failure, Generator, Options, Scheduler}
-  alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -82,9 +84,9 @@ defmodule PropertyDamage.RunTrace do
           event_log: [Entry.t()],
           command_labels: %{non_neg_integer() => String.t()},
           command_fold_ordinals: %{Sequence.Position.t() => non_neg_integer()},
-          linearization: [{non_neg_integer(), non_neg_integer(), struct()}] | nil,
           expansion: %{String.t() => [map()]} | nil,
-          outcome: outcome() | nil
+          outcome: outcome() | nil,
+          logs: PropertyDamage.Log.logs()
         }
 
   defstruct seed: nil,
@@ -102,9 +104,9 @@ defmodule PropertyDamage.RunTrace do
             event_log: [],
             command_labels: %{},
             command_fold_ordinals: %{},
-            linearization: nil,
             expansion: nil,
-            outcome: nil
+            outcome: nil,
+            logs: %{}
 
   @doc """
   Build a `RunTrace` from its constituent pieces.
@@ -146,9 +148,9 @@ defmodule PropertyDamage.RunTrace do
       event_log: Keyword.get(opts, :event_log, []),
       command_labels: Keyword.get(opts, :command_labels, %{}),
       command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
-      linearization: Keyword.get(opts, :linearization),
       expansion: Keyword.get(opts, :expansion),
-      outcome: Keyword.get(opts, :outcome)
+      outcome: Keyword.get(opts, :outcome),
+      logs: Keyword.get(opts, :logs, %{})
     }
   end
 
@@ -161,195 +163,6 @@ defmodule PropertyDamage.RunTrace do
   """
   @spec plan_fingerprint(Sequence.t()) :: String.t()
   def plan_fingerprint(%Sequence{} = plan), do: Sequence.fingerprint(plan)
-
-  @doc """
-  Run ONE full, unshrunk plan and return its trace, pass or fail (DR-035).
-
-  This is the input to `PropertyDamage.RunComparison`. Unlike the exploration
-  loop it never shrinks and never stops early on failure: it captures the whole
-  execution record of a single run. `plan_source` is always `:generated` (the
-  plan is a pure function of the effective seed). The plan carries the setup
-  and teardown commands generated as `PropertyDamage.run/1` generates them, and the
-  target runs them before and after the roots.
-
-  ## Options
-
-  Required: `:model`, `:targets` (exactly one entry; `mocks:` is not supported),
-  `:seed`.
-
-  Optional: `:run_number` (default 0), `:run_nonce` (default fresh crypto
-  entropy, DR-034), `:mint_epoch` (default 0),
-  `:max_commands` (default 50), `:branching`, `:source_revision` (default
-  detected). The target's `injectors:` (fault/async injectors) are set up around
-  the run so their events land in the trace.
-
-  For a model with `c:PropertyDamage.Model.expansions/0`, the target chooses
-  at each root by its `expansion:` option exactly as `PropertyDamage.run/1`
-  does for the same seed, run number and target name, runs the leaves it
-  chose through the same engine path a run's target uses
-  (`PropertyDamage.Scheduler`, one target), and the trace records what it ran
-  in `expansion`.
-  """
-  @spec capture(keyword()) :: t()
-  def capture(opts) do
-    model = Keyword.fetch!(opts, :model)
-    target = Options.required_target!(opts)
-
-    Options.reject_unsupported_target_keys!(
-      [target],
-      [:mocks],
-      "PropertyDamage.RunTrace.capture/1"
-    )
-
-    # A branching sequence runs without expansions, as on `run/1`.
-    Expansion.check_options!(model, opts)
-    seed = Keyword.fetch!(opts, :seed)
-    run_number = Keyword.get(opts, :run_number, 0)
-
-    run_nonce =
-      Keyword.get(opts, :run_nonce) ||
-        :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
-
-    mint_epoch = Keyword.get(opts, :mint_epoch, 0)
-    max_commands = Keyword.get(opts, :max_commands, 50)
-    branching = Keyword.get(opts, :branching)
-
-    gen_opts =
-      [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
-
-    run_seed = Generator.run_seed(seed, run_number)
-
-    # The plan as `PropertyDamage.run/1` generates it: the setup commands and
-    # the roots, then the teardown commands generated against them.
-    plan =
-      model
-      |> Generator.generate_sequence(gen_opts)
-      |> Generator.generate_value(run_seed)
-      |> then(&Generator.teardown_commands(model, &1, run_seed))
-
-    if Expansion.defines?(model) do
-      capture_expanded(opts, model, target, plan, %{
-        seed: seed,
-        run_number: run_number,
-        run_seed: run_seed,
-        run_nonce: run_nonce,
-        mint_epoch: mint_epoch
-      })
-    else
-      capture_engine(opts, model, target, plan, %{
-        seed: seed,
-        run_number: run_number,
-        run_seed: run_seed,
-        run_nonce: run_nonce,
-        mint_epoch: mint_epoch
-      })
-    end
-  end
-
-  defp capture_engine(opts, model, target, plan, run) do
-    %{adapter: adapter, config: config} = target
-    %{seed: seed, run_number: run_number, run_seed: run_seed} = run
-    %{run_nonce: run_nonce, mint_epoch: mint_epoch} = run
-
-    # The target's injectors are set up against the run's event queue, as on
-    # every other path that executes a run. `mocks:` is rejected above.
-    run_result =
-      RunServices.with_services(target, fn event_queue, _mock_registry ->
-        Executor.run(plan, model, adapter,
-          config: config,
-          event_queue: event_queue,
-          rng_seed: run_seed,
-          run_nonce: run_nonce,
-          mint_epoch: mint_epoch,
-          setup_commands: plan.setup,
-          teardown_commands: plan.teardown
-        )
-      end)
-
-    captured =
-      case run_result do
-        {:ok, result} ->
-          [
-            executed: Map.get(result, :executed, %{}),
-            event_log: result.event_log,
-            command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-            linearization: linearization_of(result),
-            outcome: outcome_of(result)
-          ]
-
-        # An injector's or the adapter's setup failed: nothing ran, and the
-        # trace says so instead of raising, as the scheduler path does.
-        {:error, reason} ->
-          [outcome: {:fail, Failure.setup_failed(reason)}]
-      end
-
-    new(
-      [
-        seed: seed,
-        run_number: run_number,
-        run_nonce: run_nonce,
-        mint_epoch: mint_epoch,
-        model: model,
-        adapter: adapter,
-        source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
-        plan: plan,
-        plan_source: :generated,
-        command_labels: %{}
-      ] ++ captured
-    )
-  end
-
-  # A model with expansions: the target's concrete sequence, as a run draws it
-  # for this seed and target name, runs through the scheduler with that one
-  # target, which sets up its event queue and injectors.
-  defp capture_expanded(opts, model, target, plan, run) do
-    expansion = Expansion.expand(model, plan, [target], run.run_seed)
-
-    {:ok, outcome} =
-      Scheduler.run(
-        model: model,
-        targets: [target],
-        commands: Sequence.to_list(plan),
-        variants: Expansion.schedule([target], expansion),
-        setup_commands: plan.setup,
-        teardown_commands: plan.teardown,
-        placeholder_registry: plan.registry,
-        seed: run.seed,
-        run_number: run.run_number,
-        run_nonce: run.run_nonce,
-        mint_epoch: run.mint_epoch,
-        concurrency: :serial
-      )
-
-    [%{} = result] = outcome.results
-
-    new(
-      seed: run.seed,
-      run_number: run.run_number,
-      run_nonce: run.run_nonce,
-      mint_epoch: run.mint_epoch,
-      model: model,
-      adapter: target.adapter,
-      source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
-      plan: plan,
-      plan_source: :generated,
-      executed: Map.get(result, :executed, %{}),
-      event_log: result.event_log,
-      command_labels: %{},
-      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      linearization: linearization_of(result),
-      expansion: %{target.name => expansion.variants[target.name].choices},
-      outcome: outcome_of(result)
-    )
-  end
-
-  defp outcome_of(%{success: true}), do: :pass
-  defp outcome_of(%{failure_reason: reason}), do: {:fail, reason}
-
-  # Keep only a verified linearization (a tagged list) on the trace; the
-  # `:indeterminate` / `:no_linearization` executor tags are not a fold order.
-  defp linearization_of(%{linearization: [_ | _] = tagged}), do: tagged
-  defp linearization_of(_), do: nil
 
   @doc """
   The run as a timeline of `Step` structs, in flattened (reading) order.
@@ -366,7 +179,10 @@ defmodule PropertyDamage.RunTrace do
   def steps(%__MODULE__{plan: nil}), do: []
 
   def steps(%__MODULE__{plan: %Sequence{} = plan} = trace) do
-    build_steps(plan, trace.event_log, trace.command_labels, nil, executed: trace.executed)
+    build_steps(plan, trace.event_log, trace.command_labels, nil,
+      executed: trace.executed,
+      logs: trace.logs
+    )
   end
 
   @doc """
@@ -380,12 +196,11 @@ defmodule PropertyDamage.RunTrace do
 
   ## Options
 
-    * `:branch_id` - the failing branch, used with `failed_at_index` to resolve
-      the failing command's position (defaults to `nil`).
     * `:executed` - a `%{Position => command}` map of concrete resolved commands
       (defaults to `%{}`, i.e. `executed_command` is `nil` on every step).
-    * `:choices` - what the traced target ran at each root of a linear
-      sequence, as the run's expansion choices record it (defaults to `nil`,
+    * `:logs` - the run's log lines by key (`RunTrace.logs`); each step takes
+      the lines kept under its position (defaults to `%{}`, no lines).
+    * `:choices` - what the traced target ran at each root of the sequence, as the run's expansion choices record it (defaults to `nil`,
       every root ran as itself). A root the target ran as an expansion's
       leaves is one step per leaf, at its `Position.leaf/2` position, with the
       entries that leaf produced; the flattened indices then count every step.
@@ -399,16 +214,14 @@ defmodule PropertyDamage.RunTrace do
           keyword()
         ) :: [Step.t()]
   def build_steps(%Sequence{} = sequence, event_log, command_labels, failed_at_index, opts \\ []) do
-    branch_id = Keyword.get(opts, :branch_id)
     executed = Keyword.get(opts, :executed, %{})
+    logs = Keyword.get(opts, :logs, %{})
     leaves = leaf_choices(sequence, Keyword.get(opts, :choices))
 
     # Group the command-attributed log entries by the position of the command
     # that produced them. Injector/telemetry entries carry no command_index and
-    # so belong to no step. `(command_index, branch_id)` resolves uniquely to a
-    # position, so this is the branch-aware equivalent of grouping by
-    # command_index alone. Full entries (not bare events) are kept so each step
-    # preserves per-event provenance (source, branch_id) for the event timeline.
+    # so belong to no step. Full entries (not bare events) are kept so each step
+    # preserves per-event provenance (source) for the event timeline.
     # A step is a root: setup and teardown entries carry an offset among the
     # setup or teardown commands, not a root index, and belong to no step.
     entries_by_position =
@@ -416,16 +229,13 @@ defmodule PropertyDamage.RunTrace do
       |> List.wrap()
       |> Enum.filter(&(&1.command_index != nil and &1.phase == :root))
       |> Enum.group_by(fn entry ->
-        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
+        Sequence.position_at(sequence, entry.command_index)
       end)
 
-    # The failing command's position (nil for a non-localized failure). Resolved
-    # via position_at, NOT by comparing flattened_index to failed_at_index: the
-    # latter is an executor index and diverges from the flattened ordinal for
-    # branch failures.
+    # The failing command's position (nil for a non-localized failure).
     failed_position =
       if failed_at_index != nil do
-        Sequence.position_at(sequence, failed_at_index, branch_id)
+        Sequence.position_at(sequence, failed_at_index)
       end
 
     sequence
@@ -437,20 +247,21 @@ defmodule PropertyDamage.RunTrace do
         command: command,
         executed_command: Map.get(executed, position),
         entries: Map.get(entries_by_position, position, []),
+        logs: Map.get(logs, position, []),
         label: Map.get(command_labels, flattened_index),
         failed?: failed_position != nil and position == failed_position
       }
 
       case Map.get(leaves, position) do
         nil -> [root_step]
-        choice -> leaf_steps(root_step, choice, executed)
+        choice -> leaf_steps(root_step, choice, executed, logs)
       end
     end)
     |> renumber(leaves)
   end
 
   # The choices of the roots the target ran as leaves, by root position.
-  defp leaf_choices(%Sequence{branches: nil}, choices) when is_list(choices) do
+  defp leaf_choices(%Sequence{}, choices) when is_list(choices) do
     for %{leaves?: true} = choice <- choices, into: %{} do
       {Sequence.Position.prefix(choice.root), choice}
     end
@@ -461,14 +272,14 @@ defmodule PropertyDamage.RunTrace do
   # One step per leaf of `choice`, each with the entries its leaf produced; an
   # entry of the root no leaf claims (an event drained after the leaves)
   # belongs to the last leaf.
-  defp leaf_steps(root_step, choice, executed) do
+  defp leaf_steps(root_step, choice, executed, logs) do
     last = length(choice.commands) - 1
     by_leaf = Enum.group_by(root_step.entries, &(&1.leaf_index || last))
 
     failing =
       if root_step.failed? do
         executed_leaves =
-          for leaf <- 0..last, Map.has_key?(executed, leaf_position(choice, leaf)), do: leaf
+          for leaf <- 0..last//1, Map.has_key?(executed, leaf_position(choice, leaf)), do: leaf
 
         List.last(executed_leaves) || last
       end
@@ -484,6 +295,7 @@ defmodule PropertyDamage.RunTrace do
         command: command,
         executed_command: Map.get(executed, position),
         entries: Map.get(by_leaf, leaf, []),
+        logs: Map.get(logs, position, []),
         label: nil,
         failed?: leaf == failing
       }
@@ -506,8 +318,8 @@ defmodule PropertyDamage.RunTrace do
   The `EventLog.Entry` structs observed for a single command, addressed by
   flattened index or `Sequence.Position`.
 
-  Sugar over `steps/1`. Each entry carries its per-event provenance (`source`,
-  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when
+  Sugar over `steps/1`. Each entry carries its per-event provenance
+  (`source`); the bare event struct is `entry.event`. Returns `[]` when
   nothing matches.
   """
   @spec event_entries_at(t(), non_neg_integer() | Sequence.Position.t()) :: [Entry.t()]
@@ -566,7 +378,9 @@ defmodule PropertyDamage.RunTrace do
   Faithful projection state immediately AFTER the step at `position`.
 
   Folds every recorded item (command folds + folded event-log entries) up to and
-  including this step's own folds, in true fold order. `position` may be a
+  including this step's own folds, in true fold order. For a leaf of an expanded
+  root, that is the state the prefix had when the root began (every fold of an
+  earlier step) plus the folds of the root's leaves through this leaf. `position` may be a
   `%Sequence.Position{}` or a flattened (reading-order) index. Returns a
   `%{projection_module => state}` map, or `%{}` for a trace with no plan/model.
   """
@@ -680,7 +494,7 @@ defmodule PropertyDamage.RunTrace do
   defp faithful_state(%__MODULE__{plan: nil}, _position, _boundary), do: %{}
   defp faithful_state(_trace, nil, _boundary), do: %{}
 
-  defp faithful_state(%__MODULE__{plan: plan} = trace, position, boundary) do
+  defp faithful_state(%__MODULE__{} = trace, position, boundary) do
     init = init_projections(trace.model)
     items = fold_items(trace)
     section = position.section
@@ -699,81 +513,15 @@ defmodule PropertyDamage.RunTrace do
       section == :teardown ->
         items |> Enum.sort_by(& &1.ordinal) |> fold_in_order(init)
 
-      not branched?(plan) or section == :prefix ->
-        cutoff = boundary_ordinal(items, position, boundary)
+      true ->
+        cutoff = boundary_ordinal(items, position, boundary, leaf_roots(trace))
 
         items
-        |> Enum.filter(&section_in?(&1.position, sections_for(section, plan)))
+        |> Enum.filter(&(section_in?(&1.position, [:setup, :prefix, nil]) or leaf?(&1)))
         |> keep_below(cutoff, boundary)
         |> fold_in_order(init)
-
-      match?({:branch, _}, section) ->
-        cutoff = boundary_ordinal(items, position, boundary)
-
-        items
-        |> Enum.filter(&section_in?(&1.position, [:setup, :prefix, section]))
-        |> keep_below(cutoff, boundary)
-        |> fold_in_order(init)
-
-      section == :suffix ->
-        merged = merged_state(trace, init, items)
-        cutoff = boundary_ordinal(items, position, boundary)
-
-        items
-        |> Enum.filter(&(section_of(&1.position) == :suffix))
-        |> keep_below(cutoff, boundary)
-        |> fold_in_order(merged)
     end
   end
-
-  # For a linear plan, every position is in the prefix section, so we fold the
-  # whole item stream by ordinal; branched-plan prefix positions likewise only
-  # ever see prefix items (branch/suffix ordinals are strictly higher).
-  defp sections_for(:prefix, plan) do
-    if branched?(plan), do: [:setup, :prefix], else: [:setup, :prefix, :suffix, nil]
-  end
-
-  # Merge branch state exactly as `Executor.Branching.merge_branch_states` does:
-  # fold the prefix, then replay each branch's (command, observed events) in the
-  # verified linearization order when one exists, else branch order. Command
-  # first, then that command's folded events (attribution order within a branch).
-  defp merged_state(trace, init, items) do
-    prefix_state =
-      items
-      |> Enum.filter(&(section_of(&1.position) in [:setup, :prefix]))
-      |> fold_in_order(init)
-
-    trace
-    |> linearization_order()
-    |> Enum.reduce(prefix_state, fn position, projs ->
-      projs = fold_one(projs, executed_or_plan(trace, position, nil))
-
-      trace
-      |> folded_entries_at(position)
-      |> Enum.reduce(projs, fn entry, acc -> fold_one(acc, entry.event) end)
-    end)
-  end
-
-  # The branch replay order as `%Sequence.Position{}` values: the verified
-  # linearization when the trace recorded one, otherwise plain branch order
-  # (branch 0 then branch 1 ..., each in offset order), which is itself a valid
-  # interleaving for independent branches.
-  defp linearization_order(%__MODULE__{linearization: [_ | _] = tagged}) do
-    Enum.map(tagged, fn {branch_id, offset, _cmd} ->
-      Sequence.Position.branch(branch_id, offset)
-    end)
-  end
-
-  defp linearization_order(%__MODULE__{plan: %Sequence{branches: branches}})
-       when is_list(branches) do
-    branches
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {commands, branch_id} ->
-      Enum.map(0..(length(commands) - 1)//1, &Sequence.Position.branch(branch_id, &1))
-    end)
-  end
-
-  defp linearization_order(_), do: []
 
   # A setup command's entry carries its offset among the setup commands, not a
   # root index.
@@ -783,7 +531,7 @@ defmodule PropertyDamage.RunTrace do
   defp entry_position(_plan, %{command_index: nil}), do: nil
 
   defp entry_position(plan, entry),
-    do: Sequence.position_at(plan, entry.command_index, entry.branch_id)
+    do: Sequence.position_at(plan, entry.command_index)
 
   # All folded items (commands + folded entries) tagged with their fold ordinal
   # and structured position. Non-folded entries (stutter / telemetry, fold_index
@@ -805,10 +553,14 @@ defmodule PropertyDamage.RunTrace do
     command_items ++ entry_items
   end
 
-  defp boundary_ordinal(items, position, boundary) do
+  # The fold ordinals a step's boundary is made of: its own folds and, for a
+  # root, the folds of the leaf commands it ran.
+  defp boundary_ordinal(items, position, boundary, leaf_roots \\ %{}) do
     ordinals =
       items
-      |> Enum.filter(&(&1.position == position))
+      |> Enum.filter(
+        &(&1.position == position or leaf_owner(&1.position, leaf_roots) == position)
+      )
       |> Enum.map(& &1.ordinal)
 
     case {boundary, ordinals} do
@@ -817,6 +569,29 @@ defmodule PropertyDamage.RunTrace do
       {:at, _} -> Enum.max(ordinals)
     end
   end
+
+  defp leaf?(%{position: %Sequence.Position{section: {:leaf, _}}}), do: true
+  defp leaf?(_item), do: false
+
+  # The root a leaf position belongs to, as its prefix position.
+  defp leaf_owner(%Sequence.Position{section: {:leaf, root_id}}, leaf_roots) do
+    Sequence.Position.prefix(Map.get(leaf_roots, root_id, root_id))
+  end
+
+  defp leaf_owner(_position, _leaf_roots), do: nil
+
+  # Leaf positions carry the root's generation index (`root_id`), which
+  # differs from its place in the plan once shrinking dropped a root. Every
+  # target's choices pair the two the same way.
+  defp leaf_roots(%__MODULE__{expansion: expansion}) when is_map(expansion) do
+    for {_target, choices} <- expansion,
+        is_list(choices),
+        %{root: root, root_id: root_id} <- choices,
+        into: %{},
+        do: {root_id, root}
+  end
+
+  defp leaf_roots(_trace), do: %{}
 
   defp keep_below(_items, nil, _boundary), do: []
 
@@ -889,9 +664,6 @@ defmodule PropertyDamage.RunTrace do
   end
 
   defp resolve_position(_trace, _position), do: nil
-
-  defp branched?(%Sequence{branches: branches}) when is_list(branches), do: true
-  defp branched?(_), do: false
 
   defp section_of(nil), do: nil
   defp section_of(%Sequence.Position{section: section}), do: section

@@ -107,15 +107,14 @@ defmodule ObanBench.CompareTest do
     assert divergence.mismatch.left == divergence.reference_value
     assert divergence.mismatch.right == divergence.variant_value
 
+    # The default relation (`==`) answers `false`, not a reason, so the report
+    # prints no Mismatch line: the two values it names say everything one would.
     output = text(report)
-    assert output =~ "Divergence"
+    assert output =~ "Failure      diverged"
     assert output =~ "ObanBench.Compare.Counters.counters"
-    assert output =~ "Mismatch"
-
-    # The mismatch renders both values, indented under its heading.
-    for line <- String.split(Exception.message(divergence.mismatch), "\n") do
-      assert output =~ line
-    end
+    assert output =~ ~s(Reference    "a"  #{inspect(divergence.reference_value)})
+    assert output =~ ~s(Variant      "double"  #{inspect(divergence.variant_value)})
+    refute output =~ "Mismatch"
   end
 
   test "a variant whose jobs never land does not converge within the bound" do
@@ -139,11 +138,9 @@ defmodule ObanBench.CompareTest do
 
     output = text(report)
 
-    assert output =~
-             "did not converge within 300 ms at root 0 in variant \"noop\""
-
-    assert output =~ ":unapplied"
-    assert output =~ "waited #{convergence.waited_ms} ms"
+    assert output =~ "Failure      did not converge"
+    assert output =~ ~s(Variant      "noop"  still pending: #{inspect(convergence.reason)})
+    assert output =~ ~r/Compared\s+using ==, still pending after \d+ ms \(bound 300 ms\)/
   end
 
   test "a probe that first reads stale data converges through the re-read" do

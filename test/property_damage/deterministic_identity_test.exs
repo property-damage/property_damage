@@ -40,8 +40,8 @@ defmodule PropertyDamage.DeterministicIdentityTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl PropertyDamage.Model
     def commands, do: [CreateItem]
     @impl PropertyDamage.Model

@@ -36,21 +36,27 @@ defmodule PropertyDamage.IEx do
 
       iex> PropertyDamage.IEx.explain(MyApp.Model)
 
-      ═══════════════════════════════════════════════════════════════
-                            MyApp.Model
-      ═══════════════════════════════════════════════════════════════
+      ═════════════════════════════════════════════════════════════════
+                                 MyApp.Model
+      ═════════════════════════════════════════════════════════════════
 
-      COMMANDS (6 total)
+      COMMANDS (4 total)
       ─────────────────────────────────────────────────────────────────
         Weight │ Command                    │ Semantics
       ─────────────────────────────────────────────────────────────────
-           5   │ CreateAccount              │ sync
-           3   │ Credit                     │ sync
-           3   │ Debit                      │ sync
-           2   │ CreateAuthorization        │ probe
-           2   │ CreateCapture              │ sync
-           1   │ CloseAccount               │ sync
-      ...
+            5   │ CreateAccount              │ sync
+            3   │ Credit                     │ sync
+            3   │ Debit                      │ sync
+            1   │ GetBalance                 │ sync
+
+      PROJECTIONS
+      ─────────────────────────────────────────────────────────────────
+        State:      MyApp.Projection
+        Extra:      (none)
+
+      HINTS
+      ─────────────────────────────────────────────────────────────────
+        Consider adding probe (read-only) commands for better test coverage
 
   """
   @spec explain(module()) :: :ok
@@ -84,9 +90,9 @@ defmodule PropertyDamage.IEx do
     IO.puts("  Weight │ Command                    │ Semantics")
     IO.puts(String.duplicate("─", 65))
 
-    for {weight, cmd_module, _spec} <- commands do
+    for {weight, cmd_module, spec} <- commands do
       name = cmd_module |> Module.split() |> List.last()
-      semantics = get_semantics(cmd_module)
+      semantics = PropertyDamage.Settle.get_semantics(spec)
 
       weight_str = String.pad_leading("#{weight}", 5)
       name_str = String.pad_trailing(name, 26)
@@ -211,8 +217,8 @@ defmodule PropertyDamage.IEx do
 
     # Check for no probe commands
     has_probes =
-      Enum.any?(commands, fn {_weight, cmd, _spec} ->
-        get_semantics(cmd) == :probe
+      Enum.any?(commands, fn {_weight, _cmd, spec} ->
+        PropertyDamage.Settle.get_semantics(spec) == :probe
       end)
 
     hints =
@@ -223,10 +229,6 @@ defmodule PropertyDamage.IEx do
       end
 
     Enum.reverse(hints)
-  end
-
-  defp get_semantics(cmd_module) do
-    PropertyDamage.Settle.get_semantics(cmd_module)
   end
 
   # ============================================================================
@@ -243,24 +245,23 @@ defmodule PropertyDamage.IEx do
 
   - `:commands` - Number of commands to generate (default: 10)
   - `:seed` - Random seed for reproducibility
-  - `:branching` - Enable branching sequences (default: false)
   - `:verbose` - Show detailed command fields (default: false)
 
   ## Examples
 
-      iex> PropertyDamage.IEx.dry_run(MyModel, commands: 5)
+      iex> PropertyDamage.IEx.dry_run(MyApp.Model, commands: 5, seed: 7)
 
       Generated sequence (5 commands):
       ─────────────────────────────────────────────────────────────────
-      [0] CreateAccount{currency: "USD"}
-      [1] Credit{account_ref: :ref0, amount: 500}
-      [2] CreateAuthorization{account_ref: :ref0, amount: 200}
-      [3] Debit{account_ref: :ref0, amount: 100}
-      [4] GetBalance{account_ref: :ref0}
+      [0] CreateAccount{currency: "EUR"}
+      [1] Debit{amount: 91, account_id: <Placeholder:account_id@pr...}
+      [2] Debit{amount: 359, account_id: <Placeholder:account_id@p...}
+      [3] Debit{amount: 34, account_id: <Placeholder:account_id@pr...}
+      [4] Credit{amount: 128, account_id: <Placeholder:account_id@p...}
 
-      Seed: 12345 (use this to reproduce)
+      Seed: 7 (use this to reproduce)
 
-      iex> PropertyDamage.IEx.dry_run(MyModel, seed: 12345)
+      iex> PropertyDamage.IEx.dry_run(MyApp.Model, commands: 5, seed: 7)
       # Same sequence as above
 
   """
@@ -268,17 +269,11 @@ defmodule PropertyDamage.IEx do
   def dry_run(model, opts \\ []) do
     max_commands = Keyword.get(opts, :commands, 10)
     seed = Keyword.get(opts, :seed, :rand.uniform(1_000_000_000))
-    branching = Keyword.get(opts, :branching, nil)
     verbose = Keyword.get(opts, :verbose, false)
 
     # Generate sequence (explicitly seeded; matches what run/1 generates
     # for run 0 of the same seed)
-    generator_opts = [max_commands: max_commands]
-
-    generator_opts =
-      if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
-
-    generator = Generator.generate_sequence(model, generator_opts)
+    generator = Generator.generate_sequence(model, max_commands: max_commands)
     sequence = Generator.generate_value(generator, seed) || Sequence.linear([])
 
     # Print sequence
@@ -290,7 +285,7 @@ defmodule PropertyDamage.IEx do
     :ok
   end
 
-  defp print_sequence(%Sequence{branches: nil} = seq, verbose) do
+  defp print_sequence(%Sequence{} = seq, verbose) do
     commands = seq.prefix
     IO.puts("Generated sequence (#{length(commands)} commands):")
     IO.puts(String.duplicate("─", 65))
@@ -304,68 +299,20 @@ defmodule PropertyDamage.IEx do
     IO.puts("")
   end
 
-  defp print_sequence(%Sequence{} = seq, verbose) do
-    total = Sequence.command_count(seq)
-    branch_count = length(seq.branches)
-
-    IO.puts("Generated branching sequence (#{total} commands, #{branch_count} branches):")
-    IO.puts(String.duplicate("─", 65))
-
-    # Print prefix
-    if seq.prefix != [] do
-      IO.puts("PREFIX:")
-
-      seq.prefix
-      |> Enum.with_index()
-      |> Enum.each(fn {cmd, idx} ->
-        print_command(cmd, idx, verbose, "  ")
-      end)
-    end
-
-    # Print branches
-    IO.puts("BRANCHES:")
-
-    seq.branches
-    |> Enum.with_index()
-    |> Enum.each(fn {branch, branch_idx} ->
-      IO.puts("  Branch #{branch_idx + 1}:")
-
-      branch
-      |> Enum.with_index()
-      |> Enum.each(fn {cmd, cmd_idx} ->
-        print_command(cmd, cmd_idx, verbose, "    ")
-      end)
-    end)
-
-    # Print suffix
-    if seq.suffix != [] do
-      IO.puts("SUFFIX:")
-      offset = length(seq.prefix) + Enum.sum(Enum.map(seq.branches, &length/1))
-
-      seq.suffix
-      |> Enum.with_index(offset)
-      |> Enum.each(fn {cmd, idx} ->
-        print_command(cmd, idx, verbose, "  ")
-      end)
-    end
-
-    IO.puts("")
-  end
-
-  defp print_command(cmd, idx, verbose, prefix \\ "") do
+  defp print_command(cmd, idx, verbose) do
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
     fields = Map.from_struct(cmd) |> Map.drop([:__struct__])
 
     if verbose do
-      IO.puts("#{prefix}[#{idx}] #{cmd_name}")
+      IO.puts("[#{idx}] #{cmd_name}")
 
       for {key, value} <- fields do
-        IO.puts("#{prefix}     #{key}: #{inspect(value)}")
+        IO.puts("     #{key}: #{inspect(value)}")
       end
     else
       # Compact format: show key fields inline
       fields_str = format_fields_compact(fields)
-      IO.puts("#{prefix}[#{idx}] #{cmd_name}{#{fields_str}}")
+      IO.puts("[#{idx}] #{cmd_name}{#{fields_str}}")
     end
   end
 
@@ -388,21 +335,30 @@ defmodule PropertyDamage.IEx do
   Shows the command, request/response details, and resulting events.
   Useful for testing individual commands before running full sequences.
 
+  The adapter receives the command exactly as given, so pass a struct whose
+  fields hold concrete values, such as an account id your system returned
+  earlier.
+
   ## Options
 
   - `:adapter_opts` - Options passed to adapter.setup/1 (default: [])
-  - `:refs` - Map of ref atoms to resolved values (default: %{})
+
+  Any other option raises `ArgumentError`.
 
   ## Examples
+
+  The output below comes from a real run. Event fields print in map order and
+  the time varies. In the second call, the adapter answers `Credit` with
+  `{:error, :account_not_found}`.
 
       iex> PropertyDamage.IEx.debug_command(
       ...>   %CreateAccount{currency: "USD"},
       ...>   MyAdapter
       ...> )
 
-      ═══════════════════════════════════════════════════════════════
-                           COMMAND EXECUTION
-      ═══════════════════════════════════════════════════════════════
+      ═════════════════════════════════════════════════════════════════
+                             COMMAND EXECUTION
+      ═════════════════════════════════════════════════════════════════
 
       COMMAND
       ─────────────────────────────────────────────────────────────────
@@ -412,26 +368,40 @@ defmodule PropertyDamage.IEx do
       EXECUTION
       ─────────────────────────────────────────────────────────────────
       Status: OK
-      Time: 15ms
+      Time: 0ms
 
       RESULT EVENT
       ─────────────────────────────────────────────────────────────────
       AccountCreated
-        account_id: "acc_abc123"
-        currency: "USD"
         balance: 0
+        currency: "USD"
+        account_id: "acc_abc123"
 
       iex> PropertyDamage.IEx.debug_command(
-      ...>   %Credit{account_ref: :ref0, amount: 500},
-      ...>   MyAdapter,
-      ...>   refs: %{ref0: "acc_abc123"}
+      ...>   %Credit{account_id: "acc_abc123", amount: 500},
+      ...>   MyAdapter
       ...> )
+
+      ═════════════════════════════════════════════════════════════════
+                             COMMAND EXECUTION
+      ═════════════════════════════════════════════════════════════════
+
+      COMMAND
+      ─────────────────────────────────────────────────────────────────
+      Credit
+        account_id: "acc_abc123"
+        amount: 500
+
+      EXECUTION
+      ─────────────────────────────────────────────────────────────────
+      Status: ERROR
+      Time: 0ms
+      Reason: :account_not_found
 
   """
   @spec debug_command(struct(), module(), keyword()) :: :ok | {:error, term()}
   def debug_command(command, adapter, opts \\ []) do
-    adapter_opts = Keyword.get(opts, :adapter_opts, [])
-    refs = Keyword.get(opts, :refs, %{})
+    adapter_opts = opts |> Keyword.validate!(adapter_opts: []) |> Keyword.fetch!(:adapter_opts)
 
     IO.puts("")
     IO.puts(String.duplicate("═", 65))
@@ -440,19 +410,26 @@ defmodule PropertyDamage.IEx do
     IO.puts("")
 
     # Print command
-    print_command_detail(command, refs)
+    print_command_detail(command)
 
+    # The adapter's setup/1, execute/3 and teardown/1 run in one scope; this
+    # helper builds no failure report, so their log lines are dropped (DR-054).
+    {result, _lines} =
+      PropertyDamage.Log.inline(fn -> run_debug_command(command, adapter, adapter_opts) end)
+
+    result
+  end
+
+  defp run_debug_command(command, adapter, adapter_opts) do
     # Setup adapter
     case adapter.setup(adapter_opts) do
       {:ok, context} ->
         try do
-          # Resolve refs in command
-          resolved_command = resolve_refs(command, refs)
-
           # Execute. This single-command debug runner has no projection or
           # injection window, so the Runtime's inject/start_poller raise if used
           # (DR-027); user_context is the adapter's setup/1 return.
           runtime = %PropertyDamage.Runtime{
+            log: PropertyDamage.Log.lookup(),
             inject: fn _event ->
               raise ArgumentError,
                     "Runtime.inject is not available in iex single-command execution"
@@ -464,7 +441,7 @@ defmodule PropertyDamage.IEx do
           }
 
           start_time = System.monotonic_time(:millisecond)
-          result = adapter.execute(resolved_command, context, runtime)
+          result = adapter.execute(command, context, runtime)
           elapsed = System.monotonic_time(:millisecond) - start_time
 
           # Print result
@@ -484,7 +461,7 @@ defmodule PropertyDamage.IEx do
     end
   end
 
-  defp print_command_detail(command, refs) do
+  defp print_command_detail(command) do
     cmd_name = command.__struct__ |> Module.split() |> List.last()
     fields = Map.from_struct(command)
 
@@ -493,14 +470,7 @@ defmodule PropertyDamage.IEx do
     IO.puts(cmd_name)
 
     for {key, value} <- fields do
-      resolved_note =
-        if is_atom(value) and Map.has_key?(refs, value) do
-          " → #{inspect(refs[value])}"
-        else
-          ""
-        end
-
-      IO.puts("  #{key}: #{inspect(value)}#{resolved_note}")
+      IO.puts("  #{key}: #{inspect(value)}")
     end
 
     IO.puts("")
@@ -553,24 +523,6 @@ defmodule PropertyDamage.IEx do
     IO.puts("")
   end
 
-  defp resolve_refs(command, refs) do
-    fields = Map.from_struct(command)
-
-    resolved_fields =
-      Map.new(fields, fn {key, value} ->
-        resolved_value =
-          if is_atom(value) and Map.has_key?(refs, value) do
-            refs[value]
-          else
-            value
-          end
-
-        {key, resolved_value}
-      end)
-
-    struct!(command.__struct__, resolved_fields)
-  end
-
   # ============================================================================
   # inspect_state/2 - State Inspection
   # ============================================================================
@@ -590,11 +542,7 @@ defmodule PropertyDamage.IEx do
 
       STATE AFTER 2 EVENTS
       ─────────────────────────────────────────────────────────────────
-      %{
-        accounts: %{
-          "acc_1" => %{currency: "USD", balance: 500}
-        }
-      }
+      %{accounts: %{"acc_1" => %{balance: 500, currency: "USD"}}}
 
   """
   @spec inspect_state([struct()], module()) :: :ok
@@ -631,12 +579,14 @@ defmodule PropertyDamage.IEx do
 
       PRECONDITION CHECK
       ─────────────────────────────────────────────────────────────────
-        Command                    │ Precondition │ Reason
+        Command                    │ Precondition │ Weight
       ─────────────────────────────────────────────────────────────────
-        CreateAccount              │ ✓ VALID      │ -
-        Credit                     │ ✗ INVALID    │ No accounts exist
-        Debit                      │ ✗ INVALID    │ No accounts exist
-        GetBalance                 │ ✗ INVALID    │ No accounts exist
+        CreateAccount              │ ✓ VALID      │ 5
+        Credit                     │ ✗ INVALID    │ 3
+        Debit                      │ ✗ INVALID    │ 3
+        GetBalance                 │ ✗ INVALID    │ 1
+      ─────────────────────────────────────────────────────────────────
+        1/4 commands valid in current state
 
   """
   @spec check_preconditions(map(), module()) :: :ok

@@ -66,7 +66,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   defmodule FailingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   defmodule ComparedModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -237,36 +237,6 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
     end
   end
 
-  describe "branching" do
-    test "re-shrinks a branching failure without a branching guard", %{dir: dir} do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-      {:ok, result} = Executor.run(branching, FailingModel, FailingAdapter, [])
-
-      failure =
-        FailureReport.new(
-          seed: 0,
-          run_number: 1,
-          original_sequence: branching,
-          shrunk_sequence: branching,
-          failed_at_index: result.failed_at_index,
-          failure_reason: result.failure_reason,
-          event_log: result.event_log,
-          projections: result.projections,
-          projections_before: result.projections_before,
-          model: FailingModel,
-          targets: [{FailingAdapter, []}]
-        )
-
-      {:ok, path} = Persistence.save(failure, dir)
-
-      {status, output} = with_output(fn -> Reshrink.exec([path]) end)
-
-      assert status == :ok
-      refute output =~ "branching"
-      refute output =~ "could not run"
-    end
-  end
-
   describe "a divergence report" do
     test "prints the comparison key in the summary instead of raising", %{dir: dir} do
       sequence = Sequence.linear([%Bump{}])
@@ -289,6 +259,36 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
       assert output =~ "Failure:  "
       assert output =~ "(#{inspect(ComparedCounter)}.count)"
+    end
+  end
+
+  describe "a fresh mix process" do
+    @root Path.expand("../../..", __DIR__)
+
+    # The test VM has already started every application, so only a new OS
+    # process shows whether the task starts what the shrinker needs.
+    test "re-shrinks a saved failure the engine produced", %{dir: dir} do
+      {:error, failure} =
+        PropertyDamage.run(
+          model: PropertyDamage.Test.FailingModel,
+          targets: [PropertyDamage.Test.SimpleAdapter],
+          max_runs: 100,
+          seed: 1,
+          replay_dir: false
+        )
+
+      {:ok, path} = PropertyDamage.save_failure(failure, dir)
+
+      {output, status} =
+        System.cmd("mix", ["pd.reshrink", path, "--strategy", "quick"],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      assert output =~ "Before:"
+      refute output =~ "re-shrink could not run"
     end
   end
 

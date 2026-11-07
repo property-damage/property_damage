@@ -1,8 +1,8 @@
 defmodule PropertyDamage.RunTraceStateTimelineTest do
   @moduledoc """
   DR-040: unit-level contracts for the derived per-step state timeline,
-  driven by hand-built traces so the fold-order and branch-merge semantics are
-  pinned precisely (independent of any live run).
+  driven by hand-built traces so the fold-order semantics are pinned
+  precisely (independent of any live run).
   """
   use ExUnit.Case, async: true
 
@@ -28,7 +28,7 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true
@@ -76,58 +76,87 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
     end
   end
 
-  describe "faithful timeline (branching) recovers the verified linearization order" do
-    test "the merged state folds branches in linearization order, not branch order" do
-      plan =
-        Sequence.branching([], [[%Cmd{op: :a}], [%Cmd{op: :b}]], [%Cmd{op: :sink}])
-
-      b0 = Position.branch(0, 0)
-      b1 = Position.branch(1, 0)
-      sfx = Position.suffix(0)
-
-      # Verified order is branch 1 THEN branch 0 -- the reverse of branch order.
-      trace =
-        RunTrace.new(
-          model: Model,
-          plan: plan,
-          executed: %{b0 => %Cmd{op: :a}, b1 => %Cmd{op: :b}, sfx => %Cmd{op: :sink}},
-          command_fold_ordinals: %{b0 => 0, b1 => 0, sfx => 1},
-          linearization: [{1, 0, %Cmd{op: :b}}, {0, 0, %Cmd{op: :a}}],
-          event_log: [],
-          outcome: :pass
-        )
-
-      assert RunTrace.state_at(trace, sfx)[Log] == %{log: [{:cmd, :b}, {:cmd, :a}, {:cmd, :sink}]}
-
-      # state_before the suffix is the merged state with no suffix folds yet.
-      assert RunTrace.state_before(trace, sfx)[Log] == %{log: [{:cmd, :b}, {:cmd, :a}]}
+  describe "faithful timeline (linear) with a late poller fold" do
+    # The failing root's own poller delivers an event while the run finalizes,
+    # after the root's command fold and its own events. The event is attributed
+    # to that root, so the root's boundary includes it: the post-step state
+    # equals the state the run ended with.
+    defp late_fold_trace do
+      RunTrace.new(
+        model: Model,
+        plan: Sequence.linear([%Cmd{op: :c0}, %Cmd{op: :c1}]),
+        executed: %{Position.prefix(0) => %Cmd{op: :c0}, Position.prefix(1) => %Cmd{op: :c1}},
+        command_fold_ordinals: %{Position.prefix(0) => 0, Position.prefix(1) => 2},
+        event_log: [
+          %Entry{command_index: 0, event: %Ev{tag: :e0}, source: :command, fold_index: 1},
+          %Entry{command_index: 1, event: %Ev{tag: :e1}, source: :command, fold_index: 3},
+          %Entry{
+            command_index: 1,
+            event: %Ev{tag: :late},
+            source: :resource_poller,
+            fold_index: 4
+          }
+        ],
+        outcome: :pass
+      )
     end
 
-    test "falls back to branch order when no linearization was verified" do
-      plan =
-        Sequence.branching([], [[%Cmd{op: :a}], [%Cmd{op: :b}]], [%Cmd{op: :sink}])
+    test "the failing root's post-step state includes the fold its poller delivered late" do
+      trace = late_fold_trace()
 
+      assert RunTrace.state_at(trace, Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :c0}, :e0, {:cmd, :c1}, :e1, :late]}
+
+      assert [_, {_, last}] = RunTrace.state_timeline(trace)
+      assert last[Log].log == [{:cmd, :c0}, :e0, {:cmd, :c1}, :e1, :late]
+    end
+
+    test "the late fold stays out of the state before the failing root" do
+      assert RunTrace.state_before(late_fold_trace(), Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :c0}, :e0]}
+    end
+  end
+
+  describe "faithful timeline (linear) with expansion leaves" do
+    test "a root's boundary includes the folds of its leaf commands and nothing of a later root's" do
+      # Root 1 ran as two leaf commands, positioned by the root's generation
+      # index (3), not its place in the shrunk plan. The leaves fold after the
+      # root's own fold and have no events, so only the leaf folds themselves
+      # can carry the boundary past the root's own fold.
       trace =
         RunTrace.new(
           model: Model,
-          plan: plan,
+          plan: Sequence.linear([%Cmd{op: :r0}, %Cmd{op: :r1}, %Cmd{op: :r2}]),
+          expansion: %{
+            "a" => [
+              %{root: 1, root_id: 3, leaves?: true, commands: [%Cmd{op: :l0}, %Cmd{op: :l1}]}
+            ]
+          },
           executed: %{
-            Position.branch(0, 0) => %Cmd{op: :a},
-            Position.branch(1, 0) => %Cmd{op: :b},
-            Position.suffix(0) => %Cmd{op: :sink}
+            Position.prefix(0) => %Cmd{op: :r0},
+            Position.prefix(1) => %Cmd{op: :r1},
+            Position.leaf(3, 0) => %Cmd{op: :l0},
+            Position.leaf(3, 1) => %Cmd{op: :l1},
+            Position.prefix(2) => %Cmd{op: :r2}
           },
           command_fold_ordinals: %{
-            Position.branch(0, 0) => 0,
-            Position.branch(1, 0) => 0,
-            Position.suffix(0) => 1
+            Position.prefix(0) => 0,
+            Position.prefix(1) => 1,
+            Position.leaf(3, 0) => 2,
+            Position.leaf(3, 1) => 3,
+            Position.prefix(2) => 4
           },
-          linearization: nil,
           event_log: [],
           outcome: :pass
         )
 
-      assert RunTrace.state_at(trace, Position.suffix(0))[Log] ==
-               %{log: [{:cmd, :a}, {:cmd, :b}, {:cmd, :sink}]}
+      assert RunTrace.state_at(trace, Position.prefix(0))[Log] == %{log: [{:cmd, :r0}]}
+
+      assert RunTrace.state_at(trace, Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :r0}, {:cmd, :r1}, {:cmd, :l0}, {:cmd, :l1}]}
+
+      assert RunTrace.state_before(trace, Position.prefix(2))[Log] ==
+               %{log: [{:cmd, :r0}, {:cmd, :r1}, {:cmd, :l0}, {:cmd, :l1}]}
     end
   end
 end

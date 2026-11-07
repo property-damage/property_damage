@@ -35,6 +35,8 @@ defmodule GiteaBench.UiAdapter do
   alias GiteaBench.Gitea
   alias Playwright.{Browser, BrowserContext, Page}
 
+  require PropertyDamage
+
   alias GiteaBench.Commands.{
     AddLabelToIssue,
     CloseIssue,
@@ -96,6 +98,17 @@ defmodule GiteaBench.UiAdapter do
 
     case outcome do
       :ok ->
+        log_ui("UI login /user/login -> ok  user=#{admin}", login_form(admin))
+
+      {:error, reason} ->
+        log_ui(
+          "UI login /user/login -> failed  user=#{admin}",
+          login_form(admin) ++ [{"error", inspect(reason, pretty: true)}]
+        )
+    end
+
+    case outcome do
+      :ok ->
         # The admin's later actions find this context in context_for/2.
         Agent.update(ctx.sessions, &Map.put(&1, admin, context))
         {:ok, [%SessionOpened{user: admin}]}
@@ -123,6 +136,10 @@ defmodule GiteaBench.UiAdapter do
 
     Page.click(page, ~s|button:has-text("Create User Account")|)
 
+    log_ui("UI submit /admin/users/new -> submitted  user=#{login}", [
+      form(user_name: login, email: email, password: "[REDACTED]", must_change_password: false)
+    ])
+
     event = settle(fn -> Gitea.user_event(ctx.client, login) end, &(&1.login == login))
     {:ok, [event]}
   end
@@ -133,6 +150,7 @@ defmodule GiteaBench.UiAdapter do
     navigate(page, ctx.base_url <> "/repo/create", "input[name=repo_name]")
     Page.fill(page, "input[name=repo_name]", name)
     Page.click(page, ~s|button:has-text("Create Repository")|)
+    log_ui("UI submit /repo/create -> submitted  repo=#{owner}/#{name}", [form(repo_name: name)])
 
     event = settle(fn -> Gitea.repo_event(ctx.client, owner, name) end, &(&1.full_name != nil))
     {:ok, [event]}
@@ -148,6 +166,10 @@ defmodule GiteaBench.UiAdapter do
     Page.wait_for_selector(page, "#status-button", %{timeout: @nav_timeout})
 
     number = issue_number_from_url(Page.url(page))
+
+    log_ui("UI submit /#{full_name}/issues/new -> issue ##{number}  repo=#{full_name}", [
+      form(title: title)
+    ])
 
     event =
       settle(
@@ -168,6 +190,10 @@ defmodule GiteaBench.UiAdapter do
     Page.fill(page, ".new-label.modal input[name=title]", name)
     Page.fill(page, ".new-label.modal input[name=color]", color)
     Page.click(page, ~s|.new-label.modal button:has-text("Create Label")|)
+
+    log_ui("UI submit /#{full_name}/labels -> submitted  label=#{name}  repo=#{full_name}", [
+      form(title: name, color: color)
+    ])
 
     event = settle(fn -> Gitea.label_event(ctx.client, full_name, name) end, &(&1.name == name))
     {:ok, [event]}
@@ -195,12 +221,14 @@ defmodule GiteaBench.UiAdapter do
     # can generate a duplicate assignment for an already-labelled issue, so only
     # click when the label is not yet checked. Clicking unconditionally would
     # silently *unassign* the label and make the invariant fire on a phantom miss.
-    unless Page.eval_on_selector(page, item, "el => el.classList.contains('checked')") do
-      Page.click(page, item)
-    end
+    checked? = Page.eval_on_selector(page, item, "el => el.classList.contains('checked')")
+    unless checked?, do: Page.click(page, item)
 
     # Clicking outside the dropdown commits the change (Gitea posts via AJAX).
     Page.click(page, "footer")
+
+    outcome = if checked?, do: "already checked", else: "checked"
+    log_ui("UI select label /#{full_name}/issues/#{number} -> #{outcome}  label=#{label}")
 
     event =
       settle(
@@ -218,6 +246,7 @@ defmodule GiteaBench.UiAdapter do
     navigate(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", "#status-button")
 
     Page.click(page, "#status-button")
+    log_ui("UI close issue /#{full_name}/issues/#{number} -> submitted")
 
     event =
       settle(
@@ -253,6 +282,7 @@ defmodule GiteaBench.UiAdapter do
         context = Browser.new_context(ctx.browser)
         login_page = BrowserContext.new_page(context)
         login(login_page, ctx.base_url, user, password_for(ctx, user))
+        log_ui("UI login /user/login -> ok  user=#{user}", login_form(user))
         # Login set the auth cookies on the context; the login page itself is no
         # longer needed (each command opens its own fresh page).
         Page.close(login_page)
@@ -321,6 +351,18 @@ defmodule GiteaBench.UiAdapter do
     exception -> {:error, Exception.message(exception)}
   catch
     kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp login_form(user), do: [form(user_name: user, password: "[REDACTED]")]
+
+  defp form(fields), do: {"form", Enum.map_join(fields, "\n", fn {k, v} -> "#{k}: #{v}" end)}
+
+  # A test that calls the adapter directly, outside a run, has no log scope;
+  # its interactions go unlogged.
+  defp log_ui(summary, details \\ []) do
+    PropertyDamage.log(GiteaBench.log_entry(summary, details), tags: [:ui])
+  rescue
+    PropertyDamage.Log.NoScopeError -> :ok
   end
 
   defp error_message(%{message: message}) when is_binary(message), do: message

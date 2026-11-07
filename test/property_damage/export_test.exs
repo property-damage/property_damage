@@ -130,7 +130,7 @@ defmodule PropertyDamage.ExportTest do
   end
 
   defmodule TestModelStub do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [CreateAccount]
     @impl true
@@ -154,9 +154,8 @@ defmodule PropertyDamage.ExportTest do
       run_number: 1,
       failed_at_index: 2,
       failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
-      original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
-      trace:
-        PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands, branches: nil, suffix: []}),
+      original_sequence: %Sequence{prefix: commands},
+      trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
       timestamp: ~U[2025-12-26 14:30:00Z],
       model: TestModel,
       targets: [{TestHTTPAdapter, []}]
@@ -307,10 +306,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -380,10 +376,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -414,10 +407,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -476,10 +466,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -531,10 +518,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 0,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -597,10 +581,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 0,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -675,6 +656,13 @@ defmodule PropertyDamage.ExportTest do
       assert test_code =~ "NonNegativeBalance"
     end
 
+    test "re-runs the seed with the atom markers the report records" do
+      failure = %{create_test_failure_report() | external_markers: [:__external__]}
+
+      assert Export.to_exunit(failure) =~ "external_markers: [:__external__]"
+      refute Export.to_exunit(create_test_failure_report()) =~ "external_markers:"
+    end
+
     test "includes command sequence" do
       failure = create_test_failure_report()
 
@@ -693,17 +681,23 @@ defmodule PropertyDamage.ExportTest do
       assert test_code =~ "MyApp.Regressions.CustomTest"
     end
 
+    test "a string module name yields the same header as an atom" do
+      failure = create_test_failure_report()
+
+      test_code = Export.to_exunit(failure, module_name: "RegressionAccountTest")
+
+      assert test_code =~ "defmodule RegressionAccountTest do"
+      assert {:ok, _} = Code.string_to_quoted(test_code)
+    end
+
     test "a command with a non-literal field (PID) does not emit invalid #PID<> source" do
       commands = [%PidCommand{pid: self(), name: "worker"}]
 
       failure = %FailureReport{
         seed: 123,
         failure_reason: Failure.check_failed(:NonNegativeBalance, "boom"),
-        original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        original_sequence: %Sequence{prefix: commands},
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}]
       }
@@ -812,7 +806,7 @@ defmodule PropertyDamage.ExportTest do
       {:ok, path} = Export.save(failure, tmp_dir, :exunit)
 
       assert File.exists?(path)
-      assert path =~ ~r/reproduce_512902757_[0-9a-f]+\.exs$/
+      assert path =~ ~r/reproduce_512902757_[0-9a-f]+_test\.exs$/
 
       content = File.read!(path)
       assert content =~ "defmodule"
@@ -837,9 +831,62 @@ defmodule PropertyDamage.ExportTest do
       assert curl_path =~ ".sh"
       assert python_path =~ ".py"
     end
+
+    @tag :tmp_dir
+    test "every format saves under its own file name", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+      opts = [base_url: "http://localhost:4000", adapter: TestHTTPAdapter]
+
+      formats = [
+        :exunit,
+        :livebook,
+        {:script, :elixir},
+        {:script, :curl},
+        {:script, :python}
+      ]
+
+      paths =
+        for format <- formats do
+          format_opts = if format == :exunit, do: [], else: opts
+          {:ok, path} = Export.save(failure, tmp_dir, format, format_opts)
+          path
+        end
+
+      assert length(Enum.uniq(paths)) == length(formats),
+             "two formats share a file name: #{inspect(paths)}"
+    end
+
+    @tag :tmp_dir
+    test "rejects an unknown option and writes no file", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
+        Export.save(failure, tmp_dir, :exunit, bogus: true)
+      end
+
+      assert File.ls!(tmp_dir) == []
+    end
   end
 
   describe "save_all/3" do
+    @tag :tmp_dir
+    test "keeps the ExUnit test and the Elixir script apart", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      {:ok, paths} =
+        Export.save_all(failure, tmp_dir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter,
+          script_languages: [:elixir, :curl, :python]
+        )
+
+      assert paths.exunit != paths.script_elixir
+      assert length(Enum.uniq(Map.values(paths))) == map_size(paths)
+
+      assert File.read!(paths.exunit) =~ "use ExUnit.Case"
+      assert File.read!(paths.script_elixir) =~ "Mix.install"
+    end
+
     @tag :tmp_dir
     test "saves all formats", %{tmp_dir: tmp_dir} do
       failure = create_test_failure_report()
@@ -860,6 +907,17 @@ defmodule PropertyDamage.ExportTest do
       Enum.each(Map.values(paths), fn path ->
         assert File.exists?(path), "Expected file to exist: #{path}"
       end)
+    end
+
+    @tag :tmp_dir
+    test "rejects an unknown option and writes no file", %{tmp_dir: tmp_dir} do
+      failure = create_test_failure_report()
+
+      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
+        Export.save_all(failure, tmp_dir, base_url: "http://localhost:4000", bogus: true)
+      end
+
+      assert File.ls!(tmp_dir) == []
     end
   end
 
@@ -883,13 +941,17 @@ defmodule PropertyDamage.ExportTest do
       failure = create_test_failure_report()
 
       assert Common.generate_filename(failure, :exunit) =~
-               ~r/^reproduce_512902757_[0-9a-f]+\.exs$/
+               ~r/^reproduce_512902757_[0-9a-f]+_test\.exs$/
 
       assert Common.generate_filename(failure, :curl) =~ ~r/^reproduce_512902757_[0-9a-f]+\.sh$/
       assert Common.generate_filename(failure, :python) =~ ~r/^reproduce_512902757_[0-9a-f]+\.py$/
 
       assert Common.generate_filename(failure, :livebook) =~
                ~r/^reproduce_512902757_[0-9a-f]+\.livemd$/
+
+      # the Elixir script is not a test file, so `mix test` never collects it
+      assert Common.generate_filename(failure, :elixir) =~
+               ~r/^reproduce_512902757_[0-9a-f]+\.exs$/
 
       # stable for the same failure, distinct for a different one
       assert Common.generate_filename(failure, :exunit) ==
@@ -962,10 +1024,7 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_reason: Failure.check_failed(nil, "check failed"),
-        trace:
-          PropertyDamage.RunTrace.new(
-            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
-          ),
+        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
         model: TestModelStub,
         targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]

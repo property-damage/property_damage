@@ -15,31 +15,6 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
     defstruct [:id]
   end
 
-  defmodule Alpha, do: defstruct(id: nil)
-  defmodule Beta, do: defstruct(id: nil)
-  defmodule Gamma, do: defstruct(id: nil)
-  defmodule Delta, do: defstruct(id: nil)
-
-  # prefix [Alpha] ++ branches [[Beta], [Gamma]] ++ suffix [Delta].
-  # Flattened reading order: Alpha=0, Beta=1, Gamma=2, Delta=3.
-  # The executor numbers BOTH branch commands from prefix_len (=1), so Beta and
-  # Gamma share executor command_index 1, disambiguated only by branch_id. A
-  # failure in branch 1 (Gamma) is recorded as failed_at_index: 1, branch_id: 1,
-  # whose flattened index is 2, so `idx == failed_at_index` would mismark Beta.
-  defp branch_failure_report do
-    FailureReport.new(
-      seed: 1,
-      run_number: 1,
-      original_sequence: Sequence.branching([%Alpha{}], [[%Beta{}], [%Gamma{}]], [%Delta{}]),
-      shrunk_sequence: Sequence.branching([%Alpha{}], [[%Beta{}], [%Gamma{}]], [%Delta{}]),
-      failed_at_index: 1,
-      branch_id: 1,
-      failure_reason: Failure.in_branch(Failure.check_failed(:TestCheck, "boom"), 1),
-      model: TestModel,
-      targets: [{TestAdapter, []}]
-    )
-  end
-
   defp report_with_async_event do
     FailureReport.new(
       seed: 1,
@@ -116,15 +91,14 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
           failure_reason: Failure.check_failed(:TestCheck, "boom"),
           event_log: [
             %Entry{timestamp: 1, command_index: 0, event: %CreateOrder{id: 1}, source: :command},
-            # A nemesis event recorded against command 0 (non-nil command_index):
-            # it must render with its NEM badge, not as a bare command output, so
-            # fault injection stays visible.
+            # A mock event recorded against command 0 (non-nil command_index):
+            # it must render with its MOC badge, not as a bare command output, so
+            # the mock's contribution stays visible.
             %Entry{
               timestamp: 2,
               command_index: 0,
               event: %PaymentConfirmed{id: 1},
-              source: :nemesis,
-              nemesis_module: SomeNemesis
+              source: :mock
             }
           ],
           model: TestModel,
@@ -133,29 +107,8 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
 
       output = strip_ansi(Timeline.format_event_timeline(report, color: false))
 
-      assert output =~ "NEM"
+      assert output =~ "MOC"
       assert output =~ "CMD"
-    end
-
-    test "marks the branch failure on its flattened command, not the index collision" do
-      output = strip_ansi(Timeline.format_event_timeline(branch_failure_report(), color: false))
-
-      # Gamma is the failing branch-1 command (flattened index 2). Beta shares
-      # the executor command index (1) but is in branch 0 and must NOT be
-      # marked. This is the branch-aware fix: failed? is resolved by position,
-      # not by comparing the flattened ordinal to failed_at_index.
-      assert output =~ "[2] Gamma ► FAILURE"
-      refute output =~ "Beta ► FAILURE"
-    end
-  end
-
-  describe "format/2 branch marking" do
-    test "marks the failing branch cell, not a same-index cell in another branch" do
-      output = strip_ansi(Timeline.format(branch_failure_report(), color: false))
-
-      # Only the branch-1 (Gamma) cell carries the ► marker.
-      assert output =~ "Gamma ►"
-      refute output =~ "Beta ►"
     end
   end
 
@@ -172,10 +125,6 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
     test "a linear timeline emits no escape bytes" do
       report = report_with_async_event()
       refute Timeline.format(report, color: false) =~ "\e["
-    end
-
-    test "a branching timeline emits no escape bytes" do
-      refute Timeline.format(branch_failure_report(), color: false) =~ "\e["
     end
   end
 end

@@ -70,7 +70,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 2}, Arm, Flip]
@@ -184,7 +184,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   end
 
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.kind == FailureReport.kind_of(report.failure_reason)
+    assert report.kind == Failure.report_kind(report.failure_reason)
   end
 
   defp reproduce(report) do

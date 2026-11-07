@@ -37,25 +37,40 @@ defmodule PropertyDamage.SettleTest do
     # No command_spec/1 - should resolve to the framework default (:sync)
   end
 
+  defmodule TableModel do
+    use PropertyDamage.Model
+
+    @impl true
+    def commands, do: [SyncCommand, ProbeCommand, AsyncCommand, NoSemanticsCommand]
+
+    @impl true
+    def command_sequence_projection, do: PropertyDamage.Test.Projections.ModelState
+  end
+
+  # A command's spec as the model's table holds it.
+  defp spec(command) do
+    PropertyDamage.Model.spec_for(PropertyDamage.Model.spec_table(TableModel), command)
+  end
+
   describe "get_semantics/1" do
     test "returns :sync for sync commands" do
-      assert Settle.get_semantics(%SyncCommand{id: 1}) == :sync
-      assert Settle.get_semantics(SyncCommand) == :sync
+      assert Settle.get_semantics(spec(%SyncCommand{id: 1})) == :sync
+      assert Settle.get_semantics(spec(SyncCommand)) == :sync
     end
 
     test "returns :probe for probe commands" do
-      assert Settle.get_semantics(%ProbeCommand{id: 1}) == :probe
-      assert Settle.get_semantics(ProbeCommand) == :probe
+      assert Settle.get_semantics(spec(%ProbeCommand{id: 1})) == :probe
+      assert Settle.get_semantics(spec(ProbeCommand)) == :probe
     end
 
     test "returns :async for async commands" do
-      assert Settle.get_semantics(%AsyncCommand{id: 1}) == :async
-      assert Settle.get_semantics(AsyncCommand) == :async
+      assert Settle.get_semantics(spec(%AsyncCommand{id: 1})) == :async
+      assert Settle.get_semantics(spec(AsyncCommand)) == :async
     end
 
     test "returns :sync for commands without semantics/0" do
-      assert Settle.get_semantics(%NoSemanticsCommand{id: 1}) == :sync
-      assert Settle.get_semantics(NoSemanticsCommand) == :sync
+      assert Settle.get_semantics(spec(%NoSemanticsCommand{id: 1})) == :sync
+      assert Settle.get_semantics(spec(NoSemanticsCommand)) == :sync
     end
 
     test "returns :sync for plain maps" do
@@ -65,7 +80,7 @@ defmodule PropertyDamage.SettleTest do
 
   describe "get_config/1" do
     test "returns command's settle_config when implemented" do
-      config = Settle.get_config(%ProbeCommand{id: 1})
+      config = Settle.get_config(spec(%ProbeCommand{id: 1}))
 
       assert config.timeout_ms == 500
       assert config.interval_ms == 50
@@ -73,15 +88,15 @@ defmodule PropertyDamage.SettleTest do
     end
 
     test "returns defaults when settle_config not implemented" do
-      config = Settle.get_config(%SyncCommand{id: 1})
+      config = Settle.get_config(spec(%SyncCommand{id: 1}))
 
       assert config.timeout_ms == 2_000
       assert config.interval_ms == 300
       assert config.backoff == :linear
     end
 
-    test "works with module directly" do
-      config = Settle.get_config(AsyncCommand)
+    test "works with a command module" do
+      config = Settle.get_config(spec(AsyncCommand))
 
       assert config.timeout_ms == 1000
       assert config.backoff == :exponential
@@ -90,19 +105,19 @@ defmodule PropertyDamage.SettleTest do
 
   describe "requires_settling?/1" do
     test "returns true for probes" do
-      assert Settle.requires_settling?(%ProbeCommand{id: 1})
+      assert Settle.requires_settling?(spec(%ProbeCommand{id: 1}))
     end
 
     test "returns true for async" do
-      assert Settle.requires_settling?(%AsyncCommand{id: 1})
+      assert Settle.requires_settling?(spec(%AsyncCommand{id: 1}))
     end
 
     test "returns false for sync" do
-      refute Settle.requires_settling?(%SyncCommand{id: 1})
+      refute Settle.requires_settling?(spec(%SyncCommand{id: 1}))
     end
 
     test "returns false for commands without semantics" do
-      refute Settle.requires_settling?(%NoSemanticsCommand{id: 1})
+      refute Settle.requires_settling?(spec(%NoSemanticsCommand{id: 1}))
     end
   end
 
@@ -157,73 +172,56 @@ defmodule PropertyDamage.SettleTest do
     end
 
     test "uses linear backoff by default" do
-      {:ok, agent} = Agent.start_link(fn -> [] end)
+      sleeps =
+        record_sleeps(fn _attempt -> {:retry, :continue} end, timeout_ms: 100, interval_ms: 20)
 
-      Settle.settle(
-        fn ->
-          now = System.monotonic_time(:millisecond)
-          Agent.update(agent, fn times -> [now | times] end)
-          {:retry, :continue}
-        end,
-        timeout_ms: 100,
-        interval_ms: 20,
-        backoff: :linear
-      )
-
-      times = Agent.get(agent, & &1) |> Enum.reverse()
-      Agent.stop(agent)
-
-      # Check intervals are roughly constant (linear backoff)
-      if length(times) >= 3 do
-        intervals =
-          times
-          |> Enum.chunk_every(2, 1, :discard)
-          |> Enum.map(fn [a, b] -> b - a end)
-
-        # Intervals should stay roughly the configured 20ms (linear backoff keeps
-        # them constant). Process.sleep and millisecond-monotonic measurement
-        # jitter on a loaded runner can land an interval a few ms either side of
-        # nominal, so the bounds are deliberately wide; the point here is that the
-        # intervals do not grow (the exponential-backoff test covers growth).
-        for interval <- intervals do
-          assert interval >= 10 and interval <= 60,
-                 "expected interval #{interval}ms to be near the configured 20ms"
-        end
-      end
+      # Every sleep but the last stays at the interval; the last is clipped to
+      # the time left before the deadline, so it never exceeds the interval.
+      assert length(sleeps) >= 2
+      {steady, [last]} = Enum.split(sleeps, -1)
+      assert Enum.all?(steady, &(&1 == 20))
+      assert last in 1..20
     end
 
     test "uses exponential backoff when specified" do
-      {:ok, agent} = Agent.start_link(fn -> [] end)
+      sleeps =
+        record_sleeps(
+          fn attempt -> if attempt < 5, do: {:retry, :continue}, else: {:ok, :done} end,
+          timeout_ms: 5_000,
+          interval_ms: 10,
+          backoff: :exponential
+        )
 
-      Settle.settle(
-        fn ->
-          now = System.monotonic_time(:millisecond)
-          Agent.update(agent, fn times -> [now | times] end)
-          {:retry, :continue}
-        end,
-        timeout_ms: 200,
-        interval_ms: 10,
-        backoff: :exponential
-      )
+      assert sleeps == [10, 20, 40, 80]
+    end
 
-      times = Agent.get(agent, & &1) |> Enum.reverse()
-      Agent.stop(agent)
+    test "clips the final sleep to the time left before the deadline" do
+      sleeps =
+        record_sleeps(fn _attempt -> {:retry, :continue} end,
+          timeout_ms: 100,
+          interval_ms: 40,
+          backoff: :linear
+        )
 
-      # With exponential backoff, intervals should grow
-      if length(times) >= 4 do
-        intervals =
-          times
-          |> Enum.chunk_every(2, 1, :discard)
-          |> Enum.map(fn [a, b] -> b - a end)
+      assert hd(sleeps) == 40
+      assert List.last(sleeps) < 40
+    end
 
-        # First interval should be smaller than later ones
-        [first | rest] = intervals
+    test "sleeps with the injected :sleep function" do
+      parent = self()
 
-        if length(rest) >= 2 do
-          avg_later = Enum.sum(Enum.take(rest, 2)) / 2
-          assert avg_later >= first
-        end
-      end
+      result =
+        Settle.settle(fn -> {:retry, :never} end,
+          timeout_ms: 30,
+          interval_ms: 10,
+          sleep: fn ms ->
+            send(parent, {:slept, ms})
+            Process.sleep(ms)
+          end
+        )
+
+      assert {:timeout, :never} = result
+      assert_received {:slept, 10}
     end
 
     test "executes the function at least once even with timeout_ms: 0" do
@@ -282,7 +280,7 @@ defmodule PropertyDamage.SettleTest do
 
       result =
         Settle.execute_with_settle(
-          %ProbeCommand{id: 1},
+          spec(%ProbeCommand{id: 1}),
           fn ->
             attempt = Agent.get_and_update(agent, fn n -> {n + 1, n + 1} end)
 
@@ -301,7 +299,7 @@ defmodule PropertyDamage.SettleTest do
     test "executes directly for sync commands" do
       result =
         Settle.execute_with_settle(
-          %SyncCommand{id: 1},
+          spec(%SyncCommand{id: 1}),
           fn -> {:ok, :direct_result} end
         )
 
@@ -314,7 +312,7 @@ defmodule PropertyDamage.SettleTest do
 
       result =
         Settle.execute_with_settle(
-          %ProbeCommand{id: 1},
+          spec(%ProbeCommand{id: 1}),
           fn -> {:retry, :always} end
         )
 
@@ -324,5 +322,32 @@ defmodule PropertyDamage.SettleTest do
       # Should timeout around 500ms (with some buffer)
       assert elapsed >= 400 and elapsed < 700
     end
+  end
+
+  # Runs settle with a sleep function that records every requested sleep (and
+  # still sleeps, so the deadline advances); `fun` receives the 1-based attempt.
+  defp record_sleeps(fun, opts) do
+    {:ok, log} = Agent.start_link(fn -> %{sleeps: [], attempts: 0} end)
+
+    Settle.settle(
+      fn ->
+        attempt =
+          Agent.get_and_update(log, fn st ->
+            {st.attempts + 1, %{st | attempts: st.attempts + 1}}
+          end)
+
+        fun.(attempt)
+      end,
+      [
+        sleep: fn ms ->
+          Agent.update(log, fn st -> %{st | sleeps: [ms | st.sleeps]} end)
+          Process.sleep(ms)
+        end
+      ] ++ opts
+    )
+
+    sleeps = Agent.get(log, &Enum.reverse(&1.sleeps))
+    Agent.stop(log)
+    sleeps
   end
 end

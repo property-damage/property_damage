@@ -70,6 +70,7 @@ mix deps.get
 
 Create `lib/counter_paths.ex` with this content:
 
+<!-- pd-example: lib/counter_paths.ex -->
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule Counter.Add do
@@ -134,7 +135,7 @@ end
 
 defmodule Counter.Model do
   @moduledoc "`Add n` may run as itself or as `Add 1` then `Add (n - 1)`."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias Counter.Add
 
@@ -209,6 +210,7 @@ Turn on the planted bug in the second target only. No root ever sends `Add 1`
 (the generator picks 2 to 9), so only the two-step form can reach the bug.
 Create `bug.exs`:
 
+<!-- pd-example: bug.exs -->
 <!-- pd-doc-verify: runnable -->
 ```elixir
 {:error, report} =
@@ -231,59 +233,128 @@ IO.inspect(report, pretty: true)
 mix run bug.exs
 ```
 
-The run fails, shrinks the failure and prints the report. Its shape (times and
-the timestamp vary):
+The run fails, shrinks the failure and prints the report. The offsets (`+0.00s`)
+and the waited time vary from run to run:
 
+<!-- pd-report-excerpt: mix run bug.exs; seed 42 -->
 ```text
-Divergence: Counter.Projection.total
+#FailureReport<
+╔══════════════════════════════════════════════════════════════════════╗
+║                            BUG DETECTED!                             ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-## Failure Location
+Seed: 42
 
-Run Number:             1
-Command Index:       1
-Leaf:                         leaf 1 of root 0 (Counter.Add)
-Random Seed:           42
-Expansions:             at root 0
-  left (reference): Add[0] = [Add]
-  right: Add[1] = [Add, Add]
+## Failure
 
-## What Failed
+Failure      diverged
+Observation  Counter.Projection.total
+At           [0] %Counter.Add{amount: 0}
+Reference    "left"  0
+Variant      "right"  1
+Compared     using ==, still differing after 101 ms (bound 100 ms)
 
-Type:                         Divergence
-Observation:           Counter.Projection.total
-Root:                         0 %Counter.Add{amount: 0}
-Reference:               "left": 0
-Variant:                   "right": 1
-...
+## What this checks
 
-## Minimal Reproduction (2 commands)
+  Diverged      Two targets ran the same plan separately and disagreed. They may
+                have taken different but equivalent paths, and an observation
+                settled to different values in the reference target and in the
+                variant target. Either the system treats equivalent histories
+                differently, or the test's claim that the paths are equivalent
+                is wrong.
 
-  [0] Add {amount: 1}
-► [1] Add {amount: -1} ◄── FAILURE
-...
+  Model         Counter.Model
+                `Add n` may run as itself or as `Add 1` then `Add (n - 1)`.
+
+  Observation   Counter.Projection.total/2
+                (no description: add @doc to Counter.Projection.total/2)
+
+  Projection    Counter.Projection
+                Folds the reported total and compares it across targets.
+
+  Path          "left" kept Add (step 0) as one step
+                (no description: add doc: "..." to the first entry that Counter.Model.add_paths/2 returns for Add)
+
+  Path          "right" split Add (step 0) into Add (step 0.0) and Add (step 0.1)
+                (no description: add doc: "..." to the second entry that Counter.Model.add_paths/2 returns for Add)
+
+  Command       Counter.Add
+                Add `amount` to the counter.
+
+## Minimal Reproduction (1 root)
+
+Reference: target "left"
+► [0] %Counter.Add{amount: 0}  kept as one step  ◄── diverged
+        +0.00s event %Counter.Added{amount: 0, total: 0}
+
+Variant: target "right"
+► [0] %Counter.Add{amount: 0}  split into steps 0.0 and 0.1  ◄── diverged
+    [0.0] %Counter.Add{amount: 1}
+        +0.00s event %Counter.Added{amount: 1, total: 2}
+    [0.1] %Counter.Add{amount: -1}
+        +0.00s event %Counter.Added{amount: -1, total: 1}
+
+## Projections at [0]   (- reference "left", + variant "right")
+
+Counter.Projection   last applied: Added
+  - total: 0
+  + total: 1
 
 ## Reproduction
 
-PropertyDamage.run(model: Counter.Model, targets: [...], compare: [converge_within: 100], max_commands: 10, seed: 42, max_runs: 1)
+targets = [{Counter.Adapter, name: "left", config: %{store: :left}}, {Counter.Adapter, name: "right", config: %{store: :right, bug: true}}]
 
-Regenerate the failing variant:
+# Rerun from the seed:
+PropertyDamage.run(model: Counter.Model, targets: targets, compare: [converge_within: 100], max_commands: 10, seed: 42, max_runs: 1)
+
+# Regenerate the failing variant:
 PropertyDamage.Expansion.for(Counter.Model, 42, 1, "right", max_commands: 10)
 
-Replay the shrunk failure:
-PropertyDamage.run(model: Counter.Model, targets: [...], compare: [converge_within: 100], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
+# Replay the shrunk failure:
+PropertyDamage.run(model: Counter.Model, targets: targets, compare: [converge_within: 100], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
+>
 ```
 
-Read it from the top: the observation `Counter.Projection.total` diverged; the
-failing variant is `"right"`; at root 0 the reference `"left"` ran the root
-itself and `"right"` ran the two-step form. The shrinker cut ten roots down to
-one, kept the reference on the plain command, and could not move `"right"` onto
-it without losing the failure. The one difference left between the targets is
-the path: a path bug.
+Read it from the top. The Failure section says the observation
+`Counter.Projection.total` diverged at root `[0]`: the reference `"left"`
+read 0 and the variant `"right"` read 1. `Compared` names the relation (`==`)
+and the wait: the comparison waited 101 ms against a bound of 100 ms before it
+called the difference real.
+
+The "What this checks" section prints the docs of the model, the observation,
+its projection and the command. Its `Path` items say how each target ran the
+root (here `"left"` ran `Add` as itself and `"right"` split it into two `Add`
+steps) and print the `doc:` of the entry that target ran. The `(no description: ...)` lines
+here say to add that `doc:` to the entry.
+
+Minimal Reproduction lists both sides of the comparison, each under its own
+header, and marks the diverging root `►` in both. The reference ran the root
+itself (`kept as one step`). The variant ran the second entry (`split into
+steps 0.0 and 0.1`), so its leaves `[0.0]` and `[0.1]` follow the root, each
+with the events it produced.
+The shrinker cut ten roots down to one, kept the reference on the plain
+command, and could not move `"right"` onto it without losing the failure. The
+one difference left between the targets is the path: a path bug.
+
+In the HTML page (written when you pass `report_html: dir` or set
+`PD_REPORT_HTML=dir`) the header of each root band says the same in plain words,
+for each target that ran the root under a listed entry: `right split it into
+Add (step 0.0) and Add (step 0.1)`, `left kept it as one step`, or, for an
+entry with no commands, `left dropped it`. The terminal listing says the same
+on the root line, in words of its own: `split into steps 0.0 and 0.1`,
+`kept as one step` or `dropped: no step ran in its place`.
+
+The Projections section shows the same boundary: `total` is 0 for the
+reference and 1 for the variant. The leaves `Add 1` and `Add -1` should add up
+to 0, but the planted bug makes `Add 1` add 2, as the first leaf's event
+shows (`total: 2`).
 
 The shrunk root is `Add 0`, below the generator's range of 2 to 9, and its
 second leaf is `Add -1`. Argument simplification shrinks a number toward 0
 without regard to the generator's range. The rewrite still means the same
 (`1 + -1 = 0`), and the bug still shows, because the first leaf is still `Add 1`.
+For the other sections of the report, see
+[Reading the report](debugging_failures.md#reading-the-report).
 
 ### 5. Replay the failure
 
@@ -337,8 +408,10 @@ def expansions, do: [{Add, &add_paths/2}]
 
 The function takes the root as generated and the target's simulated state at
 that root, and returns a list of **entries**. An entry is a sequence, or
-`{sequence, weight: n}` with a positive integer weight (default 1). Entries are
-named after their index in the returned list: `Add[0]`, `Add[1]`.
+`{sequence, weight: n, doc: "..."}`: `weight:` is a positive integer (default 1)
+and `doc:` is a string that describes the whole route. The failure report shows
+it in the Path item, and a `doc:` on a leaf is ignored with a warning. Entries
+are named after their index in the returned list: `Add[0]`, `Add[1]`.
 
 **The contract.** Every entry must mean the same as the root once the root is
 done, under every `@compare` observation of the model. The framework cannot
@@ -428,7 +501,7 @@ def total(state, _root), do: state.total
 - Values agree under `==` unless `using:` names another relation: `:fun` (a
   function of the projection, public or private), `{Mod, :fun}` or
   `{Mod, :fun, args}`, called with the reference's value and the variant's
-  value first and returning a verdict: truthy to agree, `false` or
+  value first and returning a verdict: truthy to agree, `false`, `nil` or
   `{:fail, reason}` to disagree (DR-051). Normalize in the observation body
   with `PropertyDamage.Equivalence.normalize/1` (drops id and timestamp keys)
   and `drop_keys/2`, and keep `using:` for relations that are not equalities,
@@ -474,7 +547,8 @@ A failure report names its kind and the target it happened in:
 `report.failed_at_index` is the failing root, and `report.expansions` maps each
 target name to what it ran at every root up to the failure:
 `%{root: i, entry: "Add[1]", leaves: [Counter.Add, Counter.Add]}`. The printed
-report shows the entries at the failing root, with the reference marked.
+report lists the reference's and the failing variant's commands at the failing
+root, with the entry each one ran.
 
 **How the shrinker attributes a divergence.** A shrink cycle runs four phases
 and repeats until nothing changes:
@@ -509,7 +583,7 @@ The report ends with three calls you can paste:
 1. **The reproduction command**, `PropertyDamage.run(..., seed: s, max_runs: 1)`:
    generates the failing run again from its seed with the same targets and
    options, then fails and shrinks again.
-2. **Regenerate the failing variant**, `PropertyDamage.Expansion.for/5`: returns
+2. **Regenerate the failing variant**, `PropertyDamage.Expansion.for/4`: returns
    the concrete sequence one target ran before shrinking, without running
    anything:
 

@@ -5,23 +5,21 @@ defmodule PropertyDamage.Executor.StateTest do
 
   # DR-029: these tests pin the run-state contract so later strangler extractions
   # cannot silently change it. Replay reads exec_state.event_log and
-  # exec_state.projections (replay.ex); the finalize chain and branching read the
-  # rest. A rename/removal must break here, loudly.
+  # exec_state.projections (replay.ex); the finalize chain and the per-command
+  # engine read the rest. A rename/removal must break here, loudly.
 
   @consumed_fields [
     # Replay's two reads (the externally de-facto frozen names)
     :event_log,
     :projections,
-    # finalize chain / per-command engine / branching
+    # finalize chain / per-command engine
     :projections_before,
     :check_counters,
     :check_failures,
     :check_mode,
     :active_pollers,
     :active_resource_pollers,
-    :active_faults,
     :async_halt,
-    :branch_id,
     :current_position,
     :step_count,
     :placeholder_registry,
@@ -46,18 +44,17 @@ defmodule PropertyDamage.Executor.StateTest do
     }
   end
 
-  test "declares every field Replay, finalize, and branching consume" do
+  test "declares every field Replay, finalize, and the engine consume" do
     fields = State.__struct__() |> Map.from_struct() |> Map.keys() |> MapSet.new()
 
     for f <- @consumed_fields do
       assert f in fields,
-             "Executor.State must declare #{inspect(f)} (consumed by Replay/finalize/branching)"
+             "Executor.State must declare #{inspect(f)} (consumed by Replay/finalize/engine)"
     end
   end
 
-  test "the ghost fields default sanely (active_faults => %{}, async_halt => nil)" do
+  test "the ghost field defaults sanely (async_halt => nil)" do
     state = minimal_state()
-    assert state.active_faults == %{}
     assert state.async_halt == nil
   end
 

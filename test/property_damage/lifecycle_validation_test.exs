@@ -30,7 +30,7 @@ defmodule PropertyDamage.LifecycleValidationTest do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
           def commands, do: unquote(support).act_roots()
           def command_sequence_projection, do: unquote(SetupCommands.World)
           def check_projections, do: [unquote(SetupCommands.Fixture)]
@@ -102,14 +102,6 @@ defmodule PropertyDamage.LifecycleValidationTest do
 
       error = assert_raise ArgumentError, fn -> Validation.validate!(model, FixtureAdapter) end
       assert error.message =~ "nmae"
-    end
-
-    test "a nemesis module in setup_each/0 is a validation error naming the callback" do
-      model = model!(Nemesis, setup: [PropertyDamage.Nemesis.NetworkLatency])
-
-      error = assert_raise ArgumentError, fn -> Validation.validate!(model, FixtureAdapter) end
-      assert error.message =~ "setup_each/0"
-      assert error.message =~ "NetworkLatency"
     end
 
     test "a bare integer weight in teardown_each/0 is rejected naming weight:" do

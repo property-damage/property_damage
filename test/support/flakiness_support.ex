@@ -73,8 +73,8 @@ defmodule PropertyDamage.Test.Flake.Model do
   captured run exercises a single, seed-determined command against the
   banding adapter.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Flake.Events.Ok
   alias PropertyDamage.Test.Flake.{Health, State}
@@ -116,7 +116,7 @@ defmodule PropertyDamage.Test.Flake.Adapter do
     * `amount >= 67` — **stable**: always emits an Ok event (every run passes).
 
   A counter (rather than the FI fixture's pure-function-of-seed switch) is used
-  deliberately: `RunTrace.capture/1` never shrinks, so there are no shrink
+  deliberately: `RunTrace.Capture.capture/1` never shrinks, so there are no shrink
   re-runs whose determinism a counter could break; the counter is only what
   makes the flaky band produce a *guaranteed* outcome mix across the N captures
   of one plan (the same plan differs across runs only in its random

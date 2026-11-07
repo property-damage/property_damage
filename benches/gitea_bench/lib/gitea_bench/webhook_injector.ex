@@ -57,7 +57,7 @@ defmodule GiteaBench.WebhookInjector do
   def teardown(_context) do
     # Drop the current queue so a late/retried delivery arriving between runs is
     # ignored. The listener stays up for the next run.
-    if Process.whereis(Registry), do: Registry.put(queue: nil)
+    if Process.whereis(Registry), do: Registry.put(queue: nil, runtime: nil)
     :ok
   end
 
@@ -78,16 +78,53 @@ defmodule GiteaBench.WebhookInjector do
   # action) is silently dropped.
   def deliver(token, body) do
     case Registry.get() do
-      %{token: ^token, queue: queue} when is_pid(queue) ->
+      %{token: ^token, queue: queue} = current when is_pid(queue) ->
         with {:ok, payload} <- Jason.decode(body),
              {:ok, event} <- to_event(payload) do
           PropertyDamage.EventQueue.push(queue, __MODULE__, event)
+          log_delivery(current.runtime, "queued", body)
         else
-          _ -> :ok
+          _ -> log_delivery(current.runtime, "skipped", body)
         end
 
       _ ->
         :ok
+    end
+  end
+
+  @doc """
+  Make `runtime` the one a delivery is logged through. The adapter calls it as
+  each command starts; it does nothing when no injector is running.
+
+  The listener runs outside every step, so it logs through the runtime of the
+  command running when the delivery arrives. Gitea delivers asynchronously:
+  a delivery that arrives after that command ended, between two commands, is
+  not logged.
+  """
+  def attach(runtime) do
+    if Process.whereis(Registry), do: Registry.put(runtime: runtime)
+    :ok
+  end
+
+  defp log_delivery(%PropertyDamage.Runtime{log: log} = runtime, outcome, body)
+       when is_function(log, 2) do
+    entry =
+      GiteaBench.log_entry("webhook POST /hook -> 200 #{outcome}#{delivery_ids(body)}", [
+        {"request", Jason.Formatter.pretty_print(body)}
+      ])
+
+    PropertyDamage.Runtime.log(runtime, entry, tags: [:webhook])
+  end
+
+  defp log_delivery(_no_runtime, _outcome, _body), do: :ok
+
+  defp delivery_ids(body) do
+    case Jason.decode(body) do
+      {:ok, %{"action" => action, "repository" => %{"full_name" => repo}, "issue" => issue}} ->
+        "  action=#{action}  issue=#{repo}##{issue["number"]}"
+
+      _ ->
+        ""
     end
   end
 
@@ -125,14 +162,18 @@ defmodule GiteaBench.WebhookInjector do
 
   defmodule Registry do
     @moduledoc false
-    # Holds the current run's {queue, token} and the shared listener pid. Owned by
+    # Holds the current run's {queue, token}, the runtime of the command running
+    # now, and the shared listener pid. Owned by
     # the run/test process (linked), so it survives across runs and dies with it.
     use Agent
 
     def ensure_started do
       case Process.whereis(__MODULE__) do
         nil ->
-          Agent.start_link(fn -> %{queue: nil, token: nil, listener: nil} end, name: __MODULE__)
+          Agent.start_link(
+            fn -> %{queue: nil, token: nil, listener: nil, runtime: nil} end,
+            name: __MODULE__
+          )
 
         pid ->
           {:ok, pid}

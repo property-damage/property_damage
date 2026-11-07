@@ -1,35 +1,96 @@
 defmodule PropertyDamage do
   @moduledoc """
-  PropertyDamage: A stateful property-based testing framework for Elixir.
-
-  PropertyDamage combines the power of property-based testing with stateful system
-  testing, allowing you to verify that your system behaves correctly under any
-  sequence of operations.
+  PropertyDamage is a stateful property-based testing framework for Elixir.
+  It generates random sequences of commands, runs them against a real system,
+  checks invariants as the run proceeds, and shrinks any failure to a minimal
+  reproduction.
 
   ## Overview
 
-  Traditional property-based testing generates random inputs and verifies properties
-  hold for all inputs. Stateful property-based testing extends this by generating
-  random *sequences of operations* (commands) and verifying that the system under
-  test (SUT) behaves correctly throughout the entire sequence.
+  Ordinary property-based testing generates random inputs. Stateful testing
+  generates random *sequences of operations* and checks that the system under
+  test (SUT) behaves correctly throughout each sequence.
 
-  ## Key Concepts
+  You implement four behaviours and name each system to test as a target
+  entry. The framework owns the rest: generation, execution, comparison,
+  shrinking and reporting.
 
-  - **Commands**: Operations that can be executed against the SUT (create, update, delete, etc.)
-  - **Model**: Defines what commands are available and how state is tracked
-  - **Projections**: Pure state reducers that process commands and events to maintain state
-  - **Adapters**: Bridge between the test framework and the actual SUT
-  - **Refs**: Symbolic placeholders for entity IDs, resolved during execution
+  - **Command** (`PropertyDamage.Command`) says what an operation is: its
+    fields and a generator for them.
+  - **Model** (`PropertyDamage.Model`) says when each command may run and
+    with which arguments.
+  - **Projection** (`PropertyDamage.Model.Projection`) folds events into state
+    and judges that state.
+  - **Adapter** (`PropertyDamage.Adapter`) says how to send a command to the
+    system.
+  - **Target** (`PropertyDamage.Target`) names one system to run against: an
+    adapter plus its configuration. You give it as a `targets:` entry; it is
+    not a module you write.
 
   ## Two-Phase Execution
 
-  PropertyDamage uses a two-phase execution model:
+  A run has two phases.
 
-  1. **Symbolic Phase**: Generate a sequence of commands with symbolic refs
-  2. **Concrete Phase**: Execute commands against the SUT, resolving refs to real values
+  1. **Symbolic phase.** The framework draws a command sequence from a seed.
+     The model's simulator (`PropertyDamage.Model.Simulator`) predicts the
+     events of each command, so later commands can depend on earlier ones.
+     This phase never touches the system.
+  2. **Concrete phase.** The framework executes the sequence against each
+     target and folds the real events into the projections.
 
-  This separation enables powerful shrinking of failing test cases while maintaining
-  the dependency relationships between commands.
+  The split matters for shrinking. The plan is a pure function of the seed, so
+  the shrinker (`PropertyDamage.Shrinker`) can re-run any smaller plan and get
+  a meaningful answer.
+
+  ## One Engine
+
+  Every kind of run goes through `PropertyDamage.run/1`: a property run against
+  one system, a differential run that compares several systems, and a
+  path-equivalence run that reaches one system by two command paths and
+  compares the outcomes. For each
+  generated sequence, `PropertyDamage.Scheduler` starts one
+  `PropertyDamage.Variant` process per target and advances them in lockstep.
+  Each variant executes one command at a time through
+  `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
+  observations after each root. A root is a top-level generated command; an
+  expansion is a command that unfolds into child commands under a root.
+
+  ## Symbolic Values
+
+  Some values exist only after the system creates them, such as an order id.
+  Mark that event field with `external()` (see `PropertyDamage.External`).
+  During simulation the field becomes a `%PropertyDamage.Placeholder{}`, and
+  commands generated later can use it. In the concrete phase, the framework
+  replaces each placeholder with the value from the real event before the
+  command that uses it runs.
+
+  ## Where Checks Run
+
+  A projection declares its checks with module attributes.
+
+  - `@check` judges the projection state right after events fold, at the points
+    named by `every:` or `at:`.
+  - `@eventually` polls a predicate until it holds or a timeout ends the
+    window. Use it when the system settles later.
+  - `@compare` returns a value that the framework compares across targets after
+    each root.
+
+  See `PropertyDamage.Model.Projection` for the exact options.
+
+  ## Where to Look
+
+  - `PropertyDamage.Generator` and `PropertyDamage.Expansion`: generate command
+    sequences.
+  - `PropertyDamage.Scheduler`, `PropertyDamage.Variant` and
+    `PropertyDamage.Executor`: run a sequence on one or more targets.
+  - `PropertyDamage.Settle`: retries commands on eventually consistent systems.
+  - `PropertyDamage.Shrinker`: reduces a failing sequence.
+  - `PropertyDamage.RunTrace`, `PropertyDamage.Failure` and
+    `PropertyDamage.FailureReport`: record what a run did and why it failed.
+  - `PropertyDamage.Persistence`, `PropertyDamage.Replay` and
+    `PropertyDamage.Export`: save, replay and export failures.
+  - `PropertyDamage.Coverage`, `PropertyDamage.Mutation` and
+    `PropertyDamage.LoadTest`: measure how well a model exercises the system.
 
   ## Basic Usage
 
@@ -97,8 +158,11 @@ defmodule PropertyDamage do
 
   ## Coverage Metrics
 
-  Track how thoroughly your model is being exercised:
+  Track how thoroughly your model is being exercised. `coverage: true` attaches
+  the tracker to the success stats as `:coverage`; a passing result without it
+  raises `ArgumentError`:
 
+      result = PropertyDamage.run(model: MyModel, targets: [MyAdapter], coverage: true)
       coverage = PropertyDamage.coverage(result, MyModel)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 
@@ -117,19 +181,9 @@ defmodule PropertyDamage do
 
   Scan a whole corpus of seeds with `PropertyDamage.RunComparison.scan/1`. See
   `PropertyDamage.RunComparison` for details.
-
-  ## Architecture
-
-  The framework consists of several layers:
-
-  - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
-  - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
-  - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
-  - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, RunComparison
-  - **Utilities**: Persistence, SeedLibrary, mix tasks
-
-  See the individual module documentation for detailed information on each component.
   """
+
+  alias PropertyDamage.Log.{Cap, Filter}
 
   alias PropertyDamage.{
     Comparison,
@@ -182,7 +236,6 @@ defmodule PropertyDamage do
           seed: integer(),
           run_number: non_neg_integer(),
           original_sequence: Sequence.t(),
-          shrunk_sequence: Sequence.t(),
           failed_at_index: non_neg_integer(),
           failure_reason: term(),
           shrink_iterations: non_neg_integer(),
@@ -215,7 +268,25 @@ defmodule PropertyDamage do
   - `:max_commands` - Maximum commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility (default: random)
-  - `:shrink` - Whether to shrink failing sequences (default: true)
+  - `:shrink` - Whether to shrink failing sequences (default: true; `false`
+    under `only: [replay: path]`)
+  - `:run_nonce` - A 64-bit integer that seeds the values the client mints for
+    a run (default: strong random entropy). Hold the seed and vary the nonce to
+    run the same plan with fresh minted values on a shared system
+  - `:only` - Run part of a campaign: `[run: n, variants: names,
+    with_reference: boolean]` runs run `n` of the seed alone, and
+    `[replay: path]` runs a replay artifact (default: the whole campaign)
+  - `:replay_dir` - The directory a failing run writes its replay artifact
+    into, created when missing (default: `"property_damage_replays"`); `false`
+    writes none
+  - `:coverage` - Accumulate the command, transition and state coverage of the
+    whole run and attach the tracker to the success stats as `:coverage`
+    (default: false)
+  - `:external_markers` - Extra atoms to treat as `external()` markers, for
+    domain libraries that mark server-generated fields without depending on
+    PropertyDamage (default: `[]`)
+  - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` updates
+    during the run and a final result (default: nil)
   - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
     disabled), `true` (default file), or a path. Previously-failing seeds are
     replayed before exploration; a still-failing replay halts the run.
@@ -226,11 +297,29 @@ defmodule PropertyDamage do
   - `:regression` - Keyword list for automatic regression test management (see below)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
-  - `:branching` - Keyword list for branching sequences (see below); one
-    target only
   - `:stutter` - Keyword list for idempotency testing (see below)
   - `:check_mode` - How a failing check is handled: `:halt` (default),
     `:record`, `:log` or `:disabled`
+  - `:setup_log` - The lines `PropertyDamage.Log.capture/1` returned for work
+    done before the run, such as seeding the system (default `[]`). The report
+    prints them once, in a Setup section before the reproduction, labeled as
+    shared by every run.
+  - `:report_html` - A directory a failing run writes its report into as an
+    HTML page, beside an `index.html` that browses every page there (default
+    `false`). The environment variable `PD_REPORT_HTML` replaces it. See
+    `PropertyDamage.FailureReport.HTML`.
+  - `:log` - `[keep_attempts: n, only: tags, except: tags]`. `keep_attempts`
+    is how many of a step's last settle or stutter attempts keep their log
+    lines besides the first attempt (default `3`); the report prints each gap
+    as `... N attempts omitted (M lines)`. `only:` and `except:` are
+    non-empty lists of tag atoms that hide whole log lines from the printed
+    report: `only:` shows the lines that carry a listed tag, `except:` hides
+    them and wins, and a line with no tag always shows. The report prints the
+    filter and warns about a listed tag no line carries. A filter hides lines
+    from one reader and protects no secret (redact in the code that logs);
+    the environment variable `PD_LOG`, for example
+    `PD_LOG="only:http,seed except:body"`, replaces it. See
+    `PropertyDamage.Log.Filter`.
   - `:concurrency` - How the targets reach each command boundary: `:serial`
     (default) steps one target at a time in target order; `:parallel` steps
     every target at once
@@ -262,8 +351,8 @@ defmodule PropertyDamage do
   the engine, in this order per run: its adapter's `setup/1`, the `@check at:
   :startup` checks, the setup commands, the roots, the final boundary, the
   `@check at: :teardown` checks, the teardown commands, and its adapter's
-  `teardown/1`. Every path that executes the run again (a branching run, each
-  shrink attempt, the reproduction, `shrink_further/2`, the seed-library
+  `teardown/1`. Every path that executes the run again (each shrink attempt,
+  the reproduction, `shrink_further/2`, the seed-library
   replay, `replay/2`) runs them the same way; the shrinker never removes or
   simplifies a setup command and draws the teardown commands again for each
   candidate. A failing setup command, a check that fails on a setup
@@ -308,22 +397,6 @@ defmodule PropertyDamage do
   run once more, and the report describes that reproduction; when it does not
   fail the same way, the report keeps the original run. A setup failure
   implicates no command and is reported unshrunk.
-
-  ## Branching Options
-
-  Pass `branching: [...]` to generate branching sequences, a prefix, two or
-  more branches and a suffix, run on one target:
-
-  - `:branch_probability` - Probability of creating a branch point (default: 0.2)
-  - `:max_branches` - Maximum number of parallel branches (default: 3)
-  - `:max_branch_length` - Maximum commands per branch (default: 5)
-  - `:min_prefix_length` - Minimum commands before branching (default: 3)
-
-  The branches execute one after another on the one adapter context, each from
-  the forked post-prefix state, and the linearization checker then asks whether
-  some ordering of the branch commands explains the observed events against
-  the model's simulator. The path detects no race (DR-053). `latency:` and a
-  `check_mode:` other than the default are option errors beside `branching:`.
 
   ## Stutter Options (Idempotency Testing)
 
@@ -372,7 +445,7 @@ defmodule PropertyDamage do
 
   - `:name` - Label used in reports (default: last segment of the module name)
   - `:config` - Map passed to `adapter.setup/1` (default: `%{}`)
-  - `:injectors` - List of InjectorAdapter modules for event injection
+  - `:injectors` - List of `PropertyDamage.Adapter.Injector` modules for event injection
     (default: `[]`)
   - `:mocks` - Mock third-party services the SUT calls (default: `[]`).
     A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`
@@ -382,6 +455,9 @@ defmodule PropertyDamage do
     is handed to the adapter on the `PropertyDamage.Runtime` handle
     (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
     the "Mocking Third-Party Services" guide.
+  - `:expansion` - How this target chooses among a root's expansions:
+    `:random` (default), `:identity` or `:reference`. See
+    `PropertyDamage.Target`.
 
   ## Examples
 
@@ -442,9 +518,7 @@ defmodule PropertyDamage do
     # A model that still defines a removed lifecycle hook fails here, before
     # any target is set up.
     PropertyDamage.Model.check_lifecycle!(model)
-    # The rules for expansions/0, and the run options it rules out, fail here
-    # too, before any target is set up.
-    Expansion.check_options!(model, opts)
+    # The rules for expansions/0 fail here too, before any target is set up.
     Expansion.check_model!(model)
     [reference | _] = targets
     max_commands = opts[:max_commands]
@@ -494,15 +568,18 @@ defmodule PropertyDamage do
       first_run: first_run(opts[:only]),
       replay: replay,
       replay_dir: opts[:replay_dir],
+      report_html: FailureReport.HTML.dir(opts[:report_html]),
       seed: seed,
       run_nonce: run_nonce,
       shrink: opts[:shrink],
       shrinker_config: opts[:shrinker_config] || ShrinkerConfig.new(),
       on_failure: build_on_failure_callback(opts),
       reporter: reporter,
-      branching: opts[:branching],
       stutter: opts[:stutter],
       stutter_config: Stutter.parse_config(opts[:stutter]),
+      keep_attempts: keep_attempts(opts),
+      log_filter: Filter.from_option(opts[:log]),
+      setup_log: opts[:setup_log],
       check_mode: opts[:check_mode],
       seed_library: seed_library,
       coverage: opts[:coverage],
@@ -510,7 +587,8 @@ defmodule PropertyDamage do
       compare: opts[:compare],
       measure_latency: opts[:latency] != false,
       latency: latency_given,
-      latency_budget: opts[:latency]
+      latency_budget: opts[:latency],
+      external_markers: opts[:external_markers] || []
     }
 
     # Validate configuration against every target's adapter and injectors
@@ -600,12 +678,7 @@ defmodule PropertyDamage do
     end)
 
     # Generate sequences and run
-    generator_opts = [max_commands: ctx.max_commands]
-
-    generator_opts =
-      if ctx.branching,
-        do: Keyword.put(generator_opts, :branching, ctx.branching),
-        else: generator_opts
+    generator_opts = [max_commands: ctx.max_commands, external_markers: ctx.external_markers]
 
     ctx = Map.put(ctx, :generator, Generator.generate_sequence(ctx.model, generator_opts))
 
@@ -653,11 +726,21 @@ defmodule PropertyDamage do
 
         case Keyword.fetch(only, :replay) do
           {:ok, path} ->
-            replay = load_replay!(path, opts[:model], opts[:targets])
+            # An `external_markers:` the caller gave replaces the artifact's.
+            given = if Keyword.has_key?(raw_opts, :external_markers), do: opts, else: []
+
+            replay =
+              load_replay!(
+                path,
+                opts[:model],
+                opts[:targets],
+                Keyword.take(given, [:external_markers])
+              )
 
             {opts
              |> Keyword.put(:seed, replay.term.seed)
              |> Keyword.put(:targets, replay.targets)
+             |> Keyword.put(:external_markers, replay.external_markers)
              |> Keyword.put(:shrink, Keyword.get(raw_opts, :shrink, false)), replay}
 
           :error ->
@@ -666,11 +749,17 @@ defmodule PropertyDamage do
     end
   end
 
-  defp load_replay!(path, model, targets) do
-    # The loader builds structs of loaded modules only and never loads one, so
-    # the modules `model:` names are loaded first: the model and the commands
-    # it lists. A leaf module no other command names must be loaded by the
-    # caller.
+  # The replay reads the artifact's commands with the markers it records,
+  # or with the `external_markers:` in `markers` when the caller gave one.
+  defp load_replay!(path, model, targets, markers) do
+    # The loader builds structs of loaded modules only. Before it resolves the
+    # file's atoms it loads the framework's failure and expansion modules and,
+    # when the model the file names is loaded, the commands and projections
+    # that model lists, so the modules `model:` names are loaded first: the
+    # model and the commands it lists. A name still unknown after that, such
+    # as a leaf only an expansion produces or an atom of a constants module,
+    # makes the loader load the modules of every loaded application and read
+    # the file once more.
     load_model_modules(model)
 
     term =
@@ -728,14 +817,15 @@ defmodule PropertyDamage do
         %{Enum.find(targets, &(&1.name == name)) | index: index, expansion: mode}
       end)
 
-    sequence = ReplayArtifact.sequence(term)
+    sequence = ReplayArtifact.sequence(term, markers)
 
     %{
       term: term,
       path: path,
       targets: replayed,
+      external_markers: Keyword.get(markers, :external_markers, term.external_markers),
       sequence: sequence,
-      expansion: ReplayArtifact.expansion(term, sequence)
+      expansion: ReplayArtifact.expansion(term, sequence, nil, markers)
     }
   end
 
@@ -772,6 +862,14 @@ defmodule PropertyDamage do
   # `with_reference: false`) has no first target to copy: it runs the
   # choices computed for it on the full `targets:`, which every later
   # realization carries, as a `:random` target carries its own.
+  # How many of a step's last settle or stutter attempts keep their log lines
+  # (`log: [keep_attempts: n]`).
+  defp keep_attempts(opts) do
+    opts
+    |> Keyword.get(:log, [])
+    |> Keyword.get(:keep_attempts, Cap.default_keep_attempts())
+  end
+
   defp executed_targets([%{expansion: :reference} = alone | rest]),
     do: [%{alone | expansion: :random} | rest]
 
@@ -834,9 +932,11 @@ defmodule PropertyDamage do
 
   # The budget is judged once, after every run passed, so the report is not
   # localized to a command and nothing is shrunk or re-executed. It records the
-  # last run's sequence, seed and number.
+  # last run's sequence, seed and number, and the failing target's result of
+  # that run (each run replaces the previous one, so one run stays in memory).
   defp latency_report(ctx, acc, metrics, [{target, failure} | rest]) do
     last = acc.last_run
+    result = Enum.at(last.results, target.index) || %{}
 
     FailureReport.new(
       seed: last.run_seed,
@@ -848,6 +948,10 @@ defmodule PropertyDamage do
       run_nonce: ctx.run_nonce,
       mint_epoch: 0,
       failed_at_index: nil,
+      executed: Map.get(result, :executed, %{}),
+      event_log: Map.get(result, :event_log, []),
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      logs: Map.get(result, :logs, %{}),
       failure_reason: failure,
       kind: :latency_exceeded,
       variant: variant_of(target),
@@ -857,6 +961,8 @@ defmodule PropertyDamage do
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
+      setup_log: ctx.setup_log,
+      log_filter: ctx.log_filter,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_fires: acc.fires,
@@ -866,6 +972,7 @@ defmodule PropertyDamage do
           %{variant: variant_of(other), root: nil, failure: other_failure}
         end,
       check_mode: ctx.check_mode,
+      external_markers: ctx.external_markers,
       campaign: %{seed: ctx.seed, max_runs: ctx.max_runs},
       latency: ctx.latency,
       metrics: metrics
@@ -889,8 +996,7 @@ defmodule PropertyDamage do
         phase: :run,
         run_number: run_number + 1,
         total_runs: ctx.max_runs,
-        command_count: command_count,
-        branch_count: Sequence.branch_count(sequence)
+        command_count: command_count
       }
     end)
 
@@ -899,8 +1005,7 @@ defmodule PropertyDamage do
 
     Telemetry.sequence_start(%{
       run_number: run_number,
-      command_count: command_count,
-      branching: Sequence.branching?(sequence)
+      command_count: command_count
     })
 
     run = %{
@@ -912,12 +1017,10 @@ defmodule PropertyDamage do
       start: seq_start_time
     }
 
-    if ctx.branching,
-      do: run_branching(ctx, run, acc),
-      else: run_lockstep(ctx, run, acc)
+    run_lockstep(ctx, run, acc)
   end
 
-  # A linear sequence runs on every target through the lockstep scheduler,
+  # A sequence runs on every target through the lockstep scheduler,
   # which owns each target's event queue, injectors, mocks, setup and teardown.
   defp run_lockstep(ctx, run, acc) do
     outcome = schedule(ctx, run)
@@ -964,7 +1067,10 @@ defmodule PropertyDamage do
            | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
              setup_commands: acc.setup_commands + length(run.sequence.setup),
              teardown_commands: acc.teardown_commands + length(run.sequence.teardown),
-             last_run: Map.take(run, [:sequence, :run_seed, :run_number])
+             last_run:
+               run
+               |> Map.take([:sequence, :run_seed, :run_number])
+               |> Map.put(:results, if(ctx.measure_latency, do: outcome.results, else: []))
          }}
 
       _failure ->
@@ -1004,73 +1110,15 @@ defmodule PropertyDamage do
         compare: ctx.compare,
         measure_latency: ctx.measure_latency,
         stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         check_mode: ctx.check_mode
       )
 
     outcome
   end
 
-  # A branching sequence runs on the one target through the linear engine.
-  defp run_branching(ctx, run, acc) do
-    fires_before = acc.fires
-
-    case execute_branching(ctx, run) do
-      {:ok, result} = run_result ->
-        Telemetry.sequence_stop(run.start, %{
-          run_number: run.run_number,
-          success: result.success,
-          commands_executed: Sequence.command_count(run.sequence),
-          variant: if(result.success, do: nil, else: variant_of(ctx.target))
-        })
-
-        acc = accumulate_coverage(acc, result, run.sequence, nil)
-
-        if result.success do
-          {:pass,
-           %{
-             acc
-             | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
-               setup_commands: acc.setup_commands + length(run.sequence.setup),
-               teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
-           }}
-        else
-          found = branching_found(ctx, run, run_result, acc.fires)
-          handle_failure(ctx, Map.put(found, :fires_before, fires_before))
-        end
-
-      # Executor.run returns {:error, reason} when the adapter's setup/1
-      # fails: a setup failure of the one target, never shrunk.
-      {:error, _reason} = run_result ->
-        handle_failure(ctx, branching_found(ctx, run, run_result, acc.fires))
-    end
-  end
-
-  defp execute_branching(ctx, run) do
-    target = ctx.target
-
-    RunServices.with_services(target, fn event_queue, mock_registry ->
-      Executor.run(run.sequence, ctx.model, target.adapter,
-        config: target.config,
-        event_queue: event_queue,
-        mock_registry: mock_registry,
-        stutter_config: ctx.stutter_config,
-        # Explicit stutter RNG base (DR-029): per-run seed so stutter
-        # decisions are decoupled from run count and seed-library replay
-        # drift, yet reproduce on the same campaign seed.
-        rng_seed: run.run_seed,
-        # Client-minted run-scoped values (DR-034): the exploration run is
-        # epoch 0; the nonce is constant across the campaign's runs.
-        run_nonce: ctx.run_nonce,
-        mint_epoch: 0,
-        telemetry: Telemetry.engine_context(variant_of(target), run.run_number),
-        setup_commands: run.sequence.setup,
-        teardown_commands: run.sequence.teardown
-      )
-    end)
-  end
-
-  # A failure a run found, in one shape for the lockstep and the branching path:
-  # the run that found it (sequence, effective seed, run number), the whole-run
+  # A failure a run found: the run that found it (sequence, effective seed, run number), the whole-run
   # check firings so far, the scheduler-shaped failure (`kind`, `variant`,
   # `root`, `reason`), and the failing target's finished result (nil when its
   # setup failed).
@@ -1085,43 +1133,8 @@ defmodule PropertyDamage do
       compare_counts: outcome.compare_counts,
       failure: outcome.failure,
       other_failures: outcome.other_failures,
-      result: Enum.at(outcome.results, outcome.failure.variant.index)
-    }
-  end
-
-  defp branching_found(ctx, run, run_result, fires) do
-    {failure, result} =
-      case run_result do
-        {:ok, result} ->
-          {%{
-             kind: FailureReport.kind_of(result.failure_reason),
-             variant: variant_of(ctx.target),
-             root: result.failed_at_index,
-             reason: result.failure_reason,
-             stacktrace: result.stacktrace
-           }, result}
-
-        {:error, reason} ->
-          {%{
-             kind: :setup_failed,
-             variant: variant_of(ctx.target),
-             root: nil,
-             reason: Failure.setup_failed(reason),
-             stacktrace: nil
-           }, nil}
-      end
-
-    %{
-      sequence: run.sequence,
-      expansion: nil,
-      expansion_counts: %{},
-      run_seed: run.run_seed,
-      run_number: run.run_number,
-      fires: fires,
-      compare_counts: Comparison.zero_counts(ctx.model),
-      failure: failure,
-      other_failures: [],
-      result: result
+      result: Enum.at(outcome.results, outcome.failure.variant.index),
+      reference_result: Enum.at(outcome.results, 0)
     }
   end
 
@@ -1175,18 +1188,18 @@ defmodule PropertyDamage do
   # its teardown commands generated against the state the roots leave.
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
-    Generator.teardown_commands(ctx.model, sequence, run_seed)
+    Generator.teardown_commands(ctx.model, sequence, run_seed, markers(ctx))
   end
 
-  # Every target's concrete sequence for a generated linear sequence: the roots
-  # with each target's expansions realized, before any target is set up. A
-  # branching run has one target and runs its sequence as generated.
-  defp expand(%{branching: branching}, _sequence, _run_seed) when branching != nil, do: nil
+  # The `:external_markers` option of the generator and expansion calls.
+  defp markers(ctx), do: [external_markers: ctx.external_markers]
 
+  # Every target's concrete sequence for a generated sequence: the roots with
+  # each target's expansions realized, before any target is set up.
   defp expand(ctx, sequence, run_seed) do
     if Expansion.defines?(ctx.model) do
       ctx.model
-      |> Expansion.expand(sequence, ctx.all_targets, run_seed)
+      |> Expansion.expand(sequence, ctx.all_targets, run_seed, markers(ctx))
       |> running(ctx)
     else
       Expansion.identity(sequence, ctx.targets)
@@ -1395,8 +1408,7 @@ defmodule PropertyDamage do
   end
 
   # Replays one seed as run 0 of itself: the sequence, setup and teardown
-  # commands included, on every target (through the lockstep scheduler, or the
-  # linear engine for a branching run). A failure, when this seed is the
+  # commands included, on every target through the lockstep scheduler. A failure, when this seed is the
   # representative (`build_rep?`), goes through the run's failure path: shrunk,
   # reproduced and reported. A target's setup failure halts the replay with its
   # report.
@@ -1427,18 +1439,11 @@ defmodule PropertyDamage do
   # Replay is a pre-exploration phase; whole-run anti-vacuity coverage is an
   # exploration concern, so no firings are accumulated here.
   defp replay_run(ctx, run) do
-    if ctx.branching do
-      case execute_branching(ctx, run) do
-        {:ok, %{success: true}} -> :passed
-        run_result -> {:failed, branching_found(ctx, run, run_result, %{})}
-      end
-    else
-      outcome = schedule(ctx, run)
+    outcome = schedule(ctx, run)
 
-      if outcome.failure,
-        do: {:failed, lockstep_found(run, outcome, %{}, %{})},
-        else: :passed
-    end
+    if outcome.failure,
+      do: {:failed, lockstep_found(run, outcome, %{}, %{})},
+      else: :passed
   end
 
   defp replay_report(ctx, found, true) do
@@ -1596,7 +1601,7 @@ defmodule PropertyDamage do
     # non-resettable SUT. Epoch 0 was the exploration run.
     mint_epoch_counter = :atomics.new(1, signed: false)
 
-    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms} =
+    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms, shrink_stop} =
       if ctx.shrink do
         shrink_result =
           Shrinker.shrink(found.sequence,
@@ -1613,6 +1618,8 @@ defmodule PropertyDamage do
             # them with stutter forced on (probability 1.0), so they minimize to
             # the offending command rather than being skipped.
             stutter_config: ctx.stutter_config,
+            keep_attempts: ctx.keep_attempts,
+            external_markers: ctx.external_markers,
             # The run's effective seed: every attempt runs as run 0 of it, so
             # the per-target RNG and the stutter base track the original run.
             rng_seed: found.run_seed,
@@ -1624,12 +1631,12 @@ defmodule PropertyDamage do
           )
 
         {shrink_result.sequence, shrink_result.expansion, shrink_result.iterations,
-         shrink_result.time_ms}
+         shrink_result.time_ms, shrink_result.stop}
       else
-        {found.sequence, found.expansion, 0, 0}
+        {found.sequence, found.expansion, 0, 0, :done}
       end
 
-    shrink = %{iterations: shrink_iterations, time_ms: shrink_time_ms}
+    shrink = %{iterations: shrink_iterations, time_ms: shrink_time_ms, stop: shrink_stop}
 
     # Re-execute the shrunk sequence to get fresh state (the original result has
     # state from before shrinking). The reproduction is a fresh SUT execution:
@@ -1652,6 +1659,7 @@ defmodule PropertyDamage do
             Map.merge(found, %{
               failure: failure,
               result: result,
+              reference_result: counts.reference_result,
               other_failures: other_failures,
               expansion: expansion,
               original_root: found.failure.root,
@@ -1671,9 +1679,8 @@ defmodule PropertyDamage do
     report_failure(ctx, report)
   end
 
-  # Runs the shrunk sequence once: a linear sequence on every target through
-  # the scheduler, a branching one on the one target through the linear engine,
-  # each with its own services. For a stutter failure, stutter is forced on
+  # Runs the shrunk sequence once on every target through the scheduler, each
+  # target with its own services. For a stutter failure, stutter is forced on
   # with the run's seed so the fresh state carries the reproduced violation
   # (DR-029). Returns `{:reproduced, failure, result, other_failures, counts}`
   # when its primary failure has the found failure's signature (kind, name,
@@ -1681,9 +1688,7 @@ defmodule PropertyDamage do
   # reproduction's `compare_counts` and the check `fires` of its reference
   # target; `{:setup_failed, reason}` when a target's setup failed, else
   # `:not_reproduced`.
-  defp reproduce(ctx, sequence, found, epoch, expansion)
-
-  defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch, expansion) do
+  defp reproduce(ctx, %Sequence{} = sequence, found, epoch, expansion) do
     {:ok, outcome} =
       Scheduler.run(
         model: ctx.model,
@@ -1701,6 +1706,7 @@ defmodule PropertyDamage do
         concurrency: ctx.concurrency,
         compare: ctx.compare,
         stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
+        keep_attempts: ctx.keep_attempts,
         check_mode: ctx.check_mode
       )
 
@@ -1720,54 +1726,6 @@ defmodule PropertyDamage do
     end
   end
 
-  defp reproduce(ctx, sequence, found, epoch, _expansion) do
-    target = ctx.target
-
-    run_result =
-      RunServices.with_services(target, fn event_queue, mock_registry ->
-        Executor.run(sequence, ctx.model, target.adapter,
-          config: target.config,
-          event_queue: event_queue,
-          mock_registry: mock_registry,
-          stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
-          rng_seed: found.run_seed,
-          run_nonce: ctx.run_nonce,
-          mint_epoch: epoch,
-          telemetry: Telemetry.engine_context(variant_of(target), found.run_number),
-          setup_commands: sequence.setup,
-          teardown_commands: sequence.teardown
-        )
-      end)
-
-    case run_result do
-      {:ok, %{success: false, failure_reason: %Failure{type: %Failure.Setup{}} = reason}} ->
-        {:setup_failed, reason}
-
-      {:ok, %{success: false, failure_reason: %Failure{} = reason} = result} ->
-        failure = %{
-          found.failure
-          | root: result.failed_at_index,
-            reason: reason,
-            stacktrace: result.stacktrace
-        }
-
-        counts = %{
-          compare_counts: Comparison.zero_counts(ctx.model),
-          fires: project_fires(Map.get(result, :check_counters, %{}))
-        }
-
-        if same_failure?(failure, found.failure),
-          do: {:reproduced, failure, result, [], counts},
-          else: :not_reproduced
-
-      {:error, reason} ->
-        {:setup_failed, Failure.setup_failed(reason)}
-
-      _passed ->
-        :not_reproduced
-    end
-  end
-
   # The compare counts of a lockstep reproduction and the check firings of
   # its reference target (DR-026: firings count what the reference ran).
   defp reproduction_counts(outcome) do
@@ -1777,14 +1735,17 @@ defmodule PropertyDamage do
         _no_reference -> %{}
       end
 
-    %{compare_counts: outcome.compare_counts, fires: fires}
+    %{
+      compare_counts: outcome.compare_counts,
+      fires: fires,
+      reference_result: Enum.at(outcome.results, 0)
+    }
   end
 
   # What every target runs when the shrunk sequence is reproduced: the
   # failing run's choices, realized again for the shrunk sequence (the
   # shrinker carries them), or every root as itself for a model without
-  # expansions. A branching run has none.
-  defp reproduction_expansion(_ctx, _sequence, _shrunk, %{expansion: nil}), do: nil
+  # expansions.
   defp reproduction_expansion(_ctx, _sequence, %{} = shrunk, _found), do: shrunk
 
   defp reproduction_expansion(ctx, sequence, nil, _found),
@@ -1803,7 +1764,7 @@ defmodule PropertyDamage do
   defp failure_report(ctx, found, how) do
     {shrunk_sequence, plan_source, mint_epoch, shrink} =
       case how do
-        :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0}}
+        :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0, stop: :done}}
         {:fallback, shrink} -> {found.sequence, :generated, 0, shrink}
         # Without shrinking the reproduced sequence is the generated one.
         {:shrunk, sequence, epoch, shrink} -> {sequence, plan_source(ctx), epoch, shrink}
@@ -1837,19 +1798,26 @@ defmodule PropertyDamage do
       variant: failure.variant,
       shrink_iterations: shrink.iterations,
       shrink_time_ms: shrink.time_ms,
+      shrink_stop: shrink.stop,
+      reference_result: Map.get(found, :reference_result),
       event_log: Map.get(result, :event_log, []),
       projections: Map.get(result, :projections, %{}),
       projections_before: Map.get(result, :projections_before),
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      linearization: Map.get(result, :linearization),
+      # The reported run's log lines (DR-054); a target whose setup/1 failed
+      # has no result, and its failure carries that setup's lines.
+      logs: Map.get(result, :logs) || Map.get(failure, :logs, %{}),
       stacktrace: failure.stacktrace,
       model: ctx.model,
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
+      setup_log: ctx.setup_log,
+      log_filter: ctx.log_filter,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_mode: ctx.check_mode,
+      external_markers: ctx.external_markers,
       check_fires: found.fires,
       run_check_fires: run_fires(found),
       other_failures: Enum.map(found.other_failures, &other_failure/1),
@@ -1878,8 +1846,8 @@ defmodule PropertyDamage do
   defp ran_a_root?(result),
     do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
 
-  # The concrete sequences of the run the report describes; a branching run
-  # ran its one target's roots as generated.
+  # The concrete sequences of the run the report describes; a found failure
+  # that carries none ran the reference target's roots as generated.
   defp report_expansion(_ctx, %{expansion: %{} = expansion}, _sequence), do: expansion
   defp report_expansion(ctx, _found, sequence), do: Expansion.identity(sequence, [ctx.target])
 
@@ -1889,6 +1857,7 @@ defmodule PropertyDamage do
   # Announces a failure report and returns it as the run's result.
   defp report_failure(ctx, failure_report) do
     failure_report = with_replay(ctx, failure_report)
+    write_html(ctx, failure_report)
 
     # Terminal failure notification (DR-022): the verbose consumer renders this
     # as the failure summary. The authoritative result is the returned report.
@@ -1970,6 +1939,26 @@ defmodule PropertyDamage do
       {:ok, path} -> %{report | replay_path: path, replay_status: :written}
       {:error, reason} -> %{report | replay_status: {:write_failed, reason}}
     end
+  end
+
+  # The report's HTML page, when the run names a directory for it. An error
+  # while rendering or writing the page costs one logged warning, never the
+  # report.
+  defp write_html(%{report_html: dir}, report) when is_binary(dir) do
+    case FailureReport.HTML.write(report, dir) do
+      {:ok, _path} -> :ok
+      {:error, reason} -> warn_html(dir, inspect(reason))
+    end
+  rescue
+    exception -> warn_html(dir, Exception.message(exception))
+  end
+
+  defp write_html(_ctx, _report), do: :ok
+
+  defp warn_html(dir, reason) do
+    require Logger
+
+    Logger.warning("could not write the failure report's HTML page into #{dir}: #{reason}")
   end
 
   # A replay run's shrink found a failure with fewer roots than the artifact.
@@ -2066,6 +2055,15 @@ defmodule PropertyDamage do
     (default: the report's `concurrency`)
   - `:compare` - `[converge_within: ms]`, as on `PropertyDamage.run/1`
     (default: the report's `compare`)
+  - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
+    step's last settle or stutter attempts keep their log lines in the new
+    report (default 3). The report does not record the run's value, so a run
+    given another value passes it here again.
+  - `:external_markers` - The atom markers of the run, as on
+    `PropertyDamage.run/1` (default: the report's `external_markers`, the
+    markers the run named). The re-shrink simulates the report's commands
+    again, and only a marker in this list turns an event field into a
+    placeholder that later commands resolve.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2094,7 +2092,10 @@ defmodule PropertyDamage do
         strategy: :exhaustive
       )
 
-      IO.puts("Reduced from \#{length(original)} to \#{length(smaller)} commands")
+      alias PropertyDamage.{FailureReport, Sequence}
+      before = failure |> FailureReport.shrunk_sequence() |> Sequence.command_count()
+      after_count = smaller |> FailureReport.shrunk_sequence() |> Sequence.command_count()
+      IO.puts("Reduced from \#{before} to \#{after_count} commands")
   """
   @spec shrink_further(FailureReport.t(), keyword()) ::
           {:ok, FailureReport.t()} | {:error, term()}
@@ -2117,7 +2118,8 @@ defmodule PropertyDamage do
           ReplayArtifact.reexecution(
             report,
             Enum.map(targets, & &1.name),
-            "PropertyDamage.shrink_further/2"
+            "PropertyDamage.shrink_further/2",
+            external_markers: further_markers(report, opts)
           )
 
         if names_failing_target?(targets, report.variant),
@@ -2125,6 +2127,10 @@ defmodule PropertyDamage do
           else: {:error, {:variant_not_in_targets, report.variant.name}}
     end
   end
+
+  # The markers a re-shrink simulates with: the option, else the run's.
+  defp further_markers(report, opts),
+    do: Keyword.get(opts, :external_markers, report.external_markers)
 
   # Whether `targets` hold the target the report failed in at the index it
   # failed at. A candidate counts only when it fails in that target, so
@@ -2148,6 +2154,8 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
+      keep_attempts: Options.keep_attempts!(opts),
+      external_markers: further_markers(report, opts),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }
@@ -2184,6 +2192,8 @@ defmodule PropertyDamage do
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
+        external_markers: ctx.external_markers,
         check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
@@ -2222,6 +2232,8 @@ defmodule PropertyDamage do
             variant: failure.variant,
             shrink_iterations: report.shrink_iterations + shrink_result.iterations,
             shrink_time_ms: report.shrink_time_ms + elapsed,
+            shrink_stop: shrink_result.stop,
+            reference_result: counts.reference_result,
             event_log: Map.get(result, :event_log, []),
             executed: Map.get(result, :executed, %{}),
             # A further-shrunk report only reaches here on a genuine
@@ -2246,10 +2258,14 @@ defmodule PropertyDamage do
               |> merge_fires(counts.fires),
             run_check_fires: counts.fires,
             other_failures: Enum.map(other_failures, &other_failure/1),
+            # The report's own setup lines stay, as the caller gave them.
+            setup_log: report.setup_log,
+            log_filter: report.log_filter,
             stutter: ctx.stutter,
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,
-            linearization: Map.get(result, :linearization),
+            external_markers: ctx.external_markers,
+            logs: Map.get(result, :logs, %{}),
             stacktrace: failure.stacktrace,
             expansion: shrink_result.expansion,
             expansion_counts: recount(report, shrink_result.expansion, failure.root)
@@ -2402,12 +2418,18 @@ defmodule PropertyDamage do
   @doc """
   Load a previously saved failure report.
 
+  Returns `{:ok, report}`, or `{:ok, report, warnings}` when the file was saved
+  by a different version and may not reproduce, or `{:error, reason}`.
+
   ## Examples
 
       {:ok, failure} = PropertyDamage.load_failure("failures/currency-bug.pd")
       PropertyDamage.replay(failure)
   """
-  @spec load_failure(Path.t()) :: {:ok, FailureReport.t()} | {:error, term()}
+  @spec load_failure(Path.t()) ::
+          {:ok, FailureReport.t()}
+          | {:ok, FailureReport.t(), [PropertyDamage.Persistence.warning()]}
+          | {:error, term()}
   defdelegate load_failure(path), to: PropertyDamage.Persistence, as: :load
 
   @doc """
@@ -2477,10 +2499,13 @@ defmodule PropertyDamage do
   @doc """
   Load a seed library from disk.
 
-  Returns an empty library if the file doesn't exist.
+  With no argument it reads `property_damage_seeds.json` and returns an empty
+  library if that file doesn't exist. A path you pass that doesn't exist
+  returns `{:error, :enoent}`.
 
   ## Example
 
+      {:ok, library} = PropertyDamage.load_seed_library()
       {:ok, library} = PropertyDamage.load_seed_library("seeds.json")
   """
   @spec load_seed_library(Path.t()) :: {:ok, PropertyDamage.SeedLibrary.t()} | {:error, term()}
@@ -2670,6 +2695,74 @@ defmodule PropertyDamage do
   end
 
   # ============================================================================
+  # Log Lines
+  # ============================================================================
+
+  @doc """
+  Writes one log line for the failure report (DR-054).
+
+  A line is shown only in a failure report, under the step whose code wrote
+  it, in timestamp order with that step's events, as its offset from the
+  target's run start, its tags and its message:
+
+      +0.12s log   [http url] POST /transfers
+
+  PropertyDamage never prints a line during a run and never forwards one to
+  Elixir's `Logger`. Call it behind `require PropertyDamage`; the call site's
+  file and line are recorded.
+
+  ## Message
+
+    * a string is stored as written and printed as written;
+    * any other value is stored as it was at the call and printed with
+      `inspect/2` when the report is formatted;
+    * a 0-arity function is called each time the report is formatted, after
+      the run ended, and its result printed by the two rules above. A function
+      that reads state that can change (an `Agent`, an ETS table) sees the
+      value at the end of the run; one that raises prints
+      `(log line raised: ...)`.
+
+  The macro never wraps a message in a function on its own.
+
+  ## Options
+
+    * `:tags` - a literal list of atoms, printed in brackets before the
+      message. It is the only option; any other option, a tag that is not an
+      atom, or options that are not a literal keyword list is a compile error.
+
+  ## Scope
+
+  The call needs a scope: code PropertyDamage runs at an execution point (an
+  adapter callback, a command, a mock handler), or a process
+  started from it through `Task`. Anywhere else it raises
+  `PropertyDamage.Log.NoScopeError`; a process the adapter did not start
+  through `Task` logs with `PropertyDamage.Runtime.log/3`. See
+  `PropertyDamage.Log`.
+
+  Remove secrets before the call: every line reaches the printed report.
+
+  ## Example
+
+      require PropertyDamage
+
+      def execute(%Transfer{amount: amount}, %{client: client}, _runtime) do
+        PropertyDamage.log("POST /transfers", tags: [:http, :url])
+        PropertyDamage.log(%{amount: amount}, tags: [:http, :body])
+        {status, body} = MyApp.Client.post(client, "/transfers", %{amount: amount})
+        PropertyDamage.log(fn -> Jason.decode!(body) end, tags: [:http, :response])
+        {:ok, [%Transferred{amount: amount, status: status}]}
+      end
+  """
+  defmacro log(message, opts \\ []) do
+    tags = PropertyDamage.Log.__tags__!(opts, __CALLER__)
+    location = {__CALLER__.file, __CALLER__.line}
+
+    quote do
+      PropertyDamage.Log.__log__(unquote(message), unquote(tags), unquote(location))
+    end
+  end
+
+  # ============================================================================
   # Model-Free Execution (Static Regression Tests)
   # ============================================================================
 
@@ -2736,12 +2829,23 @@ defmodule PropertyDamage do
   For simple tests that only need command return values (no injector events),
   calling the adapter directly is simpler:
 
-      {:ok, adapter_ctx} = MyAdapter.setup(%{})
-      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx)
-      assert [%UserCreated{name: "alice"}] = events
-      MyAdapter.teardown(adapter_ctx)
+      {:ok, user_context} = MyAdapter.setup(%{})
 
-  Use `execute/2` when you need the full infrastructure: injector adapters,
+      runtime = %PropertyDamage.Runtime{
+        inject: fn _event -> :ok end,
+        start_poller: fn _opts -> raise "no pollers in a direct call" end
+      }
+
+      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, user_context, runtime)
+
+      assert [%UserCreated{name: "alice"}] = events
+      MyAdapter.teardown(user_context)
+
+  The adapter callback is `execute/3`: command, user context, runtime handle.
+  The stub handle above suits an adapter that neither injects events nor
+  starts pollers; the two functions are the required fields of the struct.
+
+  Use `PropertyDamage.execute/2` when you need the full infrastructure: injector adapters,
   event queue, external() value resolution across commands, etc.
   """
   @spec execute([struct()], keyword()) ::
@@ -2759,7 +2863,12 @@ defmodule PropertyDamage do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
-      case RunServices.setup_injectors(injectors, config, event_queue) do
+      {set_up, _lines} =
+        PropertyDamage.Log.inline(fn ->
+          RunServices.setup_injectors(injectors, config, event_queue)
+        end)
+
+      case set_up do
         {:ok, injector_contexts} ->
           sequence = Sequence.linear(commands)
           execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts)
@@ -2775,8 +2884,14 @@ defmodule PropertyDamage do
 
   # Sets the adapter up and runs the sequence once the injectors are up, then
   # tears down the adapter and the injectors.
+  #
+  # Setup and teardown run in a scope of their own, and each command logs into
+  # a sink of its own (`Executor.execute_raw/3`); this call builds no failure
+  # report, so every log line is dropped (DR-054).
   defp execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts) do
-    case adapter.setup(config) do
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         context = %{adapter_context: adapter_context, event_queue: event_queue}
 
@@ -2784,14 +2899,16 @@ defmodule PropertyDamage do
           Executor.execute_raw(sequence, adapter, context)
         after
           # Cleanup. The event queue is stopped by the caller's `after`.
-          adapter.teardown(adapter_context)
-          RunServices.teardown_injectors(injector_contexts)
+          PropertyDamage.Log.inline(fn ->
+            adapter.teardown(adapter_context)
+            RunServices.teardown_injectors(injector_contexts)
+          end)
         end
 
       {:error, reason} ->
         # Cleanup injectors on setup failure; the event queue is stopped by the
         # caller's `after`.
-        RunServices.teardown_injectors(injector_contexts)
+        PropertyDamage.Log.inline(fn -> RunServices.teardown_injectors(injector_contexts) end)
         {:error, Failure.setup_failed(reason)}
     end
   end
@@ -2824,10 +2941,10 @@ defmodule PropertyDamage do
         import PropertyDamage, only: [external: 0]
 
         defstruct [
-          payment_id: external(),
-          transaction_ref: external(),
           :order_id,
-          :amount
+          :amount,
+          payment_id: external(),
+          transaction_id: external()
         ]
       end
 
@@ -2836,8 +2953,8 @@ defmodule PropertyDamage do
   Externals are supported in nested maps:
 
       defstruct [
-        ids: %{transaction: external(), confirmation: external()},
-        :amount
+        :amount,
+        ids: %{transaction: external(), confirmation: external()}
       ]
 
   ## Fixed-Length Lists
@@ -2845,8 +2962,8 @@ defmodule PropertyDamage do
   Externals are supported in fixed-length lists:
 
       defstruct [
-        item_ids: [external(), external(), external()],
-        :batch_name
+        :batch_name,
+        item_ids: [external(), external(), external()]
       ]
 
   ## How It Works

@@ -31,6 +31,17 @@ defmodule PropertyDamage.FailureReport do
 
       IO.inspect(report, pretty: true)
 
+  The printed report (DR-055, DR-056) opens with a banner and the seed, then
+  has four sections. Failure names the failure, the step it happened at and
+  the fields of its kind, in one aligned column. Minimal Reproduction lists
+  every step with its label (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`)
+  and its events under it, and lists both sides of a
+  comparison failure. Projections shows the projection state attribute by
+  attribute, before against after the failing step, or the reference against
+  the variant at the failing boundary. Reproduction binds `targets` once and
+  ends with the calls that rerun the failure. The same layout prints as
+  markdown, and a report also prints as JSON or as one compact line.
+
   A plain `inspect/1` prints a one-line summary. To turn a report into a test,
   a script or a notebook, see `PropertyDamage.Export`; to save it, see
   `PropertyDamage.save_failure/3`.
@@ -46,11 +57,14 @@ defmodule PropertyDamage.FailureReport do
   fine-grained `Failure.kind/1` (which stays inside `failure_reason`):
 
   - `:check_failed` - a check did not hold: a check at a command, an
-    `@eventually` timeout, a `:startup` or finalization check, an idempotency
-    or linearization violation.
+    `@eventually` timeout, a `:startup` or finalization check, or an
+    idempotency violation.
   - `:diverged` - a target's boundary observation (a `@compare` function)
     still differed from the reference's when the convergence bound expired.
-  - `:setup_failed` - a target's adapter `setup/1` returned an error or raised.
+  - `:setup_failed` - a target could not be brought up: its adapter `setup/1`
+    returned an error or raised, model code or the variant failed while it came
+    up, a setup command failed, a check failed on a setup command's event, or
+    a setup command left an `external()` value unresolved.
   - `:execution_failed` - a command could not be executed: an adapter raise,
     a command the framework could not run, and, in a one-target run, an
     adapter `{:error, _}` answer.
@@ -74,6 +88,13 @@ defmodule PropertyDamage.FailureReport do
   `reproduction_command/1` prints each one that differs from its default, and
   `PropertyDamage.shrink_further/2` re-shrinks under them; `PropertyDamage.Replay`
   replays under the report's `check_mode` too.
+
+  `external_markers` records the run's `external_markers:` option, the atoms
+  the run treated as `external()` markers (`[]` by default). Every path that
+  simulates the report's commands again reads them: `PropertyDamage.Replay`,
+  `PropertyDamage.shrink_further/2`, `PropertyDamage.Analysis` and
+  `PropertyDamage.Export`. An `external_markers:` option given to one of them
+  replaces the recorded list.
 
   `campaign` records the campaign a `:latency_exceeded` report judged its
   budget over, `%{seed: seed, max_runs: n}` (the run's `seed:` and
@@ -125,13 +146,57 @@ defmodule PropertyDamage.FailureReport do
   The printed report ends with three calls: `reproduction_command/1` (the
   seed, before shrinking), `expansion_command/1` (the failing target's
   sequence, regenerated) and, last, `replay_command/1`, which runs the
-  artifact with `only: [replay: path]`.
+  artifact with `only: [replay: path]`. The report binds the targets once
+  (`targets = [...]`), and each printed call names `targets: targets` in
+  place of the list these functions return.
 
   Every path that executes the failure again reads what each target ran
   from `replay` (or, when the report has no term, from the choices its trace
   records): `PropertyDamage.shrink_further/2`, `PropertyDamage.Replay`,
   `PropertyDamage.Analysis.isolate_trigger/2` and the exports. They work for
   every target the report records, leaves included.
+
+  ## The reference side of a comparison failure
+
+  For `:diverged` and `:did_not_converge`, the report also keeps what the
+  reference target did in the reported run, so a reader can set both sides
+  side by side:
+
+    * `reference_trace` - the reference target's `PropertyDamage.RunTrace` of
+      the reported run. `trace` and `reference_trace` always come from the
+      same run: the shrunk reproduction when the shrinker reproduced the
+      failure, else the original run.
+    * `reference_state_at_failure` - the reference's projection state at the
+      failing boundary, `%{projection_module => state}` like
+      `state_at_failure`. It holds every fold up to the last one attributed to
+      the failing root, the folds of the leaf commands that root ran included,
+      and nothing applied after the boundary: not the events of the teardown
+      commands, and not what the run folded while it finalized.
+
+  Every other kind leaves both fields `nil`. `reference_steps/1` and
+  `reference_event_log/1` read the reference's trace the way `steps/1` and
+  `event_log/1` read the failing target's, which they keep meaning.
+
+  `setup_log` holds the `PropertyDamage.Log.Line` structs the run's `setup_log:`
+  option carried, the lines a test captured with `PropertyDamage.Log.capture/1`
+  for work done before the run (DR-054). Every report `PropertyDamage.run/1`
+  builds has them, and `PropertyDamage.shrink_further/2` keeps them. The report
+  prints them once, in a Setup section, whatever the number of targets. Like
+  every log line they live only in memory: a saved report holds `[]`, and so
+  does a loaded one.
+
+  `log_filter` holds the run's `log: [only:, except:]` tag filter
+  (`PropertyDamage.Log.Filter`), or `nil` for none. Every report
+  `PropertyDamage.run/1` builds has it, and `PropertyDamage.shrink_further/2`
+  keeps it, so `PropertyDamage.ExUnit.format_failure/1` prints a run's filter.
+  It is a view of the report and lives only in memory: a saved report holds
+  `nil`, and so does a loaded one.
+
+  `shrink_stop` records why the shrinker stopped: `:done` when it finished
+  inside its budget or never ran (`shrink: false`, a setup failure, a latency
+  report), `:max_iterations` or `:max_time` when a budget ran out first (the
+  iteration cap wins when both did), in which case the reproduction may not be
+  minimal. It is `nil` on a report saved before the field existed.
 
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
@@ -140,12 +205,16 @@ defmodule PropertyDamage.FailureReport do
   campaign's runs before the failing one plus the run the report describes;
   `run_check_fires` holds that run's own share, so a further shrink can
   replace it with its reproduction's. Convenience accessors
-  derive the common views: `failure_type/1` (the kind), `check_name/1`,
+  derive the common views: `failure_type/1` (the fine-grained
+  `PropertyDamage.Failure.kind/1` of `failure_reason`, not the report `kind`
+  above: an idempotency violation gives `:idempotency_violation` where the
+  report `kind` is `:check_failed`), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
 
   alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, LatencyMetrics, RunTrace, Sequence}
   alias PropertyDamage.Failure.Check
+  alias PropertyDamage.Failure.Naming
 
   # The `max_commands:` default of `PropertyDamage.run/1`; a reproduction
   # command prints the option only when the run used another value.
@@ -158,13 +227,7 @@ defmodule PropertyDamage.FailureReport do
   @type failure_type :: Failure.kind()
 
   @typedoc "The outcome a report describes; see \"Report kind and the failing target\"."
-  @type kind ::
-          :check_failed
-          | :diverged
-          | :setup_failed
-          | :execution_failed
-          | :did_not_converge
-          | :latency_exceeded
+  @type kind :: Failure.report_kind()
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -186,7 +249,7 @@ defmodule PropertyDamage.FailureReport do
     * `:refused` - not built: a command field holds a value no file can hold
       (`replay` names where)
     * `:unavailable` - no artifact can describe the run: a latency budget
-      judged over the whole campaign, or a branching sequence
+      judged over the whole campaign
     * `:reproduced` - the run replayed the artifact at `replay_path` and
       failed as it records
     * `:not_reproduced` - the run replayed the artifact at `replay_path` and
@@ -223,6 +286,7 @@ defmodule PropertyDamage.FailureReport do
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
           check_mode: :halt | :record | :log | :disabled,
+          external_markers: [atom()],
           campaign: %{seed: integer(), max_runs: pos_integer()} | nil,
           latency: false | true | keyword(),
           metrics: %{String.t() => map()} | nil,
@@ -231,6 +295,23 @@ defmodule PropertyDamage.FailureReport do
           # deep structures (plan, event_log, executed) live here once;
           # `shrunk_sequence/1` and `event_log/1` are accessors over it.
           trace: RunTrace.t(),
+
+          # The lines `PropertyDamage.Log.capture/1` returned for work done
+          # before the run (`setup_log:`); memory only, `[]` in a saved or
+          # loaded report.
+          setup_log: [PropertyDamage.Log.Line.t()],
+
+          # The run's `log: [only:, except:]` tag filter, nil for none
+          # (`PropertyDamage.Log.Filter`); memory only, nil in a saved or
+          # loaded report.
+          log_filter: PropertyDamage.Log.Filter.t() | nil,
+
+          # The reference target's trace of the same run, and its projection
+          # state at the failing boundary, for `:diverged` and
+          # `:did_not_converge`; nil for every other kind (see "The reference
+          # side of a comparison failure").
+          reference_trace: RunTrace.t() | nil,
+          reference_state_at_failure: %{atom() => any()} | nil,
 
           # The setup and teardown commands of the reported sequence (the
           # shrunk one when it reproduced, else the original), with concrete
@@ -253,14 +334,10 @@ defmodule PropertyDamage.FailureReport do
           state_before_failure: %{atom() => any()} | nil,
           state_at_failure: %{atom() => any()} | nil,
 
-          # Parallel execution-specific
-          branch_id: non_neg_integer() | nil,
-          linearization: [struct()] | nil,
-          branch_events: %{non_neg_integer() => [Entry.t()]} | nil,
-
           # Shrinking stats
           shrink_iterations: non_neg_integer(),
           shrink_time_ms: non_neg_integer(),
+          shrink_stop: PropertyDamage.Shrinker.stop_reason() | nil,
 
           # Metadata
           model: module() | nil,
@@ -345,21 +422,24 @@ defmodule PropertyDamage.FailureReport do
             stutter: nil,
             max_commands: nil,
             check_mode: :halt,
+            external_markers: [],
             campaign: nil,
             latency: false,
             metrics: nil,
+            setup_log: [],
+            log_filter: nil,
             trace: nil,
+            reference_trace: nil,
+            reference_state_at_failure: nil,
             setup_commands: [],
             teardown_commands: [],
             original_sequence: nil,
             failure_reason: nil,
             state_before_failure: nil,
             state_at_failure: nil,
-            branch_id: nil,
-            linearization: nil,
-            branch_events: nil,
             shrink_iterations: 0,
             shrink_time_ms: 0,
+            shrink_stop: :done,
             model: nil,
             timestamp: nil,
             error_origin: nil,
@@ -397,13 +477,23 @@ defmodule PropertyDamage.FailureReport do
   - `:projections_before` - Projection states before failing command
   - `:shrink_iterations` - Number of shrink attempts
   - `:shrink_time_ms` - Time spent shrinking
+  - `:shrink_stop` - Why the shrinker stopped (default `:done`)
+  - `:logs` - The log lines of the run the report describes, by step
+    (`RunTrace.logs`, DR-054); default `%{}`
+  - `:log_filter` - The run's `log: [only:, except:]` tag filter; default `nil`
+  - `:setup_log` - The lines `PropertyDamage.Log.capture/1` returned for work
+    done before the run (`setup_log:` of `PropertyDamage.run/1`); default `[]`
+  - `:reference_result` - The reference target's finished result of the
+    reported run (`event_log`, `executed`, `command_fold_ordinals`, `logs`); for
+    `:diverged` and `:did_not_converge` it becomes `reference_trace` and
+    `reference_state_at_failure` (default `nil`)
   - `:model` - Model module
   - `:targets` - The run's `targets:` entries (normalized to `{adapter, options}`
     form), the reference first (default `[]`)
   - `:variant` - The target the failure happened in, `%{index:, name:}`
     (default: the reference target, or `nil` without targets)
   - `:kind` - The report kind (default: derived from `:failure_reason` by
-    `kind_of/1`)
+    `PropertyDamage.Failure.report_kind/1`)
   - `:concurrency` - The run's `concurrency:` (default `:serial`)
   - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
   - `:compare_counts` - The failing run's per-observation compare counts
@@ -416,6 +506,7 @@ defmodule PropertyDamage.FailureReport do
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
   - `:check_mode` - The run's `check_mode:` (default `:halt`)
+  - `:external_markers` - The run's `external_markers:` (default `[]`)
   - `:campaign` - The campaign of a latency budget, `%{seed:, max_runs:}`
     (default `nil`)
   - `:original_failed_at_index` - The failing index in the run that found the
@@ -423,7 +514,6 @@ defmodule PropertyDamage.FailureReport do
   - `:latency` - The run's `latency:` option as given (default `false`)
   - `:metrics` - The latency metrics per target name measured so far (default
     `nil`, `latency:` off)
-  - `:linearization` - Selected linearization (parallel)
   - `:expansion` - What every target ran for the reported sequence
     (`PropertyDamage.Expansion.t()`); the report's `expansions` lists it up to
     the failing root, and its trace keeps the concrete commands
@@ -448,13 +538,9 @@ defmodule PropertyDamage.FailureReport do
     stacktrace = Keyword.get(opts, :stacktrace)
     targets = Keyword.get(opts, :targets, [])
 
-    # The failing check name (for invariant resolution) and the branch, derived
-    # straight from the structured %Failure{}.
+    # The failing check name (for invariant resolution), derived straight from
+    # the structured %Failure{}.
     check_name = failure_check_name(failure_reason)
-    branch_id = failure_branch_id(failure_reason)
-
-    # Extract branch events if parallel
-    branch_events = extract_branch_events(event_log)
 
     # Classify error origin
     classification = ErrorOrigin.classify(failure_reason, stacktrace)
@@ -493,12 +579,15 @@ defmodule PropertyDamage.FailureReport do
         # DR-040: the fold-order record so the trace can derive the per-step
         # state timeline and the report can run the projection-purity check.
         command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
-        linearization: Keyword.get(opts, :linearization),
         expansion: expansion_choices(Keyword.get(opts, :expansion)),
-        outcome: {:fail, failure_reason}
+        outcome: {:fail, failure_reason},
+        logs: Keyword.get(opts, :logs, %{})
       )
 
-    kind = Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end)
+    kind = Keyword.get_lazy(opts, :kind, fn -> Failure.report_kind(failure_reason) end)
+
+    reference_trace =
+      reference_trace(kind, Keyword.get(opts, :reference_result), trace)
 
     %__MODULE__{
       seed: seed,
@@ -513,21 +602,24 @@ defmodule PropertyDamage.FailureReport do
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      external_markers: Keyword.get(opts, :external_markers, []),
       campaign: Keyword.get(opts, :campaign),
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),
+      setup_log: Keyword.get(opts, :setup_log, []),
+      log_filter: Keyword.get(opts, :log_filter),
       trace: trace,
+      reference_trace: reference_trace,
+      reference_state_at_failure: reference_state(reference_trace, failed_at_index),
       setup_commands: Sequence.setup_commands(shrunk_sequence),
       teardown_commands: Sequence.teardown_commands(shrunk_sequence),
       original_sequence: original_sequence,
       failure_reason: failure_reason,
       state_before_failure: projections_before,
       state_at_failure: projections,
-      branch_id: branch_id,
-      linearization: Keyword.get(opts, :linearization),
-      branch_events: branch_events,
       shrink_iterations: Keyword.get(opts, :shrink_iterations, 0),
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
+      shrink_stop: Keyword.get(opts, :shrink_stop, :done),
       model: Keyword.get(opts, :model),
       timestamp: timestamp,
       error_origin: classification.origin,
@@ -548,6 +640,30 @@ defmodule PropertyDamage.FailureReport do
     }
   end
 
+  # The reference target's trace of the run `trace` describes: the same plan,
+  # seed, nonce, epoch and expansion choices, with the reference's own events,
+  # executed commands and fold ordinals. Only a comparison failure has one.
+  defp reference_trace(kind, %{} = result, %RunTrace{} = trace)
+       when kind in [:diverged, :did_not_converge] do
+    %RunTrace{
+      trace
+      | executed: Map.get(result, :executed, %{}),
+        event_log: Map.get(result, :event_log, []),
+        command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+        outcome: :pass,
+        logs: Map.get(result, :logs, %{})
+    }
+  end
+
+  defp reference_trace(_kind, _result, _trace), do: nil
+
+  # The reference's state at the failing boundary, derived from its trace
+  # (DR-040) so that nothing folded after the boundary is in it.
+  defp reference_state(%RunTrace{} = trace, failed_at_index) when is_integer(failed_at_index),
+    do: RunTrace.state_at(trace, Sequence.Position.prefix(failed_at_index))
+
+  defp reference_state(_trace, _failed_at_index), do: nil
+
   # The last root the failing run executed: none before a setup failure, the
   # failing root, or every root for a failure at the end of the run.
   defp executed_root(:setup_failed, _failed_at_index), do: -1
@@ -565,11 +681,9 @@ defmodule PropertyDamage.FailureReport do
   # pre-state generation saw. The fold mirrors the generator's `update_state`
   # (`Generator.update_state/4`): apply the command, then each simulated event.
   #
-  # Commands are folded in flattened (`Sequence.to_list/1`) order, and labels are
-  # keyed by that flat index, so the displayed order a reader sees IS the order
-  # the pre-states were folded in. For a branching sequence this is a
-  # linearization (branch N's pre-state reflects earlier branches), matching the
-  # linear reproduction the report renders rather than any per-branch fork.
+  # Commands are folded in `Sequence.to_list/1` order, and labels are keyed by
+  # that index, so the displayed order a reader sees IS the order the
+  # pre-states were folded in.
   #
   # Best-effort and never load-bearing: a model without the callback, or any
   # error in user `label/2`/projection/simulator code, degrades to "no labels"
@@ -602,7 +716,7 @@ defmodule PropertyDamage.FailureReport do
   end
 
   # Call a command's optional `label/2` against its pre-state, guarding both the
-  # not-loaded-module case (see PropertyDamage.Linearization) and a raising user
+  # not-loaded-module case and a raising user
   # implementation.
   defp command_label(command, state) when is_struct(command) do
     module = command.__struct__
@@ -735,26 +849,6 @@ defmodule PropertyDamage.FailureReport do
   def async_entries(%__MODULE__{trace: nil}), do: []
 
   @doc """
-  The report kind for a failure reason: `:check_failed` for every check kind,
-  `:diverged`, `:did_not_converge`, `:setup_failed`, `:latency_exceeded`, and
-  `:execution_failed` for every execution and framework kind. `nil` for anything that is not a
-  `%Failure{}`.
-  """
-  @spec kind_of(term()) :: kind() | nil
-  def kind_of(%Failure{} = failure) do
-    case Failure.class(failure) do
-      :check -> :check_failed
-      :divergence -> :diverged
-      :convergence -> :did_not_converge
-      :setup -> :setup_failed
-      :latency -> :latency_exceeded
-      class when class in [:execution, :framework] -> :execution_failed
-    end
-  end
-
-  def kind_of(_failure_reason), do: nil
-
-  @doc """
   The reference target (the first of `targets`) rebuilt as a
   `%PropertyDamage.Target{}` with its adapter, name and config, or `nil` when
   the report records no target.
@@ -834,24 +928,22 @@ defmodule PropertyDamage.FailureReport do
     check_name = check_name(report)
 
     case failure_type(report) do
-      :check_failed -> "Invariant Violation: #{format_name(check_name)}"
-      :projection_violation -> "Invariant Violation: #{format_name(check_name)}"
+      :check_failed -> "Invariant Violation: #{Naming.format_name(check_name)}"
+      :projection_violation -> "Invariant Violation: #{Naming.format_name(check_name)}"
       :idempotency_violation -> "Idempotency Violation"
-      :poll_timeout -> "Poll Timeout: #{format_name(check_name)}"
+      :poll_timeout -> "Poll Timeout: #{Naming.format_name(check_name)}"
       :poll_error -> "Poll Predicate Error"
       :adapter_error -> "Adapter Error"
       :settle_timeout -> "Settle Timeout"
-      :nemesis_error -> "Fault Injection Error"
       :resource_poller_error -> "Resource Poller Error"
       :stutter_execution_failed -> "Stutter Execution Failed"
       :retry_from_sync_command -> "Sync Command Returned Retry"
       :malformed_adapter_return -> "Malformed Adapter Return"
-      :linearization -> "Linearization Failed"
       :placeholder_resolution -> "Placeholder Resolution Error"
-      :diverged -> "Divergence: #{format_name(check_name)}"
-      :did_not_converge -> "Did Not Converge: #{format_name(check_name)}"
+      :diverged -> "Divergence: #{Naming.format_name(check_name)}"
+      :did_not_converge -> "Did Not Converge: #{Naming.format_name(check_name)}"
       :setup_failed -> "Setup Failed"
-      :latency_exceeded -> "Latency Exceeded: #{format_name(check_name)}"
+      :latency_exceeded -> "Latency Exceeded: #{Naming.format_name(check_name)}"
       :unknown -> "Unknown Failure"
       # Total fallback (e.g. nil on a hand-built struct) so rendering/Inspect
       # never crashes with a CaseClauseError
@@ -911,16 +1003,6 @@ defmodule PropertyDamage.FailureReport do
   """
   @spec poll_timeout_failure?(t()) :: boolean()
   def poll_timeout_failure?(%__MODULE__{} = report), do: failure_type(report) == :poll_timeout
-
-  @doc """
-  Check if this is a parallel execution failure.
-  """
-  @spec parallel_failure?(t()) :: boolean()
-  def parallel_failure?(%__MODULE__{failure_reason: %Failure{} = f}) do
-    Failure.kind(f) == :linearization or Failure.branch_id(f) != nil
-  end
-
-  def parallel_failure?(%__MODULE__{}), do: false
 
   @doc """
   Check if this is an idempotency failure.
@@ -1046,11 +1128,19 @@ defmodule PropertyDamage.FailureReport do
   It names `targets:` when the failing target does not run `:random` or the
   reference does not (the sequence then depends on another target's mode),
   and `max_commands:` when the run did not use the default.
-  """
-  @spec expansion_command(t()) :: String.t()
-  def expansion_command(%__MODULE__{model: model, seed: seed} = report) do
-    name = (report.variant || reference_variant(report.targets) || %{})[:name]
 
+  Returns `nil` for a report that records no target: it has no name to
+  regenerate with.
+  """
+  @spec expansion_command(t()) :: String.t() | nil
+  def expansion_command(%__MODULE__{} = report) do
+    case (report.variant || reference_variant(report.targets) || %{})[:name] do
+      nil -> nil
+      name -> expansion_call(report, name)
+    end
+  end
+
+  defp expansion_call(%__MODULE__{model: model, seed: seed} = report, name) do
     options =
       [
         names_targets?(report, name) && "targets: #{targets_source(report)}",
@@ -1085,26 +1175,6 @@ defmodule PropertyDamage.FailureReport do
   defp converge_within(%__MODULE__{}), do: @default_converge_within
 
   @doc """
-  A failure name as text: a `{projection, function}` key as
-  `Projection.function`, a module by its name, a check name as is, `nil` as
-  an empty string.
-  """
-  @spec format_name(Failure.name()) :: String.t()
-  def format_name({projection, function}) when is_atom(projection) and is_atom(function),
-    do: "#{inspect(projection)}.#{function}"
-
-  def format_name(nil), do: ""
-
-  def format_name(name) when is_atom(name) do
-    case Atom.to_string(name) do
-      "Elixir." <> _module -> inspect(name)
-      string -> string
-    end
-  end
-
-  def format_name(name), do: inspect(name)
-
-  @doc """
   The failed run as a timeline of `Step` structs, in flattened (reading) order.
 
   Each step pairs a command with its `Sequence.Position`, flattened index,
@@ -1122,32 +1192,64 @@ defmodule PropertyDamage.FailureReport do
 
   def steps(%__MODULE__{trace: %RunTrace{plan: %Sequence{} = plan} = trace} = report) do
     # Delegate to the trace's data and the shared grouping core (DR-033), adding
-    # the report's failure-localization overlay (`failed_at_index` / `branch_id`
-    # stay report-level). Output is identical to the pre-move behavior.
+    # the report's failure-localization overlay (`failed_at_index` stays
+    # report-level).
     RunTrace.build_steps(plan, trace.event_log, trace.command_labels, report.failed_at_index,
-      branch_id: report.branch_id,
       executed: trace.executed,
+      logs: Map.get(trace, :logs, %{}),
       choices: traced_choices(report)
     )
   end
 
   # The trace records the failing target's execution: its steps are what that
   # target ran at each root.
-  defp traced_choices(%__MODULE__{trace: %RunTrace{expansion: expansion}} = report)
-       when is_map(expansion) do
-    name = (report.variant || reference_variant(report.targets) || %{})[:name]
-    Map.get(expansion, name)
+  defp traced_choices(%__MODULE__{} = report),
+    do:
+      choices_of(
+        report.trace,
+        (report.variant || reference_variant(report.targets) || %{})[:name]
+      )
+
+  defp choices_of(%RunTrace{expansion: expansion}, name) when is_map(expansion),
+    do: Map.get(expansion, name)
+
+  defp choices_of(_trace, _name), do: nil
+
+  @doc """
+  The steps of the reference target's run, for a comparison failure.
+
+  The same `PropertyDamage.RunTrace.Step` shape as `steps/1`, over
+  `reference_trace` with the reference's own expansion choices. `[]` when the
+  report has no reference trace.
+  """
+  @spec reference_steps(t()) :: [Step.t()]
+  def reference_steps(
+        %__MODULE__{reference_trace: %RunTrace{plan: %Sequence{} = plan} = trace} = report
+      ) do
+    RunTrace.build_steps(plan, trace.event_log, trace.command_labels, nil,
+      executed: trace.executed,
+      logs: Map.get(trace, :logs, %{}),
+      choices: choices_of(trace, (reference_variant(report.targets) || %{})[:name])
+    )
   end
 
-  defp traced_choices(_report), do: nil
+  def reference_steps(%__MODULE__{}), do: []
+
+  @doc """
+  The reference target's event log of the reported run, as `event_log/1` gives
+  the failing target's. `[]` when the report has no reference trace.
+  """
+  @spec reference_event_log(t()) :: [Entry.t()]
+  def reference_event_log(%__MODULE__{reference_trace: %RunTrace{event_log: log}}), do: log
+  def reference_event_log(%__MODULE__{}), do: []
 
   @doc """
   The `EventLog.Entry` structs observed for a single command, addressed by
-  flattened index or `Sequence.Position`.
+  index or `Sequence.Position`.
 
   Delegates to `RunTrace.event_entries_at/2` (entries are independent of failure
-  localization). Each entry carries its per-event provenance (`source`,
-  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when
+  localization). Each entry carries its per-event provenance (`source`); the
+  bare event struct is `entry.event`. Returns `[]` when
   nothing matches.
   """
   @spec event_entries_at(t(), non_neg_integer() | Sequence.Position.t()) :: [Entry.t()]
@@ -1160,8 +1262,8 @@ defmodule PropertyDamage.FailureReport do
   @doc """
   The `Step` where the failure was localized, or `nil`.
 
-  Returns `nil` for non-localized failures (teardown / whole-run / linearization
-  checks, where `failed_at_index` is `nil`). At most one step is ever the failure
+  Returns `nil` for non-localized failures (teardown and whole-run checks,
+  where `failed_at_index` is `nil`). At most one step is ever the failure
   step.
   """
   @spec failure_step(t()) :: Step.t() | nil
@@ -1170,15 +1272,12 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
-  The flattened (reading-order) index of the failing command, for reader-facing
-  display.
+  The index of the failing command, for reader-facing display.
 
   This is the ordinal into `steps/1` / `Sequence.to_list/1`, i.e. the number a
-  reader cross-references against the reproduction listing. It differs from the
-  raw `failed_at_index` field, which is the *executor* command index and diverges
-  from the flattened ordinal for parallel-branch failures. Falls back to
+  reader cross-references against the reproduction listing. Falls back to
   `failed_at_index` when the failure can't be localized to a step (typically
-  `nil`, e.g. a teardown / whole-run / linearization failure).
+  `nil`, e.g. a teardown or whole-run failure).
   """
   @spec failure_index(t()) :: non_neg_integer() | nil
   def failure_index(%__MODULE__{} = report) do
@@ -1187,36 +1286,6 @@ defmodule PropertyDamage.FailureReport do
       nil -> report.failed_at_index
     end
   end
-
-  @doc """
-  Where a setup failure happened, for a reader: the setup command, its setup
-  index and the cause, and for an unresolved placeholder the field.
-
-  A setup failure implicates no root, so `failure_index/1` is `nil` for it;
-  this names the place instead, for example
-  `"setup command 1 (MyApp.Login), cause: command"` or
-  `"adapter setup/1, cause: adapter_setup"`. Takes a report or its
-  `%PropertyDamage.Failure{}`; returns `nil` for any other failure.
-  """
-  @spec setup_location(t() | Failure.t() | term()) :: String.t() | nil
-  def setup_location(%__MODULE__{failure_reason: reason}), do: setup_location(reason)
-
-  def setup_location(%Failure{type: %Failure.Setup{cause: :adapter_setup}}),
-    do: "adapter setup/1, cause: adapter_setup"
-
-  def setup_location(%Failure{type: %Failure.Setup{setup_index: nil} = setup}),
-    do: "setup phase, cause: #{setup.cause}"
-
-  def setup_location(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
-    "setup command #{setup.setup_index} (#{command_name(setup.command)}), " <>
-      "cause: unresolved_placeholder, field #{inspect(setup.field)}"
-  end
-
-  def setup_location(%Failure{type: %Failure.Setup{} = setup}),
-    do:
-      "setup command #{setup.setup_index} (#{command_name(setup.command)}), cause: #{setup.cause}"
-
-  def setup_location(_reason), do: nil
 
   @doc """
   Projection-purity check: does the faithful per-step state derived from the
@@ -1287,15 +1356,12 @@ defmodule PropertyDamage.FailureReport do
   defp failure_check_name(%Failure{} = failure), do: Failure.name(failure)
   defp failure_check_name(_), do: nil
 
-  defp failure_branch_id(%Failure{} = failure), do: Failure.branch_id(failure)
-  defp failure_branch_id(_), do: nil
-
   # Human-readable message for each failure kind, mirroring the per-tag wording
   # the old parser produced.
   defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail} = check}) do
     case Map.get(check, :context) do
       %{poll_count: poll} ->
-        "@eventually #{format_name(check.name)} failed on poll #{poll}: " <>
+        "@eventually #{Naming.format_name(check.name)} failed on poll #{poll}: " <>
           extract_message(detail)
 
       _ ->
@@ -1305,9 +1371,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Check{kind: :idempotency_violation, detail: violation}}),
     do: format_idempotency_message(violation)
-
-  defp message_for(%Failure{type: %Check{kind: :linearization, detail: message}}),
-    do: to_string(message)
 
   defp message_for(%Failure{type: %Check{kind: :poll_timeout, detail: info}}),
     do: format_poll_timeout_message(info)
@@ -1321,9 +1384,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Failure.Execution{kind: :adapter_error, detail: reason}}),
     do: extract_message(reason)
-
-  defp message_for(%Failure{type: %Failure.Execution{kind: :nemesis_error, detail: reason}}),
-    do: "Fault injection failed: #{inspect(reason)}"
 
   defp message_for(%Failure{
          type: %Failure.Execution{kind: :resource_poller_error, detail: reason}
@@ -1344,11 +1404,11 @@ defmodule PropertyDamage.FailureReport do
        do: inspect(reason)
 
   defp message_for(%Failure{type: %Failure.Divergence{} = d}) do
-    "#{format_name(d.key)} diverged at root #{d.root}: " <> extract_message(d.mismatch)
+    "#{Naming.format_name(d.key)} diverged at root #{d.root}: " <> extract_message(d.mismatch)
   end
 
   defp message_for(%Failure{type: %Failure.Convergence{} = c}) do
-    "#{format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
+    "#{Naming.format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
       "(waited #{c.waited_ms} ms); still pending: #{inspect(c.reason)}"
   end
 
@@ -1358,26 +1418,31 @@ defmodule PropertyDamage.FailureReport do
   defp message_for(%Failure{type: %Failure.Setup{cause: :adapter_setup, detail: detail}}),
     do: "Adapter setup failed (cause: adapter_setup): " <> extract_message(detail)
 
+  defp message_for(%Failure{type: %Failure.Setup{cause: :model, detail: detail}}),
+    do: "Model code failed while the variant came up (cause: model): " <> extract_message(detail)
+
+  defp message_for(%Failure{type: %Failure.Setup{cause: :variant, detail: detail}}),
+    do:
+      "The variant process exited while the target came up (cause: variant): " <>
+        extract_message(detail)
+
   defp message_for(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
     "Setup failed (cause: unresolved_placeholder) at setup command #{setup.setup_index} " <>
-      "(#{command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>
+      "(#{Naming.command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>
       "never arrived"
   end
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :check, detail: %Failure{} = check}} = f) do
     "Setup failed (cause: check) at setup command #{f.type.setup_index} " <>
-      "(#{command_name(f.type.command)}): " <> failure_message(check)
+      "(#{Naming.command_name(f.type.command)}): " <> failure_message(check)
   end
 
   defp message_for(%Failure{type: %Failure.Setup{} = setup}) do
     "Setup failed (cause: #{setup.cause}) at setup command #{setup.setup_index} " <>
-      "(#{command_name(setup.command)}): " <> setup_detail_message(setup.detail)
+      "(#{Naming.command_name(setup.command)}): " <> setup_detail_message(setup.detail)
   end
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
-
-  defp command_name(%{__struct__: module}), do: inspect(module)
-  defp command_name(nil), do: "no command"
 
   defp setup_detail_message(%Failure{} = failure), do: failure_message(failure)
   defp setup_detail_message(detail), do: extract_message(detail)
@@ -1411,16 +1476,6 @@ defmodule PropertyDamage.FailureReport do
   defp format_idempotency_message(violation) do
     inspect(violation)
   end
-
-  defp extract_branch_events(event_log) do
-    event_log
-    |> Enum.filter(fn entry -> entry.branch_id != nil end)
-    |> Enum.group_by(& &1.branch_id)
-    |> case do
-      empty when map_size(empty) == 0 -> nil
-      grouped -> grouped
-    end
-  end
 end
 
 defimpl Inspect, for: PropertyDamage.FailureReport do
@@ -1440,19 +1495,21 @@ defimpl Inspect, for: PropertyDamage.FailureReport do
       Inspect.Algebra.concat(["#FailureReport<", compact, ">"])
     end
   rescue
-    _ -> fallback(report)
+    error -> fallback(report, Exception.message(error))
   catch
-    _, _ -> fallback(report)
+    kind, value -> fallback(report, Exception.format_banner(kind, value))
   end
 
-  defp fallback(report) do
+  # The summary names the error it replaced, on one line.
+  defp fallback(report, error) do
     type = PropertyDamage.FailureReport.failure_type(report)
 
     Inspect.Algebra.concat([
       "#FailureReport<",
       "seed: #{inspect(report.seed)}, ",
       "type: #{inspect(type)}, ",
-      "failed_at: #{inspect(report.failed_at_index)}",
+      "failed_at: #{inspect(report.failed_at_index)}, ",
+      "error: #{String.replace(error, ~r/\s*\n\s*/, " ")}",
       ">"
     ])
   end

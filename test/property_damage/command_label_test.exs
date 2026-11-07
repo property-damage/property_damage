@@ -71,8 +71,8 @@ defmodule PropertyDamage.CommandLabelTest do
 
   defmodule LabelModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Tick, Divide]
@@ -117,19 +117,6 @@ defmodule PropertyDamage.CommandLabelTest do
       report = report_for(seq)
 
       assert report.command_labels == %{0 => "tick 0", 1 => "tick 1", 2 => "tick 2"}
-    end
-
-    test "keys span prefix, branches, and suffix in flattened (to_list) order" do
-      # Flattened: [Tick(0), Divide0(1), Tick(2), Tick(3)]
-      seq = Sequence.branching([%Tick{}], [[%Divide{divisor: 0}], [%Tick{}]], [%Tick{}])
-      report = report_for(seq)
-
-      assert report.command_labels == %{
-               0 => "tick 0",
-               1 => "divide by zero",
-               2 => "tick 2",
-               3 => "tick 3"
-             }
     end
   end
 

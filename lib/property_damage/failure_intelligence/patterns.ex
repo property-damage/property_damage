@@ -281,8 +281,6 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
         :poll_error -> "Poll predicate error"
         :settle_timeout -> "Settle timeout"
         :adapter_error -> "Adapter error"
-        :nemesis_error -> "Fault injection error"
-        :linearization -> "Linearization failure"
         :stutter_execution_failed -> "Stutter execution failure"
         :resource_poller_error -> "Resource poller error"
         :retry_from_sync_command -> "Sync command returned retry"

@@ -77,8 +77,8 @@ defmodule PropertyDamage.ExecutorSettledTest do
   # Model wiring the probe command to the same FailingCheck (@check every: 1,
   # fails once cumulative quantity exceeds 100) the sync FailingModel uses.
   defmodule SettledModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Events.ItemCreated
 
@@ -97,6 +97,75 @@ defmodule PropertyDamage.ExecutorSettledTest do
     @impl PropertyDamage.Model.Simulator
     def simulate(%SettledCreate{name: name, quantity: quantity}, _state) do
       [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
+  # A probe command that declares only `timeout_ms`; the interval and backoff
+  # come from the framework defaults.
+  defmodule PartialSettleCreate do
+    use PropertyDamage.Command, execution: :probe, settle: %{timeout_ms: 1_000}
+
+    defstruct [:name, :quantity]
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
+  defmodule PartialSettleAdapter do
+    use PropertyDamage.Adapter
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def setup(config) do
+      {:ok, config |> Map.new() |> Map.put(:attempts, :atomics.new(1, []))}
+    end
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(%PartialSettleCreate{name: name, quantity: qty}, %{attempts: ref}, _runtime) do
+      if :atomics.add_get(ref, 1, 1) >= 2 do
+        {:settled, [%ItemCreated{item_ref: "settled_item", name: name, quantity: qty}]}
+      else
+        {:retry, :not_settled_yet}
+      end
+    end
+  end
+
+  defmodule PartialSettleModel do
+    @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
+
+    alias PropertyDamage.Test.Events.ItemCreated
+
+    @impl true
+    def commands, do: [PartialSettleCreate]
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%PartialSettleCreate{name: name, quantity: quantity}, _state) do
+      [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
+  describe "a command with a partial settle map" do
+    test "settles with the default interval and backoff for the omitted keys" do
+      {:ok, result} =
+        Executor.run(
+          [%PartialSettleCreate{name: "Widget", quantity: 1}],
+          PartialSettleModel,
+          PartialSettleAdapter
+        )
+
+      assert result.success == true
+      assert [%{event: %ItemCreated{name: "Widget"}}] = result.event_log
     end
   end
 

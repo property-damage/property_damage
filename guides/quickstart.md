@@ -15,7 +15,7 @@ PropertyDamage's architecture and gets you running fast.
 | `precondition` | Model's `when:` predicate | Declared per-command in `commands/0` |
 | `initial_state` | Projection `init/0` | Each projection has its own initial state |
 | `run_commands` | `PropertyDamage.run/1` | Generates, executes, and shrinks automatically |
-| Shrinking (automatic) | Two-phase shrinking | Sequence shrinking first, then argument simplification |
+| Shrinking (automatic) | Shrink cycle | Drops commands first, collapses expansions (when the model has any), then simplifies arguments, and repeats until nothing shrinks further |
 
 ## Key Differences
 
@@ -42,6 +42,11 @@ configurable intervals (every step, every N commands, on specific event types).
 
 ## Minimal Example
 
+Put the modules below in one file under `lib/` (for example `lib/account.ex`),
+after adding `{:property_damage, "~> 0.2"}` and `{:stream_data, "~> 1.0"}` to
+the `deps` in `mix.exs`. Put the run snippet at the end in a script such as
+`run.exs` and start it with `mix run run.exs`, or paste it into `iex -S mix`.
+
 <!-- pd-doc-verify: runnable -->
 ```elixir
 # --- Event ---
@@ -52,6 +57,7 @@ end
 
 # --- Command ---
 defmodule CreateAccount do
+  @moduledoc "Creates an account with a random name."
   use PropertyDamage.Command
 
   defstruct [:name]
@@ -66,6 +72,7 @@ end
 
 # --- Projection (state tracking + check) ---
 defmodule AccountState do
+  @moduledoc "Tracks the accounts the system has created."
   use PropertyDamage.Model.Projection
 
   def init, do: %{accounts: %{}}
@@ -80,6 +87,7 @@ defmodule AccountState do
   # generator can legitimately repeat. This one holds for the in-memory adapter
   # below (every stored account keeps a non-empty name), so the run passes; see
   # writing_invariants.md for invariants that catch real bugs.
+  @doc "Every stored account keeps a non-empty name."
   @check every: 1
   def assert_names_present(state, _) do
     Enum.all?(state.accounts, fn {_id, acc} -> acc.name not in [nil, ""] end) or
@@ -99,7 +107,8 @@ end
 
 # --- Model ---
 defmodule AccountModel do
-  @behaviour PropertyDamage.Model
+  @moduledoc "Creates accounts and checks that each keeps its name."
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [CreateAccount]
@@ -132,17 +141,38 @@ defmodule AccountAdapter do
 end
 ```
 
+`use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
+
+The `@moduledoc` and `@doc` lines are not decoration. A failure report quotes the model, command and projection `@moduledoc` and the failing check's `@doc`, and prints `(no description: ...)` where one is missing.
+
 Run it:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-PropertyDamage.run(
-  model: AccountModel,
-  targets: [AccountAdapter],
-  max_commands: 20,
-  max_runs: 50
-)
+case PropertyDamage.run(
+       model: AccountModel,
+       targets: [AccountAdapter],
+       max_commands: 20,
+       max_runs: 50
+     ) do
+  {:ok, stats} ->
+    IO.puts("#{stats.runs} runs passed (seed #{stats.seed})")
+
+  {:error, report} ->
+    IO.inspect(report, pretty: true)
+end
 ```
+
+A passing run returns `{:ok, stats}` and a failing run returns `{:error, report}`;
+the snippet prints either one. To read the failure as an HTML page instead, pass
+`report_html: "_build/pd_reports"` to the run, or set the environment variable
+`PD_REPORT_HTML` to a directory; each failing run then writes a page there (see
+[Debugging Failures](debugging_failures.md#the-report-in-a-browser)). To add your own lines to that report, call `PropertyDamage.log/2`
+from an adapter or a command; see the [log lines guide](log_lines.md).
 
 ## Placeholder Flow
 
@@ -202,17 +232,6 @@ PropertyDamage.run(model: M, targets: [A])
 # Seeded (reproducible)
 PropertyDamage.run(model: M, targets: [A], seed: 42)
 
-# Branching sequences (one branch at a time, linearization-checked)
-PropertyDamage.run(
-  model: M,
-  targets: [A],
-  branching: [
-    branch_probability: 0.3,
-    max_branches: 3,
-    max_branch_length: 5
-  ]
-)
-
 # Stutter / idempotency testing. NOTE: this needs an *idempotent* SUT. The
 # in-memory AccountAdapter above mints a fresh id per call, so re-execution is
 # not idempotent and this run reports an idempotency violation -- that is
@@ -227,7 +246,7 @@ PropertyDamage.run(
   ]
 )
 
-# Load test
+# Long run: many long sequences, with progress output
 PropertyDamage.run(
   model: M,
   targets: [A],
@@ -236,7 +255,16 @@ PropertyDamage.run(
   verbose: true
 )
 
-# Chaos / fault injection: nemeses are added to the model's commands/0 list
-# (with low weights), not passed as a run option. See the Chaos Engineering guide.
-PropertyDamage.run(model: ChaosModel, targets: [A])
+# Load test: realistic traffic at a fixed arrival rate, with latency and
+# throughput metrics (not a correctness run).
+{:ok, report} =
+  PropertyDamage.LoadTest.run(
+    model: M,
+    targets: [A],
+    arrival_rate: 100,
+    duration: {2, :minutes},
+    ramp_up: {:linear, {30, :seconds}}
+  )
 ```
+
+The [Load Testing guide](load_testing.md) covers the load-test options.

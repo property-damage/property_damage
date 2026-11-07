@@ -30,7 +30,7 @@ defmodule PropertyDamage.CompareFinalBoundaryTest do
 
   defmodule PayThenRead do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: Compare.commands([Pay, Read])

@@ -41,8 +41,8 @@ defmodule PropertyDamage.PlaceholderCreationTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [CreateItem]
@@ -70,8 +70,8 @@ defmodule PropertyDamage.PlaceholderCreationTest do
   end
 
   defmodule PlainModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl PropertyDamage.Model
     def commands, do: [CreateItem]
     @impl PropertyDamage.Model
@@ -90,7 +90,7 @@ defmodule PropertyDamage.PlaceholderCreationTest do
         |> Generator.generate_sequence(max_commands: 5)
         |> Generator.generate_value(1234)
 
-      assert %Sequence{registry: %PlaceholderRegistry{} = reg, branches: nil} = seq
+      assert %Sequence{registry: %PlaceholderRegistry{} = reg} = seq
 
       placeholders = PlaceholderRegistry.all(reg)
       refute placeholders == [], "expected placeholders to be minted, got none"

@@ -7,6 +7,49 @@ defmodule PropertyDamage.ModelTest do
   alias PropertyDamage.Test.{FullModel, MinimalModel, SimpleWeightModel, WeightedModel}
   alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
+  describe "declaring a model" do
+    defp compile_model(name, declaration) do
+      Code.compile_string("""
+      defmodule #{name} do
+        #{declaration}
+
+        def commands, do: []
+        def command_sequence_projection, do: nil
+      end
+      """)
+
+      Module.concat([name])
+    end
+
+    defp behaviours(mod), do: Keyword.get(mod.__info__(:attributes), :behaviour, [])
+
+    defp unload(mod) do
+      :code.purge(mod)
+      :code.delete(mod)
+    end
+
+    test "use PropertyDamage.Model sets the model behaviour" do
+      mod = compile_model("UseDeclaredModelFixture", "use PropertyDamage.Model")
+      on_exit(fn -> unload(mod) end)
+
+      assert PropertyDamage.Model in behaviours(mod)
+    end
+
+    test "a bare behaviour declaration is still a model" do
+      mod = compile_model("BareModelFixture", "@behaviour #{inspect(PropertyDamage.Model)}")
+
+      on_exit(fn -> unload(mod) end)
+
+      assert PropertyDamage.Model in behaviours(mod)
+    end
+
+    test "use PropertyDamage.Model rejects options at compile time" do
+      assert_raise ArgumentError, ~r/use PropertyDamage.Model/, fn ->
+        compile_model("OptionsDeclaredModelFixture", "use PropertyDamage.Model, foo: 1")
+      end
+    end
+  end
+
   describe "Model behaviour can be implemented" do
     test "full model with all callbacks" do
       Code.ensure_loaded!(FullModel)

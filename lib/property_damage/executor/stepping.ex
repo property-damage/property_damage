@@ -43,20 +43,18 @@ defmodule PropertyDamage.Executor.Stepping do
 
   ## Guarantees
 
-  `step/4` runs **the single per-command engine path**: ref/placeholder
-  resolution, settle, nemesis, injector/mock events, projections, checks,
+  `step/4` runs **the single per-command engine path**: placeholder
+  resolution, settle, injector/mock events, projections, checks,
   stutter, and pollers all run exactly as they do inside a full run. It is the
   same engine primitive the full-run loop uses, so stepping cannot diverge from
   running.
 
-  Two duties of the full-run loop stay with the caller, because a stepping
-  caller may want them at different points: `@check at: :startup` checks
-  before the first command, and lifting auto-restoring faults whose duration
-  elapsed after each command. `PropertyDamage.Variant` does both.
+  One duty of the full-run loop stays with the caller, because a stepping
+  caller may want it at a different point: `@check at: :startup` checks
+  before the first command. `PropertyDamage.Variant` does it.
 
-  Stepping assumes a **linear** sequence: each command's position is
-  `Position.prefix(index)` (DR-021), where `index` is its 0-based offset. Do not
-  use this API for branching/parallel sequences.
+  Each command's position is `Position.prefix(index)` (DR-021), where `index`
+  is its 0-based offset.
 
   ## Setup and teardown commands
 
@@ -88,6 +86,7 @@ defmodule PropertyDamage.Executor.Stepping do
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.{Events, Finalization, Settle}
   alias PropertyDamage.Failure
+  alias PropertyDamage.Log.Cap
   alias PropertyDamage.MockServiceRegistry
   alias PropertyDamage.{Placeholder, PlaceholderRegistry}
   alias PropertyDamage.ResourcePoller
@@ -137,6 +136,8 @@ defmodule PropertyDamage.Executor.Stepping do
       (default `nil`; see `PropertyDamage.Executor.State`)
     * `:telemetry` - the context `step/4` emits command and check telemetry
       with (see `PropertyDamage.Telemetry`); default `nil`, which emits none
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines, besides the first attempt's (default 3, DR-054)
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []) do
@@ -154,7 +155,11 @@ defmodule PropertyDamage.Executor.Stepping do
         Keyword.get(opts, :telemetry)
       )
 
-    %{state | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start)}
+    %{
+      state
+      | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start),
+        keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts())
+    }
   end
 
   @typedoc """
@@ -162,12 +167,10 @@ defmodule PropertyDamage.Executor.Stepping do
   not rebuild them from the state:
 
     * `{:ok, events}` - the events the adapter returned; for a `:probe` or
-      `:async` command, the settled events; for a nemesis command, the events
-      its `inject/2` returned
-    * `{:error, reason}` - the adapter's own error term (a nemesis command's
-      `inject/2` error likewise). A `:probe`/`:async` command that never
-      settled is `{:error, {:timeout, last_reason}}`, and a return outside the
-      adapter protocol is `{:error, return_value}`.
+      `:async` command, the settled events
+    * `{:error, reason}` - the adapter's own error term. A `:probe`/`:async`
+      command that never settled is `{:error, {:timeout, last_reason}}`, and a
+      return outside the adapter protocol is `{:error, return_value}`.
     * `{:raised, exception}` - `execute/3` raised
     * `:not_called` - a placeholder in the command could not be resolved, so
       the adapter was never called
@@ -328,20 +331,38 @@ defmodule PropertyDamage.Executor.Stepping do
   end
 
   defp execute_teardown(command, resolved, offset, state, ctx) do
-    spec = if is_struct(command), do: Map.get(state.command_specs, command.__struct__)
+    spec = PropertyDamage.Model.spec_for(state.command_specs, command)
     runtime = Executor.inject_unavailable_runtime("in a teardown command")
+    position = Position.teardown(offset)
 
-    result =
-      try do
-        Settle.execute_with_settle(resolved, ctx.adapter, ctx.adapter_context, runtime, spec)
-      rescue
-        exception -> {:raised, exception, __STACKTRACE__}
-      end
+    # The command's log lines (DR-054) go into a sink of its own and are kept
+    # under its position, whatever it answered.
+    {result, lines} =
+      PropertyDamage.Log.collect(
+        fn sink ->
+          runtime_for = fn attempt ->
+            %{runtime | log: PropertyDamage.Log.writer(sink, attempt)}
+          end
+
+          try do
+            Settle.execute_with_settle(
+              resolved,
+              ctx.adapter,
+              ctx.adapter_context,
+              runtime_for,
+              spec
+            )
+          rescue
+            exception -> {:raised, exception, __STACKTRACE__}
+          end
+        end,
+        keep_attempts: Map.get(state, :keep_attempts) || Cap.default_keep_attempts()
+      )
+
+    state = %{state | logs: PropertyDamage.Log.append(state.logs, position, lines)}
 
     case result do
       {tag, events} when tag in [:ok, :settled] and is_list(events) ->
-        position = Position.teardown(offset)
-
         entries =
           Enum.map(events, fn event ->
             Entry.attribute(
@@ -435,7 +456,9 @@ defmodule PropertyDamage.Executor.Stepping do
 
   Returns `{:ok, state}`, or `{:error, %PropertyDamage.Failure{}, failed_state}`
   when a check fails on a drained event; the failed state records the
-  offending event's command index as the place a full run would report.
+  offending event's command index as the place a full run would report. A
+  mock's `on_event/2` that raises on a drained mock event fails the same way,
+  as an adapter error at the last step's command index.
   """
   @spec drain(map(), Context.t()) :: {:ok, map()} | {:error, Failure.t(), map()}
   def drain(state, %Context{} = ctx) do
@@ -447,21 +470,21 @@ defmodule PropertyDamage.Executor.Stepping do
         ctx.event_queue,
         log_before,
         projections_before,
-        state.branch_id,
         state.fold_counter,
         state.await_matchers
       )
 
-    # A mock event pushed after the last step's own flush belongs to that step.
-    {projections, event_log, fold_counter} =
+    # A mock event pushed after the last step's own flush belongs to that step,
+    # and so do the lines the mocks' on_event/2 writes (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
       Events.process_mock_events(
         state.mock_registry,
         state.last_command_index,
         event_log,
         projections,
-        state.branch_id,
         fold_counter
       )
+      |> Events.folded_or_raise!()
 
     if state.mock_registry do
       MockServiceRegistry.update_projections(state.mock_registry, projections)
@@ -471,7 +494,8 @@ defmodule PropertyDamage.Executor.Stepping do
       state
       | projections: projections,
         event_log: event_log,
-        fold_counter: fold_counter
+        fold_counter: fold_counter,
+        logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
     }
 
     case Executor.check_async(
@@ -488,10 +512,25 @@ defmodule PropertyDamage.Executor.Stepping do
         drained = %{drained | check_counters: counters, check_failures: failures}
         {:ok, Executor.update_poller_state_getters(drained)}
 
-      {:halt, name, reason, command_index, counters} ->
+      {:halt, name, projection, reason, command_index, counters} ->
         failed = %{drained | check_counters: counters, async_failed_index: command_index}
-        {:error, Failure.check_failed(name, reason), failed}
+        {:error, Failure.check_failed(name, reason, projection), failed}
     end
+  rescue
+    # A mock's on_event/2 that raised fails the last step, whose events the
+    # mock was told of, and its lines stay under that step. A projection
+    # that rejected a mock event raises on, as before.
+    e in Events.MockEventsError ->
+      case e.error do
+        {:projection, exception, stacktrace} ->
+          reraise exception, stacktrace
+
+        error ->
+          logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
+
+          {:error, Executor.mock_events_failure(error),
+           %{state | logs: logs, async_failed_index: state.last_command_index}}
+      end
   end
 
   @doc """
@@ -499,18 +538,15 @@ defmodule PropertyDamage.Executor.Stepping do
 
   Takes either the last state, or the failed tuple
   `{:failed, index, %PropertyDamage.Failure{}, failed_state}` for a run that
-  stopped at `index` (`nil` when no command was to blame). Faults still active
-  are restored through the context's adapter context first, then the run is
+  stopped at `index` (`nil` when no command was to blame). The run is
   finalized exactly as `PropertyDamage.Executor.run/4` finalizes it: await the
   `@eventually` pollers, settle the queue, run `@check at: :teardown` checks,
   and stop every poller. Returns the result map `Executor.run/4` reports.
   """
   @spec finalize(map() | {:failed, non_neg_integer() | nil, Failure.t(), map()}, Context.t()) ::
           Executor.result()
-  def finalize(state_or_failed, %Context{} = ctx) do
-    state_or_failed
-    |> Executor.restore_remaining_faults(ctx.adapter_context, ctx.event_queue)
-    |> Finalization.finalize_result()
+  def finalize(state_or_failed, %Context{}) do
+    Finalization.finalize_result(state_or_failed)
   end
 
   @doc """

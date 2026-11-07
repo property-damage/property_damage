@@ -10,22 +10,30 @@ defmodule PropertyDamage.ReplayArtifact do
   # so a reader can follow it and an editor highlights it. It is read back as
   # data: the source is parsed with `Code.string_to_quoted/2` and a walker
   # accepts literals only. Nothing in the file is ever evaluated, and reading
-  # it neither creates an atom nor loads a module: an atom the running system
-  # does not know is refused. A struct literal in a command's own place (an
-  # element of `prefix`, a root's `command`, an element of a choice's
-  # `commands`) loads only when its module is already loaded and is a command
-  # module or one of the structs the format itself holds (`@format_structs`).
-  # Anywhere else, at any depth of a command's fields, a struct literal loads
-  # when its module is already loaded; any other struct is refused naming its
-  # module.
+  # it never creates an atom: an atom the running system does not know is
+  # refused. Before it resolves the atoms, the reader loads the modules that
+  # define the atoms an artifact names, so that a fresh VM knows them: the
+  # framework's failure and expansion modules, and, when the model the file
+  # names is loaded already, the commands and projections that model lists.
+  # When an atom or a struct module is still unknown, the reader loads the
+  # modules of every loaded application and reads the file once more, as the
+  # failure-file loader does. The file never chooses a module to load.
+  #
+  # A struct literal in a command's own place (an element of `prefix`, a
+  # root's `command`, an element of a choice's `commands`) loads only when its
+  # module is already loaded and is a command module or one of the structs the
+  # format itself holds (`@format_structs`). Anywhere else, at any depth of a
+  # command's fields, a struct literal loads when its module is already
+  # loaded; any other struct is refused naming its module.
   #
   # The term:
   #
   #   %{
-  #     format: 1,
+  #     format: 2,
   #     model: module,
   #     seed: the seed the run generated from,
   #     run: 1,
+  #     external_markers: [atom],                        the run's atom markers
   #     targets: [%{name: name, expansion: mode}],      the reference first
   #     failure: %{kind:, name:, variant_index:, root_index:},
   #     prefix: [setup command],
@@ -47,6 +55,7 @@ defmodule PropertyDamage.ReplayArtifact do
     Failure,
     FailureReport,
     Generator,
+    Model,
     PlaceholderRegistry,
     RunTrace,
     Sequence
@@ -54,13 +63,27 @@ defmodule PropertyDamage.ReplayArtifact do
 
   alias PropertyDamage.Sequence.Position
 
-  @format 1
+  @format 2
   @header "# PropertyDamage replay artifact, format #{@format}"
   @header_prefix "# PropertyDamage replay artifact, format "
-  @keys [:choices, :failure, :format, :model, :prefix, :roots, :run, :seed, :targets]
+  @keys [
+    :choices,
+    :external_markers,
+    :failure,
+    :format,
+    :model,
+    :prefix,
+    :roots,
+    :run,
+    :seed,
+    :targets
+  ]
   # The framework's own structs an artifact holds: a placeholder minted for
   # an `external()` field and the positions inside it and in `aliases`.
   @format_structs [PropertyDamage.Placeholder, PropertyDamage.Sequence.Position]
+  # The framework modules that define the atoms an artifact names on its
+  # own: the failure kinds and the expansion modes.
+  @framework_modules [Failure, FailureReport, Expansion | @format_structs]
   # Every static atom of the source is parsed as `{@atom_tag, name}` and
   # resolved to an existing atom afterwards; the source cannot write this
   # pair itself, since its own atoms are parsed the same way.
@@ -73,6 +96,7 @@ defmodule PropertyDamage.ReplayArtifact do
           model: module(),
           seed: integer(),
           run: pos_integer(),
+          external_markers: [atom()],
           targets: [%{name: String.t(), expansion: atom()}],
           failure: map(),
           prefix: [struct()],
@@ -104,8 +128,7 @@ defmodule PropertyDamage.ReplayArtifact do
 
   @doc false
   # The artifact term of the run `report` describes, or nil when the report
-  # records no target's choices (a latency report) or a branching sequence,
-  # which an artifact cannot hold.
+  # records no target's choices (a latency report).
   @spec build(FailureReport.t()) :: t() | nil
   def build(
         %FailureReport{
@@ -116,7 +139,7 @@ defmodule PropertyDamage.ReplayArtifact do
       when map_size(traced) > 0 do
     targets = targets(report)
 
-    if Sequence.linear?(plan) and Enum.all?(targets, &Map.has_key?(traced, &1.name)) do
+    if Enum.all?(targets, &Map.has_key?(traced, &1.name)) do
       reference = hd(targets).name
       roots = Sequence.to_list(plan)
       ids = Enum.map(Map.fetch!(traced, reference), & &1.root_id)
@@ -126,6 +149,7 @@ defmodule PropertyDamage.ReplayArtifact do
         model: report.model,
         seed: report.seed,
         run: 1,
+        external_markers: report.external_markers,
         targets: targets,
         failure: %{
           kind: report.kind,
@@ -463,6 +487,42 @@ defmodule PropertyDamage.ReplayArtifact do
   @spec parse(String.t()) ::
           {:ok, t()} | {:error, String.t() | {:unknown_struct_module, module()}}
   def parse(text) when is_binary(text) do
+    case parse_once(text) do
+      {:error, {:unknown_atom, _name, _line}} ->
+        reparse_with_application_modules(text)
+
+      {:error, {:unknown_struct_module, _module}} ->
+        reparse_with_application_modules(text)
+
+      result ->
+        result
+    end
+  end
+
+  # A name the first parse did not know can belong to a module of the project
+  # that nothing has loaded yet, such as a constants module or a command that
+  # only an expansion produces. Load the modules of every loaded application
+  # and parse once more. The file names no module to load, so it cannot make
+  # the reader load code outside the loaded applications.
+  defp reparse_with_application_modules(text) do
+    load_application_modules()
+
+    case parse_once(text) do
+      {:error, {:unknown_atom, name, line}} -> {:error, unknown_atom(name, line)}
+      result -> result
+    end
+  end
+
+  defp load_application_modules do
+    for {app, _description, _vsn} <- :application.loaded_applications(),
+        module <- Application.spec(app, :modules) || [] do
+      Code.ensure_loaded(module)
+    end
+
+    :ok
+  end
+
+  defp parse_once(text) do
     with :ok <- check_header(text),
          {:ok, quoted} <- quote_text(text),
          {:ok, term} <- walk(quoted, text),
@@ -504,10 +564,11 @@ defmodule PropertyDamage.ReplayArtifact do
            "#{line(second)}: an artifact holds one term"}
 
       {:ok, quoted} ->
+        load_atom_sources(quoted)
         {:ok, resolve_atoms(quoted)}
 
       {:error, {meta, "unsafe atom does not exist: " <> _, token}} ->
-        {:error, unknown_atom(token, Keyword.get(meta, :line, "?"))}
+        {:error, {:unknown_atom, token, Keyword.get(meta, :line, "?")}}
 
       {:error, {meta, message, token}} ->
         {:error,
@@ -564,6 +625,9 @@ defmodule PropertyDamage.ReplayArtifact do
          "the replay artifact's targets: must be a non-empty list of " <>
            "%{name: name, expansion: mode} maps naming each target of choices: once"}
 
+      not valid_markers?(term.external_markers) ->
+        {:error, "the replay artifact's external_markers: must be a list of atoms"}
+
       true ->
         {:ok, term}
     end
@@ -579,6 +643,9 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp valid_targets?(_term), do: false
 
+  defp valid_markers?(markers),
+    do: is_list(markers) and Enum.all?(markers, &(is_atom(&1) and not is_nil(&1)))
+
   defp valid_choices?(choices) when is_list(choices),
     do: Enum.all?(choices, &(is_map(&1) and Enum.sort(Map.keys(&1)) == Enum.sort(@choice_keys)))
 
@@ -588,7 +655,7 @@ defmodule PropertyDamage.ReplayArtifact do
     {:ok, literal!(quoted)}
   catch
     {:refuse, node, why} -> {:error, "#{why}: #{source(node, text)} at line #{line(node)}"}
-    {:unknown_atom, name, line} -> {:error, unknown_atom(name, line)}
+    {:unknown_atom, name, line} -> {:error, {:unknown_atom, name, line}}
     {:unknown_struct_module, module} -> {:error, {:unknown_struct_module, module}}
   end
 
@@ -596,6 +663,51 @@ defmodule PropertyDamage.ReplayArtifact do
     do:
       "the replay artifact names #{name}, which this system does not know (no such atom), " <>
         "at line #{line}"
+
+  # Loads the modules whose atoms an artifact names, since a module's atoms
+  # exist only once it is loaded and a fresh VM loads modules lazily: the
+  # framework's own modules, then the modules a loaded model lists. The model
+  # must be loaded already (`PropertyDamage.run/1` loads the `model:` it is
+  # given), so a file naming a module cannot make the reader load it.
+  defp load_atom_sources(quoted) do
+    Enum.each(@framework_modules, &Code.ensure_loaded/1)
+
+    with {:ok, model} <- loaded_model(quoted) do
+      Enum.each(model_modules(model), &Code.ensure_loaded/1)
+    end
+  end
+
+  defp loaded_model({:%{}, _meta, pairs}) when is_list(pairs) do
+    Enum.find_value(pairs, :error, fn
+      {{:__block__, _key_meta, [{@atom_tag, "model"}]}, {:__aliases__, _meta, parts}} ->
+        with names when is_list(names) <- alias_names(parts),
+             {:ok, model} <- existing_atom("Elixir." <> Enum.join(names, ".")),
+             true <- :code.is_loaded(model) != false,
+             true <- function_exported?(model, :command_sequence_projection, 0) do
+          {:ok, model}
+        else
+          _not_a_loaded_model -> :error
+        end
+
+      _other ->
+        nil
+    end)
+  end
+
+  defp loaded_model(_quoted), do: :error
+
+  # The commands and projections `model` lists.
+  defp model_modules(model) do
+    commands =
+      for callback <- [:commands, :setup_each, :teardown_each],
+          function_exported?(model, callback, 0),
+          entry <- apply(model, callback, []),
+          module = Model.entry_module(entry),
+          not is_nil(module),
+          do: module
+
+    commands ++ Model.projection_modules(model)
+  end
 
   # Every tagged atom the running system knows becomes that atom; an alias
   # becomes its module when that module's name is an atom already. Anything
@@ -730,8 +842,9 @@ defmodule PropertyDamage.ReplayArtifact do
     end
   end
 
-  # A struct module an artifact may name: one loaded before the artifact is
-  # read (the loader never loads a module) that defines a struct.
+  # A struct module an artifact may name: one loaded before the atoms are
+  # resolved (the loader loads only the framework's modules and those a
+  # loaded model lists) that defines a struct.
   defp artifact_struct?(module),
     do: :code.is_loaded(module) != false and function_exported?(module, :__struct__, 1)
 
@@ -791,13 +904,23 @@ defmodule PropertyDamage.ReplayArtifact do
   # generation simulated them at (a root at the position of its root id), so
   # every placeholder the recorded commands hold resolves; then the teardown
   # commands generated from the seed against the state the roots leave.
-  @spec sequence(t()) :: Sequence.t()
-  def sequence(term) do
+  #
+  # Options: `:external_markers`, the atom markers the re-execution passes,
+  # read where the commands are simulated again (see
+  # `PropertyDamage.External`); default: the markers the term records.
+  @spec sequence(t(), keyword()) :: Sequence.t()
+  def sequence(term, opts \\ []) do
+    opts = recorded_markers(opts, term.external_markers)
     roots = Enum.map(term.roots, & &1.command)
-    registry = registry(term.model, term.prefix, term.roots)
+    registry = registry(term.model, term.prefix, term.roots, opts)
     sequence = %{Sequence.linear(roots) | setup: term.prefix, registry: registry}
-    Generator.teardown_commands(term.model, sequence, term.seed)
+    Generator.teardown_commands(term.model, sequence, term.seed, markers(opts))
   end
+
+  defp markers(opts), do: [external_markers: Keyword.get(opts, :external_markers, [])]
+
+  # `opts` with `:external_markers` set to `recorded` unless the caller gave it.
+  defp recorded_markers(opts, recorded), do: Keyword.put_new(opts, :external_markers, recorded)
 
   @doc false
   # The placeholder ids that `commands` hold and that the registry an
@@ -806,10 +929,10 @@ defmodule PropertyDamage.ReplayArtifact do
   # leaf mints is left out: a re-execution simulates the leaves again where
   # they ran, so it mints that id again. A shrink candidate with an id here
   # would fail on replay where it failed in the shrink, so the shrinker never
-  # runs it.
-  @spec unregistered(module(), [struct()], [map()], [struct()]) :: [term()]
-  def unregistered(model, prefix, roots, commands) do
-    registry = registry(model, prefix, roots)
+  # runs it. Options: `:external_markers`, as for `sequence/2`.
+  @spec unregistered(module(), [struct()], [map()], [struct()], keyword()) :: [term()]
+  def unregistered(model, prefix, roots, commands, opts \\ []) do
+    registry = registry(model, prefix, roots, opts)
 
     commands
     |> PlaceholderRegistry.collect_placeholder_ids()
@@ -823,7 +946,7 @@ defmodule PropertyDamage.ReplayArtifact do
   # and the roots simulated again from the projection's initial state, each
   # root at the position of its root id, then moved to the roots' positions
   # in the recorded order.
-  defp registry(model, prefix, roots) do
+  defp registry(model, prefix, roots, opts) do
     projection = model.command_sequence_projection()
 
     steps =
@@ -836,7 +959,7 @@ defmodule PropertyDamage.ReplayArtifact do
       Enum.reduce(steps, {PlaceholderRegistry.new(), projection.init()}, fn {command, position},
                                                                             {registry, state} ->
         {_command, _events, state, minted} =
-          Generator.simulate_step(model, command, position, state)
+          Generator.simulate_step(model, command, position, state, markers(opts))
 
         {Enum.reduce(minted, registry, &PlaceholderRegistry.register(&2, &1)), state}
       end)
@@ -852,13 +975,15 @@ defmodule PropertyDamage.ReplayArtifact do
   @doc false
   # Every recorded target's concrete sequence for `sequence(term)`, from the
   # commands it ran, with no draw: `PropertyDamage.Expansion.t()`, restricted
-  # to `names` (default: every recorded target).
-  @spec expansion(t(), Sequence.t(), [String.t()] | nil) :: Expansion.t()
-  def expansion(term, %Sequence{} = sequence, names \\ nil) do
+  # to `names` (default: every recorded target). Options: `:external_markers`,
+  # as for `sequence/2`.
+  @spec expansion(t(), Sequence.t(), [String.t()] | nil, keyword()) :: Expansion.t()
+  def expansion(term, %Sequence{} = sequence, names \\ nil, opts \\ []) do
+    opts = recorded_markers(opts, term.external_markers)
     recorded = if names, do: Map.take(term.choices, names), else: term.choices
 
     if Expansion.defines?(term.model) do
-      Expansion.recorded(term.model, sequence, term.seed, recorded, owners(term))
+      Expansion.recorded(term.model, sequence, term.seed, recorded, owners(term), markers(opts))
     else
       Expansion.identity(
         sequence,
@@ -890,16 +1015,19 @@ defmodule PropertyDamage.ReplayArtifact do
   # for a value no file can hold, say) falls back to the choices its trace
   # records. Raises `ArgumentError` naming `path` when the report records
   # neither a `replay` term nor `expansions`, or does not record what one of
-  # `names` ran.
-  @spec reexecution(FailureReport.t(), [String.t()], String.t()) ::
+  # `names` ran. Options: `:external_markers`, as for `sequence/2`;
+  # default: the report's `external_markers`.
+  @spec reexecution(FailureReport.t(), [String.t()], String.t(), keyword()) ::
           {Sequence.t(), %{String.t() => map()} | nil}
-  def reexecution(%FailureReport{model: model} = report, names, path) do
+  def reexecution(%FailureReport{model: model} = report, names, path, opts \\ []) do
+    opts = recorded_markers(opts, report.external_markers)
+
     cond do
       not Expansion.defines?(model) ->
         {FailureReport.shrunk_sequence(report), nil}
 
       is_map(report.replay) ->
-        from_term(report.replay, names, path)
+        from_term(report.replay, names, path, opts)
 
       is_nil(report.replay) and is_nil(report.expansions) ->
         raise ArgumentError,
@@ -910,15 +1038,15 @@ defmodule PropertyDamage.ReplayArtifact do
                 "seed again to get a report that records them"
 
       true ->
-        from_trace(report, names, path)
+        from_trace(report, names, path, opts)
     end
   end
 
-  defp from_term(term, names, path) do
+  defp from_term(term, names, path, opts) do
     case names -- Map.keys(term.choices) do
       [] ->
-        sequence = sequence(term)
-        {sequence, expansion(term, sequence, names).variants}
+        sequence = sequence(term, opts)
+        {sequence, expansion(term, sequence, names, opts).variants}
 
       missing ->
         raise ArgumentError,
@@ -929,13 +1057,13 @@ defmodule PropertyDamage.ReplayArtifact do
     end
   end
 
-  defp from_trace(report, names, path) do
+  defp from_trace(report, names, path, opts) do
     traced = Expansion.traced!(report.model, report.trace && report.trace.expansion, names, path)
     sequence = FailureReport.shrunk_sequence(report)
 
     {sequence,
      Map.new(names, fn name ->
-       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name))}
+       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name), markers(opts))}
      end)}
   end
 

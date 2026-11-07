@@ -277,7 +277,12 @@ defmodule PropertyDamage.Comparison do
      })}
   end
 
-  defp expired_key(loop, key, {:differ, target, reference_value, variant_value, mismatch}, _ms) do
+  defp expired_key(
+         loop,
+         key,
+         {:differ, target, reference_value, variant_value, mismatch},
+         waited_ms
+       ) do
     {target,
      Failure.diverged(%{
        key: key,
@@ -286,7 +291,9 @@ defmodule PropertyDamage.Comparison do
        reference_value: reference_value,
        variant_value: variant_value,
        mismatch: mismatch,
-       using: Map.fetch!(loop.written, key)
+       using: Map.fetch!(loop.written, key),
+       waited_ms: waited_ms,
+       within_ms: loop.within
      })}
   end
 

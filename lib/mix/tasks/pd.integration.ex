@@ -24,7 +24,8 @@ defmodule Mix.Tasks.Pd.Integration do
       --report-path   Path for report file (required for non-terminal formats)
       --save-failures Directory to save failure files
       --stop-on-fail  Stop on first failure
-      --hunt          Bug hunt mode: stop after finding N unique bugs
+      --hunt          Bug hunt mode: stop after finding N unique bugs, or after
+                      --runs runs when given (default: no run limit)
       --verbose       Show detailed progress (default: true)
       --quiet         Suppress progress output
 
@@ -183,10 +184,11 @@ defmodule Mix.Tasks.Pd.Integration do
     if opts[:hunt] do
       # hunt_bugs consumes a narrower option set than run/1; pass only the keys
       # it accepts (its schema is strict) rather than the full integration_opts.
+      # A hunt is unbounded unless --runs caps it.
       hunt_opts =
         integration_opts
-        |> Keyword.take([:model, :targets, :verbose])
-        |> Keyword.merge(stop_after: opts[:hunt], max_runs: :unlimited)
+        |> Keyword.take([:model, :targets, :max_commands, :verbose, :health_check])
+        |> Keyword.merge(stop_after: opts[:hunt], max_runs: opts[:runs] || :unlimited)
 
       # Only set :save_to when a directory was given; the schema rejects nil.
       hunt_opts =

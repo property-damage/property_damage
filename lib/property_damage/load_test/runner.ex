@@ -31,6 +31,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     :ramp_step_index,
     :awaiting,
     :check_mode,
+    :seed,
     :in_flight
   ]
 
@@ -134,6 +135,10 @@ defmodule PropertyDamage.LoadTest.Runner do
     # worker_id, so workers send distinct minted values on the shared SUT.
     run_nonce = opts[:run_nonce] || :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
+    # Seed for sequence generation, drawn once like a run's seed. Each worker
+    # derives its own seed from it and its worker_id.
+    seed = opts[:seed] || :rand.uniform(1_000_000_000)
+
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
 
@@ -145,7 +150,8 @@ defmodule PropertyDamage.LoadTest.Runner do
            metrics: metrics,
            think_time_range: think_time_range,
            check_mode: check_mode,
-           run_nonce: run_nonce
+           run_nonce: run_nonce,
+           seed: seed
          ) do
       {:ok, pool} ->
         # Unified progress projection (DR-022): the user `on_progress:` callback
@@ -189,6 +195,7 @@ defmodule PropertyDamage.LoadTest.Runner do
           ramp_step_index: 0,
           awaiting: nil,
           check_mode: check_mode,
+          seed: seed,
           in_flight: MapSet.new()
         }
 
@@ -502,7 +509,8 @@ defmodule PropertyDamage.LoadTest.Runner do
         model: state.model,
         adapter: state.target.adapter,
         arrival_rate: state.arrival_rate,
-        duration_ms: state.duration_ms
+        duration_ms: state.duration_ms,
+        seed: state.seed
       }
     }
 

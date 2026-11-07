@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PropertyDamage failure reports</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; }
+  iframe { border: 0; width: 100%; height: 100%; display: block; background: #fff; }
+  .pill {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px; z-index: 10; max-width: calc(100% - 32px);
+    background: #3d5afe; color: #fff; font: 600 13px/1 system-ui, sans-serif;
+    border-radius: 999px; padding: 6px; box-shadow: 0 4px 18px rgba(0,0,0,.45);
+  }
+  .pill button { all: unset; cursor: pointer; padding: 6px 10px; border-radius: 999px; background: rgba(0,0,0,.25); }
+  .pill button:hover { background: rgba(0,0,0,.45); }
+  .pill span { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { color: #ddd; font: 15px system-ui, sans-serif; padding: 40px; }
+</style>
+</head>
+<body>
+<script type="application/json" id="pd-reports">__PD_REPORTS_JSON__</script>
+<iframe id="f" title="failure report"></iframe>
+<div class="pill"><button id="prev" aria-label="previous report">&larr;</button><span id="lbl"></span><button id="next" aria-label="next report">&rarr;</button></div>
+<script>
+  // Each entry is {file, title}: one report page in this directory.
+  const V = JSON.parse(document.getElementById("pd-reports").textContent);
+  const f = document.getElementById("f");
+  const lbl = document.getElementById("lbl");
+  function current() {
+    const m = location.hash.match(/r=([^&]+)/);
+    const i = m ? V.findIndex(v => v.file === decodeURIComponent(m[1])) : 0;
+    return i < 0 ? 0 : i;
+  }
+  function show(i) {
+    const v = V[i];
+    lbl.textContent = (i + 1) + "/" + V.length + " · " + v.title;
+    lbl.title = v.title;
+    if (!f.src.endsWith(encodeURI(v.file))) f.src = v.file;
+  }
+  function go(d) {
+    const i = (current() + d + V.length) % V.length;
+    location.hash = "r=" + encodeURIComponent(V[i].file);
+  }
+  // The report page uses the arrow keys too: forward only keys it left alone.
+  function onKey(e) {
+    if (e.defaultPrevented) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(t.tagName))) return;
+    if (e.key === "ArrowLeft") go(-1);
+    if (e.key === "ArrowRight") go(1);
+  }
+  if (!V.length) {
+    document.body.innerHTML = '<p class="empty">No failure reports in this directory.</p>';
+  } else {
+    document.getElementById("prev").onclick = () => go(-1);
+    document.getElementById("next").onclick = () => go(1);
+    window.addEventListener("hashchange", () => show(current()));
+    window.addEventListener("keydown", onKey);
+    f.addEventListener("load", () => { try { f.contentWindow.addEventListener("keydown", onKey); } catch (_) {} });
+    show(current());
+  }
+</script>
+</body>
+</html>

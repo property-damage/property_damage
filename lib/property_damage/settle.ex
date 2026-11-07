@@ -8,8 +8,8 @@ defmodule PropertyDamage.Settle do
 
   ## Usage
 
-  Commands whose `command_spec/1` declares `execution: :probe` or `:async` customize
-  retry behavior via the spec's `:settle` map. The Executor uses this module to
+  Commands whose spec declares `execution: :probe` or `:async` customize
+  retry behavior via the spec's `:settle` map (see `PropertyDamage.Model.spec_table/1`). The Executor uses this module to
   repeatedly execute the command until it succeeds or times out.
 
   ## Example
@@ -40,28 +40,13 @@ defmodule PropertyDamage.Settle do
   }
 
   @doc """
-  Get the settle configuration for a command.
+  Get the settle configuration from a command spec map.
 
-  For a command module/struct, resolves the `:settle` map from its `command_spec/1`
-  (falling back to defaults when the command has no spec). Also accepts a command
-  spec map directly via its `:settle` key.
+  Returns the spec's `:settle` map merged with the defaults. A spec of a
+  command in a model comes from `PropertyDamage.Model.spec_for/2`.
   """
-  @spec get_config(module() | struct() | map()) :: map()
-  def get_config(command) when is_struct(command) do
-    get_config(command.__struct__)
-  end
-
-  def get_config(command_module) when is_atom(command_module) do
-    get_settle_config(resolve_spec(command_module))
-  end
-
-  # Spec map with :settle key
-  def get_config(%{settle: settle}) when is_map(settle) do
-    Map.merge(@default_config, settle)
-  end
-
-  # Plain map without :settle - use defaults
-  def get_config(map) when is_map(map), do: @default_config
+  @spec get_config(map()) :: map()
+  def get_config(spec) when is_map(spec), do: get_settle_config(spec)
 
   @doc """
   Get the execution mode from a command spec map.
@@ -85,44 +70,19 @@ defmodule PropertyDamage.Settle do
   def get_settle_config(_), do: @default_config
 
   @doc """
-  Get the execution semantics of a command.
+  Get the execution semantics from a command spec map.
 
-  For a command module/struct, resolves `:execution` from its `command_spec/1`
-  (`:sync` when the command has no spec). Also accepts a command spec map with an
-  `:execution` key.
+  Returns the spec's `:execution` value, or `:sync` for a spec without one.
   """
-  @spec get_semantics(module() | struct() | map()) :: :sync | :probe | :async
-  def get_semantics(command) when is_struct(command) do
-    get_semantics(command.__struct__)
-  end
-
-  def get_semantics(command_module) when is_atom(command_module) do
-    Map.get(resolve_spec(command_module), :execution, :sync)
-  end
-
-  # Spec map with :execution key
-  def get_semantics(%{execution: execution}), do: execution
-
-  # Plain maps are always sync
-  def get_semantics(map) when is_map(map), do: :sync
-
-  # Resolve a command module's spec via its command_spec/1, falling back to the
-  # framework defaults for spec-less command modules (DR-028: command_spec is the
-  # single static-metadata surface; there is no per-callback fallback).
-  defp resolve_spec(command_module) do
-    if PropertyDamage.ModuleCheck.exports?(command_module, :command_spec, 1) do
-      command_module.command_spec([])
-    else
-      PropertyDamage.Command.framework_defaults()
-    end
-  end
+  @spec get_semantics(map()) :: :sync | :probe | :async
+  def get_semantics(spec) when is_map(spec), do: get_execution(spec)
 
   @doc """
-  Check if a command requires settling (is a probe or async).
+  Check if a command spec requires settling (is a probe or async).
   """
-  @spec requires_settling?(module() | struct()) :: boolean()
-  def requires_settling?(command) do
-    get_semantics(command) in [:probe, :async]
+  @spec requires_settling?(map()) :: boolean()
+  def requires_settling?(spec) when is_map(spec) do
+    get_semantics(spec) in [:probe, :async]
   end
 
   @doc """
@@ -139,6 +99,9 @@ defmodule PropertyDamage.Settle do
   - `:timeout_ms` - Maximum time to wait (default: 2000)
   - `:interval_ms` - Time between retries (default: 300)
   - `:backoff` - Backoff strategy, `:linear` or `:exponential` (default: `:linear`)
+  - `:sleep` - One-arity function (milliseconds) that settle sleeps with
+    between attempts (default: `&Process.sleep/1`). Tests inject a recorder to
+    assert the order and count of sleeps without measuring wall-clock time.
 
   ## Returns
 
@@ -160,13 +123,14 @@ defmodule PropertyDamage.Settle do
     timeout_ms = Keyword.get(config, :timeout_ms)
     interval_ms = Keyword.get(config, :interval_ms)
     backoff = Keyword.get(config, :backoff)
+    sleep = Keyword.get(config, :sleep, &Process.sleep/1)
 
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
-    do_settle(fun, deadline, interval_ms, backoff)
+    do_settle(fun, deadline, interval_ms, backoff, sleep)
   end
 
-  defp do_settle(fun, deadline, interval_ms, backoff) do
+  defp do_settle(fun, deadline, interval_ms, backoff, sleep) do
     # Attempt first, THEN decide whether to retry. This guarantees the function
     # runs at least once (e.g. with timeout_ms: 0) and that a final attempt is
     # made at the deadline rather than bailing out just before it.
@@ -187,7 +151,7 @@ defmodule PropertyDamage.Settle do
           sleep_time = min(interval_ms, remaining)
 
           if sleep_time > 0 do
-            Process.sleep(sleep_time)
+            sleep.(sleep_time)
           end
 
           next_interval =
@@ -196,7 +160,7 @@ defmodule PropertyDamage.Settle do
               :linear -> interval_ms
             end
 
-          do_settle(fun, deadline, next_interval, backoff)
+          do_settle(fun, deadline, next_interval, backoff, sleep)
         end
 
       {:error, reason} ->
@@ -213,19 +177,19 @@ defmodule PropertyDamage.Settle do
   @doc """
   Execute a command with settle logic if required.
 
-  If the command is a probe or async, wraps execution with settle/retry logic.
-  For regular sync commands, executes directly.
+  If the command's spec is a probe or async, wraps execution with settle/retry
+  logic. For regular sync commands, executes directly.
 
   ## Parameters
 
-  - `command` - The command struct
+  - `spec` - The command's spec map
   - `execute_fn` - Function that executes the command, should return settle-compatible result
-  - `opts` - Additional options (merged with command's settle_config)
+  - `opts` - Additional options (merged with the spec's settle config)
   """
-  @spec execute_with_settle(struct(), (-> term()), keyword()) :: term()
-  def execute_with_settle(command, execute_fn, opts \\ []) do
-    if requires_settling?(command) do
-      config = get_config(command)
+  @spec execute_with_settle(map(), (-> term()), keyword()) :: term()
+  def execute_with_settle(spec, execute_fn, opts \\ []) do
+    if requires_settling?(spec) do
+      config = get_config(spec)
       merged_opts = Keyword.merge(Map.to_list(config), opts)
       settle(execute_fn, merged_opts)
     else

@@ -33,8 +33,8 @@ defmodule PropertyDamage.Test.ExecutorModel do
   @moduledoc """
   Simple model for executor tests.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -76,8 +76,8 @@ defmodule PropertyDamage.Test.FailingModel do
   @moduledoc """
   Model with failing check projection for testing check failures.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
@@ -138,6 +138,34 @@ defmodule PropertyDamage.Test.SimpleAdapter do
   defp next_counter(%{item_counter: ref}), do: :atomics.add_get(ref, 1, 1) - 1
 end
 
+defmodule PropertyDamage.Test.AppProcessAdapter do
+  @moduledoc """
+  `SimpleAdapter` whose `setup/1` attaches a telemetry handler, which needs
+  the process the `:telemetry` application starts, so setup fails unless the
+  project's applications run.
+  """
+  use PropertyDamage.Adapter
+
+  alias PropertyDamage.Test.SimpleAdapter
+
+  @impl true
+  def setup(config) do
+    handler_id = {__MODULE__, make_ref()}
+    :ok = :telemetry.attach(handler_id, [__MODULE__, :probe], &__MODULE__.handle_event/4, nil)
+    :ok = :telemetry.detach(handler_id)
+    SimpleAdapter.setup(config)
+  end
+
+  @doc false
+  def handle_event(_event, _measurements, _metadata, _config), do: :ok
+
+  @impl true
+  def teardown(context), do: SimpleAdapter.teardown(context)
+
+  @impl true
+  def execute(command, context, runtime), do: SimpleAdapter.execute(command, context, runtime)
+end
+
 defmodule PropertyDamage.Test.ErrorAdapter do
   @moduledoc """
   Adapter that returns errors for testing error handling.
@@ -164,7 +192,7 @@ defmodule PropertyDamage.Test.SimpleModel do
   @moduledoc """
   Simple model without extra projections for ref resolution tests.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.ModelState
@@ -230,7 +258,7 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   @moduledoc """
   Model with multiple checks for testing failure equivalence.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Projections.{ModelState, MultiCheckProjection}
@@ -256,8 +284,8 @@ defmodule PropertyDamage.Test.ProbeModel do
   This model allows testing that probe commands are prioritized for removal
   during shrinking (see DR-008).
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -393,8 +421,8 @@ defmodule PropertyDamage.Test.LinkModel do
   simulator so the shrinker's validity check (`Sequence.Validator.valid_sequence?/2`)
   has something to simulate.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded

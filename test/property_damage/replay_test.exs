@@ -55,7 +55,7 @@ defmodule PropertyDamage.ReplayTest do
 
   defmodule CounterModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -90,7 +90,7 @@ defmodule PropertyDamage.ReplayTest do
   # The counter with one setup command and one teardown command.
   defmodule LifecycleCounterModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.ReplayTest.{Bump, Counter, Prepare, Release}
 
@@ -263,19 +263,6 @@ defmodule PropertyDamage.ReplayTest do
     test "missing adapter" do
       failure = %FailureReport{model: CounterModel, targets: []}
       assert {:error, :missing_adapter} = Replay.start(failure)
-    end
-
-    test "branching sequences are not steppable" do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-      failure = %FailureReport{
-        model: CounterModel,
-        targets: [{CounterAdapter, []}],
-        trace: PropertyDamage.RunTrace.new(plan: branching)
-      }
-
-      assert {:error, :branching_replay_unsupported} = Replay.start(failure)
-      assert {:error, :branching_replay_unsupported} = Replay.run(failure)
     end
   end
 

@@ -101,7 +101,7 @@ end
 
 defmodule ObanBench.Uniqueness.Model do
   @moduledoc "Ties the unique-increment command to the dedup-aware projection."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.Uniqueness.Commands.UniqueIncrement
 

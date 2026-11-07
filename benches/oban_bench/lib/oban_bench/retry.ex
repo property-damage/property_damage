@@ -63,7 +63,7 @@ end
 
 defmodule ObanBench.Retry.Model do
   @moduledoc "Reuses the Increment command; the poller is the exactly-once oracle."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.Commands.Increment
 

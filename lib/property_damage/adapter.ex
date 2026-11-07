@@ -60,8 +60,20 @@ defmodule PropertyDamage.Adapter do
     merges nothing into it, so a `setup/1` that returns `%{inject: ...}` is never
     clobbered, and you can pattern-match your own keys with confidence.
   - `runtime` is a `%PropertyDamage.Runtime{}` handle carrying the per-command
-    framework affordances (`inject`, `start_poller`, `stutter`). See
+    framework affordances (`inject`, `start_poller`, `stutter`, `log`). See
     `PropertyDamage.Runtime`.
+
+  ## Log lines (DR-054)
+
+  `execute/3`, `setup/1` and `teardown/1` can write log lines for the failure
+  report with `PropertyDamage.log/2` (behind `require PropertyDamage`). A line
+  is printed only in a failure report, under the step that wrote it, beside
+  that step's events; `setup/1` and `teardown/1` lines print under
+  `adapter setup/1` and `adapter teardown/1` notes. A `Task` the adapter starts
+  logs to the step that started it. A process the adapter did not start
+  through `Task`, such as a `GenServer`, logs with
+  `PropertyDamage.Runtime.log/3` and the runtime `execute/3` received. See
+  `PropertyDamage.Log`.
 
   ## Execution process and the per-command timeout (DR-032)
 
@@ -350,6 +362,10 @@ defmodule PropertyDamage.Adapter do
   - `:default_timeout` - Default timeout for command execution (default: 30 seconds).
     Can be an integer (seconds) or a tuple like `{500, :milliseconds}`.
 
+  The macro also records the adapter's docs and the path of its source file
+  for the failure report (see `PropertyDamage.Docs`), so place it before every
+  `def` and `defp` of the module.
+
   ## Example
 
       defmodule MyHTTPAdapter do
@@ -371,12 +387,29 @@ defmodule PropertyDamage.Adapter do
 
     quote do
       @behaviour PropertyDamage.Adapter
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Adapter)
       import PropertyDamage.Adapter, only: [delegate_execution: 1]
+
+      Module.register_attribute(__MODULE__, :pd_sub_adapters, accumulate: true)
+      @before_compile PropertyDamage.Adapter
 
       @impl true
       def timeout(_command), do: unquote(default_timeout)
 
       defoverridable timeout: 1
+    end
+  end
+
+  # Defines `__pd_sub_adapters__/0`: the modules the adapter's
+  # `delegate_execution` calls name in `to:`, each once, in call order.
+  defmacro __before_compile__(env) do
+    modules =
+      env.module |> Module.get_attribute(:pd_sub_adapters) |> Enum.reverse() |> Enum.uniq()
+
+    quote do
+      @doc false
+      def __pd_sub_adapters__, do: unquote(modules)
     end
   end
 
@@ -396,12 +429,22 @@ defmodule PropertyDamage.Adapter do
       delegate_execution for: [CreatePayment], to: PaymentsSubAdapter
 
   The target module should implement `execute/3` with the same signature; the
-  `user_context` and `runtime` are forwarded unchanged.
+  `user_context` and `runtime` are forwarded unchanged. The bundle of a
+  failure page lists the module named in `to:`, with its docs and source.
   """
   defmacro delegate_execution(opts) do
     commands = Keyword.fetch!(opts, :for)
     target = Keyword.fetch!(opts, :to)
 
+    record =
+      quote do
+        Module.put_attribute(__MODULE__, :pd_sub_adapters, unquote(target))
+      end
+
+    [record | delegations(commands, target)]
+  end
+
+  defp delegations(commands, target) do
     for command <- commands do
       quote do
         @impl true

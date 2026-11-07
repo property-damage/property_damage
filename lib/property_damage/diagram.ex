@@ -15,49 +15,52 @@ defmodule PropertyDamage.Diagram do
 
   ### From a Failure Report
 
-      report = PropertyDamage.run(...) |> elem(1)
+      {:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
       diagram = PropertyDamage.Diagram.from_failure_report(report, :mermaid)
       IO.puts(diagram)
 
   ### From a Sequence and Event Log
 
-      diagram = PropertyDamage.Diagram.generate(
-        sequence,
-        event_log,
-        format: :plantuml,
-        title: "Account Creation Flow",
-        show_state: true
-      )
+  `generate/4` takes the format as the third, positional argument. Options
+  follow as a keyword list.
+
+      sequence = report.trace.plan
+      event_log = PropertyDamage.FailureReport.event_log(report)
+
+      diagram =
+        PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
+          title: "Ping Flow",
+          show_state: true
+        )
 
   ## Example Output (Mermaid)
 
+  A failing `Ping` command whose `Pong` reply broke a latency check:
+
       ```mermaid
       sequenceDiagram
+          title Failure: Invariant Violation: latency_within_sla (seed: 7)
           participant Test
           participant SUT
-          participant State
 
-          Test->>SUT: CreateAccount(name: "Alice")
-          SUT-->>Test: AccountCreated(id: "acc_123")
-          Test->>State: balance: 0
+          Note over Test,SUT: ❌ FAILURE at command 0
+          Test-xSUT: Ping()
+          SUT-->>Test: Pong(latency_ms: 500)
 
-          Test->>SUT: Deposit(amount: 100)
-          SUT-->>Test: DepositSucceeded(new_balance: 100)
-          Test->>State: balance: 100
-
-          Note over Test,SUT: ❌ FAILURE at command 2
-          Test-xSUT: Withdraw(amount: 200)
-          Note right of SUT: NonNegativeBalance violated
+          Note right of SUT: check `latency_within_sla` returned `...
       ```
 
   ## Options
 
-  - `:title` - Diagram title (default: "PropertyDamage Sequence")
-  - `:show_state` - Include state changes (default: false)
-  - `:show_timestamps` - Include timestamps (default: false)
+  - `:title` - Diagram title (default: "PropertyDamage Sequence"; for
+    `from_failure_report/3`, a title built from the failure type and seed)
+  - `:show_state` - Add a `State` participant to the Mermaid and PlantUML
+    diagrams (default: false). No state-change lines are drawn, and the
+    WebSequence format ignores it.
   - `:max_value_length` - Truncate long values (default: 50)
-  - `:highlight_failure` - Highlight failure point (default: true)
-  - `:show_branches` - Show parallel branches (default: true)
+  - `:failed_at_index` - `generate/4` only: the flattened index of the failing
+    command, which marks that step as the failure. `from_failure_report/3`
+    sets the failure point from the report.
   """
 
   alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
@@ -66,19 +69,14 @@ defmodule PropertyDamage.Diagram do
   @type options :: [
           title: String.t(),
           show_state: boolean(),
-          show_timestamps: boolean(),
           max_value_length: pos_integer(),
-          highlight_failure: boolean(),
-          show_branches: boolean()
+          failed_at_index: non_neg_integer()
         ]
 
   @default_options [
     title: nil,
     show_state: false,
-    show_timestamps: false,
-    max_value_length: 50,
-    highlight_failure: true,
-    show_branches: true
+    max_value_length: 50
   ]
 
   @default_title "PropertyDamage Sequence"
@@ -114,7 +112,7 @@ defmodule PropertyDamage.Diagram do
 
     opts = Keyword.put(opts, :title, title)
 
-    # `steps/1` attributes events and the failure point by branch-aware position;
+    # `steps/1` attributes events and the failure point by position;
     # each Step carries its command, entries, and failed? flag.
     report |> FailureReport.steps() |> render(format, opts)
   end
@@ -140,7 +138,7 @@ defmodule PropertyDamage.Diagram do
 
     # No report here, so labels are empty; the failure point (if any) is passed
     # through opts. RunTrace owns the grouping so both diagram entry points
-    # share one branch-aware step timeline.
+    # share one step timeline.
     sequence
     |> RunTrace.build_steps(event_log, %{}, Keyword.get(opts, :failed_at_index))
     |> render(format, opts)
@@ -245,7 +243,6 @@ defmodule PropertyDamage.Diagram do
         source_indicator =
           case entry.source do
             :command -> ""
-            :nemesis -> " [nemesis]"
             :injector -> " [injected]"
             :mock -> " [mock]"
             _ -> ""
@@ -332,7 +329,6 @@ defmodule PropertyDamage.Diagram do
 
         source_indicator =
           case entry.source do
-            :nemesis -> " **[nemesis]**"
             :injector -> " //[injected]//"
             :mock -> " ''[mock]''"
             _ -> ""

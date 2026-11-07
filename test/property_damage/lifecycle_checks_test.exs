@@ -48,7 +48,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule MaxCountModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -124,7 +124,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule NeverModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -208,9 +208,9 @@ defmodule PropertyDamage.LifecycleChecksTest do
     def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
-  # Liveness (@eventually) that never resolves, plus a teardown safety check
+  # An @eventually check that never resolves, plus a teardown safety check
   # that would always fail. A genuine liveness timeout preempts the checkpoint.
-  defmodule LivenessAndSafetyProjection do
+  defmodule EventuallyAndSafetyProjection do
     use PropertyDamage.Model.Projection
     @impl true
     def init, do: %{confirmed: false}
@@ -229,12 +229,12 @@ defmodule PropertyDamage.LifecycleChecksTest do
     end
   end
 
-  defmodule LivenessSafetyModel do
-    @behaviour PropertyDamage.Model
+  defmodule EventuallySafetyModel do
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Initiate]
     @impl true
-    def command_sequence_projection, do: LivenessAndSafetyProjection
+    def command_sequence_projection, do: EventuallyAndSafetyProjection
     @impl true
     def check_projections, do: []
   end
@@ -250,7 +250,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   test "a genuine @eventually liveness timeout preempts the teardown checkpoint" do
-    {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), LivenessSafetyModel, SilentAdapter)
+    {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), EventuallySafetyModel, SilentAdapter)
 
     refute result.success
 
@@ -267,7 +267,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
   defmodule Confirmed, do: defstruct([])
 
-  # Liveness that DOES resolve (the poller confirms), so the run reaches the
+  # Eventual check that DOES resolve (the poller confirms), so the run reaches the
   # settled checkpoint and the teardown safety check fires.
   defmodule ConfirmingAdapter do
     use PropertyDamage.Adapter
@@ -310,7 +310,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule ConfirmableModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Initiate]
     @impl true
@@ -342,7 +342,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule FailingStartupModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -410,7 +410,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule PassingStartupModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -421,50 +421,6 @@ defmodule PropertyDamage.LifecycleChecksTest do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), PassingStartupModel, SingleBumpAdapter)
 
     assert result.success, "expected success, got: #{inspect(result.failure_reason)}"
-  end
-
-  # ===========================================================================
-  # Cluster 7 — branching: persistent overshoot caught on the merged state
-  # ===========================================================================
-
-  test "a persistent overshoot across branches is caught at :teardown on the merged state" do
-    # Two independent branches each emit one Bumped; the merged settled state
-    # has max = 2, tripping the teardown safety check.
-    seq = %Sequence{prefix: [], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-    {:ok, result} = run_seq(seq, MaxCountModel, SingleBumpAdapter)
-
-    refute result.success
-
-    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
-             result.failure_reason
-  end
-
-  defmodule BumpSimulator do
-    @behaviour PropertyDamage.Model.Simulator
-    @impl true
-    def simulate(%Bump{}, _state), do: [%Bumped{}]
-  end
-
-  defmodule SimulatedMaxCountModel do
-    @behaviour PropertyDamage.Model
-    @impl true
-    def commands, do: [Bump]
-    @impl true
-    def command_sequence_projection, do: MaxCountProjection
-    @impl true
-    def simulator, do: BumpSimulator
-  end
-
-  test "a branching run with a simulator skips at: checks while it verifies orderings" do
-    # The ordering check runs the synchronous checks at each branch position;
-    # a lifecycle-boundary check has no step trigger and must not reach it.
-    seq = %Sequence{prefix: [], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-    {:ok, result} = run_seq(seq, SimulatedMaxCountModel, SingleBumpAdapter)
-
-    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
-             result.failure_reason
   end
 
   # ===========================================================================
@@ -529,7 +485,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   # A projection listed as BOTH the command-sequence projection and a check
   # projection must have its teardown check evaluated only once.
   defmodule DoubleListedModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -587,7 +543,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule AccumulatorModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -612,7 +568,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule SnapshotModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true

@@ -107,7 +107,7 @@ defmodule Bank.Projections.Ledger do
 end
 
 defmodule Bank.Model do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [Bank.Commands.Deposit]
@@ -357,7 +357,7 @@ convergence bound, or the function claims a readiness it cannot reach.
 ### What `==` does not do
 
 `==` is what `assert a == b` uses, so it is the default. Five traps each give a
-false divergence; the [Writing Invariants](writing_invariants.md#what--does-not-do)
+false divergence; the [Writing Invariants](writing_invariants.md#what-does-not-do)
 guide lists them. In short: return a map when order is not the contract,
 use `using: {Kernel, :===}` when integer and float must differ, compare a key
 for value structs such as `Decimal` and `DateTime`, and use
@@ -430,7 +430,8 @@ side still pending; only the third is did not converge.
 | did not converge | `:did_not_converge` | a side is still pending at the bound |
 
 With several keys failing at one boundary the first in declaration order is
-reported, and within a key a pending side before a difference. An `@eventually`
+reported, and within a key a pending side before a difference. Every further
+key goes into the failure's `other_keys` and the printed report. An `@eventually`
 window that expires while the loop waits is a `:check_failed` at once; a
 polling `@eventually` that has not expired does not block agreement.
 
@@ -468,7 +469,7 @@ Target B: cmd1 → cmd2 → cmd3
 
 Each target runs as a **variant**: its own process, with its own projections,
 event queue, injectors, mocks and pollers. A variant runs the full engine, so
-checks, settle, stutter and nemesis work as they do in `PropertyDamage.run/1`.
+checks, settle and stutter work as they do in `PropertyDamage.run/1`.
 
 A run stops at the first boundary where a target's observation still differs
 from the reference's at the convergence bound. That is a divergence, and it is a
@@ -566,6 +567,16 @@ case PropertyDamage.run(model: MyModel, targets: [ReferenceAdapter, NewAdapter],
 end
 ```
 
+### The HTML failure page
+
+Pass `report_html: dir`, or set `PD_REPORT_HTML=dir`, and each failing run
+also writes its report as one HTML page into `dir`. The page shows one column
+per target and compares the events of each step across targets. For a
+comparison failure, `PropertyDamage.FailureReport.reference_steps/1` returns
+the steps of the reference target's run, built from the report's
+`reference_trace`, in the same shape as `steps/1`. To have an agent explain a
+page, see [Debugging Failures](debugging_failures.md) and `mix pd.explain`.
+
 ### Divergences and failures to converge
 
 A divergence is a report with `kind: :diverged`, and a failure to converge one
@@ -575,7 +586,7 @@ with `kind: :did_not_converge`. Both carry:
 |-------|---------|
 | `variant` | `%{index, name}` of the first target (in target order) that differed from the reference or was still pending |
 | `failed_at_index` | 0-based index of the root where the loop ended |
-| `failure_reason` | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value` and `mismatch`; `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), the time waited and the bound. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
+| `failure_reason` | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value`, `mismatch`, `using` (the observation's `using:` term, `nil` under `==`), `waited_ms`, `within_ms` and `other_keys` (the further keys that failed at the same boundary); `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), `waited_ms`, `within_ms` and `other_keys`. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
 | `compare` | `[converge_within: ms]` |
 | `compare_counts` | the counters per key |
 | `other_failures` | the failures found in the run besides this one (see [Adapter errors](#adapter-errors)) |
@@ -635,8 +646,9 @@ failure and for a startup check, which belong to no command.
 | `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). A raise in a `@compare` function or a `using:` relation is one too. |
 | `:diverged` | Ready sides of a `@compare` observation differ at the convergence bound. |
 | `:did_not_converge` | A side of a `@compare` observation is still pending at the convergence bound. |
-| `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too. A setup failure is not shrunk. |
-| `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a nemesis, stutter or placeholder step failed. |
+| `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too, and so does a failing setup command: one whose adapter answered `{:error, _}` or raised, a setup `@check` that failed, or a placeholder that stayed unresolved. A setup failure is not shrunk. |
+| `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a stutter or placeholder step failed. |
+| `:latency_exceeded` | A `latency:` budget was breached. It is judged once at the end of the run and is not shrunk (see [Latency](#latency)). |
 
 ### Adapter errors
 
@@ -745,8 +757,7 @@ in another target breaches `max_ratio:` as infinity; two zeros do not breach.
 
 ### What stays one-target
 
-Branching sequences run against one target: `branching:` with two or more
-targets is an option error. `PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
+`PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
 the report's reference target (with its name and config), and
 `PropertyDamage.replay/2` replays any recorded target. `isolate_trigger/2`
 returns `{:error, :not_applicable}` for a divergence or a failure to converge:
@@ -1026,5 +1037,4 @@ PropertyDamage.run(
 - See the `PropertyDamage.run/1` docs for the full API, and `PropertyDamage.FailureReport` for the report
 - [Writing Invariants](writing_invariants.md#comparing-targets-with-compare) for `@compare` and the `==` traps
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) for settle, convergence and `@eventually`
-- Read about [Chaos Engineering](chaos_engineering.md) for fault injection
 - Use [Integration Testing](integration_testing.md) for live service testing

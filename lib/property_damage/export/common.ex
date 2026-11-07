@@ -1,6 +1,7 @@
 defmodule PropertyDamage.Export.Common do
   @moduledoc false
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.{FailureReport, Placeholder, Sequence, Shrinker}
 
   # ============================================================================
@@ -37,10 +38,10 @@ defmodule PropertyDamage.Export.Common do
   @doc """
   A failure's name as every export prints it, the way the report prints it: a
   `{projection, function}` key of a divergence as `Projection.function`, a
-  check name as is (see `PropertyDamage.FailureReport.format_name/1`).
+  check name as is (see `PropertyDamage.Failure.Naming.format_name/1`).
   """
   @spec check_label(PropertyDamage.Failure.name()) :: String.t()
-  def check_label(name), do: FailureReport.format_name(name)
+  def check_label(name), do: Naming.format_name(name)
 
   @doc """
   The line a script header carries about which commands its steps are, or nil
@@ -154,6 +155,11 @@ defmodule PropertyDamage.Export.Common do
 
   @doc """
   Generates a filename for the export based on seed and format.
+
+  Every format gets its own name, so `PropertyDamage.Export.save_all/3` never
+  writes two exports to one path. The ExUnit test ends in `_test.exs`, which
+  `mix test` collects when the file sits under `test/`. The Elixir script ends
+  in plain `.exs`, which `mix test` skips.
   """
   @spec generate_filename(FailureReport.t(), atom()) :: String.t()
   def generate_filename(%FailureReport{seed: seed} = report, format) do
@@ -177,7 +183,7 @@ defmodule PropertyDamage.Export.Common do
   defp variant_index(%FailureReport{variant: %{index: index}}), do: index
   defp variant_index(%FailureReport{}), do: 0
 
-  defp extension_for_format(:exunit), do: ".exs"
+  defp extension_for_format(:exunit), do: "_test.exs"
   defp extension_for_format(:elixir), do: ".exs"
   defp extension_for_format(:curl), do: ".sh"
   defp extension_for_format(:bash), do: ".sh"

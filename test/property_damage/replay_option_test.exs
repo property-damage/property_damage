@@ -218,3 +218,61 @@ defmodule PropertyDamage.ReplayOptionTest do
     end
   end
 end
+
+defmodule PropertyDamage.ReplayDocumentedOptionsTest do
+  # The options `Replay.run/2` and `Replay.start/2` document are the ones
+  # their schema accepts: a documented option must not raise, and an option
+  # the schema rejects must not be documented.
+  use ExUnit.Case, async: true
+
+  alias PropertyDamage.{FailureReport, Replay}
+
+  @rejected [:stutter_config, :external_markers]
+
+  defp docs_of(fun_or_moduledoc) do
+    {:docs_v1, _, _, _, moduledoc, _, entries} = Code.fetch_docs(Replay)
+
+    case fun_or_moduledoc do
+      :moduledoc ->
+        %{"en" => text} = moduledoc
+        text
+
+      {name, arity} ->
+        {_, _, _, %{"en" => text}, _} =
+          Enum.find(entries, fn {{kind, n, a}, _, _, _, _} ->
+            kind == :function and n == name and a == arity
+          end)
+
+        text
+    end
+  end
+
+  for opt <- @rejected do
+    test "#{opt} is rejected before the report is read" do
+      assert_raise NimbleOptions.ValidationError,
+                   ~r/unknown options \[#{inspect(unquote(opt))}\]/,
+                   fn ->
+                     Replay.start(%FailureReport{}, [{unquote(opt), []}])
+                   end
+    end
+
+    test "#{opt} is not documented as a replay option" do
+      for doc <- [docs_of(:moduledoc), docs_of({:run, 2}), docs_of({:start, 2})] do
+        refute doc =~ "`#{inspect(unquote(opt))}`"
+      end
+    end
+  end
+
+  test "every option the run/2 docs list passes validation" do
+    listed =
+      ~r/^- `:(\w+)`/m
+      |> Regex.scan(docs_of({:run, 2}), capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.map(&String.to_existing_atom/1)
+
+    assert :targets in listed and :log in listed
+
+    schema_keys = [:targets, :stop_on_failure, :include_projections, :log]
+    assert Enum.sort(listed) == Enum.sort(schema_keys)
+  end
+end

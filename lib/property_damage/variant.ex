@@ -6,7 +6,7 @@ defmodule PropertyDamage.Variant do
   gets a variant over the same command list, and the variants are advanced
   side by side so their answers can be compared command by command. Each
   variant runs the full per-command engine path (`PropertyDamage.Executor.Stepping`):
-  placeholder resolution, settle, nemesis, injector and mock events, projections,
+  placeholder resolution, settle, injector and mock events, projections,
   checks, stutter and pollers all work exactly as in `PropertyDamage.run/1`.
 
   ## Lifecycle
@@ -21,6 +21,7 @@ defmodule PropertyDamage.Variant do
       state = Variant.snapshot(pid)
       result = Variant.finish(pid)                         # what Executor.run/4 reports
       {:ok, _entries} = Variant.run_teardown(pid)          # the teardown commands
+      {:ok, _logs} = Variant.release(pid)                  # teardown/1, the log lines
       :ok = Variant.stop(pid)
 
   `advance_to/2` steps every root from the next unexecuted index up to and
@@ -71,8 +72,7 @@ defmodule PropertyDamage.Variant do
   ## Engine duties outside `Stepping`
 
   Setup runs the model's `@check at: :startup` checks after the adapter's
-  `setup/1` and before command 0, and every step is followed by lifting the
-  auto-restoring faults whose duration elapsed, as the linear engine does. A
+  `setup/1` and before command 0, as the linear engine does. A
   one-variant run therefore folds the same events in the same order as
   `PropertyDamage.Executor.run/4` on the same sequence.
 
@@ -134,6 +134,8 @@ defmodule PropertyDamage.Variant do
 
   use GenServer
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     EventQueue,
     Executor,
@@ -142,7 +144,8 @@ defmodule PropertyDamage.Variant do
     ResourcePoller,
     StatePoller,
     Target,
-    Telemetry
+    Telemetry,
+    Verdict
   }
 
   alias PropertyDamage.Executor.{Phases, Stepping}
@@ -188,6 +191,8 @@ defmodule PropertyDamage.Variant do
       sent.
     * `:stutter_config` - stutter configuration (default `nil`)
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines besides the first attempt's (default 3, DR-054)
     * `:measure_latency` - when `true`, record the wall-clock time of every
       command's `execute/3` (see `latencies/1`); default `false`
     * `:setup_commands`, `:teardown_commands` - the sequence's setup and
@@ -220,9 +225,14 @@ defmodule PropertyDamage.Variant do
 
   Returns `:ok`, or `{:error, reason}` when `setup/1` returned `{:error, reason}`
   (any other non-`{:ok, _}` return is the reason itself), or
-  `{:error, {:raised, exception}}` when setup raised. After an error the
-  queue, injectors and mocks are released again, the adapter's `teardown/1` is
-  not called, and the variant only accepts `stop/1`.
+  `{:error, {:raised, exception}}` when setup raised. Model code that faults
+  after the adapter's `setup/1` returned `{:ok, _}` (a malformed
+  hand-written check-list entry, say) returns `{:error, failure}` with a
+  `%PropertyDamage.Failure{}` of cause `:model`; the adapter's `teardown/1`
+  runs for it. After an error the
+  queue, injectors and mocks are released, once (a later `release/1` or
+  `stop/1` releases nothing again), the adapter's `teardown/1` is not called,
+  and the variant only accepts `release/1` and `stop/1`.
   """
   @spec setup(pid()) :: :ok | {:error, term()}
   def setup(pid), do: GenServer.call(pid, :setup, :infinity)
@@ -349,6 +359,22 @@ defmodule PropertyDamage.Variant do
   def stop(pid), do: GenServer.call(pid, :stop, :infinity)
 
   @doc """
+  Release what `stop/1` releases, without exiting, and return the variant's
+  log lines (DR-054).
+
+  Runs the teardown commands when `run_teardown/1` did not, then stops the
+  pollers, tears the mocks and injectors down, stops the event queue and calls
+  the adapter's `teardown/1`, each once. Returns `{:ok, logs}`: every log line
+  the variant's user code wrote, by the step it belongs to, the lines of the
+  adapter's `setup/1` under `:adapter_setup` and of its `teardown/1` under
+  `:adapter_teardown` included (see `PropertyDamage.Log`). After a failed
+  `setup/1` the logs hold that setup's lines. Call `stop/1` afterwards; it
+  releases nothing again.
+  """
+  @spec release(pid()) :: {:ok, PropertyDamage.Log.logs()}
+  def release(pid), do: GenServer.call(pid, :release, :infinity)
+
+  @doc """
   The wall-clock time of every adapter call so far, as `[{key, microseconds}]` in
   execution order, when the variant was started with `measure_latency: true`
   (otherwise `[]`). The key is the root's index, or `{index, leaf}` for a leaf
@@ -358,7 +384,7 @@ defmodule PropertyDamage.Variant do
   of the adapter's `execute/3`, every retry of a `:probe` or `:async` command
   and the waits between them included, and nothing after the adapter answered
   (projections, checks and stutter are not timed). A command that never reached
-  the adapter (a nemesis command, an unresolved placeholder) has no entry.
+  the adapter (an unresolved placeholder) has no entry.
   """
   @spec latencies(pid()) :: [
           {non_neg_integer() | {non_neg_integer(), non_neg_integer()}, non_neg_integer()}
@@ -400,6 +426,7 @@ defmodule PropertyDamage.Variant do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       measure_latency: Keyword.get(opts, :measure_latency, false),
       latencies: [],
       owner_ref: owner_ref,
@@ -415,7 +442,11 @@ defmodule PropertyDamage.Variant do
       halted: nil,
       failure: nil,
       result: nil,
-      stash: []
+      stash: [],
+      # The lines of the adapter's setup/1 and teardown/1 (DR-054); the steps'
+      # lines live in the executor state.
+      logs: %{},
+      released: false
     }
 
     {:ok, state}
@@ -517,9 +548,13 @@ defmodule PropertyDamage.Variant do
     do: {:reply, Enum.reverse(state.latencies), state}
 
   def handle_call(:stop, _from, state) do
-    state = best_effort_teardown(state)
-    release(state)
+    state = release_once(state)
     {:stop, :normal, :ok, state}
+  end
+
+  def handle_call(:release, _from, state) do
+    state = release_once(state)
+    {:reply, {:ok, logs(state)}, state}
   end
 
   @impl true
@@ -532,7 +567,7 @@ defmodule PropertyDamage.Variant do
   # call stop/1, so release everything now.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state)
       when ref != nil do
-    release(state)
+    unless state.released, do: release_all(state)
     {:stop, :normal, state}
   end
 
@@ -547,15 +582,45 @@ defmodule PropertyDamage.Variant do
     guard(state, [queue])
     state = %{state | event_queue: queue}
 
-    case start_services_and_adapter(state) do
-      {:ok, state, adapter_context} ->
-        {:ok, build_ready_state(state, adapter_context)}
+    # Injector, mock and adapter setup run as one execution point; their log
+    # lines are kept under :adapter_setup (DR-054).
+    {started, lines} = PropertyDamage.Log.inline(fn -> start_services_and_adapter(state) end)
 
+    case started do
+      {:ok, state, adapter_context} ->
+        state = keep_lines(state, :adapter_setup, lines)
+        ready_or_model_fault(state, adapter_context)
+
+      # The services are released here, once: `release/1` and `stop/1`
+      # release nothing again.
       {:error, reason, state} ->
-        release_services(state)
-        {:error, reason, state}
+        state = keep_lines(state, :adapter_setup, lines)
+        {:ok, released} = PropertyDamage.Log.inline(fn -> release_services(state) end)
+        {:error, reason, %{keep_lines(state, :adapter_teardown, released) | released: true}}
     end
   end
+
+  # The adapter's `setup/1` returned `{:ok, _}`, so a raise, exit or throw
+  # from here on is model code's, and the report says so. The adapter's
+  # `teardown/1` runs, as it does for any variant that came up.
+  defp ready_or_model_fault(state, adapter_context) do
+    {:ok, build_ready_state(state, adapter_context)}
+  rescue
+    exception -> model_fault(state, adapter_context, exception)
+  catch
+    kind, reason -> model_fault(state, adapter_context, Verdict.caught(kind, reason))
+  end
+
+  defp model_fault(state, adapter_context, exception) do
+    state = %{state | ctx: setup_context(state, adapter_context)}
+    released = release_all(state)
+
+    {:error, Failure.setup_failed(:model, detail: exception),
+     %{keep_lines(state, :adapter_teardown, released) | released: true}}
+  end
+
+  defp keep_lines(state, key, lines),
+    do: %{state | logs: PropertyDamage.Log.append(state.logs, key, lines)}
 
   defp start_services_and_adapter(state) do
     target = state.target
@@ -611,6 +676,16 @@ defmodule PropertyDamage.Variant do
     kind, reason -> {:error, {kind, reason}}
   end
 
+  defp setup_context(state, adapter_context) do
+    %Stepping.Context{
+      model: state.model,
+      adapter: state.target.adapter,
+      adapter_context: adapter_context,
+      event_queue: state.event_queue,
+      target_name: state.target.name
+    }
+  end
+
   defp build_ready_state(state, adapter_context) do
     exec =
       Stepping.init_state(state.model,
@@ -618,6 +693,7 @@ defmodule PropertyDamage.Variant do
         stutter_config: state.stutter_config,
         mock_registry: state.mock_registry,
         check_mode: state.check_mode,
+        keep_attempts: state.keep_attempts,
         placeholder_registry: state.placeholder_registry,
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,
@@ -630,15 +706,9 @@ defmodule PropertyDamage.Variant do
           )
       )
 
-    ctx = %Stepping.Context{
-      model: state.model,
-      adapter: state.target.adapter,
-      adapter_context: adapter_context,
-      event_queue: state.event_queue,
-      target_name: state.target.name
-    }
+    exec = %{exec | logs: state.logs}
 
-    state = %{state | ctx: ctx}
+    state = %{state | ctx: setup_context(state, adapter_context)}
 
     case Executor.run_startup_checks(exec) do
       {:ok, exec} ->
@@ -700,8 +770,15 @@ defmodule PropertyDamage.Variant do
 
     result =
       case state.result do
-        nil -> nil
-        result -> %{result | event_log: result.event_log ++ entries}
+        nil ->
+          nil
+
+        result ->
+          %{
+            result
+            | event_log: result.event_log ++ entries,
+              logs: PropertyDamage.Log.merge(result.logs, exec.logs)
+          }
       end
 
     %{state | exec: exec, teardown_entries: entries, result: result}
@@ -992,16 +1069,8 @@ defmodule PropertyDamage.Variant do
     end
   end
 
-  # Lift faults whose duration elapsed, as the linear engine does after every
-  # command, and hand any new pollers to the guardian.
+  # Hand any new pollers to the guardian.
   defp after_step(state, exec, index) do
-    exec =
-      Executor.Nemesis.restore_elapsed_faults(
-        exec,
-        state.ctx.adapter_context,
-        state.event_queue
-      )
-
     guard_pollers(%{state | exec: exec, next: index + 1})
   end
 
@@ -1054,13 +1123,13 @@ defmodule PropertyDamage.Variant do
   # `%Failure{}`s in check order.
   defp teardown_check_failures(exec) do
     case Executor.run_phase_checks(exec, :teardown) do
-      {:halt, name, reason, _counters} ->
-        [Failure.check_failed(name, reason)]
+      {:halt, name, projection, reason, _counters} ->
+        [Failure.check_failed(name, reason, projection)]
 
       {:ok, recorded, _counters} ->
         recorded
         |> Enum.reverse()
-        |> Enum.map(&Failure.check_failed(&1.check_name, &1.reason))
+        |> Enum.map(&Failure.check_failed(&1.check_name, &1.reason, &1.projection))
     end
   end
 
@@ -1084,16 +1153,39 @@ defmodule PropertyDamage.Variant do
   # Teardown
   # ==========================================================================
 
-  defp release(state) do
+  # Runs the teardown commands and releases everything, once (`stop/1`,
+  # `release/1`).
+  defp release_once(%{released: true} = state), do: state
+
+  defp release_once(state) do
+    state = best_effort_teardown(state)
+    lines = release_all(state)
+    %{keep_lines(state, :adapter_teardown, lines) | released: true}
+  end
+
+  # Mock, injector and adapter teardown run as one execution point; returns
+  # the log lines they wrote (DR-054).
+  defp release_all(state) do
     if state.exec, do: stop_pollers(state.exec)
-    release_services(state)
+    {:ok, released} = PropertyDamage.Log.inline(fn -> release_services(state) end)
 
     if state.ctx do
-      Executor.safe_teardown(state.ctx.adapter, state.ctx.adapter_context)
+      released ++ Executor.safe_teardown(state.ctx.adapter, state.ctx.adapter_context)
+    else
+      released
     end
-
-    :ok
   end
+
+  # Every line the variant holds: its steps' and its adapter's.
+  defp logs(%{exec: nil} = state), do: state.logs
+  defp logs(state), do: Map.merge(step_logs(state), state.logs)
+
+  # A finished run's result also holds the lines its finalization wrote, which
+  # the executor state does not.
+  defp step_logs(%{result: %{logs: logs}, exec: exec}),
+    do: PropertyDamage.Log.merge(logs, exec.logs)
+
+  defp step_logs(%{exec: exec}), do: exec.logs
 
   defp stop_pollers(exec) do
     for poller <- exec.active_pollers, do: best_effort(fn -> StatePoller.stop(poller) end)

@@ -1,6 +1,6 @@
 # DR-053: Branching Runs One Branch at a Time Until the Concurrent Redesign
 
-**Status:** Accepted
+**Status:** Superseded by DR-063, which removes the branching mode.
 **Date:** 2026-10-17
 
 ## Context

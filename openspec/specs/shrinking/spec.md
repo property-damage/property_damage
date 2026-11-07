@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
+Defines the shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification.
 
 Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
 
@@ -39,22 +39,22 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 - **WHEN** a candidate shrunk sequence produces the equivalent failure
 - **THEN** the failure SHALL occur at the same or an earlier command index than in the original sequence
 
-### Requirement: Two-Phase Shrinking
+### Requirement: Sequence Shrinking Then Argument Simplification
 
-The system SHALL shrink in two phases: Phase 1 removes unnecessary commands from the sequence, and Phase 2 simplifies argument values in the remaining commands. For a model with `expansions/0` the shrinker also collapses each target's expansion choices between the two, and it runs these steps as a cycle that repeats until a whole cycle accepts no candidate or the budget is spent, as the requirement "Expansions Under Shrinking" states (DR-050). For a model without `expansions/0` the collapse steps accept nothing.
+The system SHALL shrink in two stages: sequence shrinking removes unnecessary commands from the sequence, and argument simplification simplifies argument values in the remaining commands. For a model with `expansions/0` the shrinker also collapses each target's expansion choices between the two, and it runs these steps as a cycle that repeats until a whole cycle accepts no candidate or the budget is spent, as the requirement "Expansions Under Shrinking" states (DR-050). For a model without `expansions/0` the collapse steps accept nothing.
 
-#### Scenario: Phase 1 then Phase 2
+#### Scenario: Sequence shrinking then argument simplification
 - **WHEN** shrinking begins on a failing sequence
-- **THEN** the shrinker SHALL first attempt to remove commands (Phase 1)
-- **AND** then attempt to simplify arguments in remaining commands (Phase 2)
+- **THEN** the shrinker SHALL first attempt to remove commands (sequence shrinking)
+- **AND** then attempt to simplify arguments in remaining commands (argument simplification)
 
-#### Scenario: Phase 2 optional
+#### Scenario: Argument simplification optional
 - **WHEN** shrinking configuration disables argument shrinking
-- **THEN** only Phase 1 (sequence shrinking) SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
+- **THEN** only sequence shrinking SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
 
-### Requirement: Phase 1 Sequence Shrinking Steps
+### Requirement: Sequence Shrinking Steps
 
-Phase 1 SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
+Sequence shrinking SHALL proceed in three ordered steps: first drop commands that were never executed (after the failure point), then apply hierarchical shrinking by dependency depth, then apply linear shrinking on individual commands.
 
 #### Scenario: Drop unexecuted commands
 - **WHEN** a sequence failed at command index N
@@ -106,7 +106,7 @@ Probe (read-only) commands SHALL be prioritized for removal during shrinking, si
 
 ### Requirement: Argument Shrinking
 
-In Phase 2, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Symbolic references SHALL never be shrunk.
+In argument simplification, the system SHALL simplify argument values in remaining commands: integers shrink toward 0, strings shrink toward empty, and lists shrink toward empty. Placeholders SHALL never be shrunk.
 
 #### Scenario: Integer shrinks toward zero
 - **WHEN** a command contains an integer argument
@@ -124,23 +124,6 @@ In Phase 2, the system SHALL simplify argument values in remaining commands: int
 - **WHEN** a command contains a placeholder for a server-generated value
 - **THEN** that placeholder SHALL NOT be modified during argument shrinking
 
-### Requirement: Branching Sequence Shrinking
-
-For branching sequences, the shrinker SHALL additionally attempt to remove entire branches, shrink individual branches, and convert the sequence to linear form.
-
-#### Scenario: Remove entire branch
-- **WHEN** a branching sequence has multiple branches
-- **THEN** the shrinker SHALL attempt removing each branch entirely
-- **AND** accept the removal if the failure is still reproduced
-
-#### Scenario: Shrink individual branches
-- **WHEN** branches remain after branch removal attempts
-- **THEN** the shrinker SHALL apply command removal within each branch independently
-
-#### Scenario: Convert to linear
-- **WHEN** the failure does not require parallel execution to reproduce
-- **THEN** the shrinker SHALL attempt converting the branching sequence to a linear sequence
-
 ### Requirement: Deterministic Shrinking
 
 Given the same seed and the same initial failure, shrinking SHALL produce the same shrunk result, provided the SUT behaves deterministically.
@@ -152,7 +135,7 @@ Given the same seed and the same initial failure, shrinking SHALL produce the sa
 
 ### Requirement: Shrinking Configuration
 
-The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether Phase 2 runs.
+The shrinker SHALL support configuration of: `granularity_threshold` (default 8) controlling when to switch from hierarchical to linear shrinking, `max_iterations` (default 1000) limiting total shrink attempts, `max_time_ms` (default 30000) setting a time budget, and a `shrink_arguments` flag (default true) controlling whether argument simplification runs.
 
 #### Scenario: Granularity threshold controls strategy
 - **WHEN** the remaining sequence length is below the granularity threshold
@@ -204,7 +187,7 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 - **THEN** the signature SHALL contain the failure kind, the check name and the variant index
 
 #### Scenario: Non-check failure signature
-- **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error, linearization failure)
+- **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error)
 - **THEN** the signature SHALL contain the failure kind, nil for the check name and the variant index
 
 #### Scenario: Divergence signature names the observation
@@ -253,10 +236,6 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 - **WHEN** a run fails with kind `:setup_failed`
 - **THEN** the framework SHALL report the original sequence without shrinking (DR-048)
 
-#### Scenario: Branching sequences keep the linear engine
-- **WHEN** a branching sequence fails (one target only)
-- **THEN** its run, shrink and reproduction SHALL use the linear engine
-
 #### Scenario: Re-shrink with several targets
 - **WHEN** `shrink_further/2` is called
 - **THEN** it SHALL use `report.targets` by default
@@ -267,13 +246,32 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 ### Requirement: Invalid Candidates Are Not Counterexamples (DR-045)
 
-Before running a shrink candidate, linear or branching, the shrinker SHALL validate it against the model (a branching candidate with its commands in reading order): fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
+Before running a shrink candidate, the shrinker SHALL validate it against the model: fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
+
+The validation SHALL mint placeholders for the fields the system mints (`external()`), as generation does, so a candidate is folded through the same states the generator saw. A candidate that keeps a command whose `when:` reads a minted value SHALL NOT be rejected because the validation lacked that value.
+
+#### Scenario: Validation mints placeholders like generation
+- **GIVEN** a command whose `when:` reads a value an earlier command's event carries in an `external()` field
+- **AND** a failing sequence that generation produced with that predicate true
+- **WHEN** the shrinker validates a candidate that keeps both commands
+- **THEN** the validation SHALL mint the placeholder for that field
+- **AND** the candidate SHALL be valid
 
 #### Scenario: A candidate the model cannot simulate is not a counterexample
 - **GIVEN** a model whose projection raises when it folds an event that references an entity the state does not hold
 - **WHEN** a shrink candidate keeps a command that references an entity whose creating command was removed
 - **THEN** the candidate's validation SHALL raise
 - **AND** the shrinker SHALL treat the candidate as invalid and SHALL NOT accept it as a reproduction
+
+### Requirement: Shrink Priority Reads The Model Spec Table
+
+The shrinker SHALL read each command's shrink hint from the model's spec table, so a `shrink:` option set on a `commands/0` listing applies during shrinking as it does everywhere else the spec is read. A command the table does not hold SHALL use the hint of its own `command_spec/1`.
+
+#### Scenario: A listing option sets the shrink priority
+- **GIVEN** a command whose own `command_spec/1` declares `shrink: :neutral`
+- **AND** a model that lists it as `{Command, shrink: :prefer_keep}`
+- **WHEN** the shrinker orders removal candidates
+- **THEN** it SHALL treat the command as `:prefer_keep`
 
 ### Requirement: Setup and Teardown Commands Under Shrinking (DR-048)
 

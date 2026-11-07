@@ -222,25 +222,6 @@ defmodule PropertyDamage.DiagramTest do
   end
 
   describe "event sources" do
-    test "shows nemesis events with indicator" do
-      commands = [%TestCommand{account_id: "acc_1", amount: 100}]
-      sequence = Sequence.linear(commands)
-
-      event_log = [
-        %Entry{
-          timestamp: 1000,
-          command_index: 0,
-          event: %TestEvent{id: "e1", balance: 100},
-          source: :nemesis,
-          nemesis_module: SomeNemesis
-        }
-      ]
-
-      diagram = Diagram.generate(sequence, event_log, :mermaid)
-
-      assert String.contains?(diagram, "[nemesis]")
-    end
-
     test "shows injector events with indicator" do
       commands = [%TestCommand{account_id: "acc_1", amount: 100}]
       sequence = Sequence.linear(commands)
@@ -366,6 +347,36 @@ defmodule PropertyDamage.DiagramTest do
       test "from_failure_report/3 #{format} is byte-identical" do
         actual = Diagram.from_failure_report(report_fixture(), unquote(format))
         check_golden("from_report.#{unquote(ext)}", actual)
+      end
+    end
+  end
+
+  describe "options" do
+    test "the options type and the module docs list only the options a renderer reads" do
+      removed = [:show_timestamps, :highlight_failure, :show_branches]
+
+      {:ok, types} = Code.Typespec.fetch_types(Diagram)
+
+      option_keys =
+        Enum.find_value(types, fn
+          {:type, {:options, {:type, _, :list, [{:type, _, :union, pairs}]}, []}} ->
+            Enum.map(pairs, fn {:type, _, :tuple, [{:atom, _, key}, _]} -> key end)
+
+          _ ->
+            nil
+        end)
+
+      assert Enum.sort(option_keys) == [:failed_at_index, :max_value_length, :show_state, :title]
+      assert Enum.filter(removed, &(&1 in option_keys)) == []
+
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(Diagram)
+
+      for key <- option_keys do
+        assert moduledoc =~ "`#{inspect(key)}`"
+      end
+
+      for key <- removed do
+        refute moduledoc =~ inspect(key)
       end
     end
   end

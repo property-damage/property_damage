@@ -30,12 +30,20 @@ defmodule PropertyDamage.Persistence do
   - Erlang term-encoded FailureReport struct
   - Checksum for integrity verification
 
+  A file of an older format version is refused with
+  `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
+  failure under the current version. Format 18 dropped the fields of the
+  removed parallel-branch mode from the saved sequence, trace and event log.
+
   ## Naming Convention
 
   Auto-generated filenames follow the pattern:
   `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
 
-  Example: `2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd`
+  The timestamp has the basic ISO 8601 form `YYYYMMDDTHHMMSS`. The check name
+  is the name of the failing check, for example the name of its function.
+
+  Example: `20251226T143000-check_failed-non_negative_balance-seed512902757.pd`
 
   ## Sensitive data
 
@@ -52,9 +60,10 @@ defmodule PropertyDamage.Persistence do
   file holds.
   """
 
-  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.Formatter
 
-  @version 15
+  @version 18
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -64,12 +73,6 @@ defmodule PropertyDamage.Persistence do
   # are no legacy shapes to whitelist: a current-version file carrying an unknown
   # key IS drift and should be surfaced.
   @removed_fields []
-
-  # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only
-  # current-version files load, and such a file legitimately lacking a current
-  # field is a genuine shape change worth a warning.
-  @added_fields []
 
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
@@ -106,7 +109,7 @@ defmodule PropertyDamage.Persistence do
 
       # Save with auto-generated name
       {:ok, path} = Persistence.save(failure, "failures/")
-      # => {:ok, "failures/2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd"}
+      # => {:ok, "failures/20251226T143000-check_failed-non_negative_balance-seed512902757.pd"}
 
       # Save with custom name
       {:ok, path} = Persistence.save(failure, "failures/", filename: "currency-bug.pd")
@@ -140,12 +143,21 @@ defmodule PropertyDamage.Persistence do
   - `{:ok, report, warnings}` - Loaded with version compatibility warnings
   - `{:error, reason}` - File not found, corrupted, incompatible version, etc.
 
+  The file is decoded without creating atoms, so a module it names must be
+  known to the VM. When the first decode refuses an unknown atom, `load/1`
+  loads the modules of every loaded application and decodes once more; a file
+  that names a module of no loaded application returns
+  `{:error, :unsafe_terms}`.
+
   Version warnings indicate that the saved test may not reproduce correctly
   due to changes in PropertyDamage or dependency versions. Warnings include:
 
   - `{:property_damage_version_mismatch, saved_version, current_version}`
   - `{:dependency_version_mismatch, app, saved_version, current_version}`
   - `{:dependency_missing, app, saved_version}`
+  - `{:struct_shape_drift, missing, unexpected}`: the saved `FailureReport` has
+    different fields than the struct of the running PropertyDamage (`missing`
+    and `unexpected` are field names)
 
   ## Examples
 
@@ -332,11 +344,18 @@ defmodule PropertyDamage.Persistence do
   @doc """
   Export a failure to JSON format for external tools.
 
+  A comparison failure's reference side is written as `reference_trace`,
+  `reference_state_at_failure` and `shrink_stop`, in the shape the `:json`
+  format gives `reference_trace`, `reference_projections` and the shrinking
+  `stop`; each is `null` when the report has none.
+
   Note: JSON export is lossy - some Elixir-specific data may be simplified.
   Use `save/3` for lossless storage.
   """
   @spec export_json(FailureReport.t()) :: String.t()
   def export_json(%FailureReport{} = report) do
+    reference = Formatter.reference_json(report)
+
     %{
       version: @version,
       seed: report.seed,
@@ -362,6 +381,9 @@ defmodule PropertyDamage.Persistence do
       setup_commands: Enum.map(report.setup_commands, &inspect/1),
       teardown_commands: Enum.map(report.teardown_commands, &inspect/1),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
+      reference_trace: reference.trace,
+      reference_state_at_failure: reference.projections,
+      shrink_stop: reference.stop,
       reproduction_command: FailureReport.reproduction_command(report)
     }
     |> Jason.encode!(pretty: true)
@@ -423,7 +445,7 @@ defmodule PropertyDamage.Persistence do
     encode_payload(%{
       format_version: @version,
       kind: :failure_report,
-      report: report,
+      report: without_logs(report),
       metadata: build_metadata(dependency_versions(report))
     })
   end
@@ -432,10 +454,31 @@ defmodule PropertyDamage.Persistence do
     encode_payload(%{
       format_version: @version,
       kind: :run_trace,
-      trace: trace,
+      trace: without_logs(trace),
       metadata: build_metadata(dependency_versions(trace))
     })
   end
+
+  # Log lines live only in memory (DR-054 decision 9): a file is committed, and
+  # a line its author forgot to redact would be published. Every trace is
+  # saved with `logs: %{}` and loaded with `logs: %{}`, and a report with
+  # `setup_log: []`, whatever the file holds, so the format and its version do
+  # not change. The report's tag filter (`log_filter`) is a view of the run
+  # and is dropped the same way.
+  defp without_logs(%FailureReport{} = report) do
+    report
+    |> Map.put(:setup_log, [])
+    |> Map.put(:log_filter, nil)
+    |> update_present(:trace, &without_logs/1)
+    |> update_present(:reference_trace, &without_logs/1)
+  end
+
+  defp without_logs(%RunTrace{} = trace), do: Map.put(trace, :logs, %{})
+  defp without_logs(other), do: other
+
+  # A drifted shape may lack the key altogether; the drift check reports it.
+  defp update_present(map, key, fun) when is_map_key(map, key), do: Map.update!(map, key, fun)
+  defp update_present(map, _key, _fun), do: map
 
   defp encode_payload(payload) do
     term_binary = :erlang.term_to_binary(payload, [:compressed])
@@ -458,10 +501,20 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V15 format: a report records the run's `check_mode`, the `campaign` a
+  # V18 format: a sequence holds only its roots (`prefix`), setup and teardown
+  # commands; a trace records no branch interleaving; an event-log entry and a
+  # failure name no branch, and the check kind for a parallel-branch ordering
+  # is gone.
+  # V17 format: the fault-injection event source and failure kind are gone, and
+  # a loaded file whose event log names a source the engine does not produce is
+  # refused.
+  # V16 format: a report records the run's `external_markers`, which every
+  # path that simulates its commands again reads. A v16 report lacking it is
+  # refused.
+  # As in v15, a report records the run's `check_mode`, the `campaign` a
   # latency budget was judged over (`%{seed:, max_runs:}`, nil for every other
   # kind), the `original_failed_at_index` of the run that found the
-  # failure and the `run_check_fires` of the run the report describes. A v15
+  # failure and the `run_check_fires` of the run the report describes. A
   # report lacking `run`, `replay`, `replay_path` or `check_mode` is refused:
   # the paths that execute a loaded report read them.
   # V14 format: a report records the campaign `run` it failed in, its replay
@@ -497,19 +550,29 @@ defmodule PropertyDamage.Persistence do
   # folding or trace synthesis. A standalone trace payload returns the trace.
   defp decode(<<"PD", @version::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
-      metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
+      with :ok <- check_event_sources(payload) do
+        metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
-      case payload[:kind] do
-        :run_trace ->
-          {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
+        case payload[:kind] do
+          :run_trace ->
+            trace = without_logs(payload.trace)
+            {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
 
-        _ ->
-          report_payload(payload.report, metadata_warnings)
+          _ ->
+            report_payload(payload.report, metadata_warnings)
+        end
       end
     end)
   end
 
-  # Pre-v15 files (format versions 1-14) are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-17 are refused (DR-041, following DR-039/DR-040).
+  # A v17 sequence, trace or event-log entry may carry the parallel-branch
+  # fields v18 dropped, and no longer decodes into the current structs.
+  # A v16 file may carry the fault-injection event source or failure kind,
+  # which v17 dropped.
+  # A v15 report does not record the run's `external_markers`, so a replay or
+  # re-shrink of a run that named atom markers cannot simulate its commands
+  # again (DR-061).
   # A v14 report records neither the `check_mode` a reproduction reuses, nor
   # the `campaign` of a latency budget, nor the `original_failed_at_index`.
   # A v13 report records neither the `run`, nor the replay artifact
@@ -539,16 +602,50 @@ defmodule PropertyDamage.Persistence do
 
   defp decode(_), do: {:error, :invalid_format}
 
+  # Every event-log entry of a loaded report (its trace and, when present, its
+  # reference trace) or standalone trace must name a source the engine
+  # produces. A file naming any other source is refused rather than loaded.
+  defp check_event_sources(payload) do
+    traces =
+      case payload[:kind] do
+        :run_trace -> [payload[:trace]]
+        _ -> report_traces(payload[:report])
+      end
+
+    traces
+    |> Enum.flat_map(&trace_sources/1)
+    |> Enum.find(&(&1 not in Entry.sources()))
+    |> case do
+      nil -> :ok
+      source -> {:error, {:unknown_event_source, source}}
+    end
+  end
+
+  defp report_traces(report) when is_map(report),
+    do: [Map.get(report, :trace), Map.get(report, :reference_trace)]
+
+  defp report_traces(_report), do: []
+
+  defp trace_sources(%{event_log: log}) when is_list(log) do
+    for %{source: source} <- log, do: source
+  end
+
+  defp trace_sources(_trace), do: []
+
   # A report must carry the fields the paths that execute a loaded report
   # read: the replay artifact term (nil when it has none), its path, the
-  # campaign run and the check mode. A report lacking one is refused, never
-  # loaded with a drift warning.
-  @required_fields [:replay, :run, :replay_path, :check_mode]
+  # campaign run, the check mode and the external markers. A report lacking
+  # one is refused, never loaded with a drift warning.
+  @required_fields [:replay, :run, :replay_path, :check_mode, :external_markers]
 
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
-      nil -> {:ok, report, warnings ++ check_struct_drift(report)}
-      field -> {:error, {:missing_field, field}}
+      nil ->
+        report = without_logs(report)
+        {:ok, report, warnings ++ check_struct_drift(report)}
+
+      field ->
+        {:error, {:missing_field, field}}
     end
   end
 
@@ -566,18 +663,42 @@ defmodule PropertyDamage.Persistence do
         {:error, :term_too_large}
 
       true ->
-        try do
-          case :erlang.binary_to_term(term_binary, [:safe]) do
-            payload when is_map(payload) -> fun.(payload)
-            # A validly-encoded but non-map payload cannot carry a PD envelope;
-            # reject it with the same shape unloadable terms get rather than
-            # letting payload access crash the loader.
-            _ -> {:error, :unsafe_terms}
-          end
-        rescue
-          ArgumentError -> {:error, :unsafe_terms}
+        case safe_decode(term_binary) do
+          {:ok, payload} when is_map(payload) -> fun.(payload)
+          # A validly-encoded but non-map payload cannot carry a PD envelope;
+          # reject it with the same shape unloadable terms get rather than
+          # letting payload access crash the loader.
+          {:ok, _other} -> {:error, :unsafe_terms}
+          :error -> {:error, :unsafe_terms}
         end
     end
+  end
+
+  # `:safe` decoding refuses an atom the VM has not seen, and a module's atoms
+  # exist only once the module is loaded. In a fresh VM that refuses a valid
+  # file, so on the first refusal the modules of every loaded application are
+  # loaded and the decode runs once more, still `:safe`: the file's bytes
+  # create no atom.
+  defp safe_decode(term_binary) do
+    {:ok, :erlang.binary_to_term(term_binary, [:safe])}
+  rescue
+    ArgumentError ->
+      load_application_modules()
+
+      try do
+        {:ok, :erlang.binary_to_term(term_binary, [:safe])}
+      rescue
+        ArgumentError -> :error
+      end
+  end
+
+  defp load_application_modules do
+    for {app, _description, _vsn} <- :application.loaded_applications(),
+        module <- Application.spec(app, :modules) || [] do
+      Code.ensure_loaded(module)
+    end
+
+    :ok
   end
 
   # The external term format declares its uncompressed size in the header for
@@ -718,12 +839,9 @@ defmodule PropertyDamage.Persistence do
     current = MapSet.new(Map.keys(current_struct))
     loaded_keys = MapSet.new(Map.keys(loaded))
 
-    # Fields added in a later version are legitimately absent on an older file
-    # (synthesized on load), so they are not "missing" drift.
     missing =
       current
       |> MapSet.difference(loaded_keys)
-      |> MapSet.difference(MapSet.new(@added_fields))
       |> Enum.sort()
 
     unexpected =

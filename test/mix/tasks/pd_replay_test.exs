@@ -67,6 +67,20 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
   end
 
+  defmodule RaisingSetupAdapter do
+    @moduledoc false
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: raise("setup blew up")
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
+  end
+
   defmodule FixedAdapter do
     @moduledoc false
     use PropertyDamage.Adapter
@@ -84,7 +98,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
   defmodule FailingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -95,7 +109,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
   defmodule FixedModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -183,7 +197,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     end
   end
 
-  # The "could-not-run" set (load error, branching, missing model/adapter) is
+  # The "could-not-run" set (load error, missing model/adapter) is
   # indeterminate: the bug's presence cannot be decided, so these map to
   # `:indeterminate` (exit 125 -> `git bisect` skip), NOT to `:reproduces`.
   # Marking an un-runnable ancestor "bad" would corrupt a bisect.
@@ -206,27 +220,32 @@ defmodule Mix.Tasks.Pd.ReplayTest do
       assert output =~ "could not load failure file"
     end
 
-    test "a branching (parallel) failure returns :indeterminate", %{dir: dir} do
-      branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
-
-      failure =
-        FailureReport.new(
-          seed: 0,
-          run_number: 1,
-          original_sequence: branching,
-          shrunk_sequence: branching,
-          failed_at_index: 1,
-          failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
-          model: FailingModel,
-          targets: [{FailingAdapter, []}]
-        )
-
-      {:ok, path} = Persistence.save(failure, dir)
+    test "an adapter whose setup/1 raises returns :indeterminate", %{dir: dir} do
+      path = save_failure(dir, FailingModel, RaisingSetupAdapter)
 
       {status, output} = with_output(fn -> Replay.exec([path]) end)
 
       assert status == :indeterminate
-      assert output =~ "parallel/branching execution"
+      assert output =~ "setup blew up"
+    end
+
+    # The task cannot produce this cause, so the message is checked directly.
+    test "a variant process that died while the target came up prints its own hint" do
+      failure = Failure.setup_failed(:variant, detail: :killed)
+
+      output = capture_io(fn -> Replay.print_replay_error(failure) end)
+
+      assert output =~ "ERROR: the variant process died while the target came up"
+      assert output =~ "Reason: :killed"
+      assert output =~ "Look for an outside kill or a crashed linked process."
+    end
+
+    test "PropertyDamage.replay/1 returns the setup error instead of raising", %{dir: dir} do
+      path = save_failure(dir, FailingModel, RaisingSetupAdapter)
+      {:ok, failure} = PropertyDamage.load_failure(path)
+
+      assert {:error, %Failure{type: %Failure.Setup{cause: :adapter_setup}}} =
+               PropertyDamage.replay(failure)
     end
 
     test "a failure that records no model returns :indeterminate", %{dir: dir} do
@@ -275,6 +294,36 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       assert output =~ "Failure:  "
       assert output =~ "(#{inspect(Counter)}.count)"
+    end
+  end
+
+  describe "a fresh mix process" do
+    @root Path.expand("../../..", __DIR__)
+
+    # The test VM has already started every application, so only a new OS
+    # process shows whether the task starts them. The adapter's setup/1 needs
+    # the process the :telemetry application starts.
+    test "starts the project's applications before the replay", %{dir: dir} do
+      {:error, failure} =
+        PropertyDamage.run(
+          model: PropertyDamage.Test.FailingModel,
+          targets: [PropertyDamage.Test.AppProcessAdapter],
+          max_runs: 100,
+          seed: 1,
+          replay_dir: false
+        )
+
+      {:ok, path} = PropertyDamage.save_failure(failure, dir)
+
+      {output, status} =
+        System.cmd("mix", ["pd.replay", path],
+          cd: @root,
+          env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 1, output
+      assert output =~ "VERDICT: failure reproduces"
     end
   end
 

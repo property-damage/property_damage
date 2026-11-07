@@ -11,8 +11,6 @@ defmodule PropertyDamage.AnalysisTest do
 
   defmodule Alpha, do: defstruct(id: nil)
   defmodule Beta, do: defstruct(id: nil)
-  defmodule Gamma, do: defstruct(id: nil)
-  defmodule Delta, do: defstruct(id: nil)
 
   # A producing event whose external field is `:id`, and command structs that
   # can carry a consumed placeholder in `:ref`.
@@ -20,46 +18,6 @@ defmodule PropertyDamage.AnalysisTest do
   defmodule Producer, do: defstruct(id: nil)
   defmodule Decoy, do: defstruct(id: nil)
   defmodule Consumer, do: defstruct(ref: nil)
-
-  describe "explain/1 branch-aware trigger localization" do
-    # prefix [Alpha] ++ branches [[Beta], [Gamma]] ++ suffix [Delta].
-    # Flattened order: Alpha=0, Beta=1, Gamma=2, Delta=3. The executor numbers
-    # both branch commands from prefix_len (=1), so a branch-1 failure records
-    # failed_at_index: 1 (branch_id: 1) whose FLATTENED index is 2. Keying the
-    # dependency graph by the executor index would mislabel Beta as the trigger.
-    setup do
-      seq = Sequence.branching([%Alpha{}], [[%Beta{}], [%Gamma{}]], [%Delta{}])
-
-      report =
-        FailureReport.new(
-          seed: 1,
-          run_number: 1,
-          original_sequence: seq,
-          shrunk_sequence: seq,
-          failed_at_index: 1,
-          failure_reason: Failure.in_branch(Failure.check_failed(:TestCheck, "boom"), 1)
-        )
-
-      %{report: report}
-    end
-
-    test "reports the flattened index of the failing command", %{report: report} do
-      explanation = Analysis.explain(report)
-      assert explanation.failure.command_index == 2
-    end
-
-    test "labels the branch-1 command (Gamma) as the trigger, not the index collision",
-         %{report: report} do
-      explanation = Analysis.explain(report)
-      trigger = Enum.find(explanation.commands, &(&1.role == :trigger))
-
-      assert trigger.index == 2
-      assert trigger.command_name == "Gamma"
-
-      beta = Enum.find(explanation.commands, &(&1.command_name == "Beta"))
-      refute beta.role == :trigger
-    end
-  end
 
   describe "explain/1 over a shrunk sequence with a remapped registry" do
     # The shrinker deliberately leaves each surviving command's embedded
@@ -153,7 +111,7 @@ defmodule PropertyDamage.AnalysisTest do
     end
 
     test "non-localized failure (failed_at_index nil) returns without raising and empty chain" do
-      # A whole-run failure (e.g. a linearization check) localizes to no command,
+      # A whole-run failure (e.g. a teardown check) localizes to no command,
       # so failed_at_index is nil. explain/1 must not call Enum.at(commands, nil).
       seq = Sequence.linear([%Alpha{}, %Beta{}])
 
@@ -164,13 +122,163 @@ defmodule PropertyDamage.AnalysisTest do
           original_sequence: seq,
           shrunk_sequence: seq,
           failed_at_index: nil,
-          failure_reason: Failure.linearization("branches did not linearize")
+          failure_reason: Failure.check_failed(:TestCheck, "the teardown check failed")
         )
 
       explanation = Analysis.explain(report)
 
       assert explanation.dependency_chain == []
       assert explanation.failure.command_index == nil
+    end
+  end
+
+  describe "format_explanation/1 of a command that reads a placeholder" do
+    test "lists the placeholder fields under Placeholders:" do
+      ph = Placeholder.new_at(Event, [:id], Position.prefix(0), 0)
+
+      seq =
+        [%Producer{}, %Consumer{ref: ph}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(PlaceholderRegistry.register(PlaceholderRegistry.new(), ph))
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:TestCheck, "boom")
+        )
+
+      explanation = Analysis.explain(report)
+      consumer = Enum.find(explanation.commands, &(&1.command_name == "Consumer"))
+      text = Analysis.format_explanation(explanation)
+      assert text =~ "    Placeholders: ref=placeholder:id@"
+      refute text =~ "Refs:"
+
+      label = "placeholder:id@#{inspect(Position.prefix(0))}"
+      assert consumer.placeholders == %{ref: label}
+    end
+  end
+
+  # A credit fails unless its currency matches the account's. The credit reads
+  # the account id the CreateAccount event minted through a placeholder.
+  defmodule Bank do
+    @moduledoc false
+
+    defmodule AccountCreated do
+      @moduledoc false
+      import PropertyDamage, only: [external: 0]
+      defstruct account_id: external()
+    end
+
+    defmodule CreateAccount do
+      @moduledoc false
+      @behaviour PropertyDamage.Command
+      defstruct [:currency]
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{currency: "USD"})
+    end
+
+    defmodule Credit do
+      @moduledoc false
+      @behaviour PropertyDamage.Command
+      defstruct [:account_ref, :currency]
+      @impl true
+      def generator(_overrides), do: StreamData.constant(%{currency: "EUR"})
+    end
+
+    defmodule Projection do
+      @moduledoc false
+      @behaviour PropertyDamage.Model.Projection
+      @impl true
+      def init, do: %{}
+      @impl true
+      def apply(state, _item), do: state
+    end
+
+    defmodule Model do
+      @moduledoc false
+      use PropertyDamage.Model
+      @impl true
+      def commands, do: [CreateAccount, Credit]
+      @impl true
+      def command_sequence_projection, do: Projection
+    end
+
+    defmodule Adapter do
+      @moduledoc false
+      use PropertyDamage.Adapter
+      @impl true
+      def setup(config), do: {:ok, config}
+      @impl true
+      def execute(%CreateAccount{}, _ctx, _runtime),
+        do: {:ok, [%AccountCreated{account_id: "acc_1"}]}
+
+      def execute(%Credit{account_ref: "acc_1", currency: "USD"}, _ctx, _runtime), do: {:ok, []}
+      def execute(%Credit{}, _ctx, _runtime), do: {:error, :currency_mismatch}
+      @impl true
+      def teardown(_ctx), do: :ok
+    end
+  end
+
+  describe "isolate_trigger/2 on a credit whose account comes from a placeholder" do
+    test "gives a CreateAccount producer the generic message, with no currency special case" do
+      ph = Placeholder.new_at(Bank.AccountCreated, [:account_id], Position.prefix(0), 0)
+
+      seq =
+        [%Bank.CreateAccount{currency: "USD"}, %Bank.Credit{account_ref: ph, currency: "EUR"}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(PlaceholderRegistry.register(PlaceholderRegistry.new(), ph))
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.adapter_error(:currency_mismatch),
+          model: Bank.Model,
+          targets: [{Bank.Adapter, []}]
+        )
+
+      assert {:ok, isolation} = Analysis.isolate_trigger(report)
+      assert Enum.any?(isolation.changes, &(&1.field == :currency and &1.fixed == "USD"))
+
+      assert isolation.likely_cause ==
+               ~s(Changing currency from "EUR" to "USD" eliminates failure)
+    end
+  end
+
+  describe "format_explanation/1 of a command that only sets up state" do
+    # A shrunk sequence [Decoy, Consumer] where no placeholder
+    # links Decoy to the failing Consumer: the shrinker kept Decoy because
+    # removing it lost the failure, so the explanation must not call it a defect.
+    setup do
+      seq = Sequence.linear([%Decoy{}, %Consumer{}])
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          shrunk_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:TestCheck, "boom")
+        )
+
+      %{text: report |> Analysis.explain() |> Analysis.format_explanation()}
+    end
+
+    test "says the shrinker kept it and does not suggest a shrinking issue", %{text: text} do
+      refute text =~ "shrinking issue"
+      refute text =~ "Unknown role"
+      assert text =~ "[0] Decoy"
+      assert text =~ "Kept by shrinking: removing it lost the failure"
+    end
+
+    test "still marks the failing command as the trigger", %{text: text} do
+      assert text =~ "[1] Consumer ← FAILURE TRIGGER"
     end
   end
 end

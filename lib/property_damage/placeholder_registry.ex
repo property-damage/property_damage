@@ -143,8 +143,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   `ids_at_position/2`), reads the value at its recorded `path`/`event_index` in
   the command's real `events` (injected, then returned) and resolves it by id;
   only an event of the placeholder's own event module resolves it. This is
-  position-driven, so it is correct under branching (distinct branch positions)
-  and shrinking (the position is rebuilt per run, never a stale generation key).
+  position-driven, so it is correct under shrinking (the position is rebuilt per run, never a stale generation key).
 
   Returns the registry unchanged when `position` is `nil`.
   """

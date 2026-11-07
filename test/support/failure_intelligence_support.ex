@@ -80,8 +80,8 @@ defmodule PropertyDamage.Test.FI.Model do
   after the first command) so each `PropertyDamage.run` call exercises a single,
   seed-determined command against the seeded-bug adapter.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.FI.{Balance, State}
   alias PropertyDamage.Test.FI.Events.Deposited

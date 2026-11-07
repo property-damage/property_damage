@@ -6,6 +6,8 @@ defmodule PropertyDamage.Error do
   fixing problems rather than just reporting them.
   """
 
+  alias PropertyDamage.Failure.Naming
+
   @type error_context :: %{
           optional(:command) => struct(),
           optional(:command_index) => non_neg_integer(),
@@ -180,51 +182,12 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  defp format_failure(:linearization, failure, context) do
-    cmd_info = format_command_info(context)
-
-    """
-    Linearization Failed
-    #{cmd_info}
-    Details: #{format_message(PropertyDamage.Failure.detail(failure))}
-
-    The parallel execution results cannot be explained by any sequential ordering.
-    This indicates a race condition or concurrency bug in the SUT.
-
-    Suggestions:
-      - Look for missing locks or synchronization
-      - Check for read-modify-write races
-      - Verify transaction isolation levels
-      - Consider if operations should be serialized
-    """
-    |> String.trim()
-  end
-
-  defp format_failure(:nemesis_error, failure, context) do
-    cmd_info = format_command_info(context)
-
-    """
-    Nemesis Error
-    #{cmd_info}
-    Error: #{format_message(PropertyDamage.Failure.detail(failure))}
-
-    A fault injection (nemesis) command failed to inject or restore.
-    This is usually an infrastructure issue, not a SUT bug.
-
-    Suggestions:
-      - Verify fault injection infrastructure (toxiproxy, etc.)
-      - Check nemesis command implementation
-      - Ensure restore can run even if inject partially failed
-    """
-    |> String.trim()
-  end
-
   defp format_failure(:diverged, failure, context) do
     cmd_info = format_command_info(context)
     detail = PropertyDamage.Failure.detail(failure)
 
     """
-    Divergence of #{PropertyDamage.FailureReport.format_name(detail.key)} at root #{inspect(detail.root)}
+    Divergence of #{Naming.format_name(detail.key)} at root #{inspect(detail.root)}
     #{cmd_info}
     Reference value: #{inspect(detail.reference_value, pretty: true, limit: 10)}
     Variant value:   #{inspect(detail.variant_value, pretty: true, limit: 10)}
@@ -250,7 +213,7 @@ defmodule PropertyDamage.Error do
     detail = PropertyDamage.Failure.detail(failure)
 
     """
-    #{PropertyDamage.FailureReport.format_name(detail.key)} did not converge within #{detail.within_ms} ms at root #{inspect(detail.root)}
+    #{Naming.format_name(detail.key)} did not converge within #{detail.within_ms} ms at root #{inspect(detail.root)}
     #{cmd_info}
     Still pending: #{inspect(detail.reason, pretty: true, limit: 10)}
     Waited: #{detail.waited_ms} ms
@@ -308,6 +271,52 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
+  defp format_failure(
+         :setup_failed,
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :model}} = failure,
+         context
+       ) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    Model code (a projection, a check or a hand-written check list) raised,
+    exited or threw while the target came up. The adapter's setup/1 had succeeded.
+
+    Suggestions:
+      - Read the reason: it names the projection or the entry that failed
+      - Fix the model code; the adapter needs no change
+    """
+    |> String.trim()
+  end
+
+  defp format_failure(
+         :setup_failed,
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :variant}} = failure,
+         context
+       ) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    The variant process died while the target came up, in a way neither the
+    adapter nor the model code could rescue: an untrappable kill, or the
+    crash of a process linked to it. The reason above is its exit reason.
+
+    Suggestions:
+      - Look for a process linked to the variant that crashed, or an outside
+        kill (for example the operating system's out-of-memory killer)
+      - The adapter and the model need no change unless the reason names them
+    """
+    |> String.trim()
+  end
+
   defp format_failure(:setup_failed, failure, context) do
     cmd_info = format_command_info(context)
 
@@ -316,7 +325,7 @@ defmodule PropertyDamage.Error do
     #{cmd_info}
     Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
 
-    The run's setup commands failed (#{PropertyDamage.FailureReport.setup_location(failure)}),
+    The run's setup commands failed (#{Naming.setup_location(failure)}),
     so no root ran.
 
     Suggestions:

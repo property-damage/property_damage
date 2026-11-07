@@ -177,7 +177,7 @@ defmodule PropertyDamage.ExpansionPathsTest do
     end
   end
 
-  describe "PropertyDamage.RunTrace.capture/1" do
+  describe "PropertyDamage.RunTrace.Capture.capture/1" do
     test "runs the target's expansions from the seed and records them" do
       model = model_once!(Capture, expansions: [{Refund, &X.refund_rewrite/2}])
 
@@ -188,7 +188,7 @@ defmodule PropertyDamage.ExpansionPathsTest do
       recorder = start_recorder()
 
       trace =
-        RunTrace.capture(
+        RunTrace.Capture.capture(
           model: model,
           targets: [X.target("solo", recorder)],
           seed: seed,

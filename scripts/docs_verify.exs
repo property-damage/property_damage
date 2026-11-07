@@ -8,11 +8,17 @@
 # Corpus: README.md, guides/*.md, benches/*/README.md, shipped agent skills
 # (.claude/skills/pd-*/**/*.md, SKILL.md plus references), and the Livebook notebook
 # notebooks/property_damage_demo.livemd. A fence is executable only when the line
-# immediately above it is exactly `<!-- pd-doc-verify: runnable -->`.
+# immediately above it is `<!-- pd-doc-verify: runnable -->`. Leading whitespace on
+# that line and on the fence is ignored, so a fence inside a list item runs too.
+# Indented code blocks without backtick fences (four-space style) never run.
 #
 # Usage (from the repo root):
 #     elixir scripts/docs_verify.exs                 # full corpus + notebook
 #     elixir scripts/docs_verify.exs guides/quickstart.md [more paths...]
+#
+# A line `<!-- pd-doc-verify: include <guide> <path> -->` in a document runs, at that
+# point, the elixir fence of <guide> that carries `<!-- pd-example: <path> -->`, so a
+# guide can run its steps on another guide's example project.
 #
 # Exit status is 0 only if every runnable fence passed.
 #
@@ -48,7 +54,7 @@ defmodule DocsVerify.CLI do
     IO.puts("consumer template: #{cache} (#{template_dir})")
     IO.puts("running #{length(docs)} document(s)\n")
 
-    opts = [hex_home: hex_home, run_root: run_root]
+    opts = [hex_home: hex_home, run_root: run_root, root: root]
 
     results =
       Enum.map(docs, fn doc ->

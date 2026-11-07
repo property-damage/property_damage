@@ -1,12 +1,15 @@
 # PropertyDamage Cheatsheet
 
-Compact syntax reference for all five core behaviours, run options, and common patterns.
+Compact syntax reference for all four core behaviours, run options, and common patterns.
 
 ## Command Template
+
+A failure report quotes the `@moduledoc` of the model, command and projection, and the `@doc` of the failing check, and prints `(no description: ...)` where one is missing. The templates below carry placeholder docs; replace them with real ones.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateOrder do
+  @moduledoc "Creates an order for a customer."
   use PropertyDamage.Command
   # Optional use opts (all static metadata lives here, DR-028):
   #   execution: :probe,                 # :sync (default) | :probe | :async
@@ -44,12 +47,19 @@ defmodule MyApp.Commands.CreateOrder do
 end
 ```
 
+Rule: `use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection`,
+`use PropertyDamage.Command` and `use PropertyDamage.Adapter`.
+
 ## Model Template
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  @moduledoc "Orders: which commands run and which projections check them."
+  use PropertyDamage.Model
 
   @impl true
   def commands do
@@ -106,7 +116,7 @@ Both default to `[]`.
 | Setup commands | run in every target after `Adapter.setup/1`, before the first root, in every run and shrink attempt |
 | Teardown commands | run after the roots, pass or fail, before `Adapter.teardown/1`; best effort, never change the verdict |
 | Not roots | never compared, expanded, or shrunk; `terminate_early?/3` and `max_commands` count roots only |
-| Engine | stutter, nemesis and latency samples are off; a nemesis module in either callback is an error |
+| Engine | stutter and latency samples are off |
 | Seeds | adding a setup command re-draws the roots for a given seed |
 | Old hooks | a model that defines a side-effect lifecycle hook (arity 1, or a `_once` hook) fails at run start |
 
@@ -147,13 +157,13 @@ end
 | Rule | Behavior |
 |------|----------|
 | Contract | every expansion means the same as the root once it is done, under every `@compare` value of the model |
-| Entry | a sequence, or `{sequence, weight: n}`; default weight 1; list order is the shrink preference |
+| Entry | a sequence, or `{sequence, weight: n, doc: "..."}`; default weight 1; `doc:` describes the whole route and shows in the failure report's Path item (ignored with a warning on a leaf); list order is the shrink preference |
 | Identity | the received root struct alone: `[root]` or `{[root], weight: n}`; nothing is chosen that is not listed |
 | `overrides:` | a map, `fn state -> map end`, or (in a sequence only) `fn state, prior_leaves -> map end` |
 | `target expansion:` | `:random` (default), `:identity` or `:reference` (copy the first target, leaf for leaf; error on the first target) |
 | Pick | keyed on the run seed, the target's name and the root; renaming a target picks again |
 | Nothing fits | the root runs as itself, counted `:forced` |
-| Load errors | no `@compare` that reaches the end; a listed module not in `commands/0`; a probe root; `branching:` |
+| Load errors | no `@compare` that reaches the end; a listed module not in `commands/0`; a probe root |
 | Counts | leaves are commands; `@compare`, `max_commands` and `total_commands` count roots |
 | Retired | `{Module, 3}` is an error: write `{Module, weight: 3}` |
 
@@ -169,6 +179,7 @@ sample a failing seed with `--seed S --seeds 1`, which samples exactly what
 
 ```elixir
 defmodule MyApp.Projections.BalanceInvariant do
+  @moduledoc "Tracks account balances and checks that they add up."
   use PropertyDamage.Model.Projection
 
   # State tracking (both optional; defaults: init -> %{}, apply -> passthrough)
@@ -184,6 +195,7 @@ defmodule MyApp.Projections.BalanceInvariant do
   def apply(state, _), do: state
 
   # Synchronous check
+  @doc "The total equals the sum of the balances."
   @check every: 1
   def assert_total_matches_sum(state, _cmd_or_event) do
     sum = state.balances |> Map.values() |> Enum.sum()
@@ -219,7 +231,7 @@ without `else` does not compile. A verdict is not a boolean: `&&` and
 
 | Kind | Options | Fails when |
 |------|---------|------------|
-| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, :command}`, `{N, :event}`, `{N, Module}`, `{N, [Modules]}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still falsy at `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
 
@@ -228,6 +240,10 @@ returns its verdict, an `@eventually` function returns the predicate to poll,
 a `@compare` function returns the value compared. A function carries one kind.
 Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
 and [Differential Testing](differential_testing.md#boundary-observations).
+`@check` and `@eventually` also take `id:` (with an optional `description:`) to
+declare an invariant, or `validates:` to link to one declared with
+`@invariant id: ..., description: ...`; see
+[Coverage and Invariant Catalogs](coverage_and_catalogs.md).
 
 ### @check Syntax
 
@@ -255,7 +271,7 @@ more targets and no `@compare` is an error at run start.
 | `@compare every: 5` | Compare after every 5th root |
 | `@compare every: {3, CreateOrder}` | Every 3rd `CreateOrder` root |
 | `@compare every: [ClearingReport, :end]` | After those roots, and at the final boundary |
-| `@compare using: :within_cent` | The relation `within_cent(reference, variant)` in this projection, public or private: truthy agrees; `false` or `{:fail, reason}` disagrees (default `==`) |
+| `@compare using: :within_cent` | The relation `within_cent(reference, variant)` in this projection, public or private: truthy agrees; `false`, `nil` or `{:fail, reason}` disagrees (default `==`) |
 | `@compare using: {Mod, :fun}` | `Mod.fun(reference, variant)` |
 | `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` | `Mod.fun(reference, variant, arg1, ..., argN)`; here, a tolerance |
 | `{:pending, reason}` (a return value) | The target is still catching up; waited for, never a disagreement |
@@ -330,34 +346,22 @@ end
 | `runtime.inject` | `(event -> :ok)` | Inject event mid-execution into projections |
 | `runtime.start_poller` | `(keyword -> poller)` | Start background resource poller |
 | `runtime.stutter` | map or `nil` | `nil` on first (non-retry) execution; a map during retries |
+| `runtime.log` | `(term, keyword -> :ok)` or `nil` | Writes a log line under the running command; use `PropertyDamage.Runtime.log/3` |
+| `runtime.mock_registry` | `pid` or `nil` | Registry of the target's `mocks:` services |
 
 Stutter map (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`.
 Prefer `PropertyDamage.Runtime.stuttering?(runtime)` to detect a retry.
 
-## Nemesis Template
+### Log Lines (see the [log lines guide](log_lines.md))
 
-```elixir
-defmodule MyApp.Nemesis.PartitionNetwork do
-  @behaviour PropertyDamage.Nemesis
+- `require PropertyDamage`: add it to a module before it calls `PropertyDamage.log/2`, which is a macro.
+- `PropertyDamage.log(message, tags: [:http])`: record a line for the failure report under the step that ran it; `tags:` is optional and a line without tags always prints.
+- `PropertyDamage.Log.capture/1` plus `setup_log: lines`: pass the lines of work done before the run; the report prints them once in a Setup section.
+- `log: [only: [:http], except: [:body]]`: show only the lines with a listed tag, or hide the lines with one; `except:` wins.
+- `log: [keep_attempts: 3]`: how many of a retried command's last attempts keep their lines, besides the first (default 3).
+- `PD_LOG="only:http except:body"`: replace the run's filter for one invocation, without a code change.
 
-  defstruct [:partition_type, :duration_ms]
-
-  @impl true
-  def inject(%__MODULE__{partition_type: type}, ctx) do
-    :ok = Toxiproxy.partition(ctx.proxy, type)
-    {:ok, [%NetworkPartitioned{type: type}]}
-  end
-
-  @impl true
-  def restore(%__MODULE__{partition_type: type}, ctx) do
-    Toxiproxy.restore(ctx.proxy, type)
-    {:ok, [%NetworkRestored{type: type}]}
-  end
-
-  @impl true
-  def precondition(_state), do: true
-end
-```
+To read a failure as a browsable page, set `report_html: "dir/"` (or the `PD_REPORT_HTML` environment variable): a failing run writes an HTML report there, with an `index.html` that lists every report in the directory.
 
 ## Run Options
 
@@ -379,31 +383,42 @@ PropertyDamage.run(
   verbose: true,             # default: false
   validate: true,            # default: true
   shrink: true,              # default: true
-
-  # Branching (parallel execution)
-  branching: [
-    branch_probability: 0.2, # probability of branch point
-    max_branches: 3,         # max parallel branches
-    max_branch_length: 5,    # max commands per branch
-    min_prefix_length: 3     # min commands before branching
-  ],
+  run_nonce: 12345,          # default: random 64-bit; seeds client-minted values, vary it to re-run a plan with fresh values
+  coverage: true,            # default: false; adds whole-run command/transition/state coverage to the success stats
+  external_markers: [:__external__], # default: []; extra atoms to treat as external() markers
+  shrinker_config: config,   # a PropertyDamage.Shrinker.Config struct that tunes shrinking
+  on_progress: fn progress -> IO.inspect(progress) end, # receives %PropertyDamage.Progress{} updates and a final result
 
   # Stutter (idempotency testing)
-  stutter: %{
+  stutter: [
     probability: 0.1,        # probability of stuttering each command
     max_repeats: 2,           # max retries per stuttered command
     delay_ms: {0, 100},       # delay between retries (min, max) or integer
     commands: :all,            # :all or [Module1, Module2]
     using: {Mod, :fun}         # Mod.fun(original_events, retry_events) -> verdict; default ==
-  },
+  ],
 
   # Several targets (compared through the model's @compare observations)
   concurrency: :serial,      # :serial | :parallel
   compare: [converge_within: 5_000], # ms a boundary waits for agreement
   latency: false,            # true measures; [warmup: n, p95: [max_ratio: r]] adds a budget (:serial only)
 
+  check_mode: :halt,         # :halt (default) | :record | :log | :disabled (see Check Modes)
+
+  # The artifacts a failing run writes (for `only:`, see below this call)
+  replay_dir: "property_damage_replays", # default; where a failure writes its replay artifact; false writes none
+  report_html: "reports/",   # default: false; a directory for the HTML failure page (env: PD_REPORT_HTML)
+
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,
+
+  # Failure report log lines
+  setup_log: lines,          # lines of PropertyDamage.Log.capture/1, printed once as Setup
+  log: [only: [:http], except: [:body], keep_attempts: 3], # tag filter and retry cap
+
+  # Seed library (replayed before exploration; see PropertyDamage.SeedLibrary)
+  seed_library: true,        # default: false; true uses property_damage_seeds.json, or give a path
+  seed_library_prune_after: 3, # default: 3; consecutive passing replays after which a seed leaves the library
 
   # Regression
   regression: [
@@ -413,6 +428,20 @@ PropertyDamage.run(
     tags: [:auto_detected],
     dedup: false
   ]
+)
+```
+
+`only:` goes in a call of its own. It runs one of the runs a seed generates, or replays an artifact, and it is an error beside `max_runs:` other than 1. With `replay:`, `seed:` is an error too, because the artifact records the seed.
+
+```elixir
+# Run 3 of the seed alone
+PropertyDamage.run(model: MyModel, targets: [MyApp.Adapter], seed: 12345, only: [run: 3])
+
+# Run an artifact again, with no seed:
+PropertyDamage.run(
+  model: MyModel,
+  targets: [MyApp.Adapter],
+  only: [replay: "property_damage_replays/MyModel_seed42.replay.exs"]
 )
 ```
 
@@ -449,7 +478,7 @@ expansions is a path-equivalence run.
 |-----------|----------|--------|-----------|
 | `:sync` | Mutates SUT, completes immediately | None | Normal |
 | `:probe` | Queries SUT, retries until settled | Configurable timeout/interval/backoff | Prefer remove (read-only) |
-| `:async` | Creates resource, polls for completion | Configurable timeout/interval/backoff | Protected if ref is used downstream |
+| `:async` | Creates resource, polls for completion | Configurable timeout/interval/backoff | Protected if a later command consumes its `external()` value |
 
 ### Shrink Hints
 
@@ -474,6 +503,8 @@ expansions is a path-equivalence run.
 |--------|---------|
 | `{:ok, [events]}` | Command succeeded, events applied to projections |
 | `{:error, reason}` | Command failed, execution stops |
+| `{:settled, [events]}` | The eventually-consistent condition is met; treated like `{:ok, events}` and ends the settle loop |
+| `{:retry, reason}` | Not settled yet; the framework calls `execute/3` again per the command's `settle:` until `{:settled, _}` or the timeout (a contract violation from a `:sync` command) |
 
 ## Lifecycle Diagram
 

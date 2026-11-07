@@ -45,7 +45,7 @@ defmodule ObanBench.JobRefsShrinkTest do
     @impl true
     def execute(%CancelJob{job_ref: job_id}, _ctx, _runtime) do
       # No cancel performed; the state we read back is still runnable.
-      {:ok, [%JobCancelled{job_ref: job_id, state: ObanBench.DB.job_state(job_id)}]}
+      {:ok, [%JobCancelled{job_ref: job_id, state: ObanBench.DB.logged_job_state(job_id)}]}
     end
 
     def execute(%EnqueueJob{} = cmd, ctx, runtime), do: Adapter.execute(cmd, ctx, runtime)

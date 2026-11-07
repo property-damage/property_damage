@@ -254,7 +254,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
     half_range = div(range, 2)
 
     nearby =
-      for offset <- -half_range..half_range,
+      for offset <- -half_range..half_range//1,
           offset != 0,
           seed = original_seed + offset,
           seed > 0 do
@@ -265,7 +265,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
     random_count = div(count, 2)
 
     random =
-      for _ <- 1..random_count do
+      for _ <- 1..random_count//1 do
         :rand.uniform(1_000_000_000)
       end
 

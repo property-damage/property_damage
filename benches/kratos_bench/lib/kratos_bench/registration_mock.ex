@@ -158,15 +158,19 @@ defmodule KratosBench.RegistrationMock do
   end
 
   @doc false
-  # Called by the Plug for each inbound web_hook. Reads the mock's state from the
-  # current sequence's registry, runs handle_request/2, pushes the injected events
-  # back, and returns the HTTP response Kratos will act on.
-  def deliver(payload) do
+  # Called by the Plug with the body of each inbound web_hook. Reads the mock's
+  # state from the current sequence's registry, runs handle_request/2, pushes the
+  # injected events back, logs the call through the runtime of the registration
+  # that triggered it, and returns the HTTP response Kratos will act on.
+  def deliver(body) do
+    payload = Jason.decode!(body)
+
     case Hub.get() do
-      %{registry: registry} when is_pid(registry) ->
+      %{registry: registry} = current when is_pid(registry) ->
         {:ok, state} = MockServiceRegistry.get_handler_state(registry, __MODULE__)
         {:ok, response, events} = handle_request(%{path: "/registration", body: payload}, state)
         MockServiceRegistry.push_events(registry, __MODULE__, events)
+        log_web_hook(current.runtime, body, payload, state.decision, response)
         response
 
       _ ->
@@ -174,14 +178,41 @@ defmodule KratosBench.RegistrationMock do
     end
   end
 
+  defp log_web_hook(
+         %PropertyDamage.Runtime{log: log} = runtime,
+         body,
+         payload,
+         decision,
+         response
+       )
+       when is_function(log, 2) do
+    summary =
+      "web_hook POST /registration -> #{response.status}  decision=#{decision}" <>
+        "  email=#{payload["email"]}"
+
+    entry =
+      KratosBench.log_entry(summary, [
+        {"request", Jason.Formatter.pretty_print(body)},
+        {"response", Jason.encode!(response.body, pretty: true)}
+      ])
+
+    PropertyDamage.Runtime.log(runtime, entry, tags: [:webhook])
+  end
+
+  defp log_web_hook(_no_runtime, _body, _payload, _decision, _response), do: :ok
+
   defmodule Hub do
     @moduledoc false
-    # Holds the current run's registry pid and the shared listener pid. Started
+    # Holds the current run's registry pid, the runtime of the registration in
+    # flight, and the shared listener pid. Started
     # by KratosBench.Application, so it outlives every run.
     use Agent
 
     def start_link(_opts),
-      do: Agent.start_link(fn -> %{registry: nil, listener: nil} end, name: __MODULE__)
+      do:
+        Agent.start_link(fn -> %{registry: nil, listener: nil, runtime: nil} end,
+          name: __MODULE__
+        )
 
     def put(fields), do: Agent.update(__MODULE__, &Map.merge(&1, Map.new(fields)))
     def get, do: Agent.get(__MODULE__, & &1)
@@ -196,8 +227,7 @@ defmodule KratosBench.RegistrationMock do
 
     post "/registration" do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      payload = Jason.decode!(body)
-      response = KratosBench.RegistrationMock.deliver(payload)
+      response = KratosBench.RegistrationMock.deliver(body)
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")

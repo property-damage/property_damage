@@ -137,7 +137,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
@@ -155,7 +156,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
@@ -173,7 +175,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
@@ -193,7 +196,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Model"
+      assert content =~ "use PropertyDamage.Model"
+      refute content =~ "@behaviour #{inspect(PropertyDamage.Model)}"
       assert content =~ "def commands"
       assert content =~ "def command_sequence_projection"
       assert content =~ "def check_projections"

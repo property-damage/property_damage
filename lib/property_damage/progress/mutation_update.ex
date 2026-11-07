@@ -4,14 +4,20 @@ defmodule PropertyDamage.Progress.MutationUpdate do
   of testing a single mutation. Not the authoritative result — see
   `PropertyDamage.Progress.MutationResult`.
 
-  One update is emitted per mutation as it is killed, survived, or timed out.
+  One update is emitted per mutation as it is killed, killed by an adapter error, survived, or timed out.
   Each update is self-contained: it names the `command` whose events were mutated,
   the `operator` that produced the `mutation`, the `result`, an optional
-  `failure_message` (present when the mutation was killed), and the wall-clock
+  `failure_message` (present when the mutation was killed, by a check or by an
+  adapter error), and the wall-clock
   `duration_ms` of that mutation's test.
   """
 
-  @type result :: :killed | :survived | :timeout
+  @typedoc """
+  `:killed` means a check caught the mutation. `:killed_by_error` means the run
+  failed with an `:execution_failed` report, for example because the mutation
+  made the adapter return an error, so no check caught it.
+  """
+  @type result :: :killed | :killed_by_error | :survived | :timeout
 
   @type t :: %__MODULE__{
           command: module(),

@@ -325,6 +325,43 @@ defmodule PropertyDamage.Options do
   # PropertyDamage.run/1 Schema
   # ============================================================================
 
+  # The retry cap on a step's log lines (DR-054 decision 13): `log:
+  # [keep_attempts: n]` on `run/1`, `shrink_further/2` and `Replay.start/2`.
+  @keep_attempts_option [
+    type: :pos_integer,
+    default: 3,
+    doc: """
+    How many of a step's last settle or stutter attempts keep their log
+    lines, besides the first attempt, whose lines are always kept. When
+    a newer attempt pushes an older one out, the run drops that attempt's
+    lines and counts them, so memory stays bounded; the report prints
+    each gap as `... N attempts omitted (M lines)`. Whole attempts only:
+    the cap never cuts a line or a value. A filter never changes what the
+    run keeps.
+    """
+  ]
+
+  @keep_attempts_log_option [
+    type: :keyword_list,
+    default: [],
+    doc: "Options for the log lines a step keeps (DR-054): the retry cap.",
+    keys: [keep_attempts: @keep_attempts_option]
+  ]
+
+  @keep_attempts_log_schema NimbleOptions.new!(log: @keep_attempts_log_option)
+
+  @doc """
+  Validates the `log: [keep_attempts: n]` option of
+  `PropertyDamage.shrink_further/2`, as `run/1` validates it, and returns `n`
+  (3 when absent). Other options in `opts` are not looked at. Raises
+  `NimbleOptions.ValidationError` on an invalid value.
+  """
+  @spec keep_attempts!(keyword()) :: pos_integer()
+  def keep_attempts!(opts) do
+    log = Keyword.get(opts, :log, [])
+    NimbleOptions.validate!([log: log], @keep_attempts_log_schema)[:log][:keep_attempts]
+  end
+
   @run_schema_definition [
     # Required
     model: [
@@ -401,8 +438,7 @@ defmodule PropertyDamage.Options do
           form says the artifact reproduced; one that passes returns stats
           whose `:replay` is `:not_reproduced`.
 
-      `max_runs:` other than 1 and `branching:` are errors beside either
-      shape.
+      `max_runs:` other than 1 is an error beside either shape.
       """
     ],
     replay_dir: [
@@ -414,6 +450,17 @@ defmodule PropertyDamage.Options do
       by a later failure of the same seed. `false` writes no artifact. The
       report's printed form ends with the `only: [replay: path]` call that
       runs it.
+      """
+    ],
+    report_html: [
+      type: {:or, [:string, {:in, [false]}]},
+      default: false,
+      doc: """
+      A directory a failing run writes its report into as one HTML page,
+      created when missing, and where it rebuilds `index.html`, a page that
+      browses every report page in the directory. `false` writes none. The
+      environment variable `PD_REPORT_HTML`, when set and not blank, replaces
+      it. See `PropertyDamage.FailureReport.HTML`.
       """
     ],
     coverage: [
@@ -463,12 +510,18 @@ defmodule PropertyDamage.Options do
       depending on PropertyDamage:
 
           # In domain library (no PropertyDamage dependency)
-          defstruct [id: :__external__, :amount]
+          defstruct [:amount, id: :__external__]
 
           # In test project
           PropertyDamage.run(model: M, targets: [A], external_markers: [:__external__])
 
-      This run option is the sole source of atom markers; there is no ambient
+      Every step of the run reads this option: sequence generation,
+      execution, the teardown draw, the expansion walk, shrinking, and
+      `only: [replay: path]`. The failure report and the replay artifact
+      record the list, and every path that runs a failure again uses it
+      (DR-061); `PropertyDamage.shrink_further/2` and `only: [replay: path]`
+      take the same `:external_markers` key, which replaces it. This run
+      option is the sole source of atom markers; there is no ambient
       app-config channel (DR-032).
       """
     ],
@@ -532,34 +585,45 @@ defmodule PropertyDamage.Options do
       - `:log` - Log failures as warnings and continue
       """
     ],
-
-    # Nested - Branching
-    branching: [
+    setup_log: [
+      type: {:custom, __MODULE__, :validate_setup_log, []},
+      default: [],
+      doc: """
+      The lines `PropertyDamage.Log.capture/1` returned for work done before the
+      run, such as seeding the system (DR-054). The failure report prints them
+      once, in a Setup section between Failure and Minimal Reproduction,
+      labeled as shared by every run. Nothing else carries them: a saved
+      report or trace and a replay artifact hold none, so `setup_log:` is
+      given again to any run that should print them. Default `[]`, which
+      prints no section.
+      """
+    ],
+    log: [
       type: :keyword_list,
+      default: [],
       doc:
-        "Options for branching sequences: a prefix, branches run one after another " <>
-          "on one target, and a suffix, checked for linearizability afterward. " <>
-          "Not with `latency:` or a `check_mode:` other than the default.",
+        "Options for the log lines of the failure report (DR-054): the retry cap and a tag filter.",
       keys: [
-        branch_probability: [
-          type: :float,
-          default: 0.2,
-          doc: "Probability of creating a branch point (0.0-1.0)."
+        keep_attempts: @keep_attempts_option,
+        only: [
+          type: {:custom, PropertyDamage.Log.Filter, :validate_tags, []},
+          doc: """
+          A non-empty list of tag atoms. The failure report shows the log lines
+          that carry any listed tag, and every line that has no tag, and hides
+          the rest. A filter hides whole lines only. The report prints the
+          filter and names a listed tag that no line carries. The environment
+          variable `PD_LOG` replaces it. It hides lines from one reader and
+          protects no secret: redact in the code that logs.
+          """
         ],
-        max_branches: [
-          type: :pos_integer,
-          default: 3,
-          doc: "Maximum number of parallel branches."
-        ],
-        max_branch_length: [
-          type: :pos_integer,
-          default: 5,
-          doc: "Maximum commands per branch."
-        ],
-        min_prefix_length: [
-          type: :pos_integer,
-          default: 3,
-          doc: "Minimum commands before branching."
+        except: [
+          type: {:custom, PropertyDamage.Log.Filter, :validate_tags, []},
+          doc: """
+          A non-empty list of tag atoms. The failure report hides the log lines
+          that carry any listed tag, also when `only:` lists another of their
+          tags. A line with no tag is always shown. Like `only:`, it hides
+          whole lines, is replaced by `PD_LOG`, and protects no secret.
+          """
         ]
       ]
     ],
@@ -726,8 +790,8 @@ defmodule PropertyDamage.Options do
     reject_retired_stutter_keys!(opts)
 
     reject_only_option_conflicts!(opts)
-    reject_branching_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
+    PropertyDamage.Model.check_listings!(Keyword.fetch!(validated, :model))
 
     case Keyword.get(validated, :regression) do
       regression when is_list(regression) -> validate_single_target!(regression)
@@ -736,10 +800,8 @@ defmodule PropertyDamage.Options do
 
     validated
     |> reject_only_variants!()
-    |> reject_multi_target_branching!()
     |> reject_timed_parallel!()
     |> reject_single_target_ratio!()
-    |> validate_branching_bounds!()
   end
 
   @doc false
@@ -819,6 +881,24 @@ defmodule PropertyDamage.Options do
   defp only_error(message), do: {:error, "`only:` " <> message}
 
   @doc false
+  # `setup_log:` option type: the list `PropertyDamage.Log.capture/1` returns.
+  def validate_setup_log(lines) when is_list(lines) do
+    if Enum.all?(lines, &is_struct(&1, PropertyDamage.Log.Line)) do
+      {:ok, lines}
+    else
+      setup_log_error(lines)
+    end
+  end
+
+  def validate_setup_log(other), do: setup_log_error(other)
+
+  defp setup_log_error(other) do
+    {:error,
+     "`setup_log:` takes the lines `PropertyDamage.Log.capture/1` returns, a list of " <>
+       "%PropertyDamage.Log.Line{} structs, got: #{inspect(other, limit: 5)}"}
+  end
+
+  @doc false
   # `replay_dir:` option type: a directory path, or `false`.
   def validate_replay_dir(false), do: {:ok, false}
   def validate_replay_dir(dir) when is_binary(dir) and dir != "", do: {:ok, dir}
@@ -872,9 +952,6 @@ defmodule PropertyDamage.Options do
       Keyword.get(raw, :max_runs, 1) != 1 &&
         "`max_runs:` #{inspect(Keyword.get(raw, :max_runs))} cannot be used with #{shape}, " <>
           "which runs one run: drop `max_runs:` or pass `max_runs: 1`",
-      Keyword.get(raw, :branching) != nil &&
-        "`branching:` cannot be used with #{shape}: a branching sequence runs on one target " <>
-          "and is not regenerated or replayed per target",
       (Keyword.has_key?(only, :replay) and not Keyword.has_key?(only, :run) and
          Keyword.has_key?(raw, :seed)) &&
         "`seed:` cannot be used with `only: [replay: ...]`: the replay artifact records " <>
@@ -917,53 +994,6 @@ defmodule PropertyDamage.Options do
       end
 
     unknown ++ alone
-  end
-
-  # Branching sequences run their branches in parallel inside one system; the
-  # lockstep comparison steps every target one command at a time, so it has no
-  # boundary to compare at inside a branch.
-  defp reject_multi_target_branching!(opts) do
-    if is_list(opts[:branching]) and length(opts[:targets]) > 1 do
-      raise NimbleOptions.ValidationError,
-        key: :branching,
-        value: opts[:branching],
-        message:
-          "`branching:` sequences run against one target only; got " <>
-            "#{length(opts[:targets])} `targets:` entries"
-    end
-
-    opts
-  end
-
-  # A branching run executes one branch at a time on one target through the
-  # linear engine, which records no latency samples and runs its checks as
-  # `:halt` whatever `check_mode:` says. Both are refused beside `branching:`
-  # instead of accepted and ignored. Read from the raw options, because the
-  # schema fills `check_mode:` in, and the default is what the path does.
-  defp reject_branching_conflicts!(opts) do
-    if Keyword.get(opts, :branching) != nil do
-      if opts[:latency] do
-        raise NimbleOptions.ValidationError,
-          key: :latency,
-          value: opts[:latency],
-          message:
-            "`latency:` cannot be used with `branching:`: a branching run executes one " <>
-              "branch at a time on one target and records no latency samples"
-      end
-
-      mode = Keyword.get(opts, :check_mode, :halt)
-
-      if mode != :halt do
-        raise NimbleOptions.ValidationError,
-          key: :check_mode,
-          value: mode,
-          message:
-            "`check_mode: #{inspect(mode)}` cannot be used with `branching:`: a branching " <>
-              "run halts at the first failing check and ignores the option"
-      end
-    end
-
-    opts
   end
 
   # Latency measured while other targets execute at the same moment would mix
@@ -1251,24 +1281,6 @@ defmodule PropertyDamage.Options do
     end
   end
 
-  # Cross-field check NimbleOptions can't express: branching cannot begin until
-  # `min_prefix_length` commands have run, but the prefix is capped by
-  # `max_commands`. If min_prefix_length > max_commands the generator can never
-  # reach the branch point and prefix generation spins. Fail fast and clearly.
-  defp validate_branching_bounds!(opts) do
-    with branching when is_list(branching) <- Keyword.get(opts, :branching),
-         max_commands when is_integer(max_commands) <- Keyword.get(opts, :max_commands, 50),
-         min_prefix when is_integer(min_prefix) <- Keyword.get(branching, :min_prefix_length, 3),
-         true <- min_prefix > max_commands do
-      raise ArgumentError,
-            "Invalid branching options: min_prefix_length (#{min_prefix}) must be <= " <>
-              "max_commands (#{max_commands}); otherwise branching can never start and " <>
-              "generation would not terminate."
-    else
-      _ -> opts
-    end
-  end
-
   # ============================================================================
   # PropertyDamage.LoadTest.run/1 Schema
   # ============================================================================
@@ -1284,6 +1296,14 @@ defmodule PropertyDamage.Options do
       type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
       doc: @single_target_doc
+    ],
+    seed: [
+      type: :pos_integer,
+      doc:
+        "Random seed for sequence generation. Each worker derives its own seed " <>
+          "from it and its worker id, so the same seed sends the same commands " <>
+          "from each worker. Defaults to a random seed, recorded in the report " <>
+          "as `config.seed`."
     ],
     run_nonce: [
       type: :non_neg_integer,
@@ -1409,7 +1429,8 @@ defmodule PropertyDamage.Options do
       type: :boolean,
       default: true,
       doc: "Include projection states in step results."
-    ]
+    ],
+    log: @keep_attempts_log_option
   ]
 
   @replay_schema NimbleOptions.new!(@replay_schema_definition)
@@ -1473,7 +1494,8 @@ defmodule PropertyDamage.Options do
     mutations_per_command: [
       type: :pos_integer,
       default: 5,
-      doc: "Maximum mutations per command type."
+      doc:
+        "Maximum mutations per operator. A command gets up to this cap times the number of operators."
     ],
     max_runs: [
       type: :pos_integer,
@@ -1621,6 +1643,51 @@ defmodule PropertyDamage.Options do
     NimbleOptions.validate!(opts, @export_livebook_schema)
   end
 
+  @doc false
+  # Validates `opts` for one export format with the schema of the matching
+  # `to_*` function. Used by `PropertyDamage.Export.save/4`.
+  @spec validate_export!(PropertyDamage.Export.format(), keyword()) :: keyword()
+  def validate_export!(:exunit, opts), do: validate_export_exunit!(opts)
+  def validate_export!(:livebook, opts), do: validate_export_livebook!(opts)
+  def validate_export!({:script, _language}, opts), do: validate_export_script!(opts)
+
+  @doc false
+  # The option keys the schema of one export format accepts.
+  @spec export_option_keys(PropertyDamage.Export.format()) :: [atom()]
+  def export_option_keys(:exunit), do: Keyword.keys(@export_exunit_schema_definition)
+  def export_option_keys(:livebook), do: Keyword.keys(@export_livebook_schema_definition)
+  def export_option_keys({:script, _}), do: Keyword.keys(@export_script_schema_definition)
+
+  # `save_all/3` takes the options of every format at once, so its schema is
+  # the union of the format schemas plus `:script_languages`. Required and
+  # default settings stay with each format's own schema.
+  @export_format_options Enum.uniq_by(
+                           for {key, spec} <-
+                                 @export_exunit_schema_definition ++
+                                   @export_livebook_schema_definition ++
+                                   @export_script_schema_definition do
+                             {key, Keyword.drop(spec, [:required, :default])}
+                           end,
+                           fn {key, _spec} -> key end
+                         )
+
+  @export_all_schema_definition [
+                                  script_languages: [
+                                    type: {:list, {:in, [:elixir, :curl, :python]}},
+                                    doc: "Languages to save scripts in."
+                                  ]
+                                ] ++ @export_format_options
+
+  @export_all_schema NimbleOptions.new!(@export_all_schema_definition)
+
+  @doc false
+  # Rejects an option that no format of `PropertyDamage.Export.save_all/3`
+  # takes, or a value of the wrong type.
+  @spec validate_export_all!(keyword()) :: keyword()
+  def validate_export_all!(opts) do
+    NimbleOptions.validate!(opts, @export_all_schema)
+  end
+
   # ============================================================================
   # PropertyDamage.execute/2 Schema
   # ============================================================================
@@ -1744,9 +1811,18 @@ defmodule PropertyDamage.Options do
       default: :unlimited,
       doc: "Maximum runs before giving up, or `:unlimited`."
     ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Maximum commands per run."
+    ],
     save_to: [
       type: :string,
       doc: "Directory to save discovered bugs."
+    ],
+    health_check: [
+      type: :any,
+      doc: "Health check configuration (keyword list or map); see `health_check/1`."
     ],
     verbose: [
       type: :boolean,
@@ -1813,10 +1889,6 @@ defmodule PropertyDamage.Options do
       type: :pos_integer,
       doc: "Max commands per generated sequence."
     ],
-    branching: [
-      type: :keyword_list,
-      doc: "Branching generation options (see `PropertyDamage.run/1`)."
-    ],
     external_markers: [
       type: {:list, :atom},
       doc: "Additional atoms to treat as external markers."
@@ -1868,7 +1940,7 @@ defmodule PropertyDamage.Options do
       type: :keyword_list,
       required: true,
       doc: """
-      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      Options forwarded to `PropertyDamage.RunTrace.Capture.capture/1` (requires
       `:model`, `:targets`, `:seed`). Passed through rather than duplicated
       here so `RunTrace`'s surface stays single-sourced; a fresh `:run_nonce`
       is injected per capture.
@@ -1907,7 +1979,7 @@ defmodule PropertyDamage.Options do
       type: :keyword_list,
       required: true,
       doc: """
-      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      Options forwarded to `PropertyDamage.RunTrace.Capture.capture/1` (requires
       `:model` and `:targets`; `:seed` is supplied per scanned seed). A fresh
       `:run_nonce` is injected per capture.
       """

@@ -90,7 +90,7 @@ defmodule PropertyDamage.LockstepRunTest do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [PropertyDamage.Test.Lockstep.Step]
@@ -253,7 +253,9 @@ defmodule PropertyDamage.LockstepRunTest do
                  :reference_value,
                  :root,
                  :using,
-                 :variant_value
+                 :variant_value,
+                 :waited_ms,
+                 :within_ms
                ]
 
       # The observation compares under ==, so no using: term is recorded.
