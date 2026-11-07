@@ -1,20 +1,21 @@
 defmodule PropertyDamage.Sequence.ValidatorTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Validator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.ExecutorModel
 
-  describe "valid_sequence?/2" do
+  describe "valid_sequence?/3" do
     test "returns true for empty sequence" do
-      assert Validator.valid_sequence?([], ExecutorModel)
+      assert Validator.valid_sequence?(Sequence.linear([]), ExecutorModel)
     end
 
     test "returns true for valid single command" do
       commands = [%CreateItem{name: "Test", quantity: 5}]
 
-      assert Validator.valid_sequence?(commands, ExecutorModel)
+      assert Validator.valid_sequence?(Sequence.linear(commands), ExecutorModel)
     end
 
     test "returns true for valid multi-command sequence" do
@@ -24,14 +25,14 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
         %CreateItem{name: "Third", quantity: 3}
       ]
 
-      assert Validator.valid_sequence?(commands, ExecutorModel)
+      assert Validator.valid_sequence?(Sequence.linear(commands), ExecutorModel)
     end
 
     test "returns false when precondition fails" do
       # ViewItem requires items to exist; the item_ref value is irrelevant here.
       commands = [%ViewItem{item_ref: nil}]
 
-      refute Validator.valid_sequence?(commands, ExecutorModel)
+      refute Validator.valid_sequence?(Sequence.linear(commands), ExecutorModel)
     end
 
     test "simulates state transitions" do
@@ -42,7 +43,7 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
         %CreateItem{name: "Another", quantity: 3}
       ]
 
-      assert Validator.valid_sequence?(commands, ExecutorModel)
+      assert Validator.valid_sequence?(Sequence.linear(commands), ExecutorModel)
     end
 
     test "validates preconditions against simulated state" do
@@ -58,7 +59,7 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
       ]
 
       # This should pass because CreateItem.simulate populates state
-      assert Validator.valid_sequence?(commands, ExecutorModel)
+      assert Validator.valid_sequence?(Sequence.linear(commands), ExecutorModel)
     end
   end
 
@@ -118,8 +119,6 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
   end
 
   describe "valid_sequence?/3 over a state keyed by minted ids" do
-    @describetag :known_defect
-
     test "accepts a generated sequence whose command needs two distinct ids" do
       sequence =
         1..40
@@ -134,11 +133,7 @@ defmodule PropertyDamage.Sequence.ValidatorTest do
 
       assert sequence, "no drawn sequence contains the dependent command"
 
-      assert Validator.valid_sequence?(
-               sequence.prefix,
-               IdKeyedFixtures.Model,
-               sequence.setup
-             )
+      assert Validator.valid_sequence?(sequence, IdKeyedFixtures.Model)
     end
   end
 end

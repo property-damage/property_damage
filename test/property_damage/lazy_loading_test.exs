@@ -64,10 +64,10 @@ defmodule PropertyDamage.LazyLoadingTest do
                Model.normalize_commands([module])
     end
 
-    test "Settle.get_semantics/1 reads its execution" do
+    test "Model.spec_for/2 reads its execution for a command the table does not hold" do
       module = lazy_command(SettledCommand)
 
-      assert Settle.get_semantics(module) == :probe
+      assert module |> then(&Model.spec_for(%{}, &1)) |> Settle.get_semantics() == :probe
     end
   end
 

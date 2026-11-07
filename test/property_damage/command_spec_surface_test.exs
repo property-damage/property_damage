@@ -55,21 +55,25 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   # --- Settle seam: get_semantics / get_config resolve via command_spec --------
 
+  # The spec of a command the model's table does not hold: it resolves through
+  # the command's own command_spec/1.
+  defp spec(command), do: PropertyDamage.Model.spec_for(%{}, command)
+
   describe "Settle resolution via command_spec (RED on HEAD)" do
     test "get_semantics/1 reads :execution from command_spec for a module" do
-      assert Settle.get_semantics(AsyncViaSpec) == :async
+      assert Settle.get_semantics(spec(AsyncViaSpec)) == :async
     end
 
     test "get_semantics/1 reads :execution from command_spec for a struct" do
-      assert Settle.get_semantics(%AsyncViaSpec{id: 1}) == :async
+      assert Settle.get_semantics(spec(%AsyncViaSpec{id: 1})) == :async
     end
 
     test "requires_settling?/1 is true for an async-via-spec command" do
-      assert Settle.requires_settling?(%AsyncViaSpec{id: 1})
+      assert Settle.requires_settling?(spec(%AsyncViaSpec{id: 1}))
     end
 
     test "get_config/1 reads :settle from command_spec" do
-      config = Settle.get_config(%AsyncViaSpec{id: 1})
+      config = Settle.get_config(spec(%AsyncViaSpec{id: 1}))
       assert config.timeout_ms == 1234
       assert config.interval_ms == 56
       assert config.backoff == :exponential

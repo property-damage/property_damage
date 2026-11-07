@@ -130,6 +130,7 @@ defmodule PropertyDamage.Shrinker do
     Expansion,
     Failure,
     Generator,
+    Model,
     Placeholder,
     PlaceholderRegistry,
     ReplayArtifact,
@@ -454,6 +455,8 @@ defmodule PropertyDamage.Shrinker do
 
     %{
       model: Keyword.fetch!(opts, :model),
+      # Every command's spec as the model lists it, built once per shrink.
+      specs: Model.spec_table(Keyword.fetch!(opts, :model)),
       targets: Keyword.fetch!(opts, :targets),
       concurrency: Keyword.get(opts, :concurrency, :serial),
       compare: Keyword.get(opts, :compare, converge_within: 5_000),
@@ -896,7 +899,8 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             try_remove_levels(adopted, original, orig_positions, graph, rest, expanded)
 
@@ -917,7 +921,7 @@ defmodule PropertyDamage.Shrinker do
   defp do_linear_shrink_fixpoint(state) do
     original_count = length(state.commands)
     # Get indices sorted by shrink priority (probe commands first)
-    prioritized_indices = sort_indices_by_shrink_priority(state.commands)
+    prioritized_indices = sort_indices_by_shrink_priority(state.commands, state.specs)
     state = do_linear_shrink(state, prioritized_indices)
     new_count = length(state.commands)
 
@@ -932,31 +936,23 @@ defmodule PropertyDamage.Shrinker do
   # Sort command indices by shrink priority.
   # Commands with :prefer_remove (probes, read-only) are prioritized for removal.
   # Commands with :prefer_keep are removed last.
-  # Reads the :shrink key from the command's resolved spec; spec-less commands
-  # default to :neutral.
-  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
-    case Map.get(resolved_shrink_spec(cmd.__struct__), :shrink, :neutral) do
+  # Reads the :shrink key from the command's spec in the model's spec table, so
+  # an option on the command's listing in commands/0 counts.
+  defp shrink_priority_for_command(cmd, specs) when is_struct(cmd) do
+    case Map.get(Model.spec_for(specs, cmd), :shrink, :neutral) do
       :prefer_remove -> 0
       :neutral -> 1
       :prefer_keep -> 2
     end
   end
 
-  defp shrink_priority_for_command(_cmd), do: 1
+  defp shrink_priority_for_command(_cmd, _specs), do: 1
 
-  defp resolved_shrink_spec(module) do
-    if PropertyDamage.ModuleCheck.exports?(module, :command_spec, 1) do
-      module.command_spec([])
-    else
-      PropertyDamage.Command.framework_defaults()
-    end
-  end
-
-  defp sort_indices_by_shrink_priority(commands) do
+  defp sort_indices_by_shrink_priority(commands, specs) do
     commands
     |> Enum.with_index()
     |> Enum.sort_by(fn {cmd, _idx} ->
-      shrink_priority_for_command(cmd)
+      shrink_priority_for_command(cmd, specs)
     end)
     |> Enum.map(fn {_cmd, idx} -> idx end)
   end
@@ -975,7 +971,7 @@ defmodule PropertyDamage.Shrinker do
 
       # Skip if this is a protected async command (its external is still
       # consumed downstream)
-      if protected_async?(command, position, state.registry, remaining) do
+      if protected_async?(command, position, state, remaining) do
         do_linear_shrink(state, rest_indices)
       else
         candidate = List.delete_at(state.commands, index)
@@ -983,10 +979,11 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             # Command was removed, recompute priorities for remaining commands
-            do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate))
+            do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate, state.specs))
 
           _rejected ->
             do_linear_shrink(state, rest_indices)
@@ -1014,7 +1011,8 @@ defmodule PropertyDamage.Shrinker do
         state = increment_iterations(state)
 
         # Argument shrinking replaces in place, so positions are unchanged.
-        case valid_candidate?(candidate, state) && adopt(candidate, state.positions, state) do
+        case valid_candidate?(candidate, state.positions, state) &&
+               adopt(candidate, state.positions, state) do
           %{} = adopted -> do_shrink_arguments(adopted, index)
           _rejected -> do_shrink_arguments(state, index + 1)
         end
@@ -1067,8 +1065,14 @@ defmodule PropertyDamage.Shrinker do
   # over a candidate the shrinker made up, such as an argument halved to 0 or a
   # key no earlier command created. Model code may raise on such a candidate;
   # that makes the candidate invalid, not the run a failure.
-  defp valid_candidate?(commands, state) do
-    Validator.valid_sequence?(commands, state.model, state.setup_commands)
+  defp valid_candidate?(commands, positions, state) do
+    sequence =
+      commands
+      |> Sequence.linear()
+      |> Sequence.with_registry(remap_registry(state.registry, positions))
+      |> Map.put(:setup, state.setup_commands)
+
+    Validator.valid_sequence?(sequence, state.model, external_markers: state.external_markers)
   rescue
     _ -> false
   end
@@ -1305,10 +1309,10 @@ defmodule PropertyDamage.Shrinker do
   # shrink-cost optimization. The produced placeholders are identified by the
   # command's structured position (DR-021), and a downstream consumer embeds a
   # placeholder carrying the same id.
-  defp protected_async?(command, position, registry, downstream_commands) do
+  defp protected_async?(command, position, state, downstream_commands) do
     with true <- is_struct(command),
-         true <- Settle.get_semantics(command) == :async,
-         %PlaceholderRegistry{} <- registry,
+         true <- Settle.get_semantics(Model.spec_for(state.specs, command)) == :async,
+         %PlaceholderRegistry{} = registry <- state.registry,
          produced_ids = PlaceholderRegistry.ids_at_position(registry, position),
          false <- produced_ids == [] do
       downstream_ids =

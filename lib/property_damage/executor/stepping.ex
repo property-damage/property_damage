@@ -331,7 +331,7 @@ defmodule PropertyDamage.Executor.Stepping do
   end
 
   defp execute_teardown(command, resolved, offset, state, ctx) do
-    spec = if is_struct(command), do: Map.get(state.command_specs, command.__struct__)
+    spec = PropertyDamage.Model.spec_for(state.command_specs, command)
     runtime = Executor.inject_unavailable_runtime("in a teardown command")
     position = Position.teardown(offset)
 

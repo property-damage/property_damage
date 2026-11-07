@@ -50,6 +50,10 @@ defmodule PropertyDamage.Validation do
     # A removed lifecycle hook fails here as it fails PropertyDamage.run/1.
     PropertyDamage.Model.check_lifecycle!(model)
 
+    # A module listed twice in commands/0 fails here as it fails
+    # PropertyDamage.run/1.
+    PropertyDamage.Model.check_listings!(model)
+
     # The shape of expansions/0 and the @compare it needs fail here as they
     # fail PropertyDamage.run/1.
     PropertyDamage.Expansion.check_model!(model)
@@ -74,8 +78,29 @@ defmodule PropertyDamage.Validation do
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
     warnings = warnings ++ sequence_warnings(model)
+    warnings = warnings ++ simulator_warnings(model)
 
     {:ok, warnings}
+  end
+
+  @doc """
+  Warns when the model defines no `simulator/0`.
+
+  Without a simulator no placeholders are minted during generation, so a
+  command whose `when:` depends on a value the system mints (an `external()`
+  field) is never generated.
+  """
+  @spec simulator_warnings(module()) :: [String.t()]
+  def simulator_warnings(model) do
+    if PropertyDamage.ModuleCheck.exports?(model, :simulator, 0) do
+      []
+    else
+      [
+        "Model defines no simulator/0: without a simulator no placeholders are minted " <>
+          "during generation, so a command whose `when:` depends on a value the system " <>
+          "mints (an `external()` field) is never generated."
+      ]
+    end
   end
 
   @doc """

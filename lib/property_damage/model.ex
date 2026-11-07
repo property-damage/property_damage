@@ -262,6 +262,11 @@ defmodule PropertyDamage.Model do
   - `Module` - Simple module, weight 1, always enabled
   - `{Module, opts}` - Module with options (weight, when, overrides)
 
+  List each module once: a second entry for the same module is an error, so
+  merge the options into one entry. A `shrink:` or `execution:` on the entry
+  applies to the module wherever the framework reads its spec (see
+  `spec_table/1`).
+
   ## Examples
 
       def commands do
@@ -701,6 +706,105 @@ defmodule PropertyDamage.Model do
   """
   @spec teardown_commands(module()) :: [normalized_command()]
   def teardown_commands(model), do: sequence_commands(model, :teardown_each)
+
+  @doc """
+  The resolved spec of every command module the model names, as
+  `%{module => spec}`.
+
+  The table holds the setup commands, the teardown commands and the
+  `commands/0` entries, each resolved with the options its entry carries, so a
+  `shrink:`, `execution:` or `settle:` set on a listing applies wherever the
+  framework reads the spec: execution, shrinking and validation. A module
+  listed in `commands/0` and also in a setup or teardown list takes the
+  `commands/0` entry. A setup or teardown list may repeat a module.
+
+  Raises `ArgumentError` when `commands/0` lists a module more than once (see
+  `check_listings!/1`), or when an entry is malformed.
+
+  A module the model does not name (a leaf an expansion generates) is not in
+  the table: look specs up with `spec_for/2`.
+  """
+  @spec spec_table(module()) :: %{module() => map()}
+  def spec_table(model) do
+    check_listings!(model)
+
+    try do
+      sequences = setup_commands(model) ++ teardown_commands(model)
+
+      (sequences ++ normalize_commands(model.commands()))
+      |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
+    rescue
+      # An empty table would silently drop every command's settle, stutter and
+      # shrink semantics, so a misconfigured model fails here.
+      e -> reraise ArgumentError, [message: spec_table_error(model, e)], __STACKTRACE__
+    end
+  end
+
+  @doc """
+  The spec of a command in a table built by `spec_table/1`.
+
+  `command` is a command struct or a command module. A module the table does
+  not hold resolves through its own `command_spec/1` (or the framework
+  defaults), as an entry with no options. A plain map is not a command module:
+  it gets the framework defaults, so it runs `:sync`.
+  """
+  @spec spec_for(%{module() => map()}, module() | struct() | map()) :: map()
+  def spec_for(table, %module{}), do: spec_for(table, module)
+
+  def spec_for(table, module) when is_atom(module) do
+    case table do
+      %{^module => spec} -> spec
+      _ -> resolve_spec(module, [])
+    end
+  end
+
+  def spec_for(_table, command) when is_map(command),
+    do: PropertyDamage.Command.framework_defaults()
+
+  @doc """
+  Raise an `ArgumentError` when `commands/0` lists a module more than once.
+
+  Two listings of one module would leave the framework to guess which options
+  win, so the message names both listings and asks for one merged entry. A
+  model with no `commands/0` passes. `setup_each/0` and `teardown_each/0` are
+  not checked: a setup sequence may run one command twice.
+  """
+  @spec check_listings!(module()) :: :ok
+  def check_listings!(model) do
+    Code.ensure_loaded(model)
+
+    if PropertyDamage.ModuleCheck.exports?(model, :commands, 0) do
+      model.commands()
+      |> Enum.group_by(&entry_module/1)
+      |> Enum.find(fn {module, entries} -> module != nil and length(entries) > 1 end)
+      |> case do
+        nil -> :ok
+        {module, entries} -> raise ArgumentError, repeated_listing_message(model, module, entries)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp repeated_listing_message(model, module, entries) do
+    "#{inspect(model)}.commands/0 lists #{inspect(module)} more than once: " <>
+      "#{Enum.map_join(entries, " and ", &inspect/1)}. " <>
+      "Merge them into one entry."
+  end
+
+  defp spec_table_error(model, error) do
+    """
+    Could not build command specs for model #{inspect(model)}: #{Exception.message(error)}
+
+    Suggestions:
+      - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
+    {module, opts} tuples (such as {module, weight: 3}), or %{command: module, ...} maps.
+      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
+    overrides have the expected shape.
+      - Verify every listed command module is defined and uses `PropertyDamage.Command`.
+    """
+    |> String.trim()
+  end
 
   defp sequence_commands(model, callback) do
     if Code.ensure_loaded?(model) and function_exported?(model, callback, 0) do

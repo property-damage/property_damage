@@ -791,6 +791,7 @@ defmodule PropertyDamage.Options do
 
     reject_only_option_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
+    PropertyDamage.Model.check_listings!(Keyword.fetch!(validated, :model))
 
     case Keyword.get(validated, :regression) do
       regression when is_list(regression) -> validate_single_target!(regression)
@@ -1295,6 +1296,14 @@ defmodule PropertyDamage.Options do
       type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
       doc: @single_target_doc
+    ],
+    seed: [
+      type: :pos_integer,
+      doc:
+        "Random seed for sequence generation. Each worker derives its own seed " <>
+          "from it and its worker id, so the same seed sends the same commands " <>
+          "from each worker. Defaults to a random seed, recorded in the report " <>
+          "as `config.seed`."
     ],
     run_nonce: [
       type: :non_neg_integer,

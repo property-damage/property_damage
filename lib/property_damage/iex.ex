@@ -90,9 +90,9 @@ defmodule PropertyDamage.IEx do
     IO.puts("  Weight │ Command                    │ Semantics")
     IO.puts(String.duplicate("─", 65))
 
-    for {weight, cmd_module, _spec} <- commands do
+    for {weight, cmd_module, spec} <- commands do
       name = cmd_module |> Module.split() |> List.last()
-      semantics = get_semantics(cmd_module)
+      semantics = PropertyDamage.Settle.get_semantics(spec)
 
       weight_str = String.pad_leading("#{weight}", 5)
       name_str = String.pad_trailing(name, 26)
@@ -217,8 +217,8 @@ defmodule PropertyDamage.IEx do
 
     # Check for no probe commands
     has_probes =
-      Enum.any?(commands, fn {_weight, cmd, _spec} ->
-        get_semantics(cmd) == :probe
+      Enum.any?(commands, fn {_weight, _cmd, spec} ->
+        PropertyDamage.Settle.get_semantics(spec) == :probe
       end)
 
     hints =
@@ -229,10 +229,6 @@ defmodule PropertyDamage.IEx do
       end
 
     Enum.reverse(hints)
-  end
-
-  defp get_semantics(cmd_module) do
-    PropertyDamage.Settle.get_semantics(cmd_module)
   end
 
   # ============================================================================

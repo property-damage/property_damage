@@ -88,7 +88,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   end
 
   # A model whose commands/0 lists a command with an invalid (zero) weight, so
-  # normalize_commands raises. build_command_specs used to swallow that.
+  # normalize_commands raises. Building the spec table must not swallow that.
   defmodule BadCommandSpecModel do
     use PropertyDamage.Model
     @impl true

@@ -15,6 +15,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :think_time_range,
     :check_mode,
     :run_nonce,
+    :seed,
     # Owning process (runner); we stop with it so workers never orphan
     :owner,
     # Pool state
@@ -116,6 +117,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       think_time_range: think_time_range,
       check_mode: check_mode,
       run_nonce: Keyword.get(opts, :run_nonce),
+      seed: Keyword.get(opts, :seed),
       owner: Keyword.get(opts, :owner),
       available: :queue.new(),
       in_use: MapSet.new(),
@@ -298,7 +300,8 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
            metrics: state.metrics,
            think_time_range: state.think_time_range,
            check_mode: state.check_mode,
-           run_nonce: state.run_nonce
+           run_nonce: state.run_nonce,
+           seed: state.seed
          ) do
       {:ok, worker} ->
         Process.monitor(worker)

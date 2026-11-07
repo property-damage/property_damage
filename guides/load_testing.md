@@ -157,6 +157,7 @@ write.
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
 | `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
+| `seed` | Positive integer the workers derive their sequences from; the same `seed` and `run_nonce` send the same commands from each worker | drawn at random, recorded as `config.seed` in the report |
 
 Every time value written as `{n, unit}` takes a positive integer `n` and one of
 these units: `:milliseconds`, `:seconds`, `:minutes` or `:hours`. This covers

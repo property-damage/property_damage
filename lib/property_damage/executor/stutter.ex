@@ -48,12 +48,9 @@ defmodule PropertyDamage.Executor.Stutter do
     rng = stutter_rng(Map.get(state, :rng_seed), index)
 
     # The resolved command spec carries the static stutter metadata (DR-028):
-    # `:idempotent` eligibility. nil for plain-map
-    # / spec-less commands, where the policy falls back to its defaults.
-    spec =
-      if is_struct(command) do
-        Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
-      end
+    # `:idempotent` eligibility. A command the model's table does not hold
+    # resolves through its own `command_spec/1`.
+    spec = PropertyDamage.Model.spec_for(Map.get(state, :command_specs, %{}), command)
 
     {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng, spec)
 
