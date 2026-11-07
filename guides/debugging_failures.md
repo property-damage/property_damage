@@ -952,22 +952,50 @@ assert {:ok, _stats} =
            targets: [MyAdapter],
            seed: failure.seed
          )
+```
 
-# Use fix verification for a comprehensive check. The model is positional;
-# :targets and :max_variations go in the opts.
-verification = PropertyDamage.FailureIntelligence.verify_fix(
-  failure,
-  MyModel,
-  targets: [MyAdapter],
-  max_variations: 50  # Test with seed variations
-)
+A passing seed is weak evidence. If the fix changes what the model generates,
+the seed draws another plan and passes while the shrunk sequence still fails.
+`verify_fix/3` replays the shrunk sequence from the report's replay artifact
+instead, and compares the failure signature with the recorded one. The model is
+positional; `:targets` goes in the opts and holds exactly one entry:
 
-# verification.status is :verified | :still_failing | :partially_fixed | :flaky
-if verification.status == :verified do
-  IO.puts("Fix verified!")
-else
-  IO.puts("Fix incomplete (#{verification.status}): #{inspect(verification.failed_variations)}")
+```elixir
+case PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel, targets: [MyAdapter]) do
+  {:error, :no_replay_artifact} -> IO.puts("No replay artifact. Capture the failure again.")
+  %{status: :verified} -> IO.puts("Fix verified: the shrunk sequence no longer fails")
+  %{status: :still_failing} -> IO.puts("The recorded failure still occurs")
+  %{status: :different_failure, new_signature: sig} -> IO.puts("The failure moved: #{inspect(sig)}")
 end
+```
+
+The result is one of three statuses:
+
+- `:verified`: the replay runs to completion with no failure.
+- `:still_failing`: a failure with the recorded signature recurs.
+- `:different_failure`: the sequence fails, but with another signature. The
+  result carries `new_signature`, and `failure` holds the report of the new
+  failure.
+
+A report whose `replay` is `nil` or `{:refused, _}` has no artifact to replay,
+so `verify_fix/3` returns `{:error, :no_replay_artifact}` and runs nothing.
+`verify_fixes/3` maps over a list of reports and returns
+`[{report, result_or_error}]`; to verify a cluster, pass the reports of its
+members.
+
+To see whether neighbouring seeds fail too, sample them. This gives no
+verdict on the fix: it runs the plans of other seeds and lists the ones that
+fail.
+
+```elixir
+exploration =
+  PropertyDamage.FailureIntelligence.explore_neighbouring_seeds(failure, MyModel,
+    targets: [MyAdapter],
+    max_seeds: 20
+  )
+
+# exploration.failures is a list of %{seed: seed, report: report}
+IO.puts("#{length(exploration.failures)} of #{exploration.seeds_run} seeds fail")
 ```
 
 ## Verbose Output Mode
@@ -1202,7 +1230,8 @@ verdicts, bounded memory).
 ### 3. Multiple Failures
 
 - Focus on one at a time
-- Use `PropertyDamage.FailureIntelligence.cluster/1` to group similar failures
+- Use `PropertyDamage.FailureIntelligence.cluster/1` to group similar failures,
+  then `verify_fixes/3` on the reports of a cluster once you fix its cause
 
 ## Next Steps
 

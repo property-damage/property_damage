@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
+Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes by replaying the shrunk sequence from the replay artifact and matching the failure signature, explores neighbouring seeds as a separate capability with no verdict, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations), DR-064 (Fixes Are Verified on the Replay Artifact)
 
 ## Requirements
 
@@ -85,7 +85,7 @@ The system SHALL extract comparable features from each failure report, producing
 #### Scenario: Fingerprint from a check failure
 
 - **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:check_failed` naming `:NonNegativeBalance` (so `FailureReport.kind/1` is `:check_failed` and `check_name/1` is `:NonNegativeBalance`)
-- **THEN** the fingerprint SHALL contain `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
+- **THEN** the fingerprint SHALL contain `kind: :check_failed` and `check_name: :NonNegativeBalance`
 - **AND** the fingerprint SHALL include the command type that triggered the failure
 - **AND** the fingerprint SHALL include the event types produced before failure
 
@@ -101,7 +101,7 @@ The system SHALL compute a weighted similarity score between two failure fingerp
 #### Scenario: Weighted dimension comparison
 
 - **WHEN** two fingerprints are compared
-- **THEN** the similarity score SHALL be computed as a weighted sum across dimensions: failure_type (0.20), check_name (0.15), command_type (0.15), command_shape (0.10), event_types (0.10), sequence_shape (0.10), error_category (0.10), error_pattern (0.10)
+- **THEN** the similarity score SHALL be computed as a weighted sum across dimensions: kind (0.20), check_name (0.15), command_type (0.15), command_shape (0.10), event_types (0.10), sequence_shape (0.10), error_category (0.10), error_pattern (0.10)
 
 #### Scenario: Similarity threshold
 
@@ -135,56 +135,71 @@ The system SHALL cluster similar failures into groups using agglomerative cluste
 
 ### Requirement: Fix Verification
 
-The system SHALL verify that a fix is robust by re-running the original failing seed and seed variations against the model and adapter.
+The system SHALL verify a fix by replaying the shrunk sequence from the failure report's replay artifact on the targets it records, and by comparing the failure signature (`Failure.signature/2`) of the outcome with the recorded one (DR-064). The verification SHALL NOT generate a plan from a seed.
 
 #### Scenario: Verified fix
 
-- **WHEN** the original seed passes and all seed variations pass
+- **WHEN** the replay of the shrunk sequence runs to completion with no failure
 - **THEN** the verification result status SHALL be `:verified`
-- **AND** a confidence score SHALL be returned
+- **AND** the result SHALL carry the original `signature`, a `nil` `failure` and a one-line `summary`
 
 #### Scenario: Still failing
 
-- **WHEN** the original seed still reproduces the failure
+- **WHEN** the replay fails with a failure whose signature equals the recorded signature
 - **THEN** the verification result status SHALL be `:still_failing`
+- **AND** the result `failure` SHALL be the report of the recurring failure
 
-#### Scenario: Partially fixed
+#### Scenario: Different failure
 
-- **WHEN** the original seed passes but some variations still fail
-- **THEN** the verification result status SHALL be `:partially_fixed`
-- **AND** the failed variation seeds SHALL be listed
+- **WHEN** the replay fails with a failure whose signature differs from the recorded signature
+- **THEN** the verification result status SHALL be `:different_failure`
+- **AND** the result SHALL carry `new_signature` and the report of the new failure in `failure`
 
-#### Scenario: Flaky detection
+#### Scenario: No replay artifact
 
-- **WHEN** the original seed intermittently passes and fails across variations
-- **THEN** the verification result status SHALL be `:flaky`
+- **WHEN** the report's `replay` is `nil` or `{:refused, _}`
+- **THEN** verification SHALL return `{:error, :no_replay_artifact}`
+- **AND** it SHALL NOT re-run any seed
 
-### Requirement: Cluster Fix Verification
+#### Scenario: Replay never generates
 
-The system SHALL verify a fix against a cluster of similar failures by re-running each clustered member that carries a seed against the model and adapter, reporting how many members are now fixed, how many still fail, and how many cannot be re-run.
+- **WHEN** the model's generation changes so that the original seed draws a different plan
+- **THEN** the verification result SHALL NOT change, because the verification replays the recorded commands and never draws from the seed
 
-#### Scenario: Fully fixed cluster
+### Requirement: Batch Fix Verification
 
-- **WHEN** every clustered failure carries a seed and none of them reproduce after the fix
-- **THEN** the cluster verification status SHALL be `:fully_fixed`
-- **AND** the fixed count SHALL equal the cluster size and the remaining count SHALL be zero
+The system SHALL verify the fixes for several reports through `verify_fixes/3`, which applies fix verification to each report and returns `[{report, result_or_error}]`. A cluster of failures SHALL be verified by passing the reports of its members; a fingerprint alone, which holds a seed and no replay artifact, SHALL NOT be verifiable (DR-064).
 
-#### Scenario: Partially fixed cluster
+#### Scenario: Mixed batch
 
-- **WHEN** some seeded members pass and at least one still reproduces
-- **THEN** the cluster verification status SHALL be `:partially_fixed`
-- **AND** the fingerprints that still reproduce SHALL be listed as remaining failures
+- **WHEN** `verify_fixes/3` receives one report with a replay artifact and one without
+- **THEN** the first entry SHALL hold a verification result
+- **AND** the second entry SHALL hold `{:error, :no_replay_artifact}`
 
-#### Scenario: Not fixed cluster
+#### Scenario: Order preserved
 
-- **WHEN** every seeded member still reproduces the failure
-- **THEN** the cluster verification status SHALL be `:not_fixed`
+- **WHEN** `verify_fixes/3` receives several reports
+- **THEN** the returned list SHALL pair each input report with its own outcome, in input order
 
-#### Scenario: Members without a seed
+### Requirement: Seed Exploration
 
-- **WHEN** a clustered fingerprint carries no seed, or no adapter is supplied to re-run it
-- **THEN** that member SHALL be counted as `unknown` rather than fixed or remaining
-- **AND** when no member can be re-run the cluster verification status SHALL be `:unknown`
+The system SHALL offer `explore_neighbouring_seeds(report, model, opts)` to sample plans from seeds near the report's seed, with the options `:targets` (one entry, required), `:max_seeds` (default 10) and `:seed_range` (default 1000). The exploration SHALL return `original_seed`, `seeds_run`, `passed` and `failures`, a list of `%{seed:, report:}` for each seed whose run fails. The exploration SHALL NOT return a verification status, a confidence score or a verdict on the fix (DR-064).
+
+#### Scenario: Neighbouring seeds pass
+
+- **WHEN** every explored seed runs to completion
+- **THEN** `passed` SHALL equal `seeds_run` and `failures` SHALL be empty
+- **AND** the result SHALL carry no `status` key
+
+#### Scenario: A neighbouring seed fails
+
+- **WHEN** the run of an explored seed fails
+- **THEN** `failures` SHALL hold an entry with that seed and the report of its failure
+
+#### Scenario: Missing target
+
+- **WHEN** `:targets` is absent or holds other than one entry
+- **THEN** the exploration SHALL refuse the call as `Options.required_target!/1` does
 
 ### Requirement: Error Origin Classification
 

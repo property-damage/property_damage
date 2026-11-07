@@ -119,7 +119,7 @@ defmodule PropertyDamage.Test.FI.Adapter do
     * `{:overdraw_when_amount_lte, t}` — overdraws only when the seed-derived
       `amount` is `<= t`. Because `amount` is a deterministic function of the run
       seed, this makes each seed deterministically pass or fail, which is the
-      intermittent switch used to drive `:partially_fixed`/`:flaky` outcomes.
+      intermittent switch used to drive seed-dependent outcomes.
   """
   use PropertyDamage.Adapter
 
@@ -145,4 +145,95 @@ defmodule PropertyDamage.Test.FI.Adapter do
   defp buggy?(:always, _amount), do: true
   defp buggy?({:overdraw_when_amount_lte, t}, amount), do: amount <= t
   defp buggy?(_other, _amount), do: false
+end
+
+defmodule PropertyDamage.Test.FI.SwitchOp do
+  @moduledoc """
+  Command whose generator reads a switch, so a test can change what a model
+  generates without changing the model module. The switch is the
+  `:persistent_term` key `{__MODULE__, :amounts}`: `:wide` draws 1..100, `:high`
+  draws only 100.
+  """
+  use PropertyDamage.Command, observables: [PropertyDamage.Test.FI.Events.Deposited]
+
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:amount]
+
+  @doc "Sets what the generator draws."
+  @spec set_amounts(:wide | :high) :: :ok
+  def set_amounts(mode), do: :persistent_term.put({__MODULE__, :amounts}, mode)
+
+  @doc "Restores the default draw."
+  @spec reset_amounts() :: :ok
+  def reset_amounts do
+    :persistent_term.erase({__MODULE__, :amounts})
+    :ok
+  end
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    amount =
+      case :persistent_term.get({__MODULE__, :amounts}, :wide) do
+        :wide -> StreamData.integer(1..100)
+        :high -> StreamData.constant(100)
+      end
+
+    %{amount: amount}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule PropertyDamage.Test.FI.SwitchModel do
+  @moduledoc false
+  # One `SwitchOp` per sequence, checked by the `FI.Balance` projection.
+  @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
+
+  alias PropertyDamage.Test.FI.{Balance, State, SwitchOp}
+  alias PropertyDamage.Test.FI.Events.Deposited
+
+  @impl true
+  def commands, do: [SwitchOp]
+
+  @impl true
+  def command_sequence_projection, do: State
+
+  @impl true
+  def check_projections, do: [Balance]
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%SwitchOp{amount: amount}, _state), do: [%Deposited{amount: amount}]
+
+  @impl true
+  def terminate_early?(_state, %SwitchOp{}, _events), do: true
+end
+
+defmodule PropertyDamage.Test.FI.SwitchAdapter do
+  @moduledoc false
+  # Overdraws whenever the amount is at most `config[:bug_at_most]`, for every
+  # plan, so the defect outlives any change to what the model generates.
+  use PropertyDamage.Adapter
+
+  alias PropertyDamage.Test.FI.Events.{Deposited, Overdrawn}
+  alias PropertyDamage.Test.FI.SwitchOp
+
+  @impl true
+  def setup(config), do: {:ok, config}
+
+  @impl true
+  def teardown(_context), do: :ok
+
+  @impl true
+  def execute(%SwitchOp{amount: amount}, config, _runtime) do
+    if amount <= Map.get(config, :bug_at_most, 0) do
+      {:ok, [%Overdrawn{amount: 1000}]}
+    else
+      {:ok, [%Deposited{amount: amount}]}
+    end
+  end
 end

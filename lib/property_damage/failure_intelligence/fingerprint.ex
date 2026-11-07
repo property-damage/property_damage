@@ -7,15 +7,16 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   clustering of similar failures.
 
   The fingerprint also carries the originating `seed` (when known). Similarity and
-  clustering ignore the seed, but it lets `Verification.verify_cluster/3` re-run a
-  clustered failure to confirm whether a fix actually resolves it.
+  clustering ignore the seed. A fingerprint holds no replay artifact, so it
+  cannot be verified; verify the reports of a cluster with
+  `Verification.verify_fixes/3`.
   """
 
-  alias PropertyDamage.{FailureReport, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
 
   @type t :: %__MODULE__{
           seed: integer() | nil,
-          failure_type: atom(),
+          kind: atom(),
           check_name: atom() | nil,
           command_type: atom() | nil,
           command_shape: map(),
@@ -32,7 +33,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
 
   defstruct [
     :seed,
-    :failure_type,
+    :kind,
     :check_name,
     :command_type,
     :command_shape,
@@ -64,10 +65,15 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     command = step && step.command
     events = Enum.map((step && step.entries) || [], & &1.event)
 
+    # The kind and name are the components of the failure signature, so a
+    # fingerprint names a failure as its replay artifact does. The variant index
+    # is no part of a fingerprint.
+    {kind, check_name, _variant_index} = Failure.signature(report.failure_reason, 0)
+
     %__MODULE__{
       seed: report.seed,
-      failure_type: FailureReport.kind(report),
-      check_name: FailureReport.check_name(report),
+      kind: kind,
+      check_name: check_name,
       command_type: extract_command_type(command),
       command_shape: extract_command_shape(command),
       event_types: extract_event_types(events),
@@ -89,7 +95,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   def from_raw_failure(failure) when is_map(failure) do
     %__MODULE__{
       seed: Map.get(failure, :seed),
-      failure_type: Map.get(failure, :failure_type, :unknown),
+      kind: Map.get(failure, :kind, :unknown),
       check_name: Map.get(failure, :check_name),
       command_type: extract_command_type(Map.get(failure, :command)),
       command_shape: extract_command_shape(Map.get(failure, :command)),
@@ -116,7 +122,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     # Include error_origin for better clustering of similar failures
     data =
       [
-        fp.failure_type,
+        fp.kind,
         fp.check_name,
         fp.command_type,
         fp.event_types,
@@ -260,17 +266,17 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   end
 
   defp categorize_raw_error(failure) do
-    failure_type = Map.get(failure, :failure_type, :unknown)
+    kind = Map.get(failure, :kind, :unknown)
     message = Map.get(failure, :message, "")
 
     cond do
-      failure_type == :check_failed -> :check_violation
-      failure_type == :invariant_violated -> :invariant_violation
-      failure_type == :precondition_failed -> :precondition_failure
-      failure_type == :postcondition_failed -> :postcondition_failure
-      failure_type == :exception -> categorize_exception(message)
-      failure_type == :adapter_error -> :adapter_error
-      failure_type == :timeout -> :timeout
+      kind == :check_failed -> :check_violation
+      kind == :invariant_violated -> :invariant_violation
+      kind == :precondition_failed -> :precondition_failure
+      kind == :postcondition_failed -> :postcondition_failure
+      kind == :exception -> categorize_exception(message)
+      kind == :adapter_error -> :adapter_error
+      kind == :timeout -> :timeout
       true -> :unknown
     end
   end

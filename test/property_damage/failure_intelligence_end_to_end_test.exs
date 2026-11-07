@@ -5,7 +5,6 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.FailureIntelligence, as: FI
-  alias PropertyDamage.FailureIntelligence.Verification
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Test.Gauntlet, as: G
 
@@ -45,7 +44,7 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
     test "reports why the other defect differs", %{drift: [target | _], crash: crash} do
       %{is_similar: false, breakdown: breakdown} = FI.compare(target, crash)
 
-      assert breakdown.failure_type == 0.0
+      assert breakdown.kind == 0.0
       assert breakdown.check_name == 0.0
       assert breakdown.command_type == 1.0
     end
@@ -69,9 +68,21 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
       fingerprint = FI.fingerprint(target)
 
       assert fingerprint.seed == 7
-      assert fingerprint.failure_type == :check_failed
+      assert fingerprint.kind == :check_failed
       assert fingerprint.check_name == :balance_matches_ledger
       assert fingerprint.command_type == G.Commands.Withdraw
+    end
+  end
+
+  describe "fingerprint/1 and the replay artifact" do
+    test "names the failure by the components of its signature", %{drift: drift, crash: crash} do
+      for report <- drift ++ [crash] do
+        {kind, name, _variant_index} = report.replay.failure.signature
+        fingerprint = FI.fingerprint(report)
+
+        assert fingerprint.kind == kind
+        assert fingerprint.check_name == name
+      end
     end
   end
 
@@ -85,48 +96,33 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
 
   describe "verify_fix/3" do
     test "verifies a fix against the correct adapter", %{drift: [target | _]} do
-      result =
-        FI.verify_fix(target, G.Model,
-          targets: [{G.Adapter, config: %{bug: :off}}],
-          max_variations: 4
-        )
+      result = FI.verify_fix(target, G.Model, targets: [{G.Adapter, config: %{bug: :off}}])
 
       assert result.status == :verified
-      assert result.original_passes
-      assert result.original_seed == 7
-      assert result.variations_run == 4
-      assert result.variations_passed == 4
-      assert result.variations_failed == 0
-      assert result.failed_variations == []
-      assert result.confidence == 1.0
+      assert result.failure == nil
+      assert result.signature == target.replay.failure.signature
+      assert result.summary =~ "Fix verified"
     end
 
     test "reports the buggy adapter as still failing", %{drift: [target | _]} do
-      result =
-        FI.verify_fix(target, G.Model,
-          targets: [{G.Adapter, config: %{bug: @bug}}],
-          max_variations: 4
-        )
+      result = FI.verify_fix(target, G.Model, targets: [{G.Adapter, config: %{bug: @bug}}])
 
       assert result.status == :still_failing
-      refute result.original_passes
-      assert result.variations_failed == 4
-      assert result.summary == "Fix NOT verified. Original failure still reproduces."
+      assert result.signature == target.replay.failure.signature
+      assert %FailureReport{} = result.failure
+      assert result.summary =~ "still occurs"
     end
 
-    test "collects the reports of the variations that still fail", %{drift: [target | _]} do
-      result =
-        FI.verify_fix(target, G.Model,
-          targets: [{G.Adapter, config: %{bug: @bug}}],
-          max_variations: 3
-        )
+    test "reports a different defect as a different failure", %{drift: [target | _]} do
+      result = FI.verify_fix(target, G.Model, targets: [{G.Adapter, config: %{bug: :crash}}])
 
-      assert length(result.similar_failures) == 3
-      assert Enum.all?(result.similar_failures, &FI.similar?(&1, target))
+      assert result.status == :different_failure
+      assert result.new_signature != result.signature
+      assert %FailureReport{} = result.failure
     end
   end
 
-  describe "analyze/2 and verify_cluster/3" do
+  describe "analyze/2 and verify_fixes/3" do
     test "finds one pattern in the reports of one defect", %{drift: drift, crash: crash} do
       analysis = FI.analyze(drift ++ [crash])
 
@@ -134,30 +130,17 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
       assert analysis.pattern_summary =~ "balance_matches_ledger"
     end
 
-    test "marks the cluster fixed against the correct adapter", %{drift: drift} do
-      [cluster] = FI.cluster(drift)
+    test "verifies every report of a cluster against the correct adapter", %{drift: drift} do
+      results = FI.verify_fixes(drift, G.Model, targets: [{G.Adapter, config: %{bug: :off}}])
 
-      result =
-        Verification.verify_cluster(cluster, G.Model,
-          targets: [{G.Adapter, config: %{bug: :off}}]
-        )
-
-      assert result.status == :fully_fixed
-      assert result.fixed == 4
-      assert result.remaining == 0
+      assert length(results) == 4
+      assert Enum.all?(results, fn {_report, result} -> result.status == :verified end)
     end
 
-    test "keeps the cluster open against the buggy adapter", %{drift: drift} do
-      [cluster] = FI.cluster(drift)
+    test "keeps every report of the cluster open against the buggy adapter", %{drift: drift} do
+      results = FI.verify_fixes(drift, G.Model, targets: [{G.Adapter, config: %{bug: @bug}}])
 
-      result =
-        Verification.verify_cluster(cluster, G.Model,
-          targets: [{G.Adapter, config: %{bug: @bug}}]
-        )
-
-      assert result.status == :not_fixed
-      assert result.fixed == 0
-      assert result.remaining == 4
+      assert Enum.all?(results, fn {_report, result} -> result.status == :still_failing end)
     end
   end
 end

@@ -12,7 +12,7 @@ defmodule PropertyDamage.FailureIntelligence.Similarity do
   @type comparison :: %{
           score: score(),
           breakdown: %{
-            failure_type: score(),
+            kind: score(),
             check_name: score(),
             command_type: score(),
             command_shape: score(),
@@ -26,7 +26,7 @@ defmodule PropertyDamage.FailureIntelligence.Similarity do
 
   # Weights for different similarity components
   @weights %{
-    failure_type: 0.20,
+    kind: 0.20,
     check_name: 0.15,
     command_type: 0.15,
     command_shape: 0.10,
@@ -56,7 +56,7 @@ defmodule PropertyDamage.FailureIntelligence.Similarity do
   @spec compare(Fingerprint.t(), Fingerprint.t()) :: comparison()
   def compare(%Fingerprint{} = fp1, %Fingerprint{} = fp2) do
     breakdown = %{
-      failure_type: exact_match_score(fp1.failure_type, fp2.failure_type),
+      kind: exact_match_score(fp1.kind, fp2.kind),
       check_name: exact_match_score(fp1.check_name, fp2.check_name),
       command_type: exact_match_score(fp1.command_type, fp2.command_type),
       command_shape: map_similarity(fp1.command_shape, fp2.command_shape),

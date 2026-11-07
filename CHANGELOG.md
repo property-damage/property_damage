@@ -1330,6 +1330,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes the `window_size` option. Write a threshold as a `@check` in your own
   projection that calls `compute_metrics/1`. The moduledoc shows the recipe.
 
+- **Breaking: the fingerprint field `failure_type` is `kind` (DR-064).**
+  `FailureIntelligence.Fingerprint` fills `kind` and `check_name` from the
+  components of `Failure.signature/2`, so a fingerprint names a failure as its
+  replay artifact does. The similarity breakdown key and weight key, and the
+  cluster pattern key, are `kind` too, and `Fingerprint.from_raw_failure/1`
+  reads `:kind`. Fingerprint hashes and similarity scores do not change.
+
+- **Breaking: `FailureIntelligence.verify_fix/3` replays the shrunk sequence
+  and compares the failure signature (DR-064).** It replays the commands in
+  `report.replay` on the target you pass, through
+  `PropertyDamage.run(only: [replay: path])`, and never draws a plan from a
+  seed. The result is a map with `status` (`:verified`, `:still_failing` or
+  `:different_failure`), `signature`, `failure` and `summary`; a
+  `:different_failure` result also carries `new_signature`. A report with no
+  replay artifact returns `{:error, :no_replay_artifact}`. Removed: the
+  statuses `:partially_fixed` and `:flaky`, the keys `confidence`,
+  `original_seed`, `original_passes`, `variations_run`, `variations_passed`,
+  `variations_failed`, `failed_variations` and `similar_failures`, the options
+  `max_variations`, `variation_range`, `include_similar` and
+  `similar_threshold`, `Verification.verify_cluster/3`,
+  `Verification.still_fails?/4` and `Verification.seed_target/2`. To verify a
+  cluster, call `verify_fixes/3` on the reports of its members. To sample
+  neighbouring seeds, call the new
+  `FailureIntelligence.explore_neighbouring_seeds/3`, which takes `:targets`,
+  `:max_seeds` and `:seed_range`, and returns `original_seed`, `seeds_run`,
+  `passed` and `failures` with no verdict.
+
 ### Removed
 
 - **BREAKING: the parallel-branch execution mode is removed (DR-063).** A
@@ -1968,6 +1995,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excerpts in the guides, and CI runs it.** `--check` fails on a stale
   excerpt and `--write` splices the regenerated one. CI also runs the
   documentation gate on the guides that carry runnable fences.
+
+- **`FailureIntelligence.verify_fix/3` no longer reports `:verified` for a
+  failing sequence.** After a change to generation, the original seed drew a
+  different plan that passed, and the function called the fix verified while
+  the shrunk sequence still failed. A run that failed with another failure was
+  reported as `:still_failing`. Verification now replays the shrunk sequence
+  and reports `:different_failure` for another signature.
 
 ## [0.2.0] - 2026-06-25
 
