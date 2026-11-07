@@ -799,7 +799,7 @@ Each variant SHALL execute its own concrete sequence through the stepping engine
 
 ### Requirement: Leaf Validation at First Production (DR-049)
 
-The engine SHALL validate a leaf module the first time a process realizes it, with `validate_command_callbacks!/1`, and SHALL cache a pass per module per process. A failed validation SHALL NOT be cached: the next realization SHALL validate again and fail the same way. The failure SHALL name the root, the entry index, the leaf and the missing callback. The `overrides:` key check SHALL run at every realization, because it depends on the entry and not on the module. A leaf module that fails validation SHALL fail in the second process as in the first.
+The engine SHALL validate a leaf module the first time a process realizes it, with `Command.validate_callbacks!/1`, and SHALL cache a pass per module per process. A failed validation SHALL NOT be cached: the next realization SHALL validate again and fail the same way. The failure SHALL name the root, the entry index, the leaf and the missing callback. The `overrides:` key check SHALL run at every realization, because it depends on the entry and not on the module. A leaf module that fails validation SHALL fail in the second process as in the first.
 
 #### Scenario: A leaf without a generator
 - **WHEN** an entry names a module that lacks the command callbacks

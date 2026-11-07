@@ -3,10 +3,6 @@ defmodule PropertyDamage.Validation do
 
   alias PropertyDamage.Error
 
-  # Callbacks a regular command module must implement. Single source of truth
-  # shared by validate_command_callbacks!/1 and the validate!/3 command check.
-  @required_command_callbacks [{:generator, 1}]
-
   @doc """
   Validate test configuration.
 
@@ -235,7 +231,7 @@ defmodule PropertyDamage.Validation do
       end
 
       # Validate required callbacks
-      validate_command_callbacks!(cmd)
+      PropertyDamage.Command.validate_callbacks!(cmd)
     end
 
     :ok
@@ -262,21 +258,6 @@ defmodule PropertyDamage.Validation do
 
   defp validate_command_spec!(invalid) do
     raise ArgumentError, Error.format_config_error(:invalid_command_spec, invalid)
-  end
-
-  @doc """
-  Validates that a command module implements required callbacks.
-  """
-  @spec validate_command_callbacks!(module()) :: :ok
-  def validate_command_callbacks!(cmd) do
-    for {callback, arity} <- @required_command_callbacks do
-      unless PropertyDamage.ModuleCheck.exports?(cmd, callback, arity) do
-        raise ArgumentError,
-              Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
-      end
-    end
-
-    :ok
   end
 
   @doc """
@@ -488,10 +469,10 @@ defmodule PropertyDamage.Validation do
   end
 
   # First missing required command callback ({callback, arity}), or nil when the
-  # command implements them all. Mirrors validate_command_callbacks!/1 but
+  # command implements them all. Mirrors Command.validate_callbacks!/1 but
   # accumulates rather than raising, matching the validate!/3 error-collection.
   defp missing_command_callback(cmd) do
-    Enum.find(@required_command_callbacks, fn {callback, arity} ->
+    Enum.find(PropertyDamage.Command.required_callbacks(), fn {callback, arity} ->
       not PropertyDamage.ModuleCheck.exports?(cmd, callback, arity)
     end)
   end

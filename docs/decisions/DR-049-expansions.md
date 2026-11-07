@@ -155,7 +155,7 @@ Four questions follow.
      expanded root module by entry (`Root[i]` and `:forced`) apart from the
      executed modules.
    - A leaf module is validated the first time a process realizes it
-     (`validate_command_callbacks!/1`), cached per module per process, and the
+     (`Command.validate_callbacks!/1`), cached per module per process, and the
      cache keeps only passes. A failure names the root, the entry, the leaf and
      the missing callback. The `overrides:` key check runs at every
      realization, because it depends on the entry and not on the module. The
