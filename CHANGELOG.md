@@ -628,6 +628,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `FailureReport.kind_of/1` is `PropertyDamage.Failure.report_kind/1`.**
+  The mapping is unchanged.
+
+- **Breaking: `FailureReport.format_name/1` and `FailureReport.setup_location/1`
+  are `PropertyDamage.Failure.Naming.format_name/1` and `setup_location/1`.**
+  `setup_location/1` no longer takes a report; pass its `failure_reason`.
+
 - **Breaking: `PropertyDamage.Settle.get_semantics/1`, `get_config/1`,
   `requires_settling?/1` and `execute_with_settle/3` take a command spec map.**
   They no longer accept a command module or struct. Look the spec up with

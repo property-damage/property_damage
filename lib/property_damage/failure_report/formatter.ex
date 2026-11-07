@@ -2,6 +2,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   @moduledoc false
 
   alias PropertyDamage.{Failure, FailureReport, Sequence}
+  alias PropertyDamage.Failure.Naming
 
   alias PropertyDamage.FailureReport.{Context, Layout, Render}
 
@@ -68,7 +69,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "variant" => %{"index" => variant.index, "name" => variant.name},
       "root" => root,
       "type" => to_string(Failure.kind(failure)),
-      "check_name" => name && FailureReport.format_name(name),
+      "check_name" => name && Naming.format_name(name),
       "message" => FailureReport.failure_message(failure)
     }
   end
@@ -98,7 +99,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
             "type" => to_string(FailureReport.failure_type(report)),
             "check_name" =>
               FailureReport.check_name(report) &&
-                FailureReport.format_name(FailureReport.check_name(report)),
+                Naming.format_name(FailureReport.check_name(report)),
             "message" => FailureReport.failure_message(report),
             "summary" => FailureReport.failure_type_summary(report)
           },
@@ -126,7 +127,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1),
       "compare_counts" =>
         Map.new(report.compare_counts, fn {key, counts} ->
-          {FailureReport.format_name(key), counts}
+          {Naming.format_name(key), counts}
         end),
       "reference_trace" => serialize_reference_trace(report),
       "reference_projections" =>

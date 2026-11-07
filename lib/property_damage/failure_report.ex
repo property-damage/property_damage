@@ -214,6 +214,7 @@ defmodule PropertyDamage.FailureReport do
 
   alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, LatencyMetrics, RunTrace, Sequence}
   alias PropertyDamage.Failure.Check
+  alias PropertyDamage.Failure.Naming
 
   # The `max_commands:` default of `PropertyDamage.run/1`; a reproduction
   # command prints the option only when the run used another value.
@@ -927,10 +928,10 @@ defmodule PropertyDamage.FailureReport do
     check_name = check_name(report)
 
     case failure_type(report) do
-      :check_failed -> "Invariant Violation: #{format_name(check_name)}"
-      :projection_violation -> "Invariant Violation: #{format_name(check_name)}"
+      :check_failed -> "Invariant Violation: #{Naming.format_name(check_name)}"
+      :projection_violation -> "Invariant Violation: #{Naming.format_name(check_name)}"
       :idempotency_violation -> "Idempotency Violation"
-      :poll_timeout -> "Poll Timeout: #{format_name(check_name)}"
+      :poll_timeout -> "Poll Timeout: #{Naming.format_name(check_name)}"
       :poll_error -> "Poll Predicate Error"
       :adapter_error -> "Adapter Error"
       :settle_timeout -> "Settle Timeout"
@@ -939,10 +940,10 @@ defmodule PropertyDamage.FailureReport do
       :retry_from_sync_command -> "Sync Command Returned Retry"
       :malformed_adapter_return -> "Malformed Adapter Return"
       :placeholder_resolution -> "Placeholder Resolution Error"
-      :diverged -> "Divergence: #{format_name(check_name)}"
-      :did_not_converge -> "Did Not Converge: #{format_name(check_name)}"
+      :diverged -> "Divergence: #{Naming.format_name(check_name)}"
+      :did_not_converge -> "Did Not Converge: #{Naming.format_name(check_name)}"
       :setup_failed -> "Setup Failed"
-      :latency_exceeded -> "Latency Exceeded: #{format_name(check_name)}"
+      :latency_exceeded -> "Latency Exceeded: #{Naming.format_name(check_name)}"
       :unknown -> "Unknown Failure"
       # Total fallback (e.g. nil on a hand-built struct) so rendering/Inspect
       # never crashes with a CaseClauseError
@@ -1174,26 +1175,6 @@ defmodule PropertyDamage.FailureReport do
   defp converge_within(%__MODULE__{}), do: @default_converge_within
 
   @doc """
-  A failure name as text: a `{projection, function}` key as
-  `Projection.function`, a module by its name, a check name as is, `nil` as
-  an empty string.
-  """
-  @spec format_name(Failure.name()) :: String.t()
-  def format_name({projection, function}) when is_atom(projection) and is_atom(function),
-    do: "#{inspect(projection)}.#{function}"
-
-  def format_name(nil), do: ""
-
-  def format_name(name) when is_atom(name) do
-    case Atom.to_string(name) do
-      "Elixir." <> _module -> inspect(name)
-      string -> string
-    end
-  end
-
-  def format_name(name), do: inspect(name)
-
-  @doc """
   The failed run as a timeline of `Step` structs, in flattened (reading) order.
 
   Each step pairs a command with its `Sequence.Position`, flattened index,
@@ -1307,36 +1288,6 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
-  Where a setup failure happened, for a reader: the setup command, its setup
-  index and the cause, and for an unresolved placeholder the field.
-
-  A setup failure implicates no root, so `failure_index/1` is `nil` for it;
-  this names the place instead, for example
-  `"setup command 1 (MyApp.Login), cause: command"` or
-  `"adapter setup/1, cause: adapter_setup"`. Takes a report or its
-  `%PropertyDamage.Failure{}`; returns `nil` for any other failure.
-  """
-  @spec setup_location(t() | Failure.t() | term()) :: String.t() | nil
-  def setup_location(%__MODULE__{failure_reason: reason}), do: setup_location(reason)
-
-  def setup_location(%Failure{type: %Failure.Setup{cause: :adapter_setup}}),
-    do: "adapter setup/1, cause: adapter_setup"
-
-  def setup_location(%Failure{type: %Failure.Setup{setup_index: nil} = setup}),
-    do: "setup phase, cause: #{setup.cause}"
-
-  def setup_location(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
-    "setup command #{setup.setup_index} (#{command_name(setup.command)}), " <>
-      "cause: unresolved_placeholder, field #{inspect(setup.field)}"
-  end
-
-  def setup_location(%Failure{type: %Failure.Setup{} = setup}),
-    do:
-      "setup command #{setup.setup_index} (#{command_name(setup.command)}), cause: #{setup.cause}"
-
-  def setup_location(_reason), do: nil
-
-  @doc """
   Projection-purity check: does the faithful per-step state derived from the
   trace match the authoritative runtime snapshots? (DR-040.)
 
@@ -1410,7 +1361,7 @@ defmodule PropertyDamage.FailureReport do
   defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail} = check}) do
     case Map.get(check, :context) do
       %{poll_count: poll} ->
-        "@eventually #{format_name(check.name)} failed on poll #{poll}: " <>
+        "@eventually #{Naming.format_name(check.name)} failed on poll #{poll}: " <>
           extract_message(detail)
 
       _ ->
@@ -1453,11 +1404,11 @@ defmodule PropertyDamage.FailureReport do
        do: inspect(reason)
 
   defp message_for(%Failure{type: %Failure.Divergence{} = d}) do
-    "#{format_name(d.key)} diverged at root #{d.root}: " <> extract_message(d.mismatch)
+    "#{Naming.format_name(d.key)} diverged at root #{d.root}: " <> extract_message(d.mismatch)
   end
 
   defp message_for(%Failure{type: %Failure.Convergence{} = c}) do
-    "#{format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
+    "#{Naming.format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
       "(waited #{c.waited_ms} ms); still pending: #{inspect(c.reason)}"
   end
 
@@ -1477,24 +1428,21 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
     "Setup failed (cause: unresolved_placeholder) at setup command #{setup.setup_index} " <>
-      "(#{command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>
+      "(#{Naming.command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>
       "never arrived"
   end
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :check, detail: %Failure{} = check}} = f) do
     "Setup failed (cause: check) at setup command #{f.type.setup_index} " <>
-      "(#{command_name(f.type.command)}): " <> failure_message(check)
+      "(#{Naming.command_name(f.type.command)}): " <> failure_message(check)
   end
 
   defp message_for(%Failure{type: %Failure.Setup{} = setup}) do
     "Setup failed (cause: #{setup.cause}) at setup command #{setup.setup_index} " <>
-      "(#{command_name(setup.command)}): " <> setup_detail_message(setup.detail)
+      "(#{Naming.command_name(setup.command)}): " <> setup_detail_message(setup.detail)
   end
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
-
-  defp command_name(%{__struct__: module}), do: inspect(module)
-  defp command_name(nil), do: "no command"
 
   defp setup_detail_message(%Failure{} = failure), do: failure_message(failure)
   defp setup_detail_message(detail), do: extract_message(detail)

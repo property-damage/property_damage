@@ -72,6 +72,7 @@ defmodule Mix.Tasks.Pd.Replay do
 
   use Mix.Task
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.Mix.TaskSupport
   alias PropertyDamage.Sequence
 
@@ -264,7 +265,7 @@ defmodule Mix.Tasks.Pd.Replay do
   end
 
   defp check_suffix(nil), do: ""
-  defp check_suffix(check), do: " (#{PropertyDamage.FailureReport.format_name(check)})"
+  defp check_suffix(check), do: " (#{Naming.format_name(check)})"
 
   defp print_step(step, verbose) do
     IO.puts("  [#{step.index}] #{step.command_name} -> #{describe_result(step.result)}")
@@ -393,7 +394,7 @@ defmodule Mix.Tasks.Pd.Replay do
 
   def print_replay_error(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure) do
     print_color(:red, "ERROR: the setup commands failed\n")
-    IO.puts("  At:     #{PropertyDamage.FailureReport.setup_location(failure)}")
+    IO.puts("  At:     #{Naming.setup_location(failure)}")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
 
     print_hint(

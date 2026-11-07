@@ -5,6 +5,7 @@ defmodule PropertyDamage.FailureReport.FailureSectionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.{Failure, FailureReport}
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.Test.ReportLayout, as: L
 
   defp target_fields(report), do: report |> L.plain() |> L.fields_labeled("Target")
@@ -93,7 +94,7 @@ defmodule PropertyDamage.FailureReport.FailureSectionTest do
       other = %{variant: %{name: "carol", index: 2}, root: 1, failure: failure}
       report = %{L.report(:check_failed) | other_failures: [other]}
       block = report |> L.plain() |> other_failure_block()
-      name = FailureReport.format_name(Failure.name(failure))
+      name = Naming.format_name(Failure.name(failure))
 
       assert count(block, name) == 1
       refute block =~ "left:"

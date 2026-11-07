@@ -40,6 +40,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.FailureReport.Context
   alias PropertyDamage.Log.{Filter, Gap, Line}
 
@@ -459,7 +460,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp name_fields(%FailureReport{failure_reason: %Failure{type: %type{key: key}}})
        when type in [Failure.Divergence, Failure.Convergence],
-       do: [{"Observation", [FailureReport.format_name(key)]}]
+       do: [{"Observation", [Naming.format_name(key)]}]
 
   defp name_fields(%FailureReport{failure_reason: %Failure{type: %Failure.Latency{}}}), do: []
 
@@ -494,7 +495,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp projection_field(_report), do: []
 
   defp check_text(nil), do: nil
-  defp check_text(name), do: FailureReport.format_name(name)
+  defp check_text(name), do: Naming.format_name(name)
 
   defp invariant_field(check, check), do: []
   defp invariant_field(name, _check), do: [{"Invariant", [name]}]
@@ -695,7 +696,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp also_differed_fields(_report), do: []
 
   defp other_key_parts(report, %{variant: variant, failure: %Failure{type: type}}) do
-    name = FailureReport.format_name(Map.get(type, :key))
+    name = Naming.format_name(Map.get(type, :key))
 
     case type do
       %Failure.Divergence{} ->
@@ -735,7 +736,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     name =
       case Failure.name(failure) do
         nil -> ""
-        name -> " " <> FailureReport.format_name(name)
+        name -> " " <> Naming.format_name(name)
       end
 
     head =

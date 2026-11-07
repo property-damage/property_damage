@@ -20,6 +20,7 @@ defmodule PropertyDamage.FailureReport.Context do
 
   alias PropertyDamage.{Docs, Expansion, Failure, FailureReport}
   alias PropertyDamage.Failure.Explain
+  alias PropertyDamage.Failure.Naming
 
   @type item :: %{
           label: String.t(),
@@ -257,7 +258,7 @@ defmodule PropertyDamage.FailureReport.Context do
   defp property_items(%FailureReport{invariant_description: description} = report)
        when is_binary(description) do
     name = FailureReport.invariant_name(report) || FailureReport.check_name(report)
-    [item("Property", FailureReport.format_name(name), description, false)]
+    [item("Property", Naming.format_name(name), description, false)]
   end
 
   defp property_items(_report), do: []

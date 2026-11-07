@@ -77,6 +77,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
 
   use Mix.Task
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.Mix.TaskSupport
   alias PropertyDamage.Sequence
 
@@ -279,7 +280,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   end
 
   defp check_suffix(nil), do: ""
-  defp check_suffix(check), do: " (#{PropertyDamage.FailureReport.format_name(check)})"
+  defp check_suffix(check), do: " (#{Naming.format_name(check)})"
 
   defp print_load_warnings(warnings) do
     print_color(:yellow, "Load warnings:\n")

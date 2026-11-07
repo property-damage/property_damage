@@ -36,6 +36,8 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
+  alias PropertyDamage.Failure.Naming
+
   alias PropertyDamage.{
     Executor,
     Expansion,
@@ -865,7 +867,7 @@ defmodule PropertyDamage.Analysis do
   defp failure_label(report) do
     case FailureReport.check_name(report) do
       nil -> to_string(FailureReport.failure_type(report))
-      name -> FailureReport.format_name(name)
+      name -> Naming.format_name(name)
     end
   end
 end
