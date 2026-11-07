@@ -1436,6 +1436,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`FailureIntelligence.similarity_score/2` scores a failure against itself
+  as exactly `1.0`.** The weighted sum came to `0.9999999999999999`, so
+  `similar?/3` with a threshold of `1.0` was false for a failure and itself.
+  The score is now the weighted sum divided by the weight total. Scores of
+  different failures change only by float rounding, and the default threshold
+  is unchanged.
+
 - **Forensics replay and the load-test worker no longer crash on a projection
   with an `at:` or `@eventually` check.** Both ran every entry of the check
   list as a per-step sample and raised a `CaseClauseError`. They now run only
