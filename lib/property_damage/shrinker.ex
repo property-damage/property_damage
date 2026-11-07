@@ -896,7 +896,8 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             try_remove_levels(adopted, original, orig_positions, graph, rest, expanded)
 
@@ -983,7 +984,8 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+        case valid_candidate?(candidate, candidate_positions, state) &&
+               adopt(candidate, candidate_positions, state) do
           %{} = adopted ->
             # Command was removed, recompute priorities for remaining commands
             do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate))
@@ -1014,7 +1016,8 @@ defmodule PropertyDamage.Shrinker do
         state = increment_iterations(state)
 
         # Argument shrinking replaces in place, so positions are unchanged.
-        case valid_candidate?(candidate, state) && adopt(candidate, state.positions, state) do
+        case valid_candidate?(candidate, state.positions, state) &&
+               adopt(candidate, state.positions, state) do
           %{} = adopted -> do_shrink_arguments(adopted, index)
           _rejected -> do_shrink_arguments(state, index + 1)
         end
@@ -1067,8 +1070,14 @@ defmodule PropertyDamage.Shrinker do
   # over a candidate the shrinker made up, such as an argument halved to 0 or a
   # key no earlier command created. Model code may raise on such a candidate;
   # that makes the candidate invalid, not the run a failure.
-  defp valid_candidate?(commands, state) do
-    Validator.valid_sequence?(commands, state.model, state.setup_commands)
+  defp valid_candidate?(commands, positions, state) do
+    sequence =
+      commands
+      |> Sequence.linear()
+      |> Sequence.with_registry(remap_registry(state.registry, positions))
+      |> Map.put(:setup, state.setup_commands)
+
+    Validator.valid_sequence?(sequence, state.model, external_markers: state.external_markers)
   rescue
     _ -> false
   end

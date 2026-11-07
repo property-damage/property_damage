@@ -1361,6 +1361,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shrinking keeps a command whose precondition depends on ids the system
+  mints.** The validity check of a shrink candidate folded one unresolved
+  marker for every minted id, so a state keyed by minted ids collapsed to one
+  key and a command whose `when:` needs two ids rejected every candidate that
+  held it. The check now mints placeholders as generation does.
 - **`mix pd.integration --hunt` honors `--commands`.** A hunt ran every
   sequence with up to 50 commands, whatever `--commands` said.
   `PropertyDamage.Integration.hunt_bugs/1` takes `max_commands:` (50 by

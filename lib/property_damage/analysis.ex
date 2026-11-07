@@ -603,7 +603,13 @@ defmodule PropertyDamage.Analysis do
   end
 
   defp eliminates?(commands, run) do
-    if Validator.valid_sequence?(commands, run.model, run.setup_commands) do
+    candidate =
+      commands
+      |> Sequence.linear()
+      |> Sequence.with_registry(run.registry)
+      |> Map.put(:setup, run.setup_commands)
+
+    if Validator.valid_sequence?(candidate, run.model) do
       sequence = Sequence.with_registry(Sequence.linear(regenerate_keys(commands)), run.registry)
 
       case Executor.run(sequence, run.model, run.target.adapter,
