@@ -1,6 +1,6 @@
 # DR-041: Structured Failure Vocabulary (`%Failure{}`)
 
-**Status:** Accepted. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. Amended by DR-045: the shrinker signature is `{kind, name, variant_index}`, from `Shrinker.failure_signature/2`; `Failure` gains the `Divergence` and `Setup` types.
+**Status:** Accepted. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. Amended by DR-045: the shrinker signature is `{kind, name, variant_index}`, from `Failure.signature/2` (it moved there from the shrinker); `Failure` gains the `Divergence` and `Setup` types.
 **Date:** 2026-07-04
 
 > Follows the DR-039 / DR-040 persistence-refusal precedent for the format bump.
@@ -17,10 +17,10 @@ fifteen distinct shapes across the codebase, constructed at ~15 sites in
 `executor/finalization.ex` / `linearization.ex`, and read by three independent
 interpreters that had each drifted:
 
-- `Shrinker.failure_signature/1` (per-tag clauses plus a granularity-losing
-  `elem(0)` catch-all),
+- the shrinker's failure-signature function (per-tag clauses plus a
+  granularity-losing `elem(0)` catch-all),
 - `FailureReport` (which re-parsed the tuples into six *denormalized* fields:
-  `failure_type`, `check_name`, `failure_message`, `invariant_name`,
+  the kind, `check_name`, `failure_message`, `invariant_name`,
   `idempotency_violation`, `poll_timeout_info`, also written by
   `finalization.ex`),
 - `FailureIntelligence` fingerprinting.
@@ -30,7 +30,7 @@ the long-deleted `%Ref{}` system; `:adapter_error` shipped in **two** arities
 (a 2-tuple and a 3-tuple carrying `partial_events`); `{:branch_failure, id,
 inner}` recursively wrapped every other shape; and two adapter-contract shapes
 (`:retry_from_sync_command`, `:malformed_adapter_return`) plus
-`:projection_violation` were handled by nobody's `failure_signature`/report
+`:projection_violation` were handled by nobody's signature or report
 clause, so they degraded silently. There was no single place that documented the
 closed set of reasons, and any consumer could invent a shape.
 
@@ -93,7 +93,7 @@ a single breaking change.
 
 6. **Delete-and-derive on `FailureReport`.** The six denormalized fields are
    deleted from the struct and replaced by accessor functions over
-   `report.failure_reason` — `failure_type/1` (the kind), `check_name/1`,
+   `report.failure_reason`: `kind/1` (the kind), `check_name/1`,
    `failure_message/1`, `invariant_name/1`, `idempotency_violation/1`,
    `poll_timeout_info/1` — mirroring the Phase-B materialized-field → accessor
    precedent. `finalization.ex` stops writing those fields and constructs proper

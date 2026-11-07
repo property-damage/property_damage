@@ -29,7 +29,7 @@ and `partial_events/1` accessors.
 #### Scenario: Report views derive from the failure reason
 
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
-- **THEN** `FailureReport.failure_type/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
+- **THEN** `FailureReport.kind/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
 
 ### Requirement: A Failed Check Records Its Projection (DR-058)
 
@@ -84,7 +84,7 @@ The system SHALL extract comparable features from each failure report, producing
 
 #### Scenario: Fingerprint from a check failure
 
-- **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:check_failed` naming `:NonNegativeBalance` (so `FailureReport.failure_type/1` is `:check_failed` and `check_name/1` is `:NonNegativeBalance`)
+- **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:check_failed` naming `:NonNegativeBalance` (so `FailureReport.kind/1` is `:check_failed` and `check_name/1` is `:NonNegativeBalance`)
 - **THEN** the fingerprint SHALL contain `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
 - **AND** the fingerprint SHALL include the command type that triggered the failure
 - **AND** the fingerprint SHALL include the event types produced before failure

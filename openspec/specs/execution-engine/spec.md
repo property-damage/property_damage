@@ -417,7 +417,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 - **WHEN** an `@check at: :startup` check fails
 - **THEN** `Variant.setup/1` SHALL still return `:ok`
-- **AND** the first `advance_to/2` SHALL return `{:failed, %{kind: :check_failed, root: nil, reason: failure}}`
+- **AND** the first `advance_to/2` SHALL return `{:failed, %{report_kind: :check_failed, root: nil, reason: failure}}`
 
 #### Scenario: Boundary drain
 

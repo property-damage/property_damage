@@ -61,7 +61,7 @@
      locator surface, printed and pattern-matched everywhere; duplicating
      scalars is harmless, duplicating structures is not).
    - *Failure/shrink overlay stays on the report:* `original_sequence` (the
-     generated plan), `failed_at_index`, `failure_type`/`failure_reason`/
+     generated plan), `failed_at_index`, the failure kind and `failure_reason`/
      `check_name`/`failure_message`, invariant identity, error origin,
      state snapshots (`state_before_failure`, `state_at_failure` — state rows
      are deferred, see DR-035), `idempotency_violation`, `poll_timeout_info`,

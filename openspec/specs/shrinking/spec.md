@@ -180,7 +180,7 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 
 ### Requirement: Failure Signature
 
-The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name is `Failure.name/1` (the specific check for a check failure, the `@compare` key `{projection, function}` for a divergence or a failure to converge, nil for other failures) and variant_index is the index of the target that failed. A signature rebuilt into a failure (`Failure.from_signature/2`) SHALL yield the same signature. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
+The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Failure.signature/2`, where kind identifies the category of failure, name is `Failure.name/1` (the specific check for a check failure, the `@compare` key `{projection, function}` for a divergence or a failure to converge, nil for other failures) and variant_index is the index of the target that failed. A signature rebuilt into a failure (`Failure.from_signature/2`) SHALL yield the same signature. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
 
 #### Scenario: Check failure signature
 - **WHEN** a failure is caused by a check violation

@@ -55,7 +55,7 @@ exploration**, as a sibling of the random run loop *inside the same `do_run`*:
    failure *signatures are not compared*.
    - **pass** (no failure): increment the entry's consecutive-pass streak.
    - **fail** (any failure): reset the streak to 0, and **refresh** the entry's
-     descriptive `failure_type`/`check_name` from the new failure report so the
+     descriptive `kind`/`check_name` from the new failure report so the
      description never goes stale.
 3. **Pruning:** an entry whose streak reaches **K consecutive passes is removed**
    (default `K = 3`, configurable). Flaky seeds keep failing intermittently, so
@@ -97,7 +97,7 @@ The previous lifetime-counter status machine
 3) is **replaced** by a single **`consecutive_passes`** streak field. The old
 machine was both dead (no caller in any run loop) and unsound: once `fail_count`
 exceeded 0, a genuinely-fixed seed could never return to `:fixed` and was pinned
-to `:flaky` forever. `failure_type`/`check_name`/`dependency_versions` are
+to `:flaky` forever. `kind`/`check_name`/`dependency_versions` are
 retained as **inert descriptive metadata** (useful in the console banner and in
 `stats`/`format`); they participate in no verdict logic.
 

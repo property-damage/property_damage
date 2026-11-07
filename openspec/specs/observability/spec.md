@@ -241,7 +241,7 @@ The system SHALL generate visual sequence diagrams from test executions in Merma
 
 ### Requirement: Progress and Telemetry Name the Variant (DR-045)
 
-Run telemetry metadata SHALL carry `targets: [%{index, name, adapter}]` instead of `adapter:`. `Progress.RunResult` SHALL carry `kind` and `variant`, and the verbose printer SHALL print the failure kind and the target name. `Progress.Printer.consumer/3` and `print_header/3` SHALL take the target list. Nothing SHALL be emitted unless a handler or consumer is attached.
+Run telemetry metadata SHALL carry `targets: [%{index, name, adapter}]` instead of `adapter:`. `Progress.RunResult` SHALL carry `report_kind` and `variant`, and the verbose printer SHALL print the failure kind and the target name. `Progress.Printer.consumer/3` and `print_header/3` SHALL take the target list. Nothing SHALL be emitted unless a handler or consumer is attached.
 
 #### Scenario: Command event carries the variant
 - **WHEN** a telemetry handler is attached and a run of two targets executes a command in the second

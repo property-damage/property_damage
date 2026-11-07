@@ -423,7 +423,7 @@ replacement.
 The loop ends by convergence, by divergence, or by the bound expiring with a
 side still pending; only the third is did not converge.
 
-| Outcome | Report `kind` | When |
+| Outcome | Report `report_kind` | When |
 |---------|---------------|------|
 | converged | none, the run continues | every side is ready and equal |
 | diverged | `:diverged` | no side is pending and ready sides differ at the bound |
@@ -474,7 +474,7 @@ checks, settle and stutter work as they do in `PropertyDamage.run/1`.
 A run stops at the first boundary where a target's observation still differs
 from the reference's at the convergence bound. That is a divergence, and it is a
 failure like any other: it ends the campaign, the framework shrinks the sequence
-and reproduces it, and `run/1` returns `{:error, report}` with `kind: :diverged`.
+and reproduces it, and `run/1` returns `{:error, report}` with `report_kind: :diverged`.
 The report is the only record: no later run starts.
 
 ### Concurrency
@@ -579,8 +579,8 @@ page, see [Debugging Failures](debugging_failures.md) and `mix pd.explain`.
 
 ### Divergences and failures to converge
 
-A divergence is a report with `kind: :diverged`, and a failure to converge one
-with `kind: :did_not_converge`. Both carry:
+A divergence is a report with `report_kind: :diverged`, and a failure to converge one
+with `report_kind: :did_not_converge`. Both carry:
 
 | Field | Meaning |
 |-------|---------|
@@ -637,7 +637,7 @@ listed too.
 
 ### Failure kinds
 
-Every failed run is a report with a `kind`, the `variant` that failed and
+Every failed run is a report with a `report_kind`, the `variant` that failed and
 `failed_at_index`, the failing root. `failed_at_index` is `nil` for a setup
 failure and for a startup check, which belong to no command.
 
@@ -878,7 +878,7 @@ with `validate: true` (the default). Fix it by giving each target its own config
 
 Pass an `on_progress` function to observe a run as it happens. It receives a
 `%PropertyDamage.Progress{}` projection (DR-022): the same `RunUpdate` and
-`RunResult` payloads as a one-target run. `RunResult` carries the failure `kind`
+`RunResult` payloads as a one-target run. `RunResult` carries the failure `report_kind`
 and the failing `variant`, and the verbose printer prints the failure kind and
 the target name. The same stream drives `verbose:`.
 
@@ -897,7 +897,7 @@ PropertyDamage.run(
   model: MyModel,
   targets: [OracleAdapter, {SUTAdapter, name: "new-impl"}],
   on_progress: fn
-    %Progress{data: %RunResult{kind: kind, variant: variant}} when not is_nil(kind) ->
+    %Progress{data: %RunResult{report_kind: kind, variant: variant}} when not is_nil(kind) ->
       IO.puts("#{kind} in #{variant.name}")
 
     %Progress{} ->

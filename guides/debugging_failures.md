@@ -348,8 +348,17 @@ the same failure.
 
 Read a failure with the accessors rather than matching the struct by hand:
 `PropertyDamage.Failure.kind/1`, `name/1`, `detail/1`, `class/1`, `branch_id/1`,
-`partial_events/1`. `FailureReport.failure_type/1` returns the kind and
+`partial_events/1`. `FailureReport.kind/1` returns the kind and
 `FailureReport.check_name/1` the name.
+
+A failure has three levels of name. `Failure.class/1` is the struct family,
+`Failure.kind/1` is the fine kind and `Failure.report_kind/1` is the outcome a
+report describes: `report.report_kind` is one of `:check_failed`, `:diverged`,
+`:did_not_converge`, `:setup_failed`, `:execution_failed` or
+`:latency_exceeded`. An idempotency violation has kind
+`:idempotency_violation` and report kind `:check_failed`. Two failures are the
+same failure when `Failure.signature/2` agrees: the kind, the name and the
+index of the target.
 
 #### Idempotency failures
 
@@ -421,15 +430,15 @@ fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
 
 # The replay fails the same way as the original run.
 true =
-  PropertyDamage.FailureReport.failure_type(replayed) ==
-    PropertyDamage.FailureReport.failure_type(failure)
+  PropertyDamage.FailureReport.kind(replayed) ==
+    PropertyDamage.FailureReport.kind(failure)
 ```
 
 The artifact is one Elixir literal term, so you can read it and edit an
 argument before you run it again. This is the start of a real one:
 
 ```elixir
-# PropertyDamage replay artifact, format 2
+# PropertyDamage replay artifact, format 3
 # model: CachexBench.Model
 # seed: 3
 # run: 1 (the run this seed generates)

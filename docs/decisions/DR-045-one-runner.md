@@ -86,7 +86,7 @@ a note that two targets disagreed.
    its reason with that one mapping, so a resource poller error found while
    the run finalizes is `:execution_failed`, not `:check_failed`.
 8. **Shrinking is variant-aware.** The failure identity is
-   `{kind, name, variant_index}`, from `Shrinker.failure_signature/2`. A
+   `{kind, name, variant_index}`, from `Failure.signature/2`. A
    candidate that fails in another variant or with another kind is
    rejected. A divergence's name is its root command's module (item 13), so
    a candidate that diverges in the same variant at a command of another type

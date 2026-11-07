@@ -91,7 +91,7 @@ Node on the host.
   campaign resets both forges before every generated sequence. `setup/1` is
   idempotent, because a crashed run may leave state behind. The bench tests still
   call it once per seed (`max_runs: 1`) so each seed reports its own result.
-- A failure or divergence returns `{:error, report}`: `report.kind` is the failure
+- A failure or divergence returns `{:error, report}`: `report.report_kind` is the failure
   kind (`:diverged` for a divergence) and `report.variant` names the target, for
   example `%{index: 1, name: "ui"}`. A divergence is shrunk before it is reported.
 - Browser automation is slow; command/run counts are kept modest.

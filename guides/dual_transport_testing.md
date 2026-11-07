@@ -58,7 +58,7 @@ own, the run is a path-equivalence run, covered in
 
 The first target in the `targets:` list is the oracle: a divergence is reported
 as "the UI did something the API didn't." The call returns `{:error, report}` with
-`kind: :diverged`. `report.variant` names the target that differed
+`report_kind: :diverged`. `report.variant` names the target that differed
 (`%{index: 1, name: "ui"}` here) and `report.failed_at_index` is the command index.
 The framework shrinks the sequence first, so
 `PropertyDamage.FailureReport.shrunk_sequence/1` is the minimal sequence that
