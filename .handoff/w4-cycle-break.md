@@ -33,11 +33,25 @@ Not captured: the four commits were made by a delegated agent whose session is n
 
 ## Record
 
-- 2026-11-07 02:17 commit `78d7396` refactor(failure): move report_kind out of FailureReport.
-- 2026-11-07 02:23 commit `5b70bad` refactor(failure): move name formatting into Failure.Naming.
-- 2026-11-07 02:27 commit `6e4cff8` refactor(run_trace): move capture into RunTrace.Capture.
-- 2026-11-07 02:30 decision (maintainer's agent, recorded in the review evidence): the three moves hold the dependency predicate but the twelve-module cycle split into a six-cycle and a two-cycle, raising the count from five to six; a fourth move breaks the two-cycle so the count does not rise.
-- 2026-11-07 02:36 commit `97c9a90` refactor(validation): break the expansion and validation dependency cycle.
+### 2026-11-07 02:17 · commit · 78d7396
+
+refactor(failure): move report_kind out of FailureReport
+
+### 2026-11-07 02:23 · commit · 5b70bad
+
+refactor(failure): move name formatting into Failure.Naming
+
+### 2026-11-07 02:27 · commit · 6e4cff8
+
+refactor(run_trace): move capture into RunTrace.Capture
+
+### 2026-11-07 02:30 · decision · fourth move
+
+The three moves hold the dependency predicate, but the twelve-module cycle split into a six-cycle and a two-cycle, raising the count from five to six. The maintainer's ruling: a fourth move breaks the two-cycle so the count does not rise; the CI ceiling is not raised.
+
+### 2026-11-07 02:36 · commit · 97c9a90
+
+refactor(validation): break the expansion and validation dependency cycle
 
 ## Reconstruction
 
