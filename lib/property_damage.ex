@@ -1,36 +1,96 @@
 defmodule PropertyDamage do
   @moduledoc """
-  PropertyDamage: A stateful property-based testing framework for Elixir.
-
-  PropertyDamage combines the power of property-based testing with stateful system
-  testing, allowing you to verify that your system behaves correctly under any
-  sequence of operations.
+  PropertyDamage is a stateful property-based testing framework for Elixir.
+  It generates random sequences of commands, runs them against a real system,
+  checks invariants as the run proceeds, and shrinks any failure to a minimal
+  reproduction.
 
   ## Overview
 
-  Traditional property-based testing generates random inputs and verifies properties
-  hold for all inputs. Stateful property-based testing extends this by generating
-  random *sequences of operations* (commands) and verifying that the system under
-  test (SUT) behaves correctly throughout the entire sequence.
+  Ordinary property-based testing generates random inputs. Stateful testing
+  generates random *sequences of operations* and checks that the system under
+  test (SUT) behaves correctly throughout each sequence.
 
-  ## Key Concepts
+  You implement four behaviours and name each system to test as a target
+  entry. The framework owns the rest: generation, execution, comparison,
+  shrinking and reporting.
 
-  - **Commands**: Operations that can be executed against the SUT (create, update, delete, etc.)
-  - **Model**: Defines what commands are available and how state is tracked
-  - **Projections**: Pure state reducers that process commands and events to maintain state
-  - **Adapters**: Bridge between the test framework and the actual SUT
-  - **Placeholders**: Symbolic stand-ins for values the system under test mints (see `PropertyDamage.External`), resolved during execution
+  - **Command** (`PropertyDamage.Command`) says what an operation is: its
+    fields and a generator for them.
+  - **Model** (`PropertyDamage.Model`) says when each command may run and
+    with which arguments.
+  - **Projection** (`PropertyDamage.Model.Projection`) folds events into state
+    and judges that state.
+  - **Adapter** (`PropertyDamage.Adapter`) says how to send a command to the
+    system.
+  - **Target** (`PropertyDamage.Target`) names one system to run against: an
+    adapter plus its configuration. You give it as a `targets:` entry; it is
+    not a module you write.
 
   ## Two-Phase Execution
 
-  PropertyDamage uses a two-phase execution model:
+  A run has two phases.
 
-  1. **Symbolic Phase**: Generate a sequence of commands, with a placeholder
-     for each value the system will mint
-  2. **Concrete Phase**: Execute commands against the SUT, resolving placeholders to real values
+  1. **Symbolic phase.** The framework draws a command sequence from a seed.
+     The model's simulator (`PropertyDamage.Model.Simulator`) predicts the
+     events of each command, so later commands can depend on earlier ones.
+     This phase never touches the system.
+  2. **Concrete phase.** The framework executes the sequence against each
+     target and folds the real events into the projections.
 
-  This separation enables powerful shrinking of failing test cases while maintaining
-  the dependency relationships between commands.
+  The split matters for shrinking. The plan is a pure function of the seed, so
+  the shrinker (`PropertyDamage.Shrinker`) can re-run any smaller plan and get
+  a meaningful answer.
+
+  ## One Engine
+
+  Every kind of run goes through `PropertyDamage.run/1`: a property run against
+  one system, a differential run that compares several systems, and a
+  path-equivalence run that reaches one system by two command paths and
+  compares the outcomes. For each
+  generated sequence, `PropertyDamage.Scheduler` starts one
+  `PropertyDamage.Variant` process per target and advances them in lockstep.
+  Each variant executes one command at a time through
+  `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
+  observations after each root. A root is a top-level generated command; an
+  expansion is a command that unfolds into child commands under a root.
+
+  ## Symbolic Values
+
+  Some values exist only after the system creates them, such as an order id.
+  Mark that event field with `external()` (see `PropertyDamage.External`).
+  During simulation the field becomes a `%PropertyDamage.Placeholder{}`, and
+  commands generated later can use it. In the concrete phase, the framework
+  replaces each placeholder with the value from the real event before the
+  command that uses it runs.
+
+  ## Where Checks Run
+
+  A projection declares its checks with module attributes.
+
+  - `@check` judges the projection state right after events fold, at the points
+    named by `every:` or `at:`.
+  - `@eventually` polls a predicate until it holds or a timeout ends the
+    window. Use it when the system settles later.
+  - `@compare` returns a value that the framework compares across targets after
+    each root.
+
+  See `PropertyDamage.Model.Projection` for the exact options.
+
+  ## Where to Look
+
+  - `PropertyDamage.Generator` and `PropertyDamage.Expansion`: generate command
+    sequences.
+  - `PropertyDamage.Scheduler`, `PropertyDamage.Variant` and
+    `PropertyDamage.Executor`: run a sequence on one or more targets.
+  - `PropertyDamage.Settle`: retries commands on eventually consistent systems.
+  - `PropertyDamage.Shrinker`: reduces a failing sequence.
+  - `PropertyDamage.RunTrace`, `PropertyDamage.Failure` and
+    `PropertyDamage.FailureReport`: record what a run did and why it failed.
+  - `PropertyDamage.Persistence`, `PropertyDamage.Replay` and
+    `PropertyDamage.Export`: save, replay and export failures.
+  - `PropertyDamage.Coverage`, `PropertyDamage.Mutation` and
+    `PropertyDamage.LoadTest`: measure how well a model exercises the system.
 
   ## Basic Usage
 
@@ -121,18 +181,6 @@ defmodule PropertyDamage do
 
   Scan a whole corpus of seeds with `PropertyDamage.RunComparison.scan/1`. See
   `PropertyDamage.RunComparison` for details.
-
-  ## Architecture
-
-  The framework consists of several layers:
-
-  - **Tier 0 (Core Types)**: Command, Projection, Model behaviours, Placeholder
-  - **Tier 1 (Execution)**: Adapter, EventQueue, Adapter.Injector, Executor
-  - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
-  - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, RunComparison
-  - **Utilities**: Persistence, SeedLibrary, mix tasks
-
-  See the individual module documentation for detailed information on each component.
   """
 
   alias PropertyDamage.Log.{Cap, Filter}

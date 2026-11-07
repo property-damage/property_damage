@@ -56,23 +56,26 @@ All user-facing contracts are defined as behaviours:
 - **Command** (`lib/property_damage/command.ex`) — Pure generator interface. Defines `generator/1` returning `StreamData.t(map())`. Commands are stateless semantic definitions; state-dependent logic (preconditions, overrides) belongs in the Model.
 - **Model** (`lib/property_damage/model.ex`) — Orchestrates which commands run and when. Required: `commands/0` (list of command specs with optional `weight:`, `when:`, `overrides:` options) and `command_sequence_projection/0`. Optional: `check_projections/0`, `simulator/0`, lifecycle hooks.
 - **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@check` attributes (`every: N`, `every: CommandModule`) for sync checks and `@eventually` for eventual consistency checks.
-- **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/2` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
+- **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/3` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
 
-A **Target** (`lib/property_damage/target.ex`) is one system variant a run executes against.
+A **Target** (`lib/property_damage/target.ex`) is one system a run executes against: an adapter plus its configuration.
 
 ### Execution flow
 
-1. **Symbolic phase**: Generate command sequence, with `%PropertyDamage.Placeholder{}` values standing in for fields the SUT will mint (`external()`); no SUT interaction. Model filters commands by `when:` predicates, selects by weight, generates via command generator + `overrides:` values.
-2. **Concrete phase**: Execute against SUT via Adapter, resolving placeholders to the real values from SUT events. Events flow through projections. Checks fire at their configured `every:` or `at:` points.
-3. **Shrinking**: On failure, the shrinker repeats a cycle of sequence shrinking (drop roots, collapse expansions) then argument simplification. Preserves failure equivalence (same type, same or earlier location).
+1. **Symbolic phase**: Draw a command sequence from a seed, with `%PropertyDamage.Placeholder{}` values standing in for fields the SUT will mint (`external()`); no SUT interaction. Model filters commands by `when:` predicates, selects by weight, generates via command generator + `overrides:` values.
+2. **Concrete phase**: `PropertyDamage.run/1` hands each sequence to the Scheduler, which runs one Variant process per target in lockstep. Each Variant executes commands through the Adapter, resolving placeholders to the real values from SUT events. Events flow through projections. Checks fire at their configured `every:` or `at:` points, and `@compare` observations are compared across targets after each root. Every kind of run takes this one path: a property run against one system, a differential run (several systems compared on the same sequence), or a path-equivalence run (one system reached by two command paths, outcomes compared). A root is a top-level generated command; the comparison happens after each root.
+3. **Shrinking**: On failure, the shrinker repeats a cycle of sequence shrinking (drop roots, collapse expansions; an expansion is a command that unfolds into child commands) then argument simplification. Preserves failure equivalence (same type, same or earlier location).
 
 ### Key subsystems
 
-- **Executor** (`lib/property_damage/executor.ex`) — Runs command sequences, handles placeholder resolution, projection updates.
+- **Scheduler / Variant** (`lib/property_damage/scheduler.ex`, `lib/property_damage/variant.ex`): Runs one sequence on every target in lockstep, one Variant process per target, and compares observations at each boundary.
+- **Executor** (`lib/property_damage/executor.ex`, `lib/property_damage/executor/stepping.ex`): Runs one command, with placeholder resolution, settle, projection updates and checks. `Executor.Stepping` is the public one-command-at-a-time seam that Variant and Replay use.
 - **Shrinker** (`lib/property_damage/shrinker.ex`) — Hierarchical and linear shrinking strategies. Deterministic given seed.
 - **External / Placeholder** (`lib/property_damage/external.ex`, `lib/property_damage/placeholder.ex`) — Symbolic value system for server-generated data. `external()` (public) marks an event field the SUT mints; internally each such field becomes a `%PropertyDamage.Placeholder{}` that is created during simulation, resolved from real SUT events, and threaded into later commands.
 - **Settle** (`lib/property_damage/settle.ex`) — Retry logic for eventually consistent systems. Commands declare `:async` or `:probe` semantics.
 - **Export** (`lib/property_damage/export/`) — Generate ExUnit tests, scripts (curl/Python/Elixir), Livebook notebooks from failures.
+- **RunTrace / RunComparison** (`lib/property_damage/run_trace.ex`, `lib/property_damage/run_comparison.ex`): `RunTrace` is the full record of one run; `RunComparison` localizes where passing and failing runs diverge.
+- **Failure / FailureReport / Persistence** (`lib/property_damage/failure.ex`, `lib/property_damage/failure_report.ex`, `lib/property_damage/persistence.ex`): Failure record, the explained report built from it, and versioned save/load.
 
 ### Test support
 

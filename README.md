@@ -1456,53 +1456,16 @@ The Hex package ships only `pd-explain` (under `priv/claude/skills`). Every othe
 
 ## Architecture
 
-```
-PropertyDamage
-├── Core Types (Tier 0)
-│   ├── Command      - Operation behaviour
-│   ├── Model        - Test model behaviour
-│   │   ├── Projection   - State reducer behaviour
-│   │   └── Simulator    - Symbolic execution behaviour
-│   └── Sequence     - Linear command sequences
-│
-├── Execution (Tier 1)
-│   ├── Adapter      - SUT bridge behaviour
-│   │   └── Injector - External event injection behaviour
-│   ├── Executor     - Command execution
-│   ├── Settle       - Probe/async retry for eventual consistency
-│   └── EventQueue   - Event coordination
-│
-├── Shrinking (Tier 2)
-│   ├── Shrinker     - Sequence minimization
-│   ├── Sequence.Validator - Sequence validation
-│   └── Shrinker.Graph - Dependency analysis
-│
-├── Diagnostics
-│   ├── FailureReport - Structured failure + formatter
-│   ├── Replay       - Step-by-step execution
-│   ├── Coverage     - Metrics tracking
-│   ├── Diagram      - Visual sequence diagrams
-│   ├── RunTrace     - Full outcome-neutral record of one run
-│   └── RunComparison - Same-plan trace comparison and divergence ranking
-│
-├── Export
-│   ├── Export       - Main API (to_exunit, to_script)
-│   ├── HTTPSpec     - HTTP call description struct
-│   ├── ExUnit       - ExUnit test generation
-│   └── Script       - Elixir / curl / Python scripts
-│
-├── Comparison
-│   ├── Scheduler    - Runs one sequence on every target in lockstep
-│   ├── Variant      - One target's execution in its own process
-│   ├── Comparison   - Convergence loop over the `@compare` observations
-│   └── Equivalence  - `using:` relations and helpers (`within/3`, `by_key/1`, `normalize/1`, `drop_keys/2`)
-│
-└── Utilities
-    ├── Persistence  - Save/load failures
-    ├── SeedLibrary  - Seed management
-    ├── Regression   - Automatic regression test management
-    └── mix pd.scaffold - OpenAPI code generation (a Mix task, not a module)
-```
+The framework has these layers:
+
+- **Contracts you write:** `PropertyDamage.Command`, `PropertyDamage.Model`, `PropertyDamage.Model.Projection` and `PropertyDamage.Adapter`.
+- **Generation:** `PropertyDamage.Generator` and `PropertyDamage.Expansion` build command sequences.
+- **Execution:** `PropertyDamage.Scheduler`, `PropertyDamage.Variant` and `PropertyDamage.Executor` run a sequence on one or more targets. `PropertyDamage.Settle` retries commands on eventually consistent systems.
+- **Shrinking:** `PropertyDamage.Shrinker` reduces a failing sequence.
+- **Diagnostics:** `PropertyDamage.RunTrace`, `PropertyDamage.Failure`, `PropertyDamage.FailureReport`, `PropertyDamage.RunComparison`, `PropertyDamage.Replay`, `PropertyDamage.Coverage` and `PropertyDamage.Diagram`.
+- **Export and persistence:** `PropertyDamage.Export`, `PropertyDamage.Persistence`, `PropertyDamage.SeedLibrary` and `PropertyDamage.Regression`.
+- **Measurement:** `PropertyDamage.Mutation` and `PropertyDamage.LoadTest`.
+- **Tooling:** `mix pd.scaffold` generates code from an OpenAPI spec.
 
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
