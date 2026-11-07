@@ -58,18 +58,18 @@ All user-facing contracts are defined as behaviours:
 - **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@check` attributes (`every: N`, `every: CommandModule`) for sync checks and `@eventually` for eventual consistency checks.
 - **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/3` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
 
-A **Target** (`lib/property_damage/target.ex`) is one system variant a run executes against.
+A **Target** (`lib/property_damage/target.ex`) is one system a run executes against: an adapter plus its configuration.
 
 ### Execution flow
 
 1. **Symbolic phase**: Draw a command sequence from a seed, with `%PropertyDamage.Placeholder{}` values standing in for fields the SUT will mint (`external()`); no SUT interaction. Model filters commands by `when:` predicates, selects by weight, generates via command generator + `overrides:` values.
-2. **Concrete phase**: `PropertyDamage.run/1` hands each sequence to the Scheduler, which runs one Variant process per target in lockstep. Each Variant executes commands through the Adapter, resolving placeholders to the real values from SUT events. Events flow through projections. Checks fire at their configured `every:` or `at:` points, and `@compare` observations are compared across targets after each root. Every kind of run (property, differential, path-equivalence) takes this one path.
-3. **Shrinking**: On failure, the shrinker repeats a cycle of sequence shrinking (drop roots, collapse expansions) then argument simplification. Preserves failure equivalence (same type, same or earlier location).
+2. **Concrete phase**: `PropertyDamage.run/1` hands each sequence to the Scheduler, which runs one Variant process per target in lockstep. Each Variant executes commands through the Adapter, resolving placeholders to the real values from SUT events. Events flow through projections. Checks fire at their configured `every:` or `at:` points, and `@compare` observations are compared across targets after each root. Every kind of run takes this one path: a property run against one system, a differential run (several systems compared on the same sequence), or a path-equivalence run (one system reached by two command paths, outcomes compared). A root is a top-level generated command; the comparison happens after each root.
+3. **Shrinking**: On failure, the shrinker repeats a cycle of sequence shrinking (drop roots, collapse expansions; an expansion is a command that unfolds into child commands) then argument simplification. Preserves failure equivalence (same type, same or earlier location).
 
 ### Key subsystems
 
 - **Scheduler / Variant** (`lib/property_damage/scheduler.ex`, `lib/property_damage/variant.ex`): Runs one sequence on every target in lockstep, one Variant process per target, and compares observations at each boundary.
-- **Executor** (`lib/property_damage/executor.ex`, `lib/property_damage/executor/stepping.ex`): Per-command engine: placeholder resolution, settle, projection updates, checks. `Executor.Stepping` is the public one-command-at-a-time seam that Variant and Replay use.
+- **Executor** (`lib/property_damage/executor.ex`, `lib/property_damage/executor/stepping.ex`): Runs one command, with placeholder resolution, settle, projection updates and checks. `Executor.Stepping` is the public one-command-at-a-time seam that Variant and Replay use.
 - **Shrinker** (`lib/property_damage/shrinker.ex`) — Hierarchical and linear shrinking strategies. Deterministic given seed.
 - **External / Placeholder** (`lib/property_damage/external.ex`, `lib/property_damage/placeholder.ex`) — Symbolic value system for server-generated data. `external()` (public) marks an event field the SUT mints; internally each such field becomes a `%PropertyDamage.Placeholder{}` that is created during simulation, resolved from real SUT events, and threaded into later commands.
 - **Settle** (`lib/property_damage/settle.ex`) — Retry logic for eventually consistent systems. Commands declare `:async` or `:probe` semantics.

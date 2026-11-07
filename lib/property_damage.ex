@@ -2,7 +2,7 @@ defmodule PropertyDamage do
   @moduledoc """
   PropertyDamage is a stateful property-based testing framework for Elixir.
   It generates random sequences of commands, runs them against a real system,
-  checks invariants after every step, and shrinks any failure to a minimal
+  checks invariants as the run proceeds, and shrinks any failure to a minimal
   reproduction.
 
   ## Overview
@@ -11,8 +11,9 @@ defmodule PropertyDamage do
   generates random *sequences of operations* and checks that the system under
   test (SUT) behaves correctly throughout each sequence.
 
-  You write five kinds of module. The framework owns the rest: generation,
-  execution, comparison, shrinking and reporting.
+  You implement four behaviours and name each system to test as a target
+  entry. The framework owns the rest: generation, execution, comparison,
+  shrinking and reporting.
 
   - **Command** (`PropertyDamage.Command`) says what an operation is: its
     fields and a generator for them.
@@ -23,7 +24,8 @@ defmodule PropertyDamage do
   - **Adapter** (`PropertyDamage.Adapter`) says how to send a command to the
     system.
   - **Target** (`PropertyDamage.Target`) names one system to run against: an
-    adapter plus its configuration.
+    adapter plus its configuration. You give it as a `targets:` entry; it is
+    not a module you write.
 
   ## Two-Phase Execution
 
@@ -44,12 +46,14 @@ defmodule PropertyDamage do
 
   Every kind of run goes through `PropertyDamage.run/1`: a property run against
   one system, a differential run that compares several systems, and a
-  path-equivalence run that reaches one system by two command paths. For each
+  path-equivalence run that reaches one system by two command paths and
+  compares the outcomes. For each
   generated sequence, `PropertyDamage.Scheduler` starts one
   `PropertyDamage.Variant` process per target and advances them in lockstep.
   Each variant executes one command at a time through
   `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
-  observations after every command.
+  observations after each root. A root is a top-level generated command; an
+  expansion is a command that unfolds into child commands under a root.
 
   ## Symbolic Values
 
@@ -69,7 +73,7 @@ defmodule PropertyDamage do
   - `@eventually` polls a predicate until it holds or a timeout ends the
     window. Use it when the system settles later.
   - `@compare` returns a value that the framework compares across targets after
-    each command.
+    each root.
 
   See `PropertyDamage.Model.Projection` for the exact options.
 
