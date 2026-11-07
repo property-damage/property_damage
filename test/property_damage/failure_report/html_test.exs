@@ -60,7 +60,7 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       assert title =~ inspect(report.model)
       {adapter, _entry} = hd(report.targets)
       assert title =~ "#{adapter |> Module.split() |> List.last()}.alice"
-      assert title =~ to_string(report.kind)
+      assert title =~ to_string(report.report_kind)
       assert title =~ "seed #{report.seed}"
     end
 
@@ -102,7 +102,7 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
     test "names the page by the failure kind the report states", %{dir: dir} do
       report = F.report!(F.Model, [F.target("alice", %{quiet: true, error_at: 1})], [])
 
-      assert PropertyDamage.FailureReport.failure_type(report) == :adapter_error
+      assert PropertyDamage.FailureReport.kind(report) == :adapter_error
       assert {:ok, path} = HTML.write(report, dir)
       assert Path.basename(path) =~ ~r/-adapter_error-seed\d+\.html$/
       assert [%{"title" => title}] = index_entries(dir)

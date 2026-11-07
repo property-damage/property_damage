@@ -417,7 +417,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 - **WHEN** an `@check at: :startup` check fails
 - **THEN** `Variant.setup/1` SHALL still return `:ok`
-- **AND** the first `advance_to/2` SHALL return `{:failed, %{kind: :check_failed, root: nil, reason: failure}}`
+- **AND** the first `advance_to/2` SHALL return `{:failed, %{report_kind: :check_failed, root: nil, reason: failure}}`
 
 #### Scenario: Boundary drain
 
@@ -575,11 +575,11 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 #### Scenario: Check failure names its variant
 - **WHEN** a check fails at a root in the second of two targets
-- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :check_failed`, `report.variant` naming the second target, and `report.failed_at_index` the root
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.report_kind == :check_failed`, `report.variant` naming the second target, and `report.failed_at_index` the root
 
 #### Scenario: Adapter raise or error answer
 - **WHEN** an adapter raises in `execute/3` or answers `{:error, _}` at a root, in a run of any number of targets
-- **THEN** `report.kind` SHALL be `:execution_failed`
+- **THEN** `report.report_kind` SHALL be `:execution_failed`
 
 #### Scenario: Setup failure is a value
 - **WHEN** a target's setup fails

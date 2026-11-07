@@ -330,7 +330,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: Reporting a divergence
 
 - **WHEN** a boundary observation differs across ready sides at the bound
-- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :diverged`
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.report_kind == :diverged`
 - **AND** `report.variant` SHALL be `%{index, name}` of the first differing variant in target order
 - **AND** `report.failed_at_index` SHALL be the 0-based index of the root
 - **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `key`, `root`, `command` (the root command), `reference_value`, `variant_value` and `mismatch`
@@ -339,7 +339,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: Reporting a failure to converge
 
 - **WHEN** a side is still pending at the bound
-- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :did_not_converge`
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.report_kind == :did_not_converge`
 - **AND** the failure reason SHALL be of type `Failure.Convergence` carrying `key`, `root`, `command`, `reason`, the time waited and the bound
 - **AND** `Failure.name/1` SHALL be the `@compare` key
 
@@ -354,7 +354,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: Record mode reports an earlier check failure
 
 - **WHEN** `check_mode: :record` is configured and a check failure is recorded at an earlier root, or at the same root in the same or an earlier target
-- **THEN** the report SHALL describe the check failure (`kind: :check_failed`) as the primary failure
+- **THEN** the report SHALL describe the check failure (`report_kind: :check_failed`) as the primary failure
 - **AND** the divergence SHALL be listed in `other_failures`, not replaced
 
 ### Requirement: Per-Run Setup and Teardown (DR-044)
@@ -376,7 +376,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 
 - **WHEN** a target's `setup/1` returns `{:error, reason}` or raises
 - **THEN** the framework SHALL end the run with a failure of kind `:setup_failed` that names that variant
-- **AND** `run/1` SHALL return `{:error, report}` with `report.kind == :setup_failed`, `report.variant` naming that variant and `report.failed_at_index` equal to `nil`
+- **AND** `run/1` SHALL return `{:error, report}` with `report.report_kind == :setup_failed`, `report.variant` naming that variant and `report.failed_at_index` equal to `nil`
 - **AND** SHALL tear down the variants that were already set up
 - **AND** SHALL NOT call `teardown/1` of the variant whose setup failed
 - **AND** no command SHALL execute
@@ -386,7 +386,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 
 ### Requirement: Failures Name the Variant (DR-044, DR-045, DR-046)
 
-A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `Failure.report_kind/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
+A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{report_kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `report_kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `report_kind` and `variant`, with `failed_at_index` as the root. The `report_kind` SHALL be derived from the failure reason by `Failure.report_kind/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of report kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
 
 An adapter that raises or answers `{:error, _}` at a root SHALL be an `:execution_failed` failure in every mode and SHALL NOT be an observation. A failure of the reference SHALL stop the run. A failure of a non-reference variant at a root SHALL retire that variant at once: the framework SHALL finalize its pollers and run its `:teardown` checks and `Adapter.teardown/1` before the next root starts anywhere, and the other variants SHALL continue and be compared among themselves. The run SHALL stop when no non-reference variant remains. The report SHALL carry as the primary failure the first failure in root order and then target order, and SHALL list the other failures found in the run in `other_failures` (each with the variant, the root and the failure). The primary failure SHALL be the only shrink target. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. A variant that is retired, and the reference when its failure ends the run, SHALL have the first check it recorded under `check_mode: :record` listed at that check's root, as a finished variant's is.
 

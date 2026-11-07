@@ -357,7 +357,7 @@ defmodule PropertyDamage do
   simplifies a setup command and draws the teardown commands again for each
   candidate. A failing setup command, a check that fails on a setup
   command's event, or an `external()` a setup command produces that stays
-  unresolved is a setup failure (`kind: :setup_failed`).
+  unresolved is a setup failure (`report_kind: :setup_failed`).
 
   ## Latency Budget
 
@@ -372,7 +372,7 @@ defmodule PropertyDamage do
   The budget is judged once, after the last run passes, on the metrics of the
   measured runs: every target is judged on `max:`, every target but the
   reference on `max_ratio:` (which needs at least two targets). A breach ends
-  the campaign with a report of `kind: :latency_exceeded`. It names the target,
+  the campaign with a report of `report_kind: :latency_exceeded`. It names the target,
   the statistic, the measured value and the limit, and it is neither shrunk nor
   re-executed: latency is statistical, so re-run the seed to reproduce it. A run
   that fails for another reason ends the campaign first, and the budget is
@@ -385,7 +385,7 @@ defmodule PropertyDamage do
 
   The first failure ends the campaign: a target whose boundary observation
   still differs from the reference's at the convergence bound
-  (`kind: :diverged`) or is still pending there (`kind: :did_not_converge`), a
+  (`report_kind: :diverged`) or is still pending there (`report_kind: :did_not_converge`), a
   failing check in any target, a setup failure or an execution failure. The
   report names the target in `variant`.
 
@@ -393,7 +393,7 @@ defmodule PropertyDamage do
   every shrink attempt runs the candidate sequence on every target through the
   scheduler (each target set up and torn down per attempt), and a candidate
   counts only if it fails with the same kind, check name and failing target
-  (`PropertyDamage.Shrinker.failure_signature/2`). The shrunk sequence is then
+  (`PropertyDamage.Failure.signature/2`). The shrunk sequence is then
   run once more, and the report describes that reproduction; when it does not
   fail the same way, the report keeps the original run. A setup failure
   implicates no command and is reported unshrunk.
@@ -953,7 +953,7 @@ defmodule PropertyDamage do
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
       logs: Map.get(result, :logs, %{}),
       failure_reason: failure,
-      kind: :latency_exceeded,
+      report_kind: :latency_exceeded,
       variant: variant_of(target),
       shrink_iterations: 0,
       shrink_time_ms: 0,
@@ -1427,7 +1427,7 @@ defmodule PropertyDamage do
       :passed ->
         {:pass}
 
-      {:failed, %{failure: %{kind: :setup_failed}} = found} ->
+      {:failed, %{failure: %{report_kind: :setup_failed}} = found} ->
         {:error, report} = handle_failure(ctx, found)
         {:setup_failed, report}
 
@@ -1453,12 +1453,12 @@ defmodule PropertyDamage do
 
   defp replay_report(_ctx, _found, false), do: nil
 
-  # Refresh descriptive metadata from the new failure. Keep the prior
-  # failure_type if the reason did not classify (nil); check_name is
-  # legitimately nil for many failure types, so it is refreshed as-is.
+  # Refresh descriptive metadata from the new failure. Keep the prior kind
+  # if the reason did not classify (nil); check_name is legitimately nil for
+  # many failure kinds, so it is refreshed as-is.
   defp replay_refresh(reason) do
-    {failure_type, check_name} = FailureReport.classify_reason(reason)
-    [check_name: check_name] ++ if(failure_type, do: [failure_type: failure_type], else: [])
+    {kind, check_name} = FailureReport.classify_reason(reason)
+    [check_name: check_name] ++ if(kind, do: [kind: kind], else: [])
   end
 
   defp pass_outcome(library, seed, k) do
@@ -1590,7 +1590,7 @@ defmodule PropertyDamage do
   # The failure path of every run, for one target or several: shrink the
   # sequence, reproduce the shrunk sequence once, and report. A target's setup
   # failure implicates no command, so it is reported as found, unshrunk.
-  defp handle_failure(ctx, %{failure: %{kind: :setup_failed}} = found) do
+  defp handle_failure(ctx, %{failure: %{report_kind: :setup_failed}} = found) do
     report_failure(ctx, failure_report(ctx, found, :found))
   end
 
@@ -1714,7 +1714,7 @@ defmodule PropertyDamage do
       nil ->
         :not_reproduced
 
-      %{kind: :setup_failed, reason: reason} ->
+      %{report_kind: :setup_failed, reason: reason} ->
         {:setup_failed, reason}
 
       failure ->
@@ -1752,8 +1752,8 @@ defmodule PropertyDamage do
     do: Expansion.identity(sequence, ctx.targets)
 
   defp same_failure?(failure, found_failure) do
-    Shrinker.failure_signature(failure.reason, failure.variant.index) ==
-      Shrinker.failure_signature(found_failure.reason, found_failure.variant.index)
+    Failure.signature(failure.reason, failure.variant.index) ==
+      Failure.signature(found_failure.reason, found_failure.variant.index)
   end
 
   # The report of a found failure. `:found` reports it as the run found it (no
@@ -1794,7 +1794,7 @@ defmodule PropertyDamage do
       original_failed_at_index: Map.get(found, :original_root, failure.root),
       last_root: last_root,
       failure_reason: failure.reason,
-      kind: failure.kind,
+      report_kind: failure.report_kind,
       variant: failure.variant,
       shrink_iterations: shrink.iterations,
       shrink_time_ms: shrink.time_ms,
@@ -1839,7 +1839,7 @@ defmodule PropertyDamage do
   # The last root the failing run executed: none when a setup command failed,
   # the failing root, or for a failure at no root (a `:startup` check, the end
   # of the run) every root when any root executed, else none.
-  defp last_root(%{kind: :setup_failed}, _result), do: -1
+  defp last_root(%{report_kind: :setup_failed}, _result), do: -1
   defp last_root(%{root: nil}, result), do: if(ran_a_root?(result), do: nil, else: -1)
   defp last_root(failure, _result), do: failure.root
 
@@ -1865,7 +1865,7 @@ defmodule PropertyDamage do
       %RunResult{
         outcome: :error,
         failure: failure_report,
-        kind: failure_report.kind,
+        report_kind: failure_report.report_kind,
         variant: failure_report.variant,
         metrics: failure_report.metrics
       }
@@ -2104,7 +2104,7 @@ defmodule PropertyDamage do
       is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
         {:error, :missing_model_or_target}
 
-      report.kind in [:setup_failed, :latency_exceeded] ->
+      report.report_kind in [:setup_failed, :latency_exceeded] ->
         {:ok, report}
 
       true ->
@@ -2167,7 +2167,7 @@ defmodule PropertyDamage do
       run_seed: report.seed,
       run_number: report.run_number,
       failure: %{
-        kind: report.kind,
+        report_kind: report.report_kind,
         variant: report.variant || variant_of(ctx.target),
         root: report.failed_at_index,
         reason: report.failure_reason,
@@ -2228,7 +2228,7 @@ defmodule PropertyDamage do
             failed_at_index: failure.root,
             original_failed_at_index: report.original_failed_at_index,
             failure_reason: failure.reason,
-            kind: failure.kind,
+            report_kind: failure.report_kind,
             variant: failure.variant,
             shrink_iterations: report.shrink_iterations + shrink_result.iterations,
             shrink_time_ms: report.shrink_time_ms + elapsed,
@@ -2446,7 +2446,7 @@ defmodule PropertyDamage do
 
       # Only check failures
       failures = PropertyDamage.list_failures("failures/",
-        filter: &(&1.failure_type == :check_failed))
+        filter: &(&1.kind == :check_failed))
   """
   @spec list_failures(Path.t(), keyword()) :: [map()]
   defdelegate list_failures(directory, opts \\ []), to: PropertyDamage.Persistence, as: :list

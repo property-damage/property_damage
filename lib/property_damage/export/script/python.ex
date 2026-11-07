@@ -46,7 +46,7 @@ defmodule PropertyDamage.Export.Script.Python do
   defp generate_docstring(metadata, report) do
     failure_desc =
       case metadata.check_name do
-        nil -> to_string(metadata.failure_type)
+        nil -> to_string(metadata.kind)
         check -> "#{Common.check_label(check)} check failed"
       end
 

@@ -70,7 +70,7 @@ defmodule PropertyDamage.SurvivorFinalizeFailureTest do
     ]
 
     assert {:error, report} = Compare.run(ctx.watch, targets, max_commands: 5)
-    assert report.kind == :execution_failed
+    assert report.report_kind == :execution_failed
     assert report.variant == %{index: 2, name: "c"}
     assert report.failed_at_index == 1
 
@@ -84,7 +84,7 @@ defmodule PropertyDamage.SurvivorFinalizeFailureTest do
     targets = [t(ctx, "a"), t(ctx, "b"), t(ctx, "c", %{fail: %{3 => :error}})]
 
     assert {:error, report} = Compare.run(ctx.eventual, targets, max_commands: 5)
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert report.variant == %{index: 0, name: "a"}
     assert report.failed_at_index == 0
     assert Failure.kind(report.failure_reason) == :poll_timeout

@@ -28,7 +28,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
   defp diverged_report(extra) do
     targets = [F.target("alice", quiet()), F.target("bob", quiet(%{skew_at: 1}))]
     report = F.report!(F.Model, targets, extra)
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     report
   end
 
@@ -186,7 +186,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
     # The decoded term of a saved file, inspected in full.
     defp saved_text(path) do
       bytes = File.read!(path)
-      assert <<"PD", 18, _checksum::32, term::binary>> = bytes
+      assert <<"PD", 19, _checksum::32, term::binary>> = bytes
       inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     end
 

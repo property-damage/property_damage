@@ -49,12 +49,14 @@ defmodule PropertyDamage.FailureReport do
   ## Failure Reasons
 
   The `failure_reason` field holds a `%PropertyDamage.Failure{}` describing what
-  failed (see that module for the class/kind vocabulary).
+  failed (see that module for the three levels of failure name: class, kind
+  and report kind).
 
   ## Report kind and the failing target
 
-  `kind` sorts every failure into one of a few outcomes, whatever its
-  fine-grained `Failure.kind/1` (which stays inside `failure_reason`):
+  `report_kind` sorts every failure into one of six outcomes, whatever its
+  fine-grained `Failure.kind/1` (which stays inside `failure_reason`; read it
+  with `kind/1`):
 
   - `:check_failed` - a check did not hold: a check at a command, an
     `@eventually` timeout, a `:startup` or finalization check, or an
@@ -205,10 +207,10 @@ defmodule PropertyDamage.FailureReport do
   campaign's runs before the failing one plus the run the report describes;
   `run_check_fires` holds that run's own share, so a further shrink can
   replace it with its reproduction's. Convenience accessors
-  derive the common views: `failure_type/1` (the fine-grained
-  `PropertyDamage.Failure.kind/1` of `failure_reason`, not the report `kind`
+  derive the common views: `kind/1` (the fine-grained
+  `PropertyDamage.Failure.kind/1` of `failure_reason`, not the `report_kind`
   above: an idempotency violation gives `:idempotency_violation` where the
-  report `kind` is `:check_failed`), `check_name/1`,
+  `report_kind` is `:check_failed`), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
 
@@ -223,11 +225,11 @@ defmodule PropertyDamage.FailureReport do
   @default_converge_within 5_000
   alias PropertyDamage.RunTrace.Step
 
-  @typedoc "The failure's kind (`PropertyDamage.Failure.kind/1`)."
-  @type failure_type :: Failure.kind()
+  @typedoc "The failure's fine-grained kind (`PropertyDamage.Failure.kind/1`)."
+  @type kind :: Failure.kind()
 
   @typedoc "The outcome a report describes; see \"Report kind and the failing target\"."
-  @type kind :: Failure.report_kind()
+  @type report_kind :: Failure.report_kind()
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -276,7 +278,7 @@ defmodule PropertyDamage.FailureReport do
           original_failed_at_index: non_neg_integer() | nil,
 
           # What failed and where
-          kind: kind() | nil,
+          report_kind: report_kind() | nil,
           variant: variant() | nil,
           targets: [target_entry()],
           concurrency: :serial | :parallel,
@@ -326,7 +328,7 @@ defmodule PropertyDamage.FailureReport do
 
           # Failure details: the structured %Failure{}. The kind / check name /
           # message / idempotency violation / poll-timeout info are derived views
-          # over this, exposed as accessor functions (failure_type/1, check_name/1,
+          # over this, exposed as accessor functions (kind/1, check_name/1,
           # failure_message/1, idempotency_violation/1, poll_timeout_info/1).
           failure_reason: Failure.t() | nil,
 
@@ -414,7 +416,7 @@ defmodule PropertyDamage.FailureReport do
             run_number: nil,
             failed_at_index: nil,
             original_failed_at_index: nil,
-            kind: nil,
+            report_kind: nil,
             variant: nil,
             targets: [],
             concurrency: :serial,
@@ -492,7 +494,7 @@ defmodule PropertyDamage.FailureReport do
     form), the reference first (default `[]`)
   - `:variant` - The target the failure happened in, `%{index:, name:}`
     (default: the reference target, or `nil` without targets)
-  - `:kind` - The report kind (default: derived from `:failure_reason` by
+  - `:report_kind` - The report kind (default: derived from `:failure_reason` by
     `PropertyDamage.Failure.report_kind/1`)
   - `:concurrency` - The run's `concurrency:` (default `:serial`)
   - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
@@ -584,17 +586,18 @@ defmodule PropertyDamage.FailureReport do
         logs: Keyword.get(opts, :logs, %{})
       )
 
-    kind = Keyword.get_lazy(opts, :kind, fn -> Failure.report_kind(failure_reason) end)
+    report_kind =
+      Keyword.get_lazy(opts, :report_kind, fn -> Failure.report_kind(failure_reason) end)
 
     reference_trace =
-      reference_trace(kind, Keyword.get(opts, :reference_result), trace)
+      reference_trace(report_kind, Keyword.get(opts, :reference_result), trace)
 
     %__MODULE__{
       seed: seed,
       run_number: run_number,
       failed_at_index: failed_at_index,
       original_failed_at_index: Keyword.get(opts, :original_failed_at_index, failed_at_index),
-      kind: kind,
+      report_kind: report_kind,
       variant: Keyword.get_lazy(opts, :variant, fn -> reference_variant(targets) end),
       targets: targets,
       concurrency: Keyword.get(opts, :concurrency, :serial),
@@ -633,7 +636,7 @@ defmodule PropertyDamage.FailureReport do
       expansions:
         PropertyDamage.Expansion.report(
           Keyword.get(opts, :expansion),
-          Keyword.get_lazy(opts, :last_root, fn -> executed_root(kind, failed_at_index) end)
+          Keyword.get_lazy(opts, :last_root, fn -> executed_root(report_kind, failed_at_index) end)
         ),
       expansion_counts: Keyword.get(opts, :expansion_counts, %{}),
       command_labels: command_labels
@@ -916,18 +919,18 @@ defmodule PropertyDamage.FailureReport do
   `failure_reason` and only need the descriptive kind/name, without building a
   full report.
   """
-  @spec classify_reason(term()) :: {failure_type() | nil, Failure.name()}
+  @spec classify_reason(term()) :: {kind() | nil, Failure.name()}
   def classify_reason(%Failure{} = failure), do: {Failure.kind(failure), Failure.name(failure)}
   def classify_reason(_failure_reason), do: {nil, nil}
 
   @doc """
   Get a summary string for the failure type.
   """
-  @spec failure_type_summary(t()) :: String.t()
-  def failure_type_summary(%__MODULE__{} = report) do
+  @spec kind_summary(t()) :: String.t()
+  def kind_summary(%__MODULE__{} = report) do
     check_name = check_name(report)
 
-    case failure_type(report) do
+    case kind(report) do
       :check_failed -> "Invariant Violation: #{Naming.format_name(check_name)}"
       :projection_violation -> "Invariant Violation: #{Naming.format_name(check_name)}"
       :idempotency_violation -> "Idempotency Violation"
@@ -956,9 +959,9 @@ defmodule PropertyDamage.FailureReport do
   # ==========================================================================
 
   @doc "The failure's kind (`PropertyDamage.Failure.kind/1`), or `:unknown`."
-  @spec failure_type(t()) :: failure_type()
-  def failure_type(%__MODULE__{failure_reason: %Failure{} = f}), do: Failure.kind(f)
-  def failure_type(%__MODULE__{}), do: :unknown
+  @spec kind(t()) :: kind()
+  def kind(%__MODULE__{failure_reason: %Failure{} = f}), do: Failure.kind(f)
+  def kind(%__MODULE__{}), do: :unknown
 
   @doc "The failing check/projection name, or `nil`."
   @spec check_name(t()) :: Failure.name()
@@ -1002,14 +1005,14 @@ defmodule PropertyDamage.FailureReport do
   Check if this is a poll timeout failure.
   """
   @spec poll_timeout_failure?(t()) :: boolean()
-  def poll_timeout_failure?(%__MODULE__{} = report), do: failure_type(report) == :poll_timeout
+  def poll_timeout_failure?(%__MODULE__{} = report), do: kind(report) == :poll_timeout
 
   @doc """
   Check if this is an idempotency failure.
   """
   @spec idempotency_failure?(t()) :: boolean()
   def idempotency_failure?(%__MODULE__{} = report),
-    do: failure_type(report) == :idempotency_violation
+    do: kind(report) == :idempotency_violation
 
   @doc """
   Check if this failure is likely a test code error.
@@ -1090,7 +1093,7 @@ defmodule PropertyDamage.FailureReport do
     "PropertyDamage.run(#{Enum.join(options, ", ")})"
   end
 
-  defp reproduced_runs(%__MODULE__{kind: :latency_exceeded, campaign: %{} = campaign}),
+  defp reproduced_runs(%__MODULE__{report_kind: :latency_exceeded, campaign: %{} = campaign}),
     do: {campaign.seed, campaign.max_runs}
 
   defp reproduced_runs(%__MODULE__{seed: seed}), do: {seed, 1}
@@ -1502,7 +1505,7 @@ defimpl Inspect, for: PropertyDamage.FailureReport do
 
   # The summary names the error it replaced, on one line.
   defp fallback(report, error) do
-    type = PropertyDamage.FailureReport.failure_type(report)
+    type = PropertyDamage.FailureReport.kind(report)
 
     Inspect.Algebra.concat([
       "#FailureReport<",

@@ -188,7 +188,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       recorder = start_recorder()
       model = model!(Retired, teardown_like_act())
 
-      assert {:error, %FailureReport{kind: :execution_failed, variant: %{index: 1}}} =
+      assert {:error, %FailureReport{report_kind: :execution_failed, variant: %{index: 1}}} =
                run(model, [
                  SetupCommands.target("a", recorder),
                  SetupCommands.target("b", recorder, %{fail: %{Act => :error}})
@@ -205,7 +205,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       recorder = start_recorder()
       model = model!(AfterSetupFailure, teardown_like_act())
 
-      assert {:error, %FailureReport{kind: :setup_failed}} =
+      assert {:error, %FailureReport{report_kind: :setup_failed}} =
                run(model, [
                  SetupCommands.target("a", recorder),
                  SetupCommands.target("b", recorder, %{fail: %{Login => :error}})
@@ -294,7 +294,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       assert {:error, %FailureReport{} = report} =
                run(model, [SetupCommands.target("a", recorder)])
 
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
       assert report.failed_at_index == nil
       assert Failure.kind(report.failure_reason) == :setup_failed
 
@@ -393,7 +393,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
                    SetupCommands.target("b", recorder, unquote(Macro.escape(config)))
                  ])
 
-        assert report.kind == :setup_failed
+        assert report.report_kind == :setup_failed
         assert report.variant == %{index: 1, name: "b"}
 
         assert %Failure{

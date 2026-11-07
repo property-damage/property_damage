@@ -274,7 +274,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
       run = late_run(:bad)
       [result] = run.results
 
-      assert %{kind: :check_failed, root: 0} = run.failure
+      assert %{report_kind: :check_failed, root: 0} = run.failure
       assert result.failed_at_index == 0
       assert linear_failed_at_index() == 0
     end
@@ -315,7 +315,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
     test "names the first recorded check failure's command and Failure" do
       run = guarded_run(:record)
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
                run.failure.reason
@@ -324,7 +324,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
     test "control: under :halt the same input names the same command" do
       run = guarded_run(:halt)
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} = run.failure
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
                run.failure.reason

@@ -73,7 +73,7 @@ defmodule PropertyDamage.CompareCountersTest do
                compare: [converge_within: 300]
              )
 
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     report
   end
 

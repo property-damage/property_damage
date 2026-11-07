@@ -631,6 +631,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `Shrinker.failure_signature/2` is `PropertyDamage.Failure.signature/2`.**
+  The type `Shrinker.failure_signature` is `Failure.signature`. The tuple is
+  unchanged: `{kind, name, variant_index}`. The function sits beside
+  `Failure.from_signature/2`, and the shrinker, the run entry point, run
+  comparison, the export file names and the scheduler compare failures through
+  it.
+
+- **Breaking: a failure has three levels of name, and each word means one
+  level.** `Failure.class/1` is the struct family, `Failure.kind/1` is the fine
+  kind and `Failure.report_kind/1` is the outcome a report describes (six
+  values). Renamed:
+  `FailureReport.failure_type/1` is `FailureReport.kind/1`;
+  `FailureReport.failure_type_summary/1` is `FailureReport.kind_summary/1`;
+  the type `FailureReport.failure_type` is `FailureReport.kind`, and the old
+  type `FailureReport.kind` is `FailureReport.report_kind`; the field
+  `FailureReport.kind` is `report_kind`, and so is the `:kind` option of
+  `FailureReport.new/1`, the `kind` field of `Progress.RunResult` and the
+  `kind` key of the runner failure maps. The `failure_type` key of the export
+  metadata and of the `Persistence.list/2` entries is `kind`. A scheduler
+  failure found again at finalize time is dropped as a duplicate only when
+  its `Failure.signature/2` and root both match.
+
+- **Breaking: failure files are written at format 19.** `.pd` and `.pdtrace`
+  files of format 18 and older are refused with
+  `{:error, {:unsupported_format_version, version, 19}}`, because a report's
+  `kind` field is now `report_kind`. In `Persistence.export_json/1` the key
+  `failure_type` is `kind` and the key `kind` is `report_kind`; in each
+  `other_failures` entry `failure_type` is `kind`. Capture the failure again.
+
+- **Breaking: the replay artifact is format 3.** The `failure:` map is
+  `%{signature: {kind, name, variant_index}, root_index: root}`, where the
+  signature is `Failure.signature/2`. It replaces the keys `kind`, `name` and
+  `variant_index`, and `kind` now holds the fine kind where it held the report
+  kind. A format 2 artifact is refused. `ReplayArtifact.reproduced?/2` compares
+  the signature, the failing target and the root.
+
+- **Breaking: the seed library file is version 3.** An entry stores its fine
+  failure kind under `kind` where version 2 used `failure_type`, and
+  `SeedLibrary.add_seed/3` and `SeedLibrary.record_run/3` take `:kind` where
+  they took `:failure_type`. `stats/1` returns `by_kind` in place of
+  `by_failure_type`. `SeedLibrary.load/1` still reads versions 1 and 2 and
+  maps the old key.
+
 - **Breaking: `RunTrace.capture/1` is `PropertyDamage.RunTrace.Capture.capture/1`.**
   `RunTrace` is now a plain record. Options and result are unchanged.
 
@@ -1392,6 +1435,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
 ### Fixed
+
+- **`FailureIntelligence.similarity_score/2` scores a failure against itself
+  as exactly `1.0`.** The weighted sum came to `0.9999999999999999`, so
+  `similar?/3` with a threshold of `1.0` was false for a failure and itself.
+  The score is now the weighted sum divided by the weight total. Scores of
+  different failures change only by float rounding, and the default threshold
+  is unchanged.
 
 - **Forensics replay and the load-test worker no longer crash on a projection
   with an `at:` or `@eventually` check.** Both ran every entry of the check

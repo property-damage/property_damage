@@ -32,13 +32,14 @@ defmodule PropertyDamage.Persistence do
 
   A file of an older format version is refused with
   `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
-  failure under the current version. Format 18 dropped the fields of the
-  removed parallel-branch mode from the saved sequence, trace and event log.
+  failure under the current version. Format 19 renamed the report's `kind`
+  field to `report_kind`, so a format 18 file no longer decodes into the
+  current report.
 
   ## Naming Convention
 
   Auto-generated filenames follow the pattern:
-  `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
+  `{timestamp}-{kind}-{check_name}-seed{seed}.pd`
 
   The timestamp has the basic ISO 8601 form `YYYYMMDDTHHMMSS`. The check name
   is the name of the failing check, for example the name of its function.
@@ -63,7 +64,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 18
+  @version 19
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -282,10 +283,10 @@ defmodule PropertyDamage.Persistence do
 
       # List all failures
       failures = Persistence.list("failures/")
-      # => [%{path: "...", seed: 123, failure_type: :check_failed, ...}, ...]
+      # => [%{path: "...", seed: 123, kind: :check_failed, ...}, ...]
 
       # List only check failures
-      failures = Persistence.list("failures/", filter: &(&1.failure_type == :check_failed))
+      failures = Persistence.list("failures/", filter: &(&1.kind == :check_failed))
   """
   @spec list(Path.t(), keyword()) :: [map()]
   def list(directory, opts \\ []) do
@@ -361,14 +362,14 @@ defmodule PropertyDamage.Persistence do
       seed: report.seed,
       run_number: report.run_number,
       failed_at_index: report.failed_at_index,
-      failure_type: FailureReport.failure_type(report),
+      kind: FailureReport.kind(report),
       check_name: name_string(FailureReport.check_name(report)),
       failure_message: FailureReport.failure_message(report),
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms,
       timestamp: DateTime.to_iso8601(report.timestamp),
       model: report.model && inspect(report.model),
-      kind: report.kind,
+      report_kind: report.report_kind,
       variant: report.variant,
       targets: Enum.map(report.targets, &export_target/1),
       compare: Map.new(report.compare),
@@ -397,7 +398,7 @@ defmodule PropertyDamage.Persistence do
     %{
       variant: variant,
       root: root,
-      failure_type: Failure.kind(failure),
+      kind: Failure.kind(failure),
       name: name_string(Failure.name(failure)),
       message: FailureReport.failure_message(failure)
     }
@@ -501,6 +502,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V19 format: a report's outcome field is `report_kind` (it was `kind`), so
+  # `kind` names only the fine kind of a failure in a report, a saved file and
+  # the JSON export.
   # V18 format: a sequence holds only its roots (`prefix`), setup and teardown
   # commands; a trace records no branch interleaving; an event-log entry and a
   # failure name no branch, and the check kind for a parallel-branch ordering
@@ -538,10 +542,10 @@ defmodule PropertyDamage.Persistence do
   # divergence (`%Failure.Divergence{}`) or failure to converge
   # (`%Failure.Convergence{}`) named by its `{projection, function}` key.
   # As in v9, a report records the run's `targets` (the reference first), its
-  # report `kind`, the failing `variant` and the run's `concurrency` in place of
+  # `report_kind`, the failing `variant` and the run's `concurrency` in place of
   # one `adapter`. As in v8 (DR-041), a report's `failure_reason` is a
   # `%PropertyDamage.Failure{}` (nested class struct) and the six denormalized
-  # failure fields (`failure_type` / `check_name` / `failure_message` /
+  # failure fields (`kind` / `check_name` / `failure_message` /
   # `invariant_name` / `idempotency_violation` / `poll_timeout_info`) are
   # accessors. V6's fold-order record (DR-040) is unchanged. Positions remain
   # `%Sequence.Position{}` structs (DR-039). The payload carries an explicit
@@ -565,7 +569,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-17 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-18 are refused (DR-041, following DR-039/DR-040).
+  # A v18 report stores its outcome in a `kind` field that v19 renamed
+  # `report_kind`.
   # A v17 sequence, trace or event-log entry may carry the parallel-branch
   # fields v18 dropped, and no longer decodes into the current structs.
   # A v16 file may carry the fault-injection event source or failure kind,
@@ -880,7 +886,7 @@ defmodule PropertyDamage.Persistence do
       |> DateTime.to_iso8601(:basic)
       |> String.slice(0, 15)
 
-    type = FailureReport.failure_type(report) || "unknown"
+    type = FailureReport.kind(report) || "unknown"
     check = name_string(FailureReport.check_name(report)) || "none"
     seed = report.seed
 
@@ -919,7 +925,7 @@ defmodule PropertyDamage.Persistence do
           {:ok, report} ->
             %{
               seed: report.seed,
-              failure_type: FailureReport.failure_type(report),
+              kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
               timestamp: report.timestamp,
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
@@ -928,7 +934,7 @@ defmodule PropertyDamage.Persistence do
           {:ok, report, _warnings} ->
             %{
               seed: report.seed,
-              failure_type: FailureReport.failure_type(report),
+              kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
               timestamp: report.timestamp,
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
@@ -951,7 +957,7 @@ defmodule PropertyDamage.Persistence do
         {:ok,
          %{
            timestamp: parse_timestamp(timestamp_str),
-           failure_type: String.to_existing_atom(type),
+           kind: String.to_existing_atom(type),
            # to_existing_atom (not to_atom): a directory of crafted filenames must
            # not be able to exhaust the atom table. An unknown check-name raises
            # ArgumentError below and drops to the accurate full-load fallback.

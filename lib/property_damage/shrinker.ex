@@ -14,7 +14,7 @@ defmodule PropertyDamage.Shrinker do
   a different one.
 
   The accepted candidate's failure must match the original on three dimensions,
-  compared through its failure *signature* (`failure_signature/2`):
+  compared through its failure *signature* (`PropertyDamage.Failure.signature/2`):
   - Same failure kind (`:check_failed`, `:idempotency_violation`, `:diverged`, etc.)
   - Same name (`PropertyDamage.Failure.name/1`): the check name for an invariant
     violation, and for a divergence or a failure to converge the key of the
@@ -146,31 +146,6 @@ defmodule PropertyDamage.Shrinker do
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
-  Failure signature for equivalence checking: `{kind, name, variant_index}`.
-
-  The three properties that must match for a shrunk sequence to be considered
-  as reproducing the "same" failure. `kind` is the failure's globally-unique
-  kind (`PropertyDamage.Failure.kind/1`, `:diverged` for a divergence), so two
-  failures of different *classes* can never collide; `name` is
-  `PropertyDamage.Failure.name/1`: the check/projection name for a check, the
-  `{projection, function}` key of the boundary observation for a divergence or
-  a failure to converge, `nil` where no name is meaningful; and
-  `variant_index` is the index of the target the failure happened in (`0` for a
-  run with one target).
-
-  Keying on `kind` rather than the coarser class is load-bearing: a
-  `:poll_timeout` of check `:x` and an `:check_failed` of `:x` share a
-  name but are different bugs, so their signatures must differ. A class-based
-  signature (`{:check, :x}` for both) would let the shrinker swap one bug's
-  identity for the other's. Keying on the target is load-bearing for the same
-  reason: a check that fails in the reference target is a different failure
-  from a divergence found in another target. Keying a divergence on its
-  observation keeps a divergence of one `@compare` function from standing in
-  for a divergence of another; the mismatch itself is detail, not identity.
-  """
-  @type failure_signature :: {Failure.kind(), Failure.name(), non_neg_integer()}
-
-  @typedoc """
   Result of shrinking.
   """
   @type shrink_result :: %{
@@ -191,26 +166,6 @@ defmodule PropertyDamage.Shrinker do
   @type stop_reason :: :done | :max_iterations | :max_time
 
   @doc """
-  Extract a failure signature from a failure reason and the index of the target
-  the failure happened in.
-
-  The signature captures the essential properties for equivalence checking.
-  """
-  #
-  # A `%Failure{}` already carries its (globally-unique) kind and, for named
-  # kinds, its name. The `name` keeps
-  # distinct checks from being conflated, and keeps an async-observed
-  # check failure equivalent to a teardown failure of the same check.
-  @spec failure_signature(Failure.t() | term(), non_neg_integer()) :: failure_signature()
-  def failure_signature(%Failure{} = failure, variant_index) do
-    {Failure.kind(failure), Failure.name(failure), variant_index}
-  end
-
-  def failure_signature(_other, variant_index) do
-    {:unknown, nil, variant_index}
-  end
-
-  @doc """
   Check if two failures are equivalent.
 
   Each failure is given as `{reason, variant_index}`. Two failures are
@@ -220,7 +175,7 @@ defmodule PropertyDamage.Shrinker do
   @spec equivalent_failures?({term(), non_neg_integer()}, {term(), non_neg_integer()}) ::
           boolean()
   def equivalent_failures?({reason1, index1}, {reason2, index2}) do
-    failure_signature(reason1, index1) == failure_signature(reason2, index2)
+    Failure.signature(reason1, index1) == Failure.signature(reason2, index2)
   end
 
   # Stutter reproduction config for shrinking (DR-029). A stutter failure
@@ -450,7 +405,7 @@ defmodule PropertyDamage.Shrinker do
     original_signature =
       case Keyword.get(opts, :failure_reason) do
         nil -> nil
-        reason -> failure_signature(reason, variant_index)
+        reason -> Failure.signature(reason, variant_index)
       end
 
     %{
@@ -1250,7 +1205,7 @@ defmodule PropertyDamage.Shrinker do
       is_nil(run.failure) ->
         :passed
 
-      Enum.any?([run.failure | run.other_failures], &(&1.kind == :setup_failed)) ->
+      Enum.any?([run.failure | run.other_failures], &(&1.report_kind == :setup_failed)) ->
         :setup_failed
 
       true ->
@@ -1268,7 +1223,7 @@ defmodule PropertyDamage.Shrinker do
     # different bug as the "minimal repro". (When a signature IS present, the
     # comparison below already rejects these unless the original was itself a
     # placeholder-resolution error.)
-    elem(failure_signature(failure_reason, variant_index), 0) != :placeholder_resolution
+    elem(Failure.signature(failure_reason, variant_index), 0) != :placeholder_resolution
   end
 
   defp check_failure_equivalence(failure_reason, variant_index, original_signature) do
@@ -1276,7 +1231,7 @@ defmodule PropertyDamage.Shrinker do
     # whatever the old per-type/check-name logic needed: named kinds compare
     # names, nameless kinds both carry nil. A failure in another target, or of
     # another kind, is a different failure.
-    failure_signature(failure_reason, variant_index) == original_signature
+    Failure.signature(failure_reason, variant_index) == original_signature
   end
 
   defp exceeded_limits?(state) do

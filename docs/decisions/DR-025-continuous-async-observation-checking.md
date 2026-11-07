@@ -1,6 +1,6 @@
 # DR-025: Continuous Async-Observation Checking (assertions fire on asynchronously-observed events)
 
-**Status:** Accepted. Amended by DR-045: the failure signature is `{kind, name, variant_index}`, from `Shrinker.failure_signature/2`.
+**Status:** Accepted. Amended by DR-045: the failure signature is `{kind, name, variant_index}`, from `Failure.signature/2`.
 **Date:** 2026-06-23
 
 > Recorded as a design pass, to be implemented next. It completes the non-goal
@@ -126,7 +126,7 @@ changes of this kind before.
 - `lib/property_damage/model/projection.ex`: unchanged. The trigger surface, normalizer,
   and `should_run?/4` are untouched; only the set of call sites that invoke the dispatch
   grows.
-- `lib/property_damage/shrinker.ex`: `failure_signature/1` gains a clause for
+- `lib/property_damage/shrinker.ex`: the failure-signature function gains a clause for
   `{:assertion_failed, name, _}` that records `name` as `check_name`, placed before the
   generic tuple clause. Assertion failures are no longer conflated by `equivalent_failures?`
   (a behavior change for multi-assertion models — distinct assertions are no longer treated

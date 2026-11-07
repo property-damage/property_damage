@@ -12,14 +12,14 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Test.ReplayFixtures, as: R
 
-  @header "# PropertyDamage replay artifact, format 2"
+  @header "# PropertyDamage replay artifact, format 3"
   @marker "PAYLOAD_SOURCE"
 
   # A complete artifact for CleanModel whose one leaf holds `payload` (Elixir
   # source) on a line of its own.
   defp template(opts \\ []) do
     header = Keyword.get(opts, :header, @header)
-    format = Keyword.get(opts, :format, 2)
+    format = Keyword.get(opts, :format, 3)
 
     """
     #{header}
@@ -47,10 +47,8 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
       },
       external_markers: [],
       failure: %{
-        kind: :diverged,
-        name: {PropertyDamage.Test.ReplayFixtures.Tally, :total},
-        root_index: 0,
-        variant_index: 0
+        signature: {:diverged, {PropertyDamage.Test.ReplayFixtures.Tally, :total}, 0},
+        root_index: 0
       },
       format: #{format},
       model: PropertyDamage.Test.ReplayFixtures.CleanModel,
@@ -87,8 +85,8 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
         ]
       },
       external_markers: [],
-      failure: %{kind: :diverged, name: {R.Tally, :total}, root_index: 0, variant_index: 0},
-      format: 2,
+      failure: %{signature: {:diverged, {R.Tally, :total}, 0}, root_index: 0},
+      format: 3,
       model: R.CleanModel,
       prefix: [],
       roots: [%{command: %R.Mark{n: 1}, root_id: 0}],
@@ -179,9 +177,9 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
     end
 
     test "for another format" do
-      header = "# PropertyDamage replay artifact, format 3"
-      message = refused(artifact(":ok", header: header, format: 3))
-      assert message =~ ~r/format:? 3/
+      header = "# PropertyDamage replay artifact, format 2"
+      message = refused(artifact(":ok", header: header, format: 2))
+      assert message =~ ~r/format:? 2/
     end
 
     test "when the term's format disagrees with it" do

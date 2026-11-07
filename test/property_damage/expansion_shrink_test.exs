@@ -10,7 +10,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{FailureReport, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.Test.ExpansionRun, as: X
 
   alias PropertyDamage.Test.ExpansionRun.{
@@ -68,7 +68,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
   end
 
   defp signature(report),
-    do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(report.failure_reason, report.variant.index)
 
   # `%{tag => [command]}`: the commands each root ran in one execution.
   defp ran(segment), do: Map.new(X.by_root(segment))
@@ -86,7 +86,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
 
     test "shrinks to a failure at or before its root with the same identity, still on the rewrite",
          %{report: report, entries: entries} do
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "beta"}
       assert signature(report) == {:diverged, {Totals, :totals}, 1}
 
@@ -210,7 +210,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
       ]
 
       assert {:error, report} = run(model, targets, seed: seed, max_commands: 6)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "beta"}
 
       %Pay{tag: pay} =

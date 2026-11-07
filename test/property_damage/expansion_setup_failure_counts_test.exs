@@ -25,7 +25,7 @@ defmodule PropertyDamage.ExpansionSetupFailureCountsTest do
 
     executed = for {:execute, "solo", command, _} <- recorded(recorder), do: command.__struct__
 
-    assert report.kind == :setup_failed
+    assert report.report_kind == :setup_failed
     assert report.failed_at_index == nil
     assert executed == [A.Open]
     assert report.expansions == %{"solo" => []}

@@ -34,7 +34,7 @@ defmodule PropertyDamage.Log.ReportTest do
     target = F.target("alice", quiet(%{script: script}), F.timeout_adapter())
     report = F.report!(F.Model, [target])
 
-    assert report.kind == :execution_failed
+    assert report.report_kind == :execution_failed
 
     assert %Failure{type: %Failure.Execution{detail: %CommandTimeoutError{}}} =
              report.failure_reason
@@ -95,7 +95,7 @@ defmodule PropertyDamage.Log.ReportTest do
       # :diverged: the Reference listing holds alice's lines, the Variant listing bob's.
       targets = [F.target("alice"), F.target("bob", %{skew_at: 1})]
       report = F.report!(F.Model, targets)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       text = F.plain(report)
 
       for {header, name} <- [{"Reference", "alice"}, {"Variant", "bob"}] do
@@ -186,7 +186,7 @@ defmodule PropertyDamage.Log.ReportTest do
       # The :setup_failed report keeps the adapter's setup lines.
       config = %{setup_log: true, fail_setup: true}
       report = F.report!(F.Model, [F.target("alice", config)])
-      assert report.kind == :setup_failed
+      assert report.report_kind == :setup_failed
 
       listing = F.listing(F.plain(report), nil)
       F.assert_note_lines(listing, "adapter setup/1", "setup by alice")
@@ -197,7 +197,7 @@ defmodule PropertyDamage.Log.ReportTest do
     test "a setup/1 that logs and succeeds prints its line before the first step" do
       # The adapter setup/1 note and its lines precede the first step.
       report = F.report!(F.Model, [F.target("alice", %{setup_log: true, fail_at: 1})])
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
 
       listing = F.listing(F.plain(report), nil)
       F.assert_note_lines(listing, "adapter setup/1", "setup by alice")

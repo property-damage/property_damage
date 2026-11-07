@@ -141,7 +141,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
   defp slow_pair, do: [timed("ref", %{sleep_ms: 1}), timed("slow", %{sleep_ms: 5})]
 
   defp breach!(targets, latency, extra \\ []) do
-    assert {:error, %FailureReport{kind: :latency_exceeded} = report} =
+    assert {:error, %FailureReport{report_kind: :latency_exceeded} = report} =
              run(targets, [latency: latency] ++ extra)
 
     report
@@ -245,7 +245,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert %FailureReport{
-               kind: :latency_exceeded,
+               report_kind: :latency_exceeded,
                variant: %{index: 1, name: "slow"},
                failed_at_index: nil,
                shrink_iterations: 0,
@@ -356,7 +356,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
     test "a check failure in the first run is reported as that kind with the metrics so far" do
       targets = [{StepAdapter, name: "a", config: %{name: "a", bad_at: 0}}, step("b")]
 
-      assert {:error, %FailureReport{kind: :check_failed} = report} =
+      assert {:error, %FailureReport{report_kind: :check_failed} = report} =
                run(targets,
                  model: GuardedStepModel,
                  latency: [p95: [max_ratio: @tiny]],
@@ -366,7 +366,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       assert report.metrics |> Map.keys() |> Enum.sort() == ["a", "b"]
       assert report.metrics["a"].commands >= 1
 
-      assert {:error, %FailureReport{kind: :check_failed, metrics: nil}} =
+      assert {:error, %FailureReport{report_kind: :check_failed, metrics: nil}} =
                run(targets, model: GuardedStepModel, shrink: false)
     end
   end
@@ -374,15 +374,15 @@ defmodule PropertyDamage.LatencyBudgetTest do
   describe "report" do
     @describetag :tmp_dir
 
-    test "a latency report persists at format version 18 and a version-11 file is refused",
+    test "a latency report persists at format version 19 and a version-11 file is refused",
          %{tmp_dir: dir} do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 18::8, _rest::binary>> = binary} = File.read(path)
+      assert {:ok, <<"PD", 19::8, _rest::binary>> = binary} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
-      assert loaded.kind == :latency_exceeded
+      assert loaded.report_kind == :latency_exceeded
       assert loaded.metrics == report.metrics
       assert loaded.latency == report.latency
       assert loaded.failure_reason == report.failure_reason
@@ -390,7 +390,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
       File.write!(old, <<"PD", 11::8, rest::binary>>)
-      assert {:error, {:unsupported_format_version, 11, 18}} = Persistence.load(old)
+      assert {:error, {:unsupported_format_version, 11, 19}} = Persistence.load(old)
     end
   end
 

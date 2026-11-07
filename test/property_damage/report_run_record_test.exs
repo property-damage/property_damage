@@ -148,7 +148,7 @@ defmodule PropertyDamage.ReportRunRecordTest do
       assert {:error, report} =
                run([target], model: StartupModel, check_mode: :record, shrink: false)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       Agent.update(recorder, fn _ -> [] end)
 
       assert {:ok, _further} = PropertyDamage.shrink_further(report, max_iterations: 5)
@@ -221,7 +221,7 @@ defmodule PropertyDamage.ReportRunRecordTest do
 
   describe "a latency budget's reproduction" do
     test "names the campaign's seed and max_runs" do
-      assert {:error, %FailureReport{kind: :latency_exceeded} = report} =
+      assert {:error, %FailureReport{report_kind: :latency_exceeded} = report} =
                PropertyDamage.run(
                  model: StepModel,
                  targets: [step("a", %{hold_ms: 2}), step("b", %{hold_ms: 2})],
@@ -261,7 +261,7 @@ defmodule PropertyDamage.ReportRunRecordTest do
       assert {:error, %FailureReport{} = report} =
                A.run(model, [target], seed: 3, max_runs: 1, max_commands: 6, shrink: false)
 
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.failed_at_index == nil
       assert report.expansions == %{"solo" => []}
       assert report.expansion_counts == %{"solo" => %{}}
@@ -291,7 +291,7 @@ defmodule PropertyDamage.ReportRunRecordTest do
     end
 
     test "isolate_trigger/2 refuses a divergence: one target alone cannot diverge" do
-      assert {:error, %FailureReport{kind: :diverged} = report} =
+      assert {:error, %FailureReport{report_kind: :diverged} = report} =
                PropertyDamage.run(
                  model: StepModel,
                  targets: [step("a", %{}), step("b", %{behavior: :shift})],

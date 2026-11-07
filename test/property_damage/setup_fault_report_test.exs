@@ -119,7 +119,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
   test "a startup check that exits is that check's failure" do
     report = run(ExitModel)
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert %Failure{type: %Failure.Check{name: :startup_probe}} = report.failure_reason
     message = FailureReport.failure_message(report)
     assert message =~ "boom_exit"
@@ -129,7 +129,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
   test "a startup check that throws is that check's failure" do
     report = run(ThrowModel)
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert %Failure{type: %Failure.Check{name: :startup_probe}} = report.failure_reason
     message = FailureReport.failure_message(report)
     assert message =~ "boom_throw"
@@ -139,7 +139,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
   test "a during-run check that throws is that check's failure" do
     report = run(DuringRunModel)
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
     assert %Failure{type: %Failure.Check{name: :after_each}} = report.failure_reason
     assert FailureReport.failure_message(report) =~ "boom_during_run"
   end
@@ -158,7 +158,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
   test "control: an adapter whose setup/1 fails is still an adapter setup failure" do
     report = run(ExitModel, DownAdapter)
 
-    assert report.kind == :setup_failed
+    assert report.report_kind == :setup_failed
     assert %Failure{type: %Failure.Setup{cause: :adapter_setup}} = report.failure_reason
     assert FailureReport.failure_message(report) =~ "Adapter setup failed"
   end
@@ -180,7 +180,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
   test "a variant process that dies while it comes up is reported as a variant crash" do
     report = run(KillModel)
 
-    assert report.kind == :setup_failed
+    assert report.report_kind == :setup_failed
     assert %Failure{type: %Failure.Setup{cause: :variant}} = report.failure_reason
     message = FailureReport.failure_message(report)
     assert message =~ "variant"

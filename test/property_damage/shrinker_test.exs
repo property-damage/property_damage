@@ -11,41 +11,41 @@ defmodule PropertyDamage.ShrinkerTest do
   # Failure Equivalence Tests
   # ============================================================================
 
-  describe "failure_signature/2" do
+  describe "Failure.signature/2" do
     test "extracts {kind, name} from a check failure" do
       reason = Failure.check_failed(:balance_invariant, "Balance negative")
-      assert Shrinker.failure_signature(reason, 0) == {:check_failed, :balance_invariant, 0}
+      assert Failure.signature(reason, 0) == {:check_failed, :balance_invariant, 0}
     end
 
     test "extracts signature from idempotency_violation" do
       reason = Failure.idempotency_violation(%{command: %{}, events: []})
-      assert Shrinker.failure_signature(reason, 0) == {:idempotency_violation, nil, 0}
+      assert Failure.signature(reason, 0) == {:idempotency_violation, nil, 0}
     end
 
     test "extracts signature from adapter_error" do
       reason = Failure.adapter_error(:connection_refused)
-      assert Shrinker.failure_signature(reason, 0) == {:adapter_error, nil, 0}
+      assert Failure.signature(reason, 0) == {:adapter_error, nil, 0}
     end
 
     test "extracts signature from placeholder_resolution" do
       reason = Failure.placeholder_resolution(:unknown_placeholder)
-      assert Shrinker.failure_signature(reason, 0) == {:placeholder_resolution, nil, 0}
+      assert Failure.signature(reason, 0) == {:placeholder_resolution, nil, 0}
     end
 
     test "extracts signature from stutter_execution_failed" do
       reason = Failure.stutter_execution_failed(:timeout)
-      assert Shrinker.failure_signature(reason, 0) == {:stutter_execution_failed, nil, 0}
+      assert Failure.signature(reason, 0) == {:stutter_execution_failed, nil, 0}
     end
 
     test "handles non-Failure reasons" do
-      assert Shrinker.failure_signature(:error, 0) == {:unknown, nil, 0}
-      assert Shrinker.failure_signature("string", 0) == {:unknown, nil, 0}
-      assert Shrinker.failure_signature(123, 0) == {:unknown, nil, 0}
+      assert Failure.signature(:error, 0) == {:unknown, nil, 0}
+      assert Failure.signature("string", 0) == {:unknown, nil, 0}
+      assert Failure.signature(123, 0) == {:unknown, nil, 0}
     end
 
     test "named check failures carry the check name (DR-025)" do
       reason = Failure.check_failed(:counter_never_exceeds, {%RuntimeError{}, []})
-      assert Shrinker.failure_signature(reason, 0) == {:check_failed, :counter_never_exceeds, 0}
+      assert Failure.signature(reason, 0) == {:check_failed, :counter_never_exceeds, 0}
     end
 
     test "a poll_timeout and a check failure of the SAME name are NOT equivalent" do
@@ -65,8 +65,8 @@ defmodule PropertyDamage.ShrinkerTest do
 
       check = Failure.check_failed(name, {%RuntimeError{}, []})
 
-      assert Shrinker.failure_signature(poll, 0) == {:poll_timeout, name, 0}
-      assert Shrinker.failure_signature(check, 0) == {:check_failed, name, 0}
+      assert Failure.signature(poll, 0) == {:poll_timeout, name, 0}
+      assert Failure.signature(check, 0) == {:check_failed, name, 0}
       refute Shrinker.equivalent_failures?({poll, 0}, {check, 0})
     end
   end
@@ -115,7 +115,7 @@ defmodule PropertyDamage.ShrinkerTest do
     test "the same failure in another target is not equivalent" do
       reason = Failure.check_failed(:balance, "Error")
 
-      assert Shrinker.failure_signature(reason, 1) == {:check_failed, :balance, 1}
+      assert Failure.signature(reason, 1) == {:check_failed, :balance, 1}
       refute Shrinker.equivalent_failures?({reason, 0}, {reason, 1})
       assert Shrinker.equivalent_failures?({reason, 1}, {reason, 1})
     end

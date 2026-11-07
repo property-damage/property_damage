@@ -67,7 +67,7 @@ defmodule PropertyDamage.Log.PathsTest do
     target = P.injected_target("alice", %{setup_log: true, fail_setup: true})
     report = F.report!(F.Model, [target])
 
-    assert report.kind == :setup_failed
+    assert report.report_kind == :setup_failed
     lines = listing(report)
 
     assert P.log_messages(F.note_block(lines, "adapter setup/1")) ==

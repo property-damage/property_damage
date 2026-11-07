@@ -187,7 +187,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
       # A settlement the variant folded after the boundary is in state_at_failure, not in the + lines.
       report = L.report(:late_fold)
       root = report.failed_at_index
-      assert {report.kind, root} == {:diverged, 1}
+      assert {report.report_kind, root} == {:diverged, 1}
 
       late = Enum.find(report.trace.event_log, &match?(%Settled{n: 0}, &1.event))
       assert late, "control: the variant's settlement of Pay 0 is in its trace"

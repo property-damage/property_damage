@@ -58,7 +58,7 @@ own, the run is a path-equivalence run, covered in
 
 The first target in the `targets:` list is the oracle: a divergence is reported
 as "the UI did something the API didn't." The call returns `{:error, report}` with
-`kind: :diverged`. `report.variant` names the target that differed
+`report_kind: :diverged`. `report.variant` names the target that differed
 (`%{index: 1, name: "ui"}` here) and `report.failed_at_index` is the command index.
 The framework shrinks the sequence first, so
 `PropertyDamage.FailureReport.shrunk_sequence/1` is the minimal sequence that
@@ -267,7 +267,7 @@ safe with that isolation). A target's `config:` map reaches `setup/1` unchanged,
 and the targets need distinct `name:` values when they use one adapter module.
 
 If setup or a command fails, `run/1` returns `{:error, report}` and the report
-names the variant and the kind, for example `report.kind == :setup_failed` and
+names the variant and the kind, for example `report.report_kind == :setup_failed` and
 `report.variant == %{index: 1, name: "ui"}` when the UI forge is down.
 
 ## Prove the oracle isn't vacuous
@@ -283,7 +283,7 @@ produced a different color via the UI:
 
 ```elixir
 {:error, report} = oracle(seed, seed_bug: true)
-assert report.kind == :diverged
+assert report.report_kind == :diverged
 assert report.variant == %{index: 1, name: "ui"}
 
 # the command at the diverging root of the shrunk sequence

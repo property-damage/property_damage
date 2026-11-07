@@ -20,7 +20,7 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
   defp failure_fields(text), do: text |> failure_lines() |> L.fields()
 
   defp with_reason(report, reason),
-    do: %{report | failure_reason: reason, kind: Failure.report_kind(reason)}
+    do: %{report | failure_reason: reason, report_kind: Failure.report_kind(reason)}
 
   defp assert_line_after_check(text, projection) do
     lines = failure_lines(text)
@@ -103,7 +103,7 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
   describe "a failure that is not a check failure" do
     test "of a divergence prints no Projection line and has no projection key" do
       report = L.report(:diverged)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
 
       assert_no_projection_line(L.plain(report))
       assert_no_projection_line(L.markdown(report))

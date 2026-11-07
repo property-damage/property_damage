@@ -23,7 +23,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
   # carry the account placeholder (fixture smoke test below).
   @external_seed 4
 
-  @header "# PropertyDamage replay artifact, format 2"
+  @header "# PropertyDamage replay artifact, format 3"
 
   @term_keys [
     :choices,
@@ -74,16 +74,14 @@ defmodule PropertyDamage.ReplayArtifactTest do
     ids = Enum.map(choices["ref"], & &1.root_id)
 
     %{
-      format: 2,
+      format: 3,
       model: model,
       seed: report.seed,
       run: 1,
       external_markers: [],
       targets: [%{name: "ref", expansion: :random}, %{name: "second", expansion: :random}],
       failure: %{
-        kind: report.kind,
-        name: Failure.name(report.failure_reason),
-        variant_index: report.variant.index,
+        signature: Failure.signature(report.failure_reason, report.variant.index),
         root_index: report.failed_at_index
       },
       prefix: report.setup_commands,
@@ -174,8 +172,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       assert term |> Map.keys() |> Enum.sort() == @term_keys
       assert term == expected_term(report, @model)
 
-      assert term.failure.kind == :diverged
-      assert term.failure.variant_index == 1
+      assert {:diverged, _name, 1} = term.failure.signature
       assert [%F.Fund{}] = term.prefix
     end
 
@@ -208,7 +205,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       assert offsets == Enum.sort(offsets)
 
       failure_offsets =
-        for key <- [:kind, :name, :root_index, :variant_index] do
+        for key <- [:root_index, :signature] do
           {at, _} = :binary.match(code, "#{key}: ")
           at
         end
@@ -240,9 +237,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       refute text =~ "PropertyDamage.Failure"
 
       assert R.term!(path).failure == %{
-               kind: :diverged,
-               name: {F.Totals, :totals},
-               variant_index: 1,
+               signature: {:diverged, {F.Totals, :totals}, 1},
                root_index: report.failed_at_index
              }
     end
@@ -312,7 +307,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
         F.drain()
 
         # The run's result is the same as without the value.
-        assert report.kind == :diverged
+        assert report.report_kind == :diverged
         assert report.variant.name == "second"
         assert report.failed_at_index == 0
 
@@ -366,7 +361,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
                )
 
       F.drain()
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       leaves = Enum.flat_map(report.trace.expansion["second"], & &1.commands)
       assert Enum.any?(leaves, &match?(%R.Credit{account_id: %PropertyDamage.Placeholder{}}, &1))
     end

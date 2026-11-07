@@ -1255,7 +1255,7 @@ Compare multiple implementations by passing several `targets:` to `PropertyDamag
 every target runs the same command sequences, and the first target is the reference.
 The targets are compared only through boundary observations: public projection
 functions marked `@compare`. A divergence is a failure: it is shrunk and reproduced,
-and `run/1` returns `{:error, report}` with `report.kind == :diverged` and
+and `run/1` returns `{:error, report}` with `report.report_kind == :diverged` and
 `report.variant` naming the target. A target still catching up at the convergence
 bound (`compare: [converge_within: ms]`, default 5 seconds) is reported as
 `:did_not_converge`. Use cases include oracle testing, performance comparison,

@@ -78,7 +78,7 @@ defmodule PropertyDamage.OtherFailuresReportTest do
     assert [%{"variant" => %{"index" => 1, "name" => "b"}, "root" => 4} = entry] =
              exported["other_failures"]
 
-    assert entry["failure_type"] == "adapter_error"
+    assert entry["kind"] == "adapter_error"
     assert is_binary(entry["message"])
   end
 end

@@ -29,7 +29,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
     ]
 
     report = F.report!(F.Model, targets)
-    assert report.kind == :diverged
+    assert report.report_kind == :diverged
     assert F.plain(report) =~ F.sentinel(), "control: the report prints the sentinel"
     report
   end
@@ -37,7 +37,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
   # The file's bytes, and the term it holds decoded and inspected in full.
   defp saved(path) do
     bytes = File.read!(path)
-    assert <<"PD", 18, _checksum::32, term::binary>> = bytes
+    assert <<"PD", 19, _checksum::32, term::binary>> = bytes
     {bytes, inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)}
   end
 
@@ -55,7 +55,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
   end
 
   test "a saved report drops every line and loads with logs: %{} on both traces", %{dir: dir} do
-    # Persisted trace round trip: version 18, no line text in the file.
+    # Persisted trace round trip: version 19, no line text in the file.
     report = diverged_report()
     assert F.field(report.trace, :logs, %{}) != %{}, "control: the variant's trace holds lines"
     assert F.field(report.reference_trace, :logs, %{}) != %{}, "control: the reference's too"

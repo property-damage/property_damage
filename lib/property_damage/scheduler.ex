@@ -154,8 +154,8 @@ defmodule PropertyDamage.Scheduler do
   failure that stopped a target is not listed again when that target
   finalizes its run.
 
-  A failure's kind is derived from its `reason` by
-  `PropertyDamage.Failure.report_kind/1`, so a report's `kind` always agrees
+  A failure's report kind is derived from its `reason` by
+  `PropertyDamage.Failure.report_kind/1`, so a report's `report_kind` always agrees
   with its `failure_reason`.
 
   When a failure ends the run, under `:serial` no other target executes the
@@ -192,7 +192,8 @@ defmodule PropertyDamage.Scheduler do
   """
   @type failure :: %{
           optional(:logs) => PropertyDamage.Log.logs(),
-          kind: :check_failed | :setup_failed | :execution_failed | :diverged | :did_not_converge,
+          report_kind:
+            :check_failed | :setup_failed | :execution_failed | :diverged | :did_not_converge,
           variant: variant(),
           run: non_neg_integer(),
           root: non_neg_integer() | nil,
@@ -589,10 +590,10 @@ defmodule PropertyDamage.Scheduler do
   # other than the reference, lets the run go on without that variant. The
   # reference is what every other variant is compared with, so its failure
   # ends the run.
-  defp retires?(%{kind: :execution_failed, variant: %{index: index}}, root),
+  defp retires?(%{report_kind: :execution_failed, variant: %{index: index}}, root),
     do: root >= 0 and index != 0
 
-  defp retires?(%{kind: :setup_failed, variant: %{index: index}}, _root), do: index != 0
+  defp retires?(%{report_kind: :setup_failed, variant: %{index: index}}, _root), do: index != 0
 
   defp retires?(_failure, _root), do: false
 
@@ -787,8 +788,8 @@ defmodule PropertyDamage.Scheduler do
   #
   # A variant whose failure halted it during the lockstep reports that same
   # failure again when it finalizes. A finalize-time failure is that same
-  # failure when the lockstep already found one in the same variant, at the
-  # same root, of the same kind and with the same name (see `identity/1`);
+  # failure when the lockstep already found one at the same root with the
+  # same `Failure.signature/2` (kind, name and target; see `identity/1`);
   # it is listed once.
   defp run_failures(config, run, finished, results) do
     found =
@@ -810,14 +811,14 @@ defmodule PropertyDamage.Scheduler do
         MapSet.member?(already_found, identity(failure))
       end)
       |> Enum.split_with(fn {failure, _primary?, _when} ->
-        failure.root != nil or failure.kind == :setup_failed
+        failure.root != nil or failure.report_kind == :setup_failed
       end)
 
     primary_and_others(found ++ at_root, at_end)
   end
 
   defp identity(failure),
-    do: {failure.variant.index, failure.root, failure.kind, Failure.name(failure.reason)}
+    do: {failure.root, Failure.signature(failure.reason, failure.variant.index)}
 
   # A variant's finalize-time failures and when each happened: a check that
   # `check_mode: :record` recorded failed while its root was stepped
@@ -967,7 +968,7 @@ defmodule PropertyDamage.Scheduler do
         _ -> {Failure.adapter_error(failure.reason), nil}
       end
 
-    %{failure | kind: Failure.report_kind(reason), reason: reason, stacktrace: stacktrace}
+    %{failure | report_kind: Failure.report_kind(reason), reason: reason, stacktrace: stacktrace}
   end
 
   defp latencies(%{measure_latency: false}, _variant), do: []
@@ -1044,7 +1045,7 @@ defmodule PropertyDamage.Scheduler do
     {reason, stacktrace} = Finalization.extract_stacktrace(reason)
 
     %{
-      kind: Failure.report_kind(reason) || :execution_failed,
+      report_kind: Failure.report_kind(reason) || :execution_failed,
       variant: variant_of(target),
       run: config.run_number,
       root: root,

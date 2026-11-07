@@ -88,10 +88,10 @@ defmodule PropertyDamage.FlakyFailureReportTest do
 
     # The confirmation re-run passed (the counter advanced past 0), so a naive
     # report built from the fresh result would be a nil-reason "Unknown Failure".
-    refute FailureReport.failure_type(report) == :unknown,
+    refute FailureReport.kind(report) == :unknown,
            "expected the observed adapter error, got a contentless Unknown Failure"
 
-    assert FailureReport.failure_type(report) == :adapter_error
+    assert FailureReport.kind(report) == :adapter_error
     assert report.failure_reason == Failure.adapter_error(:flaky_boom)
     assert report.failed_at_index == 0
   end

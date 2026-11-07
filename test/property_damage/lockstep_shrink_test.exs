@@ -7,7 +7,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.{Failure, FailureReport, Generator, Options, Scheduler, SeedLibrary}
-  alias PropertyDamage.{Sequence, Shrinker}
+  alias PropertyDamage.Sequence
   alias PropertyDamage.Test.TmpPath
 
   @probe :pd_lockstep_shrink_probe
@@ -342,7 +342,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   end
 
   defp signature(%FailureReport{} = report),
-    do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(report.failure_reason, report.variant.index)
 
   defp drain_probe(message \\ :unarmed_flip, count \\ 0) do
     receive do
@@ -354,7 +354,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   # A report's kind always agrees with its failure reason.
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.kind == Failure.report_kind(report.failure_reason)
+    assert report.report_kind == Failure.report_kind(report.failure_reason)
   end
 
   # A sequence whose first divergence under `:split` is a Flip after the only
@@ -389,7 +389,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
       assert {:error, %FailureReport{} = report} = run(DivergeModel, targets(), seed: seed)
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
       assert Failure.kind(report.failure_reason) == :diverged
       assert Sequence.to_list(report.original_sequence) == original
@@ -412,7 +412,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
       assert {:error, %FailureReport{} = report} = run(DivideModel, targets(), seed: seed)
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
 
       shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
@@ -441,7 +441,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
         rejected = drain_probe()
 
-        assert report.kind == :diverged
+        assert report.report_kind == :diverged
         assert report.variant.index == 1
         assert Failure.kind(report.failure_reason) == :diverged
 
@@ -471,7 +471,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
                  seed: seed
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       # The setup command runs once in the exploration run, once in every
       # shrink attempt and once in the reproduction, so the shrinker's
       # scheduler runs are the rest.
@@ -514,7 +514,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
         )
 
       assert %{reason: reason, variant: %{index: index}} = rerun.failure
-      assert Shrinker.failure_signature(reason, index) == signature(report)
+      assert Failure.signature(reason, index) == signature(report)
       assert signature(report) == {:diverged, {Answers, :flips}, 1}
     end
   end
@@ -553,7 +553,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
         rejected = drain_probe(:unarmed_ping)
 
         assert_kind_agrees(report)
-        assert report.kind == :diverged
+        assert report.report_kind == :diverged
         assert report.variant.index == 1
 
         shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
@@ -607,7 +607,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
                run(DivergeModel, targets(), seed: exploration, seed_library: path)
 
       assert report.seed == replayed
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
     end
   end
@@ -621,12 +621,12 @@ defmodule PropertyDamage.LockstepShrinkTest do
       seed = planted_seed()
 
       assert {:error, report} = run(DivergeModel, targets(), seed: seed, shrink: false)
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       before = report |> FailureReport.shrunk_sequence() |> Sequence.command_count()
 
       assert {:ok, smaller} = PropertyDamage.shrink_further(report, strategy: :quick)
 
-      assert smaller.kind == :diverged
+      assert smaller.report_kind == :diverged
       assert smaller.variant == report.variant
       assert signature(smaller) == signature(report)
       after_count = smaller |> FailureReport.shrunk_sequence() |> Sequence.command_count()

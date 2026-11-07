@@ -15,7 +15,7 @@ defmodule PropertyDamage.ReplayPathsTest do
   @model F.Model
   @seed 2
   @max_commands 8
-  @version 18
+  @version 19
 
   @base_url "http://localhost:4000"
 
@@ -63,7 +63,7 @@ defmodule PropertyDamage.ReplayPathsTest do
   defp without_trace_choices(report), do: %{report | trace: %{report.trace | expansion: nil}}
 
   defp identity(report),
-    do: {report.kind, Failure.name(report.failure_reason), report.variant.index}
+    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
 
   defp leaves_at(report, name, root) do
     report |> term() |> Map.fetch!(:choices) |> Map.fetch!(name) |> Enum.at(root)
@@ -281,7 +281,7 @@ defmodule PropertyDamage.ReplayPathsTest do
                )
 
       F.drain()
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert %{entry: "Refund[1]"} = Enum.at(report.expansions["solo"], report.failed_at_index)
     end
   end

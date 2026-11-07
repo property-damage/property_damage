@@ -5,7 +5,7 @@ defmodule PropertyDamage.CompareScheduleTest do
   # schedule vocabulary, the final boundary and the one-target case.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Failure, FailureReport, Sequence, Shrinker}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.Compare.{Pay, Read}
 
@@ -192,7 +192,7 @@ defmodule PropertyDamage.CompareScheduleTest do
                  compare: [converge_within: 50]
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == {roots, :at_root}
 
       divergence = report.failure_reason.type
@@ -220,10 +220,10 @@ defmodule PropertyDamage.CompareScheduleTest do
                  compare: [converge_within: 30]
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert Failure.name(report.failure_reason) == {end_only, :totals}
 
-      assert Shrinker.failure_signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(report.failure_reason, report.variant.index) ==
                {:diverged, {end_only, :totals}, 1}
 
       shrunk = Sequence.to_list(FailureReport.shrunk_sequence(report))

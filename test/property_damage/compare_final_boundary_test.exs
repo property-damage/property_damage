@@ -114,7 +114,7 @@ defmodule PropertyDamage.CompareFinalBoundaryTest do
       end)
 
     assert {:error, report} = result
-    assert report.kind == :did_not_converge
+    assert report.report_kind == :did_not_converge
     assert report.variant == %{index: 1, name: "b"}
     assert report.failed_at_index == 1
     assert Failure.name(report.failure_reason) == {Balances, :balance}

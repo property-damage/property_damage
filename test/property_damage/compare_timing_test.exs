@@ -145,7 +145,7 @@ defmodule PropertyDamage.CompareTimingTest do
                  compare: [converge_within: 100]
                )
 
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       assert report.failed_at_index == 0
       assert Failure.name(report.failure_reason) == key(ctx, :balances, :balance)
 
@@ -170,7 +170,7 @@ defmodule PropertyDamage.CompareTimingTest do
 
       assert {:error, report} = result
       assert elapsed < 1_500
-      assert report.kind == :check_failed
+      assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
       assert Failure.kind(report.failure_reason) == :poll_timeout
     end
@@ -181,7 +181,7 @@ defmodule PropertyDamage.CompareTimingTest do
       assert {:error, report} =
                Compare.run(model!(ctx, :long_window), targets, compare: [converge_within: 100])
 
-      assert report.kind == :did_not_converge
+      assert report.report_kind == :did_not_converge
       assert report.failed_at_index == 1
     end
 

@@ -319,7 +319,7 @@ defmodule PropertyDamage.ExpansionForTest do
                  shrink: false
                )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
     end
   end
 end

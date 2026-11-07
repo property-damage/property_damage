@@ -13,8 +13,7 @@ defmodule PropertyDamage.CompareReportingTest do
     FailureReport,
     Persistence,
     SeedLibrary,
-    Sequence,
-    Shrinker
+    Sequence
   }
 
   alias PropertyDamage.FailureReport.Formatter
@@ -95,10 +94,10 @@ defmodule PropertyDamage.CompareReportingTest do
   end
 
   test "a failure to converge is rebuilt from its signature" do
-    signature = Shrinker.failure_signature(did_not_converge(), 1)
+    signature = Failure.signature(did_not_converge(), 1)
     {kind, name, 1} = signature
 
-    assert Shrinker.failure_signature(Failure.from_signature(kind, name), 1) == signature
+    assert Failure.signature(Failure.from_signature(kind, name), 1) == signature
   end
 
   test "a seed library stores a key-named failure as the observation's label" do

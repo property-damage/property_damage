@@ -103,7 +103,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       ]
 
       assert {:error, report} = run(ctx, targets, [])
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 2, name: "c"}
       assert report.failed_at_index == 1
 
@@ -137,7 +137,7 @@ defmodule PropertyDamage.OtherFailuresTest do
 
       assert {:error, shrunk} = run(ctx, targets, max_commands: 8, shrink: true)
       assert shrunk.variant == %{index: 2, name: "c"}
-      assert shrunk.kind == :execution_failed
+      assert shrunk.report_kind == :execution_failed
       assert shrunk.failed_at_index <= 5
       assert length(others(shrunk)) < length(others(unshrunk))
     end
@@ -158,7 +158,7 @@ defmodule PropertyDamage.OtherFailuresTest do
 
       assert {:error, shrunk} = run(ctx, targets, max_commands: 8, shrink: true)
       assert shrunk.variant == %{index: 1, name: "b"}
-      assert shrunk.kind == :execution_failed
+      assert shrunk.report_kind == :execution_failed
 
       numbers = for %Book{n: n} <- Sequence.to_list(FailureReport.shrunk_sequence(shrunk)), do: n
       assert 3 in numbers
@@ -184,7 +184,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       assert [_ | _] = others(report)
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 18::8, _checksum::32, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 19::8, _checksum::32, _rest::binary>>} = File.read(path)
 
       assert {:ok, loaded} = Persistence.load(path)
       assert others(loaded) == others(report)
@@ -211,7 +211,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 18}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 19}} = Persistence.load(path)
     end
   end
 end

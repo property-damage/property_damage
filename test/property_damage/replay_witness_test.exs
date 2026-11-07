@@ -22,7 +22,7 @@ defmodule PropertyDamage.ReplayWitnessTest do
   end
 
   defp identity(report),
-    do: {report.kind, Failure.name(report.failure_reason), report.variant.index}
+    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
 
   test "a failure shrinks, writes its artifact, replays, and regenerates its sequence" do
     targets = [F.target("ref"), F.target("second", :random, %{bug: :credit})]
@@ -89,7 +89,7 @@ defmodule PropertyDamage.ReplayWitnessTest do
 
     # The loader refuses an unknown format and a function in the file.
     text = File.read!(path)
-    version_zero = String.replace(text, "artifact, format 2", "artifact, format 0")
+    version_zero = String.replace(text, "artifact, format 3", "artifact, format 0")
     assert {:error, _reason} = R.parse_artifact(version_zero)
 
     with_function = replace_in_term(text, "run: 1", "run: fn -> 1 end")

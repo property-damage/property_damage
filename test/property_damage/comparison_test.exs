@@ -305,7 +305,7 @@ defmodule PropertyDamage.ComparisonTest do
     end
 
     test "two targets are compared without any compare: option" do
-      assert {:error, %FailureReport{kind: :diverged}} =
+      assert {:error, %FailureReport{report_kind: :diverged}} =
                run_targets(
                  model: TestModel,
                  targets: [ReferenceAdapter, {DivergentAdapter, name: "divergent"}],
@@ -356,7 +356,7 @@ defmodule PropertyDamage.ComparisonTest do
     end
 
     test "detects divergence when targets produce different results" do
-      assert {:error, %FailureReport{kind: :diverged} = report} =
+      assert {:error, %FailureReport{report_kind: :diverged} = report} =
                run_targets(
                  model: TestModel,
                  targets: [
@@ -437,7 +437,7 @@ defmodule PropertyDamage.ComparisonTest do
           shrink: false
         )
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "broken"}
       assert Failure.kind(report.failure_reason) == :adapter_error
       assert Failure.detail(report.failure_reason) == :simulated_error
@@ -648,7 +648,7 @@ defmodule PropertyDamage.ComparisonTest do
       # Reference emits only the returned event; the injecting target additionally
       # folds the injected event, so the observations diverge. This proves the
       # positive test above is not passing by silently dropping injected events.
-      assert {:error, %FailureReport{kind: :diverged}} =
+      assert {:error, %FailureReport{report_kind: :diverged}} =
                run_targets(
                  model: TestModel,
                  targets: [

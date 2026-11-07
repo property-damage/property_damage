@@ -118,7 +118,7 @@ defmodule PropertyDamage.ReplayArtifactFreshVmTest do
           replay_dir: false
         )
 
-      IO.puts("REPLAYED kind=\#{report.kind} name=\#{report.failure_reason.type.name}")
+      IO.puts("REPLAYED kind=\#{report.report_kind} name=\#{report.failure_reason.type.name}")
     rescue
       e in ArgumentError -> IO.puts("RAISED " <> Exception.message(e))
     end
@@ -149,8 +149,7 @@ defmodule PropertyDamage.ReplayArtifactFreshVmTest do
 
   test "an artifact naming a failure kind and a projection's check name replays", ctx do
     text = File.read!(ctx.artifact)
-    assert text =~ "kind: :check_failed"
-    assert text =~ "name: :#{@check_name}"
+    assert text =~ "signature: {:check_failed, :#{@check_name}, 0}"
 
     {output, status} = script(ctx.dir, "replay.exs", @replay_script, ctx.paths, [ctx.artifact])
 
@@ -167,7 +166,7 @@ defmodule PropertyDamage.ReplayArtifactFreshVmTest do
 
     File.write!(
       edited,
-      String.replace(File.read!(ctx.artifact), "name: :#{@check_name}", "name: :#{unknown}")
+      String.replace(File.read!(ctx.artifact), ", :#{@check_name}, 0}", ", :#{unknown}, 0}")
     )
 
     # The intact artifact replays first, so every module the replay loads is

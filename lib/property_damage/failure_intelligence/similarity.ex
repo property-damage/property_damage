@@ -308,10 +308,17 @@ defmodule PropertyDamage.FailureIntelligence.Similarity do
     List.last(final_row)
   end
 
+  # The weighted sum divided by the weight total. The weights are binary
+  # floats that do not add up to exactly 1.0, so the plain sum of an identical
+  # pair scored 0.9999999999999999; dividing by the total, summed in the same
+  # order, gives exactly 1.0 when every component scores 1.0.
   defp calculate_weighted_score(breakdown) do
-    Enum.reduce(@weights, 0.0, fn {key, weight}, acc ->
-      component_score = Map.get(breakdown, key, 0.0)
-      acc + weight * component_score
-    end)
+    {weighted, total} =
+      Enum.reduce(@weights, {0.0, 0.0}, fn {key, weight}, {sum, weights} ->
+        component_score = Map.get(breakdown, key, 0.0)
+        {sum + weight * component_score, weights + weight}
+      end)
+
+    weighted / total
   end
 end

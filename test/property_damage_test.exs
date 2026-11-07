@@ -157,7 +157,7 @@ defmodule PropertyDamageTest do
   describe "run/1 error boundaries" do
     @tag :capture_log
     test "an injector whose setup raises is a setup failure and does not leak the EventQueue" do
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} =
                PropertyDamage.run(
                  model: ExecutorModel,
                  targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}],
@@ -177,7 +177,7 @@ defmodule PropertyDamageTest do
     test "an injector whose setup raises tears down the injectors set up before it" do
       config = %{test_pid: self()}
 
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed}} =
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed}} =
                PropertyDamage.run(
                  model: ExecutorModel,
                  targets: [
@@ -197,7 +197,7 @@ defmodule PropertyDamageTest do
     test "a mock whose setup raises tears down the injectors set up before it" do
       config = %{test_pid: self()}
 
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} =
                PropertyDamage.run(
                  model: ExecutorModel,
                  targets: [
@@ -239,7 +239,7 @@ defmodule PropertyDamageTest do
     end
 
     test "an injector whose setup returns {:error, reason} is a setup failure" do
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} =
                PropertyDamage.run(
                  model: ExecutorModel,
                  targets: [
@@ -266,7 +266,7 @@ defmodule PropertyDamageTest do
           validate: false
         )
 
-      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} = result
+      assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} = result
       assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
       assert report.failed_at_index == nil
       assert report.shrink_iterations == 0

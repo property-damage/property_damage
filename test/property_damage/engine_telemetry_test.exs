@@ -197,7 +197,7 @@ defmodule PropertyDamage.EngineTelemetryTest do
     assert {:error, report} =
              run(GuardedStepModel, [target("tel_fail", %{bad_at: 0})], shrink: false)
 
-    assert report.kind == :check_failed
+    assert report.report_kind == :check_failed
 
     stops = collect([:property_damage, :check, :stop], ["tel_fail"])
     assert Enum.any?(stops, fn {_m, meta} -> meta.passed == false and is_binary(meta.message) end)

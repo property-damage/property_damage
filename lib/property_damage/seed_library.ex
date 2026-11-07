@@ -46,7 +46,8 @@ defmodule PropertyDamage.SeedLibrary do
   Each entry contains:
   - `seed` - The random seed value
   - `model` - Model module name (descriptive)
-  - `failure_type` - What kind of failure it last produced (descriptive)
+  - `kind` - The fine kind of failure it last produced, as
+    `PropertyDamage.Failure.kind/1` (descriptive)
   - `check_name` - Which check or boundary observation last failed, if
     applicable (descriptive; an observation's key is kept as its
     `Projection.function` label)
@@ -58,21 +59,21 @@ defmodule PropertyDamage.SeedLibrary do
     failure, and the entry is pruned once it reaches the prune threshold
   - `dependency_versions` - Dependency versions captured at discovery (descriptive)
 
-  `failure_type`, `check_name`, and `dependency_versions` are inert descriptive
+  `kind`, `check_name`, and `dependency_versions` are inert descriptive
   metadata: they appear in the console banner and in `stats/1`/`format/1` but
   participate in no verdict logic.
   """
 
   alias PropertyDamage.Failure.Naming
 
-  @library_version 2
+  @library_version 3
   @default_file "property_damage_seeds.json"
   @default_prune_threshold 3
 
   @type seed_entry :: %{
           seed: integer(),
           model: String.t(),
-          failure_type: atom(),
+          kind: atom(),
           check_name: atom() | nil,
           tags: [atom()],
           description: String.t() | nil,
@@ -129,7 +130,7 @@ defmodule PropertyDamage.SeedLibrary do
     entry = %{
       seed: failure.seed,
       model: inspect(failure.model),
-      failure_type: PropertyDamage.FailureReport.failure_type(failure),
+      kind: PropertyDamage.FailureReport.kind(failure),
       check_name: descriptive_name(PropertyDamage.FailureReport.check_name(failure)),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
@@ -160,7 +161,7 @@ defmodule PropertyDamage.SeedLibrary do
     entry = %{
       seed: seed,
       model: Keyword.get(opts, :model, "unknown"),
-      failure_type: Keyword.get(opts, :failure_type, :unknown),
+      kind: Keyword.get(opts, :kind, :unknown),
       check_name: descriptive_name(Keyword.get(opts, :check_name)),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
@@ -198,8 +199,8 @@ defmodule PropertyDamage.SeedLibrary do
 
   - a **passing** replay increments the streak;
   - a **failing** replay resets the streak to 0 and refreshes the entry's
-    descriptive `failure_type`/`check_name` from the new report (via the
-    `:failure_type`/`:check_name` options) so the description never goes stale.
+    descriptive `kind`/`check_name` from the new report (via the
+    `:kind`/`:check_name` options) so the description never goes stale.
 
   Pruning of streaks that have reached the threshold is a separate step
   (`prune/2`), applied after a full replay pass.
@@ -207,7 +208,7 @@ defmodule PropertyDamage.SeedLibrary do
   ## Options
 
   - `:failed` - Whether the replay failed (default `false`)
-  - `:failure_type` - Refreshed failure type (used only when `failed: true`)
+  - `:kind` - Refreshed failure kind (used only when `failed: true`)
   - `:check_name` - Refreshed check name (used only when `failed: true`)
   """
   @spec record_run(t(), integer(), keyword()) :: t()
@@ -235,7 +236,7 @@ defmodule PropertyDamage.SeedLibrary do
     %{
       entry
       | consecutive_passes: 0,
-        failure_type: Keyword.get(opts, :failure_type, entry.failure_type),
+        kind: Keyword.get(opts, :kind, entry.kind),
         check_name: descriptive_name(Keyword.get(opts, :check_name, entry.check_name)),
         last_run: now
     }
@@ -255,11 +256,13 @@ defmodule PropertyDamage.SeedLibrary do
   @doc """
   Load a seed library from a JSON file.
 
-  Loads a library of version 1 or #{@library_version}. A version-1 entry keeps
-  its seed and descriptive fields: the pre-DR-023 `status`, `run_count` and
-  `fail_count` fields are dropped, and its `consecutive_passes` streak starts
-  at 0. Returns `{:error, {:invalid_library, reason}}` for valid JSON without
-  an `entries` list, or with a `version` that is neither.
+  Loads a library of version 1, 2 or #{@library_version}. A version 1 or 2 entry
+  stores its failure kind under `failure_type`, which loads as `kind`. A
+  version-1 entry keeps its seed and descriptive fields: the pre-DR-023
+  `status`, `run_count` and `fail_count` fields are dropped, and its
+  `consecutive_passes` streak starts at 0. Returns
+  `{:error, {:invalid_library, reason}}` for valid JSON without an `entries`
+  list, or with another `version`.
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, term()}
   def load(path \\ @default_file) do
@@ -278,7 +281,7 @@ defmodule PropertyDamage.SeedLibrary do
   end
 
   defp validate_library(%{version: version, entries: entries})
-       when version in [1, @library_version] and is_list(entries),
+       when version in [1, 2, @library_version] and is_list(entries),
        do: :ok
 
   defp validate_library(%{entries: entries} = data) when is_list(entries),
@@ -290,7 +293,7 @@ defmodule PropertyDamage.SeedLibrary do
     %{
       seed: entry.seed,
       model: entry[:model] || "unknown",
-      failure_type: to_atom_safe(entry[:failure_type]) || :unknown,
+      kind: to_atom_safe(entry[:kind] || entry[:failure_type]) || :unknown,
       check_name: to_atom_safe(entry[:check_name]),
       tags: Enum.map(entry[:tags] || [], &to_atom_safe/1),
       description: entry[:description],
@@ -337,7 +340,7 @@ defmodule PropertyDamage.SeedLibrary do
 
     %{
       total: length(entries),
-      by_failure_type: Enum.frequencies_by(entries, & &1.failure_type),
+      by_kind: Enum.frequencies_by(entries, & &1.kind),
       by_model: Enum.frequencies_by(entries, & &1.model),
       tags: entries |> Enum.flat_map(& &1.tags) |> Enum.frequencies()
     }
@@ -357,7 +360,7 @@ defmodule PropertyDamage.SeedLibrary do
       |> Enum.take(10)
       |> Enum.map_join("\n", fn e ->
         tags_str = if e.tags != [], do: " [#{Enum.join(e.tags, ", ")}]", else: ""
-        "  #{e.seed} - #{e.failure_type}#{tags_str} (passes: #{e.consecutive_passes})"
+        "  #{e.seed} - #{e.kind}#{tags_str} (passes: #{e.consecutive_passes})"
       end)
 
     header <> "\nRecent entries:\n" <> entries_str

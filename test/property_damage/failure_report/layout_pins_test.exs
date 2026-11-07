@@ -64,7 +64,7 @@ defmodule PropertyDamage.FailureReport.LayoutPinsTest do
         targets = [ExpansionRun.target("a", VariantSupport.start_recorder())]
 
         case R.run(model, targets, seed: seed, max_commands: 6, shrink: false) do
-          {:error, %FailureReport{kind: :check_failed} = report} ->
+          {:error, %FailureReport{report_kind: :check_failed} = report} ->
             ids =
               for %Step{position: %Position{section: {:leaf, id}}} <- FailureReport.steps(report),
                   uniq: true,

@@ -32,7 +32,7 @@ defmodule PropertyDamage.LatencyReportListingTest do
       {NamedAdapter, name: "slow", config: %{name: "slow", sleep_ms: 5}}
     ]
 
-    assert {:error, %FailureReport{kind: :latency_exceeded} = report} =
+    assert {:error, %FailureReport{report_kind: :latency_exceeded} = report} =
              PropertyDamage.run(
                model: StepModel,
                targets: targets,

@@ -373,7 +373,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # the root at the failing boundary, also when the target ran it as leaves;
   # for a setup command's failure, that command; otherwise the step the
   # failure was localized to. Nil for a failure no step is tied to.
-  defp focus(%FailureReport{kind: kind, failed_at_index: root} = report, items)
+  defp focus(%FailureReport{report_kind: kind, failed_at_index: root} = report, items)
        when kind in [:diverged, :did_not_converge] and is_integer(root) do
     match = &(&1.kind == :root and &1.root == root)
     found(items, match) || %{label: "[#{root}]", command: compared_command(report), match: match}
@@ -443,7 +443,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   # The targets the listing shows, the reference first, with the choices each
   # made at its roots.
-  defp context_targets(%FailureReport{kind: kind} = report) do
+  defp context_targets(%FailureReport{report_kind: kind} = report) do
     listed =
       if kind in [:diverged, :did_not_converge],
         do: [{reference_name(report), report.reference_trace}],
@@ -505,8 +505,9 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   # The target a failure happened in, when the run had several and the
   # failure is not a comparison, which names both sides itself.
-  defp target_fields(%FailureReport{kind: kind}) when kind in [:diverged, :did_not_converge],
-    do: []
+  defp target_fields(%FailureReport{report_kind: kind})
+       when kind in [:diverged, :did_not_converge],
+       do: []
 
   defp target_fields(%FailureReport{targets: [_, _ | _], variant: %{name: name}}),
     do: [{"Target", [inspect(name)]}]
@@ -835,10 +836,10 @@ defmodule PropertyDamage.FailureReport.Layout do
   # lines}`, the reference first.
   defp reproduction_listing(report, variant, focus) do
     {lines, targets, listed} =
-      if report.kind in [:diverged, :did_not_converge] do
+      if report.report_kind in [:diverged, :did_not_converge] do
         reference = reference_side(report, variant.filter)
-        reference_lines = listing(reference, focus, report.kind)
-        variant_lines = listing(variant, focus, report.kind)
+        reference_lines = listing(reference, focus, report.report_kind)
+        variant_lines = listing(variant, focus, report.report_kind)
 
         lines =
           [{:header, ~s(Reference: target "#{reference_name(report)}")}] ++
@@ -856,7 +857,7 @@ defmodule PropertyDamage.FailureReport.Layout do
            {:variant, variant_name(report), variant_lines}
          ]}
       else
-        lines = listing(variant, focus, report.kind)
+        lines = listing(variant, focus, report.report_kind)
 
         {lines, %{target: target_logs(variant_name(report), lines), reference: nil},
          [{:variant, variant_name(report), lines}]}
@@ -1135,7 +1136,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # reference's and the variant's states cut at the failing boundary (DR-040),
   # so nothing the variant folded after it shows; otherwise the state before
   # and after the failing step.
-  defp compared_states(%FailureReport{kind: kind} = report)
+  defp compared_states(%FailureReport{report_kind: kind} = report)
        when kind in [:diverged, :did_not_converge] do
     legend =
       {~s(- reference "#{reference_name(report)}"), ~s(+ variant "#{variant_name(report)}")}
@@ -1408,7 +1409,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     {minus, plus, _legend} = compared_states(report)
 
     if state?(minus) or state?(plus) do
-      comparison? = report.kind in [:diverged, :did_not_converge]
+      comparison? = report.report_kind in [:diverged, :did_not_converge]
 
       for module <- modules(minus, plus) do
         left = Map.get(minus || %{}, module)

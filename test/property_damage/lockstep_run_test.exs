@@ -212,7 +212,7 @@ defmodule PropertyDamage.LockstepRunTest do
     test "the report names the failing target and its kind, and no longer an execution mode" do
       keys = FailureReport |> struct() |> Map.keys()
 
-      assert :kind in keys
+      assert :report_kind in keys
       assert :variant in keys
       assert :targets in keys
       refute :execution in keys
@@ -241,7 +241,7 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
@@ -298,7 +298,7 @@ defmodule PropertyDamage.LockstepRunTest do
     test "an adapter {:error, reason} in one target is that target's failure, not a divergence" do
       report = failure!([step("a"), step("b", %{behavior: :error})], shrink: false)
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 0
       assert Failure.kind(report.failure_reason) == :adapter_error
@@ -313,7 +313,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert {:ok, _stats} = run!(targets)
 
-      assert {:error, %FailureReport{kind: :diverged}} =
+      assert {:error, %FailureReport{report_kind: :diverged}} =
                run!(targets, model: __MODULE__.IdModel)
     end
 
@@ -322,7 +322,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert {:ok, _stats} = run!(targets, model: __MODULE__.CloseModel)
 
-      assert {:error, %FailureReport{kind: :diverged}} =
+      assert {:error, %FailureReport{report_kind: :diverged}} =
                run!(targets, model: __MODULE__.NeverModel)
     end
 
@@ -335,7 +335,7 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert report.kind == :diverged
+      assert report.report_kind == :diverged
       assert report.run_number == 0
       assert report.failed_at_index == 0
       # Run 0 stepped root 0 and stopped; the second 0 is the failure's
@@ -373,7 +373,7 @@ defmodule PropertyDamage.LockstepRunTest do
     test "an adapter raise in one variant is an execution failure naming it, never a divergence" do
       report = failure!([step("a"), step("b", %{behavior: :raise})])
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.run_number == 0
       assert report.failed_at_index == 0
@@ -400,7 +400,9 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
+               report
+
       assert report.failed_at_index == 1
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
@@ -426,7 +428,8 @@ defmodule PropertyDamage.LockstepRunTest do
           concurrency: :parallel
         )
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, failed_at_index: 1} = report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, failed_at_index: 1} =
+               report
 
       for name <- ["a", "b", "c"] do
         assert Enum.all?(entered(recorder, name), &(&1 <= 1))
@@ -436,7 +439,9 @@ defmodule PropertyDamage.LockstepRunTest do
     test "a :startup check that fails in one variant names it, with no root" do
       report = failure!([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
+               report
+
       assert report.failed_at_index == nil
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :ready}} =
@@ -456,7 +461,7 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert %{kind: :execution_failed, run_number: 2, variant: %{index: 1}} = report
+      assert %{report_kind: :execution_failed, run_number: 2, variant: %{index: 1}} = report
 
       # Runs 0 to 2, then the reproduction of run 2 (which does not raise, so
       # the report keeps the original run). No run after the failing one was
@@ -485,7 +490,7 @@ defmodule PropertyDamage.LockstepRunTest do
           model: PolledModel
         )
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}} = report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}} = report
     end
   end
 
@@ -521,7 +526,7 @@ defmodule PropertyDamage.LockstepRunTest do
                  shrink: false
                )
 
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "broken"}
       assert report.run_number == 0
     end
@@ -592,7 +597,9 @@ defmodule PropertyDamage.LockstepRunTest do
           max_runs: 3
         )
 
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
+               report
+
       assert report.failed_at_index == nil
       assert Failure.detail(report.failure_reason) == :no_backend
 
@@ -603,7 +610,7 @@ defmodule PropertyDamage.LockstepRunTest do
     test "a raising setup in variant 1 is a setup failure; variant 0 is torn down" do
       report = failure!([step("a", %{test_pid: self()}), step("b", %{setup_result: :raise})])
 
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
       assert report.failed_at_index == nil
       assert %RuntimeError{message: "setup exploded"} = Failure.detail(report.failure_reason)
 
@@ -643,7 +650,7 @@ defmodule PropertyDamage.LockstepRunTest do
           step("b", failing, injectors: [RecordingInjector, RefusingInjector])
         ])
 
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
       assert report.failed_at_index == nil
       assert Failure.detail(report.failure_reason) == :no_listener
 
@@ -660,7 +667,7 @@ defmodule PropertyDamage.LockstepRunTest do
           step("b", %{injector_reply: :ok}, injectors: [RefusingInjector])
         ])
 
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
 
       assert Failure.detail(report.failure_reason) ==
                {:invalid_injector_setup_return, RefusingInjector, :ok}

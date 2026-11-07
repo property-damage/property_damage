@@ -53,7 +53,7 @@ defmodule PropertyDamage.FailureReport.Context do
   @doc false
   @spec items(FailureReport.t(), map() | nil, [{String.t(), [map()] | nil}]) :: [item()]
   def items(%FailureReport{} = report, focus, targets) do
-    kind = FailureReport.failure_type(report)
+    kind = FailureReport.kind(report)
     command = command_module(focus)
 
     [meaning(kind)] ++

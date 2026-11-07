@@ -186,7 +186,9 @@ defmodule PropertyDamage.SchedulerTest do
       assert result.projections == oracle.projections
       assert entries(result.event_log) == entries(oracle.event_log)
 
-      assert %{kind: :check_failed, variant: %{index: 0, name: "solo"}, root: 1} = run.failure
+      assert %{report_kind: :check_failed, variant: %{index: 0, name: "solo"}, root: 1} =
+               run.failure
+
       assert run.failure.run == @run_number
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
@@ -212,7 +214,8 @@ defmodule PropertyDamage.SchedulerTest do
       assert result.failed_at_index == oracle.failed_at_index
       assert result.failure_reason == oracle.failure_reason
 
-      assert %{kind: :check_failed, variant: %{index: 0, name: "solo"}, root: nil} = run.failure
+      assert %{report_kind: :check_failed, variant: %{index: 0, name: "solo"}, root: nil} =
+               run.failure
     end
   end
 
@@ -224,7 +227,9 @@ defmodule PropertyDamage.SchedulerTest do
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
 
-      assert %{kind: :execution_failed, variant: %{index: 0, name: "a"}, root: 1} = run.failure
+      assert %{report_kind: :execution_failed, variant: %{index: 0, name: "a"}, root: 1} =
+               run.failure
+
       assert %Failure{type: %Failure.Execution{kind: :adapter_error}} = run.failure.reason
       assert run.other_failures == []
 
@@ -241,7 +246,7 @@ defmodule PropertyDamage.SchedulerTest do
       targets = step_targets(["solo"], %{recorder: recorder})
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      refute match?(%{kind: :diverged}, run.failure)
+      refute match?(%{report_kind: :diverged}, run.failure)
       assert [result] = run.results
 
       assert entered(recorder, "solo") == [0, 1]
@@ -267,7 +272,7 @@ defmodule PropertyDamage.SchedulerTest do
       commands = [%Step{value: 1}, %Step{value: 2}]
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      refute match?(%{kind: :diverged}, run.failure)
+      refute match?(%{report_kind: :diverged}, run.failure)
       assert [result_a, result_b] = run.results
 
       assert events_from(result_a.event_log, :injector) == []

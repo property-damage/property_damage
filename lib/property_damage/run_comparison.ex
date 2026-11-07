@@ -334,7 +334,7 @@ defmodule PropertyDamage.RunComparison do
 
   defp distinct_failure_signatures(%__MODULE__{traces: traces, groups: %{failing: failing}}) do
     failing
-    |> Enum.map(fn i -> failure_signature(Enum.at(traces, i).outcome) end)
+    |> Enum.map(fn i -> outcome_signature(Enum.at(traces, i).outcome) end)
     |> Enum.uniq()
   end
 
@@ -372,7 +372,7 @@ defmodule PropertyDamage.RunComparison do
   defp mixed_failure_signatures(traces, %{failing: failing}) do
     sigs =
       failing
-      |> Enum.map(fn i -> failure_signature(Enum.at(traces, i).outcome) end)
+      |> Enum.map(fn i -> outcome_signature(Enum.at(traces, i).outcome) end)
       |> Enum.uniq()
 
     if length(sigs) > 1, do: sigs, else: []
@@ -380,10 +380,10 @@ defmodule PropertyDamage.RunComparison do
 
   # A trace records one target's run, so every failure it holds happened in
   # target 0.
-  defp failure_signature({:fail, reason}),
-    do: PropertyDamage.Shrinker.failure_signature(reason, 0)
+  defp outcome_signature({:fail, reason}),
+    do: PropertyDamage.Failure.signature(reason, 0)
 
-  defp failure_signature(_), do: nil
+  defp outcome_signature(_), do: nil
 
   # ---- Field extraction -----------------------------------------------------
 

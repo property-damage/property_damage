@@ -175,7 +175,7 @@ defmodule PropertyDamage.VariantRetirementTest do
 
       assert Enum.count(commands, &match?(%Create{}, &1)) > 1
       assert {:error, report} = result
-      assert report.kind == :execution_failed
+      assert report.report_kind == :execution_failed
       assert report.variant == %{index: 2, name: "ret_c"}
       assert report.failed_at_index == first_create
       assert report.other_failures == []

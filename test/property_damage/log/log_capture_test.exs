@@ -238,7 +238,7 @@ defmodule PropertyDamage.Log.CaptureTest do
       log =
         capture_log(fn ->
           assert {{:error, replayed}, _binding} = Code.eval_string(call)
-          assert replayed.kind == report.kind
+          assert replayed.report_kind == report.report_kind
           assert replayed.failed_at_index == report.failed_at_index
 
           listing = F.listing(F.plain(replayed), nil)

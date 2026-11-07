@@ -2,7 +2,8 @@ defmodule PropertyDamage.Export.Common do
   @moduledoc false
 
   alias PropertyDamage.Failure.Naming
-  alias PropertyDamage.{FailureReport, Placeholder, Sequence, Shrinker}
+
+  alias PropertyDamage.{Failure, FailureReport, Placeholder, Sequence}
 
   # ============================================================================
   # Command Extraction
@@ -25,7 +26,7 @@ defmodule PropertyDamage.Export.Common do
   def extract_metadata(%FailureReport{} = report) do
     %{
       seed: report.seed,
-      failure_type: FailureReport.failure_type(report),
+      kind: FailureReport.kind(report),
       failure_message: FailureReport.failure_message(report),
       check_name: FailureReport.check_name(report),
       failed_at_index: report.failed_at_index,
@@ -164,16 +165,16 @@ defmodule PropertyDamage.Export.Common do
   @spec generate_filename(FailureReport.t(), atom()) :: String.t()
   def generate_filename(%FailureReport{seed: seed} = report, format) do
     ext = extension_for_format(format)
-    "reproduce_#{seed}_#{failure_signature(report)}#{ext}"
+    "reproduce_#{seed}_#{content_digest(report)}#{ext}"
   end
 
   # A short, stable content signature so two distinct failures that happen to
   # share a seed (across models, or a randomly-seeded run) don't silently
   # overwrite each other, while an identical failure maps to the same file. The
   # failure's identity (kind, check name, failing target) leads.
-  defp failure_signature(%FailureReport{} = report) do
-    {Shrinker.failure_signature(report.failure_reason, variant_index(report)),
-     report.failure_reason, FailureReport.shrunk_sequence(report)}
+  defp content_digest(%FailureReport{} = report) do
+    {Failure.signature(report.failure_reason, variant_index(report)), report.failure_reason,
+     FailureReport.shrunk_sequence(report)}
     |> :erlang.phash2()
     |> Integer.to_string(16)
     |> String.downcase()

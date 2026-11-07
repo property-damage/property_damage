@@ -203,7 +203,7 @@ defmodule PropertyDamage.Log.LogFilterEnvTest do
       {plain, plain_files} = observed(Path.join(dir, "without"), nil)
       {set, set_files} = observed(Path.join(dir, "with"), "only:headers except:seed")
 
-      assert plain.kind == set.kind
+      assert plain.report_kind == set.report_kind
       assert plain.failure_reason == set.failure_reason
       assert plain.failed_at_index == set.failed_at_index
       assert plain.shrink_iterations == set.shrink_iterations

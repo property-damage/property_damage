@@ -272,7 +272,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
     IO.puts("Seed:     #{inspect(failure.seed)}")
 
     IO.puts(
-      "Failure:  #{PropertyDamage.FailureReport.failure_type(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}"
+      "Failure:  #{PropertyDamage.FailureReport.kind(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}"
     )
 
     IO.puts("Commands: #{command_count}")
