@@ -40,7 +40,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
   @readers ~w(
     error.ex
     failure.ex
-    failure_report/context.ex
     model/projection.ex
     model/projection/checks.ex
     variant.ex

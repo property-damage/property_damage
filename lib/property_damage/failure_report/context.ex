@@ -15,12 +15,13 @@ defmodule PropertyDamage.FailureReport.Context do
   # Docs come from `PropertyDamage.Docs.fetch/1` only. A subject prints its
   # whole doc and a supporting item the text up to the first blank line, both
   # as written. Nothing here raises for a module that is not loaded, a
-  # projection without `__compares__/0` or `__checks__/0`, or a failure that
+  # projection without `__compares__/0` or a check list, or a failure that
   # names no projection: the item is left out or prints its gap line.
 
   alias PropertyDamage.{Docs, Expansion, Failure, FailureReport}
   alias PropertyDamage.Failure.Explain
   alias PropertyDamage.Failure.Naming
+  alias PropertyDamage.Model.Projection.Checks
 
   @type item :: %{
           label: String.t(),
@@ -212,7 +213,7 @@ defmodule PropertyDamage.FailureReport.Context do
   defp command_module(_focus), do: nil
 
   # The check function is found by the check's name in the projection's
-  # `__checks__/0`. Without it the check item is left out and the projection
+  # check list. Without it the check item is left out and the projection
   # item stays, so the reader still sees where to look.
   defp check_items(%Failure.Check{projection: projection, name: name})
        when is_atom(projection) and not is_nil(projection) do
@@ -232,8 +233,7 @@ defmodule PropertyDamage.FailureReport.Context do
 
   defp function_of_check(projection, name) do
     projection
-    |> safe_call(:__checks__, [])
-    |> List.wrap()
+    |> check_list()
     |> Enum.find_value(fn
       %{name: ^name, function_name: fun} when is_atom(fun) -> fun
       _other -> nil
@@ -458,6 +458,13 @@ defmodule PropertyDamage.FailureReport.Context do
     Docs.fetch(module)
   rescue
     _error -> :unavailable
+  end
+
+  # The checks of a projection that may be missing or may raise.
+  defp check_list(projection) do
+    Checks.list(projection)
+  rescue
+    _error -> []
   end
 
   # Calls a function of a user module that may be missing or may raise.
