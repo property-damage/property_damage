@@ -107,19 +107,19 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
                Persistence.load_trace(path)
     end
 
-    test "the format-18 refusal comes from the header version, not from the file" do
+    @tag :tmp_dir
+    test "the format-18 refusal comes from the header version, not from the file", %{
+      tmp_dir: dir
+    } do
       # Control: the refusal above is about the header version, not the file.
       # Re-framing the same bytes under header 19 gets past the version check
       # (it may fail later, on its checksum or payload, but not as unsupported).
       path = Path.join(@persistence_fixtures, "format_18_report.pd")
       <<"PD", _v::8, rest::binary>> = File.read!(path)
-      dir = System.tmp_dir!() |> Path.join("fid_#{System.unique_integer([:positive])}")
-      File.mkdir_p!(dir)
       reframed = Path.join(dir, "reframed.pd")
       File.write!(reframed, <<"PD", @current_version::8, rest::binary>>)
 
       refute match?({:error, {:unsupported_format_version, _, _}}, Persistence.load(reframed))
-      File.rm_rf!(dir)
     end
   end
 
@@ -235,12 +235,14 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
     test "FailureReport.kind/1 is the fine kind where the report kind is the outcome" do
       report = idempotency_report()
 
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(FailureReport, :kind, [report]) == :idempotency_violation
       assert Map.get(report, :report_kind) == :check_failed
       assert Failure.kind(report.failure_reason) == :idempotency_violation
     end
 
     test "FailureReport.kind/1 is :unknown without a failure" do
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(FailureReport, :kind, [%{failing_report() | failure_reason: nil}]) == :unknown
     end
 
@@ -251,6 +253,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       refute function_exported?(FailureReport, :failure_type_summary, 1)
       refute function_exported?(FailureReport, :failure_type, 1)
 
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(FailureReport, :kind_summary, [failing_report()]) ==
                "Invariant Violation: at_most_one"
     end

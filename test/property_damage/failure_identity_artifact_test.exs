@@ -32,6 +32,7 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
     report
   end
 
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
   defp signature(reason, index), do: apply(Failure, :signature, [reason, index])
 
   describe "Failure.signature/2" do
