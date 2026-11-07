@@ -163,18 +163,18 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       assert json["report_kind"] == "check_failed"
 
       assert json["check_name"] ==
-               "PropertyDamage.FailureIdentityPersistenceTest.Count.at_most_one"
+               "at_most_one"
     end
 
     test "names the fine kind of each other failure `kind`" do
       report = failing_report()
-      other = Failure.from_signature(:poll_timeout, :eventually_check)
+      other = Failure.from_signature(:adapter_error, nil)
 
       with_other = %{report | other_failures: [%{variant: 0, root: 1, failure: other}]}
       assert [entry] = exported(with_other)["other_failures"]
 
-      assert entry["kind"] == "poll_timeout"
-      assert entry["name"] == "eventually_check"
+      assert entry["kind"] == "adapter_error"
+      assert entry["name"] == nil
       refute Map.has_key?(entry, "failure_type")
     end
   end
@@ -251,10 +251,11 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       refute function_exported?(FailureReport, :failure_type_summary, 1)
       refute function_exported?(FailureReport, :failure_type, 1)
 
-      assert apply(FailureReport, :kind_summary, [failing_report()]) =~ "check"
+      assert apply(FailureReport, :kind_summary, [failing_report()]) ==
+               "Invariant Violation: at_most_one"
     end
 
-    test "Failure.report_kind/1 sorts every failure into one of five outcomes" do
+    test "Failure.report_kind/1 sorts every failure into one of its six outcomes" do
       cases = [
         {:check_failed, Failure.from_signature(:idempotency_violation, nil)},
         {:execution_failed, Failure.from_signature(:adapter_error, nil)},
@@ -269,7 +270,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
         assert Failure.report_kind(failure) == expected
       end
 
-      assert cases |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 5
+      assert cases |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 6
       assert Failure.report_kind(:not_a_failure) == nil
     end
   end
