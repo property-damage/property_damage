@@ -14,7 +14,7 @@ overlapped at the system under test, so the mode detected no race.
 
 The mode cost a second run driver with its own state merge and the
 `Linearization` checker. Five sites chose between the linear and the branching
-path (`run/1`, reproduce, the shrinker, `RunTrace.capture/1` and `Analysis`),
+path (`run/1`, reproduce, the shrinker, `RunTrace.Capture.capture/1` and `Analysis`),
 and the generator, shrinker, trace, positions, failure vocabulary and event log
 each carried branch cases. The mode could not use settle, `@compare` or
 latency, so `Options` refused it beside `latency:`, a `check_mode:` other than
@@ -30,7 +30,7 @@ latency, so `Options` refused it beside `latency:`, a `check_mode:` other than
    and `:suffix` sections. `Failure`, `EventLog.Entry` and the JSON export
    entries lose `branch_id`. The sequence start and stop telemetry metadata
    lose the `branching` and `branch_count` keys.
-3. `run/1`, reproduce, the shrinker, `RunTrace.capture/1` and `Analysis` call
+3. `run/1`, reproduce, the shrinker, `RunTrace.Capture.capture/1` and `Analysis` call
    the one linear path. The shrinker loses its branch strategies.
 4. The refusals that existed only because `branching:` selected another
    engine are removed: its conflicts with `latency:`, with a `check_mode:`

@@ -735,7 +735,7 @@ discriminate the outcomes (DR-035). The two use cases:
 
 Both need full, unshrunk runs of the same plan, which is exactly what a
 `FailureReport` is *not* (it holds a shrunk sequence). Capture those runs with
-`PropertyDamage.RunTrace.capture/1` and feed them to
+`PropertyDamage.RunTrace.Capture.capture/1` and feed them to
 `PropertyDamage.RunComparison.compare/1`. Neither runs a SUT during comparison:
 capture records the runs, `compare/1` is pure data-in/data-out.
 
@@ -746,8 +746,8 @@ same seed (same seed and model ⇒ same plan ⇒ comparable):
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides: identical plan, different SUT behavior.
-before = RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 
 comparison = RunComparison.compare([before, after_])
 ```

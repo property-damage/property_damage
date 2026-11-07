@@ -205,7 +205,7 @@ Three questions follow.
     - Export emits the reference's concrete leaves. The ExUnit export emits
       `only: [replay: path]` when the report has a file and the seed path
       otherwise.
-    - The seed-library replay and `RunTrace.capture/1` recompute from the seed
+    - The seed-library replay and `RunTrace.Capture.capture/1` recompute from the seed
       and record the choices, unchanged.
     - The report's `expansions` and `expansion_counts` describe the shrunk run,
       for the report `run/1` returns and for `shrink_further/2`.

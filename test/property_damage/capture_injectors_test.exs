@@ -1,6 +1,6 @@
 defmodule PropertyDamage.CaptureInjectorsTest do
   @moduledoc """
-  DR-035/DR-033: `RunTrace.capture/1` sets up injector adapters around the run,
+  DR-035/DR-033: `RunTrace.Capture.capture/1` sets up injector adapters around the run,
   so injector (async, command-unattributed) events appear in the captured trace.
   """
   use ExUnit.Case, async: false
@@ -71,7 +71,7 @@ defmodule PropertyDamage.CaptureInjectorsTest do
 
   test "captured trace includes injector events (async, command-unattributed)" do
     trace =
-      RunTrace.capture(
+      RunTrace.Capture.capture(
         model: Model,
         targets: [{Adapter, injectors: [Injector]}],
         seed: 1,
@@ -85,13 +85,13 @@ defmodule PropertyDamage.CaptureInjectorsTest do
   end
 
   test "without injectors the trace has no injected events" do
-    trace = RunTrace.capture(model: Model, targets: [Adapter], seed: 1, max_commands: 3)
+    trace = RunTrace.Capture.capture(model: Model, targets: [Adapter], seed: 1, max_commands: 3)
     refute Enum.any?(RunTrace.async_entries(trace), &match?(%{event: %Injected{}}, &1))
   end
 
   test "a failing injector setup yields a trace with a setup-failed outcome" do
     trace =
-      RunTrace.capture(
+      RunTrace.Capture.capture(
         model: Model,
         targets: [{Adapter, injectors: [PropertyDamage.Test.RefusingInjector]}],
         seed: 1,

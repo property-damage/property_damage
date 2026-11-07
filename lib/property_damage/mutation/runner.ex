@@ -5,6 +5,7 @@ defmodule PropertyDamage.Mutation.Runner do
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate, Reporter}
+  alias PropertyDamage.RunTrace.Capture
 
   @doc """
   Runs mutation testing against a model.
@@ -169,7 +170,7 @@ defmodule PropertyDamage.Mutation.Runner do
     # event log, so relying on it yielded zero events (and thus zero mutations)
     # for any passing model.
     trace =
-      PropertyDamage.RunTrace.capture(
+      Capture.capture(
         model: config.model,
         targets: [PropertyDamage.Target.to_entry(config.target)],
         seed: :erlang.unique_integer([:positive]),

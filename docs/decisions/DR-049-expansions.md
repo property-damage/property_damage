@@ -264,7 +264,7 @@ Four questions follow.
     - Persistence is version 13. Loaders refuse version 12 and older.
     - Paths that run a failure again carry each target's choices:
       the shrinker, `shrink_further/2`, `Replay`, the seed-library replay
-      (which recomputes from the seed) and export. `RunTrace.capture/1`
+      (which recomputes from the seed) and export. `RunTrace.Capture.capture/1`
       recomputes from the seed and records the choices. `shrink_further/2` and
       `Replay` raise when a target's choices are not recorded.
       `Analysis.isolate_trigger/2` raises for a target that ran leaves,

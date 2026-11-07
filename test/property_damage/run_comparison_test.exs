@@ -269,9 +269,15 @@ defmodule PropertyDamage.RunComparisonTest do
     def execute(%DoThing{}, _ctx, _rt), do: {:ok, []}
   end
 
-  describe "RunTrace.capture/1" do
+  describe "RunTrace.Capture.capture/1" do
     test "captures a full unshrunk run as a :generated trace" do
-      trace = RunTrace.capture(model: RealModel, targets: [RealAdapter], seed: 1, max_commands: 4)
+      trace =
+        RunTrace.Capture.capture(
+          model: RealModel,
+          targets: [RealAdapter],
+          seed: 1,
+          max_commands: 4
+        )
 
       assert %RunTrace{plan_source: :generated, outcome: :pass} = trace
       assert is_binary(trace.plan_fingerprint)
@@ -280,8 +286,8 @@ defmodule PropertyDamage.RunComparisonTest do
     end
 
     test "same seed + run_number capture the same plan (fingerprint-equal)" do
-      a = RunTrace.capture(model: RealModel, targets: [RealAdapter], seed: 7)
-      b = RunTrace.capture(model: RealModel, targets: [RealAdapter], seed: 7)
+      a = RunTrace.Capture.capture(model: RealModel, targets: [RealAdapter], seed: 7)
+      b = RunTrace.Capture.capture(model: RealModel, targets: [RealAdapter], seed: 7)
       assert a.plan_fingerprint == b.plan_fingerprint
     end
   end

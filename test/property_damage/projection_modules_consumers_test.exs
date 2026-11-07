@@ -98,7 +98,9 @@ defmodule PropertyDamage.ProjectionModulesConsumersTest do
   end
 
   test "a trace's derived state holds it" do
-    trace = RunTrace.capture(model: Model, targets: [{Adapter, []}], seed: 1, max_commands: 2)
+    trace =
+      RunTrace.Capture.capture(model: Model, targets: [{Adapter, []}], seed: 1, max_commands: 2)
+
     assert %{pings: 0} = RunTrace.state_at(trace, 0)[OnlyChecks]
   end
 end

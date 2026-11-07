@@ -94,7 +94,7 @@ defmodule PropertyDamage.MutationTest do
   # passes. The first value mutation of any field (an empty string or a zero)
   # breaks one of these rules, so a mutation is what the check catches.
   # Mutation testing harvests sample events from the baseline run via
-  # RunTrace.capture/1. Used by the end-to-end and progress tests below.
+  # RunTrace.Capture.capture/1. Used by the end-to-end and progress tests below.
   defmodule WellFormedItemCheck do
     use PropertyDamage.Model.Projection
 
@@ -935,7 +935,7 @@ defmodule PropertyDamage.MutationTest do
         )
 
       # The regression: a model whose suite passes must still yield sample events
-      # (harvested via RunTrace.capture), so mutations are generated and tested.
+      # (harvested via RunTrace.Capture.capture), so mutations are generated and tested.
       assert %Report{} = report
       assert report.total > 0
 
