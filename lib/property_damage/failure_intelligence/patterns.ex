@@ -18,7 +18,7 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
         }
 
   @type pattern :: %{
-          failure_type: atom(),
+          kind: atom(),
           check_name: atom() | nil,
           command_types: [atom()],
           event_types: [atom()],
@@ -151,7 +151,7 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
   def extract_common_traits(fingerprints) do
     # Find values that are the same across all fingerprints
     %{
-      failure_type: common_value(fingerprints, :failure_type),
+      kind: common_value(fingerprints, :kind),
       check_name: common_value(fingerprints, :check_name),
       command_type: common_value(fingerprints, :command_type),
       error_category: common_value(fingerprints, :error_category),
@@ -257,7 +257,7 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
       |> Enum.uniq()
 
     %{
-      failure_type: traits.failure_type,
+      kind: traits.kind,
       check_name: traits.check_name,
       command_types: command_types,
       event_types: event_types,
@@ -269,11 +269,11 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
 
   defp generate_pattern_description(traits, command_types, count) do
     # Keyed on the real `PropertyDamage.Failure.kind/1` vocabulary that
-    # fingerprints actually carry (via `FailureReport.failure_type/1`); the old
+    # fingerprints actually carry (via `FailureReport.kind/1`); the old
     # `:check_failed`/`:invariant_violated`/... atoms never matched, so every
     # cluster degraded to the generic "Failure".
     type_desc =
-      case traits.failure_type do
+      case traits.kind do
         :check_failed -> "Check failure"
         :projection_violation -> "Invariant violation"
         :idempotency_violation -> "Idempotency violation"

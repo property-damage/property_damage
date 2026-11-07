@@ -1330,6 +1330,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes the `window_size` option. Write a threshold as a `@check` in your own
   projection that calls `compute_metrics/1`. The moduledoc shows the recipe.
 
+- **Breaking: the fingerprint field `failure_type` is `kind` (DR-064).**
+  `FailureIntelligence.Fingerprint` fills `kind` and `check_name` from the
+  components of `Failure.signature/2`, so a fingerprint names a failure as its
+  replay artifact does. The similarity breakdown key and weight key, and the
+  cluster pattern key, are `kind` too, and `Fingerprint.from_raw_failure/1`
+  reads `:kind`. Fingerprint hashes and similarity scores do not change.
+
 - **Breaking: `FailureIntelligence.verify_fix/3` replays the shrunk sequence
   and compares the failure signature (DR-064).** It replays the commands in
   `report.replay` on the target you pass, through

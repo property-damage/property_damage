@@ -71,7 +71,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         }
       end)
 
-    kind = Keyword.get(opts, :failure_type, :check_failed)
+    kind = Keyword.get(opts, :kind, :check_failed)
     check_name = Keyword.get(opts, :check_name, :balance_non_negative)
     message = Keyword.get(opts, :message, "Balance -100 is negative")
 
@@ -107,12 +107,12 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   def cluster_a_failure(seed), do: create_failure_report(seed: seed)
 
   # Cluster-B shaped failure: an exception during CreateAccount, no events. This
-  # is deliberately dissimilar to cluster A (different failure_type, check_name,
+  # is deliberately dissimilar to cluster A (different kind, check_name,
   # command, events) so the two form distinct, non-overlapping clusters.
   def cluster_b_failure(seed) do
     create_failure_report(
       seed: seed,
-      failure_type: :adapter_error,
+      kind: :adapter_error,
       check_name: nil,
       command: %TestCommand.CreateAccount{
         account_ref: "acc_2",
@@ -128,7 +128,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   def singleton_failure(seed) do
     create_failure_report(
       seed: seed,
-      failure_type: :settle_timeout,
+      kind: :settle_timeout,
       check_name: nil,
       command: %TestCommand.CreditAccount{account_ref: "acc_3", amount: 5, currency: "GBP"},
       events: [%TestEvent.AccountCredited{account_ref: "acc_3", amount: 5, new_balance: 5}],
@@ -142,10 +142,10 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
   describe "Fingerprint.from_failure_report/1" do
     test "extracts failure type" do
-      report = create_failure_report(failure_type: :projection_violation)
+      report = create_failure_report(kind: :projection_violation)
       fp = Fingerprint.from_failure_report(report)
 
-      assert fp.failure_type == :projection_violation
+      assert fp.kind == :projection_violation
     end
 
     test "extracts check name" do
@@ -202,15 +202,15 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "categorizes error correctly" do
-      check_failure = create_failure_report(failure_type: :check_failed)
+      check_failure = create_failure_report(kind: :check_failed)
       fp = Fingerprint.from_failure_report(check_failure)
       assert fp.error_category == :check_violation
 
-      invariant = create_failure_report(failure_type: :projection_violation)
+      invariant = create_failure_report(kind: :projection_violation)
       fp = Fingerprint.from_failure_report(invariant)
       assert fp.error_category == :invariant_violation
 
-      precond = create_failure_report(failure_type: :adapter_error)
+      precond = create_failure_report(kind: :adapter_error)
       fp = Fingerprint.from_failure_report(precond)
       assert fp.error_category == :adapter_error
     end
@@ -270,14 +270,14 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test "very different fingerprints have low score" do
       report1 =
         create_failure_report(
-          failure_type: :check_failed,
+          kind: :check_failed,
           check_name: :balance_non_negative,
           command: %TestCommand.DebitAccount{account_ref: "acc_1", amount: 100, currency: "USD"}
         )
 
       report2 =
         create_failure_report(
-          failure_type: :adapter_error,
+          kind: :adapter_error,
           check_name: nil,
           command: %TestCommand.CreateAccount{
             account_ref: "acc_2",
@@ -322,7 +322,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert Map.has_key?(comparison, :is_similar)
 
       breakdown = comparison.breakdown
-      assert Map.has_key?(breakdown, :failure_type)
+      assert Map.has_key?(breakdown, :kind)
       assert Map.has_key?(breakdown, :check_name)
       assert Map.has_key?(breakdown, :command_type)
     end
@@ -351,8 +351,8 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "returns false for dissimilar fingerprints" do
-      report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
-      report2 = create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+      report1 = create_failure_report(kind: :check_failed, check_name: :check_a)
+      report2 = create_failure_report(kind: :adapter_error, check_name: nil, events: [])
 
       fp1 = Fingerprint.from_failure_report(report1)
       fp2 = Fingerprint.from_failure_report(report2)
@@ -379,7 +379,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       others = [
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+        create_failure_report(kind: :adapter_error, check_name: nil, events: [])
       ]
 
       target_fp = Fingerprint.from_failure_report(target)
@@ -414,7 +414,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         create_failure_report(seed: 111),
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+        create_failure_report(kind: :adapter_error, check_name: nil, events: [])
       ]
 
       clusters = Patterns.cluster_failures(failures)
@@ -508,28 +508,28 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   describe "Patterns pattern descriptions (failure-type vocabulary)" do
     test "a projection_violation cluster reads as an invariant violation, not generic Failure" do
       failures = [
-        create_failure_report(seed: 111, failure_type: :projection_violation),
-        create_failure_report(seed: 222, failure_type: :projection_violation)
+        create_failure_report(seed: 111, kind: :projection_violation),
+        create_failure_report(seed: 222, kind: :projection_violation)
       ]
 
       [cluster | _] = Patterns.cluster_failures(failures)
 
       # The fingerprint carries a real Failure.kind (:projection_violation); the
       # cluster description must reflect it, not degrade to the generic "Failure".
-      assert cluster.pattern.failure_type == :projection_violation
+      assert cluster.pattern.kind == :projection_violation
       assert cluster.pattern.description =~ "Invariant violation"
       refute cluster.pattern.description =~ ~r/^Failure\b/
     end
 
     test "a check_failed cluster reads as a check failure, not generic Failure" do
       failures = [
-        create_failure_report(seed: 111, failure_type: :check_failed),
-        create_failure_report(seed: 222, failure_type: :check_failed)
+        create_failure_report(seed: 111, kind: :check_failed),
+        create_failure_report(seed: 222, kind: :check_failed)
       ]
 
       [cluster | _] = Patterns.cluster_failures(failures)
 
-      assert cluster.pattern.failure_type == :check_failed
+      assert cluster.pattern.kind == :check_failed
       assert cluster.pattern.description =~ "Check failure"
       refute cluster.pattern.description =~ ~r/^Failure\b/
     end
@@ -580,8 +580,8 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "detects dissimilar failures" do
-      report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
-      report2 = create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+      report1 = create_failure_report(kind: :check_failed, check_name: :check_a)
+      report2 = create_failure_report(kind: :adapter_error, check_name: nil, events: [])
 
       refute FailureIntelligence.similar?(report1, report2)
     end
@@ -607,7 +607,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failures = [
         create_failure_report(seed: 222),
         create_failure_report(seed: 333),
-        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+        create_failure_report(kind: :adapter_error, check_name: nil, events: [])
       ]
 
       results = FailureIntelligence.find_similar(target, failures)
@@ -688,7 +688,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failures = [
         create_failure_report(seed: 111),
         create_failure_report(seed: 222),
-        create_failure_report(failure_type: :adapter_error, check_name: nil, events: [])
+        create_failure_report(kind: :adapter_error, check_name: nil, events: [])
       ]
 
       groups = FailureIntelligence.group_by_fingerprint(failures)
@@ -802,7 +802,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # A fresh cluster-A failure should map onto the cluster-A group with a
       # perfect score.
       assert {cluster, score} = Patterns.find_best_match(cluster_a_failure(99), clusters)
-      assert cluster.pattern.failure_type == :check_failed
+      assert cluster.pattern.kind == :check_failed
       assert_in_delta score, 1.0, 0.0001
     end
 
@@ -842,9 +842,9 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # The big cluster is the check-failure group; the mid cluster is the
       # exception group.
       [big, mid, _lone] = clusters
-      assert big.pattern.failure_type == :check_failed
+      assert big.pattern.kind == :check_failed
       assert big.pattern.command_types == [TestCommand.DebitAccount]
-      assert mid.pattern.failure_type == :adapter_error
+      assert mid.pattern.kind == :adapter_error
     end
 
     test "analyze/2 reports two clusters, one singleton, and the most common pattern",
@@ -856,7 +856,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert analysis.total_failures == 6
 
       # Most common pattern is the largest cluster (the 3 check failures).
-      assert analysis.most_common_pattern.failure_type == :check_failed
+      assert analysis.most_common_pattern.kind == :check_failed
       assert analysis.most_common_pattern.command_types == [TestCommand.DebitAccount]
 
       # Membership: the two significant clusters cover 5 of the 6 failures.
@@ -883,13 +883,13 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       cluster = FailureIntelligence.match_pattern(cluster_a_failure(99), clusters)
 
       refute is_nil(cluster)
-      assert cluster.pattern.failure_type == :check_failed
+      assert cluster.pattern.kind == :check_failed
     end
 
     test "returns nil for a novel failure that matches no cluster", %{clusters: clusters} do
       novel =
         create_failure_report(
-          failure_type: :poll_error,
+          kind: :poll_error,
           check_name: nil,
           command: %TestCommand.CreditAccount{account_ref: "x", amount: 1, currency: "JPY"},
           events: [],

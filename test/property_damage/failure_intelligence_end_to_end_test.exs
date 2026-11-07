@@ -44,7 +44,7 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
     test "reports why the other defect differs", %{drift: [target | _], crash: crash} do
       %{is_similar: false, breakdown: breakdown} = FI.compare(target, crash)
 
-      assert breakdown.failure_type == 0.0
+      assert breakdown.kind == 0.0
       assert breakdown.check_name == 0.0
       assert breakdown.command_type == 1.0
     end
@@ -68,9 +68,21 @@ defmodule PropertyDamage.FailureIntelligenceEndToEndTest do
       fingerprint = FI.fingerprint(target)
 
       assert fingerprint.seed == 7
-      assert fingerprint.failure_type == :check_failed
+      assert fingerprint.kind == :check_failed
       assert fingerprint.check_name == :balance_matches_ledger
       assert fingerprint.command_type == G.Commands.Withdraw
+    end
+  end
+
+  describe "fingerprint/1 and the replay artifact" do
+    test "names the failure by the components of its signature", %{drift: drift, crash: crash} do
+      for report <- drift ++ [crash] do
+        {kind, name, _variant_index} = report.replay.failure.signature
+        fingerprint = FI.fingerprint(report)
+
+        assert fingerprint.kind == kind
+        assert fingerprint.check_name == name
+      end
     end
   end
 

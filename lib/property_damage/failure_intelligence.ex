@@ -78,7 +78,7 @@ defmodule PropertyDamage.FailureIntelligence do
   ## Example
 
       fingerprint = PropertyDamage.FailureIntelligence.fingerprint(failure)
-      # => %Fingerprint{failure_type: :check_failed, check_name: :balance_valid, ...}
+      # => %Fingerprint{kind: :check_failed, check_name: :balance_valid, ...}
   """
   @spec fingerprint(FailureReport.t()) :: Fingerprint.t()
   defdelegate fingerprint(failure), to: Fingerprint, as: :from_failure_report
@@ -151,7 +151,7 @@ defmodule PropertyDamage.FailureIntelligence do
       comparison = PropertyDamage.FailureIntelligence.compare(failure1, failure2)
       # => %{
       #   score: 0.85,
-      #   breakdown: %{failure_type: 1.0, check_name: 1.0, command_type: 0.8, ...},
+      #   breakdown: %{kind: 1.0, check_name: 1.0, command_type: 0.8, ...},
       #   is_similar: true
       # }
   """

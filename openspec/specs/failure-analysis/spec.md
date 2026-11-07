@@ -85,7 +85,7 @@ The system SHALL extract comparable features from each failure report, producing
 #### Scenario: Fingerprint from a check failure
 
 - **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:check_failed` naming `:NonNegativeBalance` (so `FailureReport.kind/1` is `:check_failed` and `check_name/1` is `:NonNegativeBalance`)
-- **THEN** the fingerprint SHALL contain `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
+- **THEN** the fingerprint SHALL contain `kind: :check_failed` and `check_name: :NonNegativeBalance`
 - **AND** the fingerprint SHALL include the command type that triggered the failure
 - **AND** the fingerprint SHALL include the event types produced before failure
 
@@ -101,7 +101,7 @@ The system SHALL compute a weighted similarity score between two failure fingerp
 #### Scenario: Weighted dimension comparison
 
 - **WHEN** two fingerprints are compared
-- **THEN** the similarity score SHALL be computed as a weighted sum across dimensions: failure_type (0.20), check_name (0.15), command_type (0.15), command_shape (0.10), event_types (0.10), sequence_shape (0.10), error_category (0.10), error_pattern (0.10)
+- **THEN** the similarity score SHALL be computed as a weighted sum across dimensions: kind (0.20), check_name (0.15), command_type (0.15), command_shape (0.10), event_types (0.10), sequence_shape (0.10), error_category (0.10), error_pattern (0.10)
 
 #### Scenario: Similarity threshold
 
