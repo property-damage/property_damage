@@ -107,6 +107,57 @@ shrinker_config: PropertyDamage.Shrinker.Config.new(
 )
 ```
 
+### Measuring Shrink Time
+
+A shrink emits three telemetry events, so you can see where its time goes
+before you tune its budget:
+
+- `[:property_damage, :shrink, :start]` once, with `original_length` in the
+  metadata.
+- `[:property_damage, :shrink, :iteration]` for each candidate it tries. The
+  measurements are `iteration` and `duration` (native time units); the
+  metadata is `current_length` and `success`, whether the shrinker adopted the
+  candidate.
+- `[:property_damage, :shrink, :stop]` once. The measurements are `duration`
+  (native time units), `iterations`, and three totals in milliseconds:
+  `candidate_ms` (the time spent running candidates), and `setup_ms` and
+  `teardown_ms` (the time your adapter's `setup/1` and `teardown/1` took
+  across all candidates). The metadata is `original_length`, `shrunk_length`
+  and `stop`, why the shrink ended.
+
+If `setup_ms` and `teardown_ms` are most of `candidate_ms`, the shrink spends
+its time bringing your system up and down, not running commands. Lowering
+`max_iterations` or `max_time_ms` bounds that cost; making `setup/1` cheaper
+reduces it.
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+test_pid = self()
+
+:telemetry.attach(
+  "shrink-timing",
+  [:property_damage, :shrink, :stop],
+  fn _event, measurements, _metadata, _config ->
+    send(test_pid, {:shrink_timing, measurements})
+  end,
+  nil
+)
+
+PropertyDamage.Telemetry.shrink_stop(System.system_time(), %{
+  iterations: 12,
+  candidate_ms: 840.0,
+  setup_ms: 600.0,
+  teardown_ms: 120.0
+})
+
+receive do
+  {:shrink_timing, m} ->
+    IO.puts("adapter share: #{round((m.setup_ms + m.teardown_ms) / m.candidate_ms * 100)}%")
+end
+
+:telemetry.detach("shrink-timing")
+```
+
 ## Scenario-Specific Models
 
 Create focused models that bias generation toward specific behaviors. This is

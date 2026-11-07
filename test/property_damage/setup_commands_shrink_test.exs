@@ -14,9 +14,10 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
     Generator,
     Placeholder,
     PlaceholderRegistry,
-    Sequence,
-    Shrinker
+    Sequence
   }
+
+  alias PropertyDamage.Test.ShrinkSupport
 
   alias PropertyDamage.Test.SetupCommands
 
@@ -347,7 +348,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       root = divergent_root(Sequence.to_list(sequence))
 
       result =
-        Shrinker.shrink(sequence,
+        ShrinkSupport.shrink(sequence,
           failed_at_index: root,
           model: CountedModel,
           targets: targets!(flip_targets(%{}, %{fail_count: :always})),

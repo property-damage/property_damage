@@ -5,7 +5,7 @@ defmodule PropertyDamage.ShrinkerTest do
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.CreateItem
-  alias PropertyDamage.Test.{FailingModel, SimpleAdapter}
+  alias PropertyDamage.Test.{FailingModel, ShrinkSupport, SimpleAdapter}
 
   # ============================================================================
   # Failure Equivalence Tests
@@ -137,7 +137,7 @@ defmodule PropertyDamage.ShrinkerTest do
         Failure.check_failed(:high_limit, "Quantity 250 exceeds high limit of 200")
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           failure_reason: failure_reason,
           model: MultiCheckModel,
@@ -171,7 +171,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           # No failure_reason provided
           model: MultiCheckModel,
@@ -209,7 +209,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           model: FailingModel,
           targets: [
@@ -240,7 +240,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 2,
           model: FailingModel,
           targets: [
@@ -268,7 +268,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           model: FailingModel,
           targets: [
@@ -293,7 +293,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -314,7 +314,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -335,7 +335,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -358,7 +358,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "X", quantity: 400}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -384,7 +384,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "VeryLongNameHere", quantity: 400}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -416,7 +416,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: name, quantity: 400}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -441,7 +441,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "Test", quantity: 101}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -464,7 +464,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "LongName", quantity: 200}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -496,7 +496,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 3,
           model: FailingModel,
           targets: [
@@ -522,7 +522,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           model: FailingModel,
           targets: [
@@ -539,7 +539,7 @@ defmodule PropertyDamage.ShrinkerTest do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
           targets: [
@@ -593,7 +593,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 2,
           model: ProbeModel,
           targets: [
@@ -630,7 +630,7 @@ defmodule PropertyDamage.ShrinkerTest do
 
       # Total quantity: 110 > 100, triggers failure
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 4,
           model: ProbeModel,
           targets: [
@@ -671,7 +671,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 1,
           model: ProbeModel,
           targets: [
@@ -705,7 +705,7 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       result =
-        Shrinker.shrink(commands,
+        ShrinkSupport.shrink(commands,
           failed_at_index: 4,
           model: ProbeModel,
           targets: [

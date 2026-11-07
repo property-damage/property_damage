@@ -52,9 +52,10 @@ defmodule PropertyDamage.Shrinker do
   sequence's setup commands leave (`c:PropertyDamage.Model.setup_each/0`), as
   generation does, so a root that needs fixture state is valid.
 
-  An attempt whose setup failed in any target (kind `:setup_failed`: an
-  adapter's `setup/1`, a setup command, a check on a setup command's event,
-  or the completion rule) is not a counterexample either. It says nothing
+  An attempt whose setup failed in any target (the oracle answers
+  `:setup_failed`: an adapter's `setup/1`, a setup command, a check on a
+  setup command's event, or the completion rule) is not a counterexample
+  either. It says nothing
   about the roots, so the candidate is rejected whatever the original
   failure, and the attempt counts against the budget.
 
@@ -111,20 +112,28 @@ defmodule PropertyDamage.Shrinker do
 
   ```elixir
   # After a failure at index 5 in the first target
+  reason = PropertyDamage.Failure.check_failed(:balance_invariant, "...")
+  targets = [%PropertyDamage.Target{adapter: MyAdapter, name: "MyAdapter", index: 0}]
+
+  oracle =
+    PropertyDamage.Runner.shrink_oracle(
+      %PropertyDamage.Runner.Context{model: MyModel, targets: targets, seed: run_seed},
+      PropertyDamage.Failure.signature(reason, 0)
+    )
+
   shrunk = Shrinker.shrink(
     sequence,
     failed_at_index: 5,
-    failure_reason: PropertyDamage.Failure.check_failed(:balance_invariant, "..."),
+    failure_reason: reason,
     variant_index: 0,
     model: MyModel,
-    targets: [%PropertyDamage.Target{adapter: MyAdapter, name: "MyAdapter", index: 0}],
+    targets: targets,
+    oracle: oracle,
     rng_seed: run_seed,
     config: config
   )
   ```
   """
-
-  alias PropertyDamage.Log.Cap
 
   alias PropertyDamage.{
     Expansion,
@@ -134,16 +143,15 @@ defmodule PropertyDamage.Shrinker do
     Placeholder,
     PlaceholderRegistry,
     ReplayArtifact,
-    Scheduler,
     Sequence,
     Settle,
-    Stutter
+    Telemetry
   }
 
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Sequence.Validator
 
-  alias PropertyDamage.Shrinker.{Config, Graph}
+  alias PropertyDamage.Shrinker.{Config, Graph, Outcome}
 
   @typedoc """
   Result of shrinking.
@@ -178,28 +186,22 @@ defmodule PropertyDamage.Shrinker do
     Failure.signature(reason1, index1) == Failure.signature(reason2, index2)
   end
 
-  # Stutter reproduction config for shrinking (DR-029). A stutter failure
-  # (idempotency violation / stutter execution failure) only reproduces if the
-  # offending command is stuttered, but its index shifts as truncation removes
-  # earlier commands, so the original probabilistic decision is not stable.
-  # Forcing probability 1.0 (keeping the original command filter, comparison, and
-  # max_repeats) makes every eligible command stutter on every reproduction, so
-  # the violation reproduces regardless of position. Non-stutter failures return
-  # nil so the shrinker re-runs without stutter, exactly as it did before stutter was shrinkable.
-  defp stutter_repro_config({kind, _name, _variant_index}, %Stutter.Config{} = config)
-       when kind in [:idempotency_violation, :stutter_execution_failed] do
-    %{config | probability: 1.0, enabled: true}
-  end
-
-  defp stutter_repro_config(_signature, _config), do: nil
-
   @doc """
   Shrink a failing command sequence.
 
-  Every candidate is a fresh execution of the run's targets. A candidate runs
-  through `PropertyDamage.Scheduler.run/1` with every target, which sets each
-  target up and tears it down again, so nothing (an event queue, a mock
-  registry, adapter state) carries over from one attempt to the next.
+  The shrinker does not run a candidate itself. It hands the candidate's
+  plan (`t:PropertyDamage.Runner.plan/0`) and a fresh mint epoch to the
+  `:oracle`, and adopts the candidate when the oracle's
+  `PropertyDamage.Shrinker.Outcome` is the original failure: `:failed`, with
+  the original signature, at the same or an earlier root. The oracle
+  `PropertyDamage.Runner.shrink_oracle/2` builds makes every candidate a
+  fresh execution of the run's targets: it runs the plan through
+  `PropertyDamage.Runner.execute/2` with every target, which sets each target
+  up and tears it down again, so nothing (an event queue, a mock registry,
+  adapter state) carries over from one attempt to the next. A candidate the
+  shrinker rejects before it runs (see "Invalid Candidates" in the moduledoc,
+  and "Expansions" below) never reaches the oracle, and still counts as an
+  attempt.
 
   The setup commands are never part of a candidate: no strategy removes,
   reorders or simplifies one, and every attempt executes the sequence's setup
@@ -273,21 +275,22 @@ defmodule PropertyDamage.Shrinker do
     - `:model` - Model module (required)
     - `:targets` - The run's `[%PropertyDamage.Target{}]`, reference first
       (required)
-    - `:concurrency`, `:compare`, `:check_mode` - as on `PropertyDamage.run/1`
-      (defaults `:serial`, `[converge_within: 5_000]`, `:halt`)
-    - `:rng_seed` - The run's effective seed: each attempt runs as run 0 of it,
-      so the per-target RNG and the stutter decisions match the original run
-      (default `0`)
-    - `:run_nonce` - The run nonce for client-minted values (DR-034)
-    - `:mint_epoch_counter` - `:atomics` counter every attempt draws a fresh
-      mint epoch from (DR-034; default a new counter, so epochs start at 1)
+    - `:oracle` - A function `(plan, mint_epoch) ->
+      %PropertyDamage.Shrinker.Outcome{}` that runs a candidate and says what
+      it did (required). `PropertyDamage.Runner.shrink_oracle/2` builds the
+      one that runs it on every target; how a candidate runs (concurrency,
+      the convergence bound, the check mode, stutter, the run nonce) is the
+      oracle's.
+    - `:rng_seed` - The run's effective seed: the teardown commands and the
+      expansions of every candidate are drawn from it (default `0`)
+    - `:mint_epoch_counter` - `:atomics` counter every candidate that reaches
+      the oracle draws a fresh mint epoch from (DR-034; default a new
+      counter, so epochs start at 1)
     - `:expansion` - What every target ran for the failing sequence
       (the run's expansion choices, or a report trace's
       `%{name => [choice]}`); default `nil`, every root runs as itself
     - `:root_ids` - The stable id of each root of `sequence`, the ids
       `:expansion` keys its choices by (default: each root's index)
-    - `:stutter_config` - The run's stutter configuration; a stutter failure is
-      reproduced with stutter forced on (DR-029)
     - `:external_markers` - The run's atom markers (see `PropertyDamage.External`).
       The teardown draw, the expansion walk and the replay check of every
       candidate simulate commands again, and each turns an event field holding
@@ -319,6 +322,8 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_linear(sequence, opts) do
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
     commands = Sequence.to_list(sequence)
+    started_at = System.system_time()
+    Telemetry.shrink_start(%{original_length: length(commands)})
 
     shrink_state =
       opts
@@ -360,6 +365,17 @@ defmodule PropertyDamage.Shrinker do
     shrink_state = cycle(shrink_state)
 
     end_time = System.monotonic_time(:millisecond)
+    stop = stop_reason(shrink_state, end_time)
+
+    Telemetry.shrink_stop(
+      started_at,
+      Map.merge(timing_totals(shrink_state), %{
+        iterations: shrink_state.iterations,
+        original_length: length(commands),
+        shrunk_length: length(shrink_state.commands),
+        stop: stop
+      })
+    )
 
     # Carry the remapped registry so the shrunk sequence (reported and
     # replayed) still resolves its externals, and the teardown commands generated
@@ -375,7 +391,7 @@ defmodule PropertyDamage.Shrinker do
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time,
       cycles: shrink_state.cycles,
-      stop: stop_reason(shrink_state, end_time)
+      stop: stop
     }
   end
 
@@ -413,13 +429,15 @@ defmodule PropertyDamage.Shrinker do
       # Every command's spec as the model lists it, built once per shrink.
       specs: Model.spec_table(Keyword.fetch!(opts, :model)),
       targets: Keyword.fetch!(opts, :targets),
-      concurrency: Keyword.get(opts, :concurrency, :serial),
-      compare: Keyword.get(opts, :compare, converge_within: 5_000),
-      check_mode: Keyword.get(opts, :check_mode, :halt),
-      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
+      # Runs a candidate and says what it did (see `shrink/2`).
+      oracle: Keyword.fetch!(opts, :oracle),
       config: Keyword.get(opts, :config, Config.new()),
       external_markers: Keyword.get(opts, :external_markers, []),
       iterations: 0,
+      # Microseconds the candidates took (slot 1), and the microseconds their
+      # adapters spent in setup/1 (slot 2) and teardown/1 (slot 3); only the
+      # stop event reads them.
+      timers: :atomics.new(3, signed: false),
       # Candidates adopted so far, and the shrink cycles run.
       adopted: 0,
       cycles: 0,
@@ -429,20 +447,14 @@ defmodule PropertyDamage.Shrinker do
       replay_basis: MapSet.new(),
       start_time: System.monotonic_time(:millisecond),
       original_signature: original_signature,
-      # Stutter reproduction (DR-029): when the original failure is a stutter
-      # failure, reproduce it during shrinking with stutter forced on (prob 1.0)
-      # so index-shift under truncation cannot un-stutter the offending command.
-      # nil for non-stutter failures, leaving normal shrinking unperturbed.
-      stutter_config:
-        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
-      # The run's effective seed: every attempt runs as run 0 of it, so the
-      # per-target RNG and the stutter base match the original run.
+      # The run's effective seed: the teardown commands and the expansions of
+      # every candidate are drawn from it, as the original run drew them.
       rng_seed: Keyword.get(opts, :rng_seed) || 0,
-      # Client-minted run-scoped values (DR-034): each shrink attempt is a fresh
-      # SUT execution, so it draws a distinct mint_epoch from this monotonic
-      # counter. On a non-resettable SUT that keeps attempts from re-sending the
-      # exploration run's (epoch 0) minted values and colliding with it.
-      run_nonce: Keyword.get(opts, :run_nonce),
+      # Client-minted run-scoped values (DR-034): each candidate the oracle
+      # runs is a fresh SUT execution, so it draws a distinct mint_epoch from
+      # this monotonic counter. On a non-resettable SUT that keeps candidates
+      # from re-sending the exploration run's (epoch 0) minted values and
+      # colliding with it.
       mint_epoch_counter:
         Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false),
       # Every target's choices in the failing run, by target name and root id;
@@ -1064,22 +1076,70 @@ defmodule PropertyDamage.Shrinker do
     # The candidate's registry has its producer_link remapped to the candidate's
     # positions (DR-021), so externals resolve against the shrunk sequence's own
     # indices.
-    with {:failed, reason, variant_index, root} <-
-           run_linear_attempt(keyed, positions, remap_registry(state.registry, positions), state),
-         true <- check_failure_equivalence(reason, variant_index, state.original_signature),
-         offset = generation_offset(positions, root),
-         false <- later?(offset, state.failing_offset) do
-      %{
-        state
-        | commands: commands,
-          positions: positions,
-          failing_offset: offset || state.failing_offset,
-          adopted: state.adopted + 1
-      }
-    else
-      _other -> nil
+    started = System.monotonic_time()
+    outcome = attempt(keyed, positions, remap_registry(state.registry, positions), state)
+    elapsed = System.monotonic_time() - started
+    offset = generation_offset(positions, outcome.root)
+
+    adopted =
+      if reproduces?(outcome, state.original_signature) and
+           not later?(offset, state.failing_offset) do
+        %{
+          state
+          | commands: commands,
+            positions: positions,
+            failing_offset: offset || state.failing_offset,
+            adopted: state.adopted + 1
+        }
+      end
+
+    record_candidate(state, outcome, elapsed)
+
+    Telemetry.shrink_iteration(
+      state.iterations,
+      %{current_length: length((adopted || state).commands), success: adopted != nil},
+      elapsed
+    )
+
+    adopted
+  end
+
+  # Adds the candidate's time and its adapters' setup and teardown time to
+  # the totals of the stop event.
+  defp record_candidate(state, outcome, elapsed) do
+    :atomics.add(state.timers, 1, System.convert_time_unit(elapsed, :native, :microsecond))
+
+    case outcome.adapter_ms do
+      %{setup: setup, teardown: teardown} ->
+        :atomics.add(state.timers, 2, round(setup * 1000))
+        :atomics.add(state.timers, 3, round(teardown * 1000))
+
+      nil ->
+        :ok
     end
   end
+
+  defp timing_totals(state) do
+    %{
+      candidate_ms: :atomics.get(state.timers, 1) / 1000,
+      setup_ms: :atomics.get(state.timers, 2) / 1000,
+      teardown_ms: :atomics.get(state.timers, 3) / 1000
+    }
+  end
+
+  # Whether a candidate's outcome is the original failure. Without an
+  # original signature the shrinker cannot prove equivalence, so it accepts
+  # any failure except a placeholder-resolution one: that failure appears only
+  # because a producing command was removed, so adopting it would pass off a
+  # shrink artifact as the minimal reproduction. With a signature, the same
+  # kind, name and target mean the same bug.
+  defp reproduces?(%Outcome{status: :failed, signature: {kind, _name, _index}}, nil),
+    do: kind != :placeholder_resolution
+
+  defp reproduces?(%Outcome{status: :failed, signature: signature}, original),
+    do: signature == original
+
+  defp reproduces?(%Outcome{}, _original), do: false
 
   # The generation position of the candidate's root `root`.
   defp generation_offset(positions, root) when is_integer(root) and is_list(positions) do
@@ -1096,23 +1156,21 @@ defmodule PropertyDamage.Shrinker do
 
   defp later?(_offset, _failing), do: false
 
-  # One linear shrink attempt: the candidate, with the sequence's setup
-  # commands and teardown commands generated for it, on every target through the
-  # scheduler, which sets each target up and tears it down. Returns
-  # `{:failed, reason, variant_index, root}`, `:setup_failed` when any target's
-  # setup failed (never a reproduction), `:invalid` when the candidate's
-  # expansions cannot be realized, or `:passed`. `positions` holds each root's
-  # original position (nil when no expansion is carried).
-  defp run_linear_attempt(commands, positions, registry, state) do
+  # One shrink attempt: the candidate, with the sequence's setup commands and
+  # teardown commands generated for it, handed to the oracle. A candidate whose
+  # expansions cannot be realized, or whose replay artifact could not re-execute
+  # it, is `:invalid` and never reaches the oracle. `positions` holds each
+  # root's original position (nil when no expansion is carried).
+  defp attempt(commands, positions, registry, state) do
     # A sequence built by hand may carry no registry: its candidates resolve
     # nothing, as on the linear engine.
     candidate = candidate(Sequence.linear(commands), registry, state)
 
     with {:ok, expansion} <- candidate_expansion(candidate, positions, state),
          true <- positions == nil or replayable?(commands, positions, expansion, state) do
-      run_candidate(commands, candidate, expansion, state)
+      run_candidate(plan(commands, candidate, expansion, state), state)
     else
-      _invalid -> :invalid
+      _invalid -> %Outcome{status: :invalid}
     end
   end
 
@@ -1180,59 +1238,21 @@ defmodule PropertyDamage.Shrinker do
 
   defp artifact_root_ids(commands, nil, _state), do: Enum.to_list(0..(length(commands) - 1)//1)
 
-  defp run_candidate(commands, candidate, expansion, state) do
-    {:ok, run} =
-      Scheduler.run(
-        model: state.model,
-        targets: state.targets,
-        commands: commands,
-        variants: expansion && PropertyDamage.Expansion.schedule(state.targets, expansion),
-        setup_commands: candidate.setup,
-        teardown_commands: candidate.teardown,
-        placeholder_registry: candidate.registry,
-        seed: state.rng_seed,
-        run_number: 0,
-        run_nonce: state.run_nonce,
-        mint_epoch: next_mint_epoch(state),
-        concurrency: state.concurrency,
-        compare: state.compare,
-        stutter_config: state.stutter_config,
-        keep_attempts: state.keep_attempts,
-        check_mode: state.check_mode
-      )
-
-    cond do
-      is_nil(run.failure) ->
-        :passed
-
-      Enum.any?([run.failure | run.other_failures], &(&1.report_kind == :setup_failed)) ->
-        :setup_failed
-
-      true ->
-        %{reason: reason, variant: %{index: index}, root: root} = run.failure
-        {:failed, reason, index, root}
-    end
+  # The plan the oracle runs for a candidate: its roots, what every target
+  # runs at each of them (nil when every target runs every root as itself),
+  # the setup and teardown commands, and the registry.
+  defp plan(commands, candidate, expansion, state) do
+    %{
+      commands: commands,
+      variants: expansion && Expansion.schedule(state.targets, expansion),
+      setup_commands: candidate.setup,
+      teardown_commands: candidate.teardown,
+      placeholder_registry: candidate.registry
+    }
   end
 
-  # Check if a failure matches the original signature
-  defp check_failure_equivalence(failure_reason, variant_index, nil) do
-    # No original signature: we can't prove equivalence, so for backwards
-    # compatibility we accept any failure EXCEPT ones that are unmistakably
-    # shrink artifacts. A placeholder-resolution error only appears
-    # because a producing command was removed; accepting it would pass off a
-    # different bug as the "minimal repro". (When a signature IS present, the
-    # comparison below already rejects these unless the original was itself a
-    # placeholder-resolution error.)
-    elem(Failure.signature(failure_reason, variant_index), 0) != :placeholder_resolution
-  end
-
-  defp check_failure_equivalence(failure_reason, variant_index, original_signature) do
-    # Same signature (kind + name + target) means the same bug. The kind carries
-    # whatever the old per-type/check-name logic needed: named kinds compare
-    # names, nameless kinds both carry nil. A failure in another target, or of
-    # another kind, is a different failure.
-    Failure.signature(failure_reason, variant_index) == original_signature
-  end
+  # The one place a candidate runs: the oracle, with a fresh mint epoch.
+  defp run_candidate(plan, state), do: state.oracle.(plan, next_mint_epoch(state))
 
   defp exceeded_limits?(state) do
     now = System.monotonic_time(:millisecond)
