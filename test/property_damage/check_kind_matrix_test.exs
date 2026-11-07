@@ -41,7 +41,6 @@ defmodule PropertyDamage.CheckKindMatrixTest do
     error.ex
     failure.ex
     failure_report/context.ex
-    model.ex
     model/projection.ex
     model/projection/checks.ex
     variant.ex

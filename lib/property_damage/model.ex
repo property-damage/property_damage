@@ -208,6 +208,9 @@ defmodule PropertyDamage.Model do
   If not implemented, the framework runs until `max_commands` is reached.
   """
 
+  alias PropertyDamage.Model.Projection.Check
+  alias PropertyDamage.Model.Projection.Checks
+
   @doc """
   Declares the using module as a model by setting the `PropertyDamage.Model`
   behaviour. The model keeps its docs and source path, readable with
@@ -918,7 +921,8 @@ defmodule PropertyDamage.Model do
         PropertyDamage.ModuleCheck.exports?(projection, :__invariants__, 0),
         {id, invariant} <- projection.__invariants__() do
       checks =
-        projection.__checks__()
+        projection
+        |> Checks.list()
         |> Enum.filter(&(&1.invariant_id == id))
         |> Enum.map(fn a -> %{name: a.name, kind: check_kind(a)} end)
 
@@ -927,7 +931,11 @@ defmodule PropertyDamage.Model do
     |> Enum.sort_by(fn entry -> {inspect(entry.projection), entry.id} end)
   end
 
-  defp check_kind(%{type: :polling}), do: :eventual
-  defp check_kind(%{type: :synchronous, trigger: %{type: :at}}), do: :lifecycle
-  defp check_kind(%{type: :synchronous}), do: :synchronous
+  defp check_kind(check) do
+    case Check.kind_for(check) do
+      :eventually -> :eventual
+      :phase -> :lifecycle
+      :step -> :synchronous
+    end
+  end
 end
