@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mix pd.validate` warns when the model defines no `simulator/0`.** Without a
+  simulator no placeholders are minted during generation, so a command whose
+  `when:` depends on a value the system mints (an `external()` field) is never
+  generated. `--strict` fails on the warning.
 - **`mix pd.scaffold --force` overwrites existing files.** Without it, the
   task refuses, names the files that already exist and writes nothing.
 - **`PropertyDamage.shrink_further/2` takes `external_markers:`.** The option

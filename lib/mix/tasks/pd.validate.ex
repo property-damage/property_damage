@@ -32,6 +32,9 @@ defmodule Mix.Tasks.Pd.Validate do
   - Commands that declare no `:observables` in their `command_spec/1`
   - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
+  - The model defines no `simulator/0`: no placeholders are minted during
+    generation, so a command whose `when:` depends on a value the system mints
+    (an `external()` field) is never generated
   - A `when:` or `weight:` on a setup or teardown entry (`setup_each/0`,
     `teardown_each/0`) or on a leaf of an expansion: every entry of a sequence
     runs, in order
@@ -442,7 +445,10 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     warnings =
-      warnings ++ invariant_warnings(model) ++ PropertyDamage.Validation.sequence_warnings(model)
+      warnings ++
+        invariant_warnings(model) ++
+        PropertyDamage.Validation.sequence_warnings(model) ++
+        PropertyDamage.Validation.simulator_warnings(model)
 
     if verbose do
       print_model_summary(model, commands)
