@@ -393,8 +393,8 @@ diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
 
 # Compare full traces of the same plan to localize where the runs diverge
-before = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 comparison = PropertyDamage.RunComparison.compare([before, after_])
 IO.inspect(comparison.ranking)  # most discriminating field first
 ```
@@ -870,7 +870,7 @@ diverge, ranking field differences by how strongly they discriminate the
 outcomes. This targets two use cases: **regression localization** (a plan passed
 on one revision of the SUT and fails on another) and **flakiness localization**
 (a plan fails one time in N). Both need full, unshrunk, same-plan runs, which is
-what `PropertyDamage.RunTrace.capture/1` produces and a `FailureReport` (a shrunk
+what `PropertyDamage.RunTrace.Capture.capture/1` produces and a `FailureReport` (a shrunk
 sequence) is not.
 
 Capture is `RunTrace`'s job; comparison is `RunComparison`'s. The comparator is
@@ -882,8 +882,8 @@ pure data-in/data-out and never runs a SUT.
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides ⇒ identical plan (comparable by fingerprint).
-before = RunTrace.capture(model: M, targets: [A.Fixed], seed: 123)
-after_ = RunTrace.capture(model: M, targets: [A.Buggy], seed: 123)
+before = RunTrace.Capture.capture(model: M, targets: [A.Fixed], seed: 123)
+after_ = RunTrace.Capture.capture(model: M, targets: [A.Buggy], seed: 123)
 
 comparison = RunComparison.compare([before, after_])
 

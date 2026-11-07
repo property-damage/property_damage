@@ -72,7 +72,7 @@ defmodule PropertyDamage.LazyLoadingTest do
   end
 
   describe "an injector module that is compiled but not loaded" do
-    test "RunTrace.capture/1 sets it up" do
+    test "RunTrace.Capture.capture/1 sets it up" do
       module = Module.concat(PropertyDamage.LazyLoadingTest, TraceInjector)
 
       compile_unloaded!(module, """
@@ -96,7 +96,9 @@ defmodule PropertyDamage.LazyLoadingTest do
       """)
 
       target = {StepAdapter, name: "solo", config: %{name: "solo"}, injectors: [module]}
-      trace = RunTrace.capture(model: StepModel, targets: [target], seed: 1, max_commands: 2)
+
+      trace =
+        RunTrace.Capture.capture(model: StepModel, targets: [target], seed: 1, max_commands: 2)
 
       assert events_from(trace.event_log, :injector) ==
                [%Noted{value: :lazy}]

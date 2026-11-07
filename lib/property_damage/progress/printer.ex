@@ -2,6 +2,7 @@ defmodule PropertyDamage.Progress.Printer do
   @moduledoc false
 
   alias PropertyDamage.{Error, FailureReport, LatencyMetrics, Sequence}
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{RunResult, RunUpdate}
   alias PropertyDamage.Sequence.Position
@@ -118,7 +119,7 @@ defmodule PropertyDamage.Progress.Printer do
 
     IO.puts(
       "  Failed at:    " <>
-        case {FailureReport.failure_index(report), FailureReport.setup_location(report)} do
+        case {FailureReport.failure_index(report), Naming.setup_location(report.failure_reason)} do
           {_index, location} when is_binary(location) -> location
           {nil, nil} -> "not localized to a command"
           {index, nil} -> "Command #{index + 1}"

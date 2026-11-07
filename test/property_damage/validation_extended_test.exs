@@ -1,6 +1,7 @@
 defmodule PropertyDamage.ValidationExtendedTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Command
   alias PropertyDamage.Options
   alias PropertyDamage.Validation
 
@@ -235,17 +236,17 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   # ============================================================================
-  # validate_command_callbacks! Tests
+  # Command.validate_callbacks! Tests
   # ============================================================================
 
-  describe "Validation.validate_command_callbacks!/1" do
+  describe "Command.validate_callbacks!/1" do
     test "passes with valid command" do
-      assert :ok = Validation.validate_command_callbacks!(ValidCommand)
+      assert :ok = Command.validate_callbacks!(ValidCommand)
     end
 
     test "raises on missing callback" do
       assert_raise ArgumentError, ~r/Missing Command Callback/, fn ->
-        Validation.validate_command_callbacks!(InvalidCommand)
+        Command.validate_callbacks!(InvalidCommand)
       end
     end
   end

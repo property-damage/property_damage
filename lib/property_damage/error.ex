@@ -6,6 +6,8 @@ defmodule PropertyDamage.Error do
   fixing problems rather than just reporting them.
   """
 
+  alias PropertyDamage.Failure.Naming
+
   @type error_context :: %{
           optional(:command) => struct(),
           optional(:command_index) => non_neg_integer(),
@@ -185,7 +187,7 @@ defmodule PropertyDamage.Error do
     detail = PropertyDamage.Failure.detail(failure)
 
     """
-    Divergence of #{PropertyDamage.FailureReport.format_name(detail.key)} at root #{inspect(detail.root)}
+    Divergence of #{Naming.format_name(detail.key)} at root #{inspect(detail.root)}
     #{cmd_info}
     Reference value: #{inspect(detail.reference_value, pretty: true, limit: 10)}
     Variant value:   #{inspect(detail.variant_value, pretty: true, limit: 10)}
@@ -211,7 +213,7 @@ defmodule PropertyDamage.Error do
     detail = PropertyDamage.Failure.detail(failure)
 
     """
-    #{PropertyDamage.FailureReport.format_name(detail.key)} did not converge within #{detail.within_ms} ms at root #{inspect(detail.root)}
+    #{Naming.format_name(detail.key)} did not converge within #{detail.within_ms} ms at root #{inspect(detail.root)}
     #{cmd_info}
     Still pending: #{inspect(detail.reason, pretty: true, limit: 10)}
     Waited: #{detail.waited_ms} ms
@@ -323,7 +325,7 @@ defmodule PropertyDamage.Error do
     #{cmd_info}
     Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
 
-    The run's setup commands failed (#{PropertyDamage.FailureReport.setup_location(failure)}),
+    The run's setup commands failed (#{Naming.setup_location(failure)}),
     so no root ran.
 
     Suggestions:

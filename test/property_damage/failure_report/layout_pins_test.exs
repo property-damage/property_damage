@@ -6,6 +6,7 @@ defmodule PropertyDamage.FailureReport.LayoutPinsTest do
   # that is a failure to converge.
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.FailureReport
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence.Position
@@ -185,7 +186,7 @@ defmodule PropertyDamage.FailureReport.LayoutPinsTest do
       [line] =
         for line <- String.split(L.plain(report), "\n"), line =~ "Other failure", do: line
 
-      name = FailureReport.format_name(PropertyDamage.Failure.name(failure))
+      name = Naming.format_name(PropertyDamage.Failure.name(failure))
 
       assert line ==
                "Other failure  did not converge #{name} in target \"carol\" (index 2) at root 1  " <>

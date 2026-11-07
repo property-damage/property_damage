@@ -67,6 +67,7 @@ defmodule PropertyDamage.ErrorOrigin do
       %{origin: :test_code_error, details: %{reason: "Missing callback", ...}}
   """
   alias PropertyDamage.Failure
+  alias PropertyDamage.Failure.Naming
 
   @spec classify(term(), list() | nil) :: classification()
   def classify(failure_reason, stacktrace \\ nil)
@@ -102,7 +103,7 @@ defmodule PropertyDamage.ErrorOrigin do
         origin: :test_code_error,
         details: %{
           reason:
-            "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' raised an " <>
+            "Check '#{Naming.format_name(check_name)}' raised an " <>
               "unexpected exception",
           evidence: %{
             check_name: check_name,
@@ -118,7 +119,7 @@ defmodule PropertyDamage.ErrorOrigin do
       %{
         origin: :sut_error,
         details: %{
-          reason: "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' failed",
+          reason: "Check '#{Naming.format_name(check_name)}' failed",
           evidence: %{check_name: check_name, reason: format_reason(reason)},
           confidence: :high
         }

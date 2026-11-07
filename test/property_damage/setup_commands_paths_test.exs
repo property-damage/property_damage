@@ -1,7 +1,7 @@
 defmodule PropertyDamage.SetupCommandsPathsTest do
   # Every path that executes a run's sequence again runs its setup commands
   # before the roots and its teardown commands after them:
-  # `PropertyDamage.replay/2`, `RunTrace.capture/1` and
+  # `PropertyDamage.replay/2`, `RunTrace.Capture.capture/1` and
   # `Analysis.isolate_trigger/2`. A check failure that belongs to a setup
   # command is a setup failure on every path.
   use ExUnit.Case, async: true
@@ -192,13 +192,13 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
   # Report-driven and trace paths
   # ==========================================================================
 
-  describe "RunTrace.capture/1" do
+  describe "RunTrace.Capture.capture/1" do
     test "executes the setup commands generated from its seed and the teardown commands" do
       recorder = start_recorder()
       model = things_model(Capture, [])
 
       trace =
-        RunTrace.capture(
+        RunTrace.Capture.capture(
           model: model,
           targets: [SetupCommands.target("a", recorder)],
           seed: 5,

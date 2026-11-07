@@ -396,6 +396,32 @@ defmodule PropertyDamage.Command do
   # Spec Building Functions
   # ===========================================================================
 
+  @required_callbacks [{:generator, 1}]
+
+  @doc """
+  The callbacks a command module must implement, as `{name, arity}` pairs.
+  """
+  @spec required_callbacks() :: [{atom(), non_neg_integer()}]
+  def required_callbacks, do: @required_callbacks
+
+  @doc """
+  Validates that a command module implements the required callbacks.
+  """
+  @spec validate_callbacks!(module()) :: :ok
+  def validate_callbacks!(cmd) do
+    for {callback, arity} <- @required_callbacks do
+      unless PropertyDamage.ModuleCheck.exports?(cmd, callback, arity) do
+        raise ArgumentError,
+              PropertyDamage.Error.format_config_error(
+                :command_missing_callback,
+                {cmd, callback, arity}
+              )
+      end
+    end
+
+    :ok
+  end
+
   @doc """
   Returns the framework's default spec values.
 

@@ -1940,7 +1940,7 @@ defmodule PropertyDamage.Options do
       type: :keyword_list,
       required: true,
       doc: """
-      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      Options forwarded to `PropertyDamage.RunTrace.Capture.capture/1` (requires
       `:model`, `:targets`, `:seed`). Passed through rather than duplicated
       here so `RunTrace`'s surface stays single-sourced; a fresh `:run_nonce`
       is injected per capture.
@@ -1979,7 +1979,7 @@ defmodule PropertyDamage.Options do
       type: :keyword_list,
       required: true,
       doc: """
-      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      Options forwarded to `PropertyDamage.RunTrace.Capture.capture/1` (requires
       `:model` and `:targets`; `:seed` is supplied per scanned seed). A fresh
       `:run_nonce` is injected per capture.
       """

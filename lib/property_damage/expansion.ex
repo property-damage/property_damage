@@ -58,13 +58,13 @@ defmodule PropertyDamage.Expansion do
   # calls the expansion function once per recorded root to read it.
 
   alias PropertyDamage.{
+    Command,
     Comparison,
     Generator,
     Model,
     Placeholder,
     PlaceholderRegistry,
-    Sequence,
-    Validation
+    Sequence
   }
 
   alias PropertyDamage.Sequence.Position
@@ -1246,7 +1246,7 @@ defmodule PropertyDamage.Expansion do
   end
 
   defp command_callbacks(module) do
-    Validation.validate_command_callbacks!(module)
+    Command.validate_callbacks!(module)
   rescue
     e in ArgumentError -> {:error, String.trim(e.message)}
   end

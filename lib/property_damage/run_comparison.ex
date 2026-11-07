@@ -7,11 +7,11 @@ defmodule PropertyDamage.RunComparison do
   fails on commit B — where do the runs diverge?) and **flakiness localization**
   (a plan that fails one time in five — what differs between passing and failing
   executions?). Both need full, unshrunk, same-plan runs, which is exactly what
-  `PropertyDamage.RunTrace.capture/1` produces and what a `FailureReport` is not.
+  `PropertyDamage.RunTrace.Capture.capture/1` produces and what a `FailureReport` is not.
 
   The comparator is pure data-in/data-out and never runs a SUT:
 
-      traces = for _ <- 1..5, do: RunTrace.capture(model: M, targets: [A], seed: 1)
+      traces = for _ <- 1..5, do: RunTrace.Capture.capture(model: M, targets: [A], seed: 1)
       comparison = RunComparison.compare(traces)
 
   This is the flakiness tool. `investigate/1` handles a single known seed:
@@ -208,7 +208,7 @@ defmodule PropertyDamage.RunComparison do
 
   ## Options
 
-  - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
+  - `:capture` (required) - options forwarded to `RunTrace.Capture.capture/1` (must
     include `:model`, `:targets`, `:seed`; may include `:run_number`, etc.). A
     fresh `:run_nonce` is injected per capture.
   - `:runs` - number of captures (default 5).
@@ -231,7 +231,7 @@ defmodule PropertyDamage.RunComparison do
       for _ <- 1..runs do
         # Fresh recorded nonce per run: identical plan, distinct minted values.
         nonce = :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
-        RunTrace.capture(Keyword.put(capture_opts, :run_nonce, nonce))
+        RunTrace.Capture.capture(Keyword.put(capture_opts, :run_nonce, nonce))
       end
 
     {traces, compare(traces, Keyword.take(opts, [:event_identity]))}
@@ -253,7 +253,7 @@ defmodule PropertyDamage.RunComparison do
 
   - `:seeds` (required) - the list of seeds to scan.
   - `:runs` - captures per seed (default 5).
-  - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
+  - `:capture` (required) - options forwarded to `RunTrace.Capture.capture/1` (must
     include `:model` and `:targets`; the `:seed` is supplied per scanned seed,
     so any `:seed` here is ignored). A fresh `:run_nonce` is injected per
     capture.
@@ -285,7 +285,7 @@ defmodule PropertyDamage.RunComparison do
       for _ <- 1..runs do
         nonce = :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
-        RunTrace.capture(
+        RunTrace.Capture.capture(
           capture_opts
           |> Keyword.put(:seed, seed)
           |> Keyword.put(:run_nonce, nonce)

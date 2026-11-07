@@ -5,6 +5,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
   # and a Reproduction section that binds the targets once.
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Failure.Naming
   alias PropertyDamage.{FailureReport, RunTrace}
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Test.Compare.Settled
@@ -250,7 +251,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
       divergence = report.failure_reason.type
 
       assert value(text, "Failure") =~ "diverged"
-      assert value(text, "Observation") =~ FailureReport.format_name(divergence.key)
+      assert value(text, "Observation") =~ Naming.format_name(divergence.key)
       assert value(text, "At") =~ ~r/^\[1\] /
 
       assert value(text, "Reference") =~ ~s("a") and
@@ -300,7 +301,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
 
       for {field, other} <- Enum.zip(also, others) do
         type = other.failure.type
-        assert field.value =~ FailureReport.format_name(type.key)
+        assert field.value =~ Naming.format_name(type.key)
 
         assert field.value =~ inspect(type.reference_value) and
                  field.value =~ inspect(type.variant_value)

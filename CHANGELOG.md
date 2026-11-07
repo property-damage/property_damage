@@ -318,14 +318,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (DR-045, DR-046).**
   `kind` is `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed`
   or `:execution_failed` or `:latency_exceeded` (DR-047),
-  and always equals `kind_of(failure_reason)`.
+  and always equals `Failure.report_kind(failure_reason)`.
   `variant` is `%{index, name}`. `targets` holds the run's entries, so
   `reproduction_command/1` prints the exact target list. It also prints
   `compare: [converge_within: ms]` (when not 5000), `stutter:` and
   `max_commands:` when the run used a non-default value, and `shrink_further/2`
   re-shrinks under the report's `compare` and `stutter` (it accepts `compare:`
   and rejects `equivalence:`). New helpers:
-  `FailureReport.kind_of/1`, `reference_target/1` and `targets_source/1`; new
+  `Failure.report_kind/1`, `FailureReport.reference_target/1` and `targets_source/1`; new
   failure types `Failure.Divergence`, `Failure.Convergence` and `Failure.Setup`.
 - **A divergence is shrunk and reproduced (DR-045, DR-046).** It ends the run and
   `run/1` returns `{:error, report}` with `kind: :diverged` (or
@@ -627,6 +627,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before it is a compile error: move the `use` above it.
 
 ### Changed
+
+- **Breaking: `RunTrace.capture/1` is `PropertyDamage.RunTrace.Capture.capture/1`.**
+  `RunTrace` is now a plain record. Options and result are unchanged.
+
+- **Breaking: `FailureReport.kind_of/1` is `PropertyDamage.Failure.report_kind/1`.**
+  The mapping is unchanged.
+
+- **Breaking: `FailureReport.format_name/1` and `FailureReport.setup_location/1`
+  are `PropertyDamage.Failure.Naming.format_name/1` and `setup_location/1`.**
+  `setup_location/1` no longer takes a report; pass its `failure_reason`.
 
 - **Breaking: `PropertyDamage.Settle.get_semantics/1`, `get_config/1`,
   `requires_settling?/1` and `execute_with_settle/3` take a command spec map.**
@@ -1106,7 +1116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       was silently lost. `:base_url` is no longer accepted in the regression
       surface (it never applied to the `:exunit`-only generated tests).
     - **`RunComparison.investigate/1` takes `capture:` as a sub-keyword.**
-      `RunTrace.capture/1` options are now nested under `:capture` (e.g.
+      `RunTrace.Capture.capture/1` options are now nested under `:capture` (e.g.
       `investigate(runs: 5, capture: [model: M, targets: [A], seed: 3])`) rather
       than passed flat, so `RunTrace`'s option surface stays single-sourced.
     - **`Analysis.generate_test/2` now validates its options** (the previously
@@ -1349,7 +1359,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking: `PropertyDamage.Diff` is removed; use `RunTrace` and
   `RunComparison` (DR-033 to DR-036).** The module was broken by construction:
   it aligned commands by index and never checked that the runs were comparable.
-  `RunTrace.capture/1` records one run, `RunComparison.compare/2` and
+  `RunTrace.Capture.capture/1` records one run, `RunComparison.compare/2` and
   `investigate/1` localize where runs of one plan differ, and
   `PropertyDamage.mint_per_run/1` mints client-side unique values from the run
   nonce.
@@ -1617,7 +1627,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spawned: anything but a 1-arity function is a check failure at that step,
   naming the check and the value, handled under `check_mode:` like a
   synchronous check.
-- **A trace capture reports a failed injector setup.** `RunTrace.capture/1` of
+- **A trace capture reports a failed injector setup.** `RunTrace.Capture.capture/1` of
   a model without expansions raised `MatchError` when an injector's `setup/1`
   returned `{:error, _}`, so `mix pd.audit` and `RunComparison` crashed instead
   of reporting. The trace now carries a `:setup_failed` outcome and an empty
@@ -1745,7 +1755,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A module that is compiled but not loaded yet keeps its callbacks.** A command
   module lost its `:probe`, `settle:` and `idempotent:` declarations, and an
-  injector was skipped by `RunTrace.capture/1`, when nothing had loaded the module
+  injector was skipped by `RunTrace.Capture.capture/1`, when nothing had loaded the module
   before the run named it. Every reflection on a model, command, projection,
   adapter or injector module now loads the module first.
 
@@ -1805,7 +1815,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PropertyDamage.coverage/2` returns the merged tracker of a multi-run result
   that ran with `coverage: true`, and raises an `ArgumentError` naming that
   option otherwise. `Mutation.run/1` harvests its baseline events through
-  `RunTrace.capture/1` and reads command specs as `{module, opts}`, so a passing
+  `RunTrace.Capture.capture/1` and reads command specs as `{module, opts}`, so a passing
   model yields mutations and no mutant is reported killed by a crash.
 - **`FailureIntelligence.verify_cluster/3` re-runs every seeded member of a
   cluster.** It used to map each member to `:unknown` and report `fixed: 0`. A

@@ -63,6 +63,8 @@ defmodule PropertyDamage.SeedLibrary do
   participate in no verdict logic.
   """
 
+  alias PropertyDamage.Failure.Naming
+
   @library_version 2
   @default_file "property_damage_seeds.json"
   @default_prune_threshold 3
@@ -372,7 +374,7 @@ defmodule PropertyDamage.SeedLibrary do
   # label; any other name is kept.
   defp descriptive_name({projection, function} = key)
        when is_atom(projection) and is_atom(function),
-       do: key |> PropertyDamage.FailureReport.format_name() |> String.to_atom()
+       do: key |> Naming.format_name() |> String.to_atom()
 
   defp descriptive_name(name), do: name
 

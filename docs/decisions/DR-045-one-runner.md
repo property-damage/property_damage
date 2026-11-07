@@ -80,9 +80,9 @@ a note that two targets disagreed.
    replaces it), `stutter:` when it was set and `max_commands:` when it is not
    the default, so the printed command regenerates and judges the same run.
    `shrink_further/2` re-shrinks under the report's `equivalence` and
-   `stutter`. `adapter` is removed. `kind_of/1`, `reference_target/1` and
+   `stutter`. `adapter` is removed. `Failure.report_kind/1`, `reference_target/1` and
    `targets_source/1` are new. A report's `kind` is always
-   `kind_of(failure_reason)`: the scheduler derives every failure's kind from
+   `Failure.report_kind(failure_reason)`: the scheduler derives every failure's kind from
    its reason with that one mapping, so a resource poller error found while
    the run finalizes is `:execution_failed`, not `:check_failed`.
 8. **Shrinking is variant-aware.** The failure identity is
