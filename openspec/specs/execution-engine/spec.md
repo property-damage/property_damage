@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-065 (One Run Driver, Not Only One Step Seam). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -587,6 +587,20 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 - **AND** `PropertyDamage.execute/2`, `Replay.start/2` and `PropertyDamage.shrink_further/2` SHALL return `{:error, %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}}}`
 - **AND** `mix pd.replay` SHALL print it
 - **AND** no `{:adapter_setup_failed, _}` result SHALL exist
+
+### Requirement: Every Run Driver Goes Through the Runner (DR-065)
+
+Every execution of a plan SHALL go through `PropertyDamage.Runner.execute/2`: a campaign run, the reproduction of a failure, `PropertyDamage.RunTrace.Capture.capture/1` and `PropertyDamage.Analysis.isolate_trigger/2`. The runner SHALL drain the event queue after every root, so every one of them folds the events that arrive at a boundary. `PropertyDamage.Executor.run/4` SHALL NOT be how a run executes; it is the one-target path without the per-root drain. The shrinker's candidate runs are not covered until they move to the runner.
+
+#### Scenario: A trace records the events of the run it explains
+- **GIVEN** a target whose injector pushes an event after each command step
+- **WHEN** `RunTrace.Capture.capture/1` captures the plan a run executed
+- **THEN** the trace's step events SHALL equal the events of that run, the events folded at each boundary included
+
+#### Scenario: Trigger isolation judges values as the run ran them
+- **GIVEN** a failure that depends on events folded at a boundary
+- **WHEN** `Analysis.isolate_trigger/2` lists the values that eliminate the failure
+- **THEN** it SHALL list only values that pass when the commands run as the run ran them, with the reference target's injectors set up
 
 ### Requirement: Active Set of Variants and the Stop Rule (DR-046)
 
