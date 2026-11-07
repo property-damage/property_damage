@@ -155,7 +155,7 @@ defmodule PropertyDamage.Scheduler do
   finalizes its run.
 
   A failure's kind is derived from its `reason` by
-  `PropertyDamage.FailureReport.kind_of/1`, so a report's `kind` always agrees
+  `PropertyDamage.Failure.report_kind/1`, so a report's `kind` always agrees
   with its `failure_reason`.
 
   When a failure ends the run, under `:serial` no other target executes the
@@ -170,7 +170,6 @@ defmodule PropertyDamage.Scheduler do
   alias PropertyDamage.{
     Comparison,
     Failure,
-    FailureReport,
     Model,
     PlaceholderRegistry,
     Target,
@@ -968,7 +967,7 @@ defmodule PropertyDamage.Scheduler do
         _ -> {Failure.adapter_error(failure.reason), nil}
       end
 
-    %{failure | kind: FailureReport.kind_of(reason), reason: reason, stacktrace: stacktrace}
+    %{failure | kind: Failure.report_kind(reason), reason: reason, stacktrace: stacktrace}
   end
 
   defp latencies(%{measure_latency: false}, _variant), do: []
@@ -1035,7 +1034,7 @@ defmodule PropertyDamage.Scheduler do
   defp exit_reason(reason), do: {:exit, reason}
 
   # Every failure's kind comes from its reason by the one mapping a report
-  # uses (`FailureReport.kind_of/1`), so the two always agree. A variant
+  # uses (`Failure.report_kind/1`), so the two always agree. A variant
   # reports an adapter raise by the bare exception; `with_failure_reason/2`
   # swaps in the engine's `%Failure{}` for it and derives the kind again.
   # A reason that embeds `{exception, stacktrace}` (a check that raised, on
@@ -1045,7 +1044,7 @@ defmodule PropertyDamage.Scheduler do
     {reason, stacktrace} = Finalization.extract_stacktrace(reason)
 
     %{
-      kind: FailureReport.kind_of(reason) || :execution_failed,
+      kind: Failure.report_kind(reason) || :execution_failed,
       variant: variant_of(target),
       run: config.run_number,
       root: root,

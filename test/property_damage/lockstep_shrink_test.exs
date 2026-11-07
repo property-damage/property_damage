@@ -354,7 +354,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   # A report's kind always agrees with its failure reason.
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.kind == FailureReport.kind_of(report.failure_reason)
+    assert report.kind == Failure.report_kind(report.failure_reason)
   end
 
   # A sequence whose first divergence under `:split` is a Flip after the only

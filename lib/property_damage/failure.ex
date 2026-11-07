@@ -338,6 +338,15 @@ defmodule PropertyDamage.Failure do
   @type class ::
           :check | :execution | :framework | :divergence | :convergence | :setup | :latency
 
+  @typedoc "The outcome a failure report describes (`report_kind/1`)."
+  @type report_kind ::
+          :check_failed
+          | :diverged
+          | :setup_failed
+          | :execution_failed
+          | :did_not_converge
+          | :latency_exceeded
+
   @typedoc "A failure's name: a check name, a projection, or a `{projection, function}` key."
   @type name :: atom() | {module(), atom()} | nil
 
@@ -400,6 +409,26 @@ defmodule PropertyDamage.Failure do
   def class(%__MODULE__{type: %Convergence{}}), do: :convergence
   def class(%__MODULE__{type: %Setup{}}), do: :setup
   def class(%__MODULE__{type: %Latency{}}), do: :latency
+
+  @doc """
+  The report kind for a failure reason: `:check_failed` for every check kind,
+  `:diverged`, `:did_not_converge`, `:setup_failed`, `:latency_exceeded`, and
+  `:execution_failed` for every execution and framework kind. `nil` for anything that is not a
+  `%Failure{}`.
+  """
+  @spec report_kind(term()) :: report_kind() | nil
+  def report_kind(%__MODULE__{} = failure) do
+    case class(failure) do
+      :check -> :check_failed
+      :divergence -> :diverged
+      :convergence -> :did_not_converge
+      :setup -> :setup_failed
+      :latency -> :latency_exceeded
+      class when class in [:execution, :framework] -> :execution_failed
+    end
+  end
+
+  def report_kind(_failure_reason), do: nil
 
   @doc "The failure's globally-unique kind atom."
   @spec kind(t()) :: kind()

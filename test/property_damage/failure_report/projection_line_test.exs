@@ -20,7 +20,7 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
   defp failure_fields(text), do: text |> failure_lines() |> L.fields()
 
   defp with_reason(report, reason),
-    do: %{report | failure_reason: reason, kind: FailureReport.kind_of(reason)}
+    do: %{report | failure_reason: reason, kind: Failure.report_kind(reason)}
 
   defp assert_line_after_check(text, projection) do
     lines = failure_lines(text)

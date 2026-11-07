@@ -226,13 +226,7 @@ defmodule PropertyDamage.FailureReport do
   @type failure_type :: Failure.kind()
 
   @typedoc "The outcome a report describes; see \"Report kind and the failing target\"."
-  @type kind ::
-          :check_failed
-          | :diverged
-          | :setup_failed
-          | :execution_failed
-          | :did_not_converge
-          | :latency_exceeded
+  @type kind :: Failure.report_kind()
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -498,7 +492,7 @@ defmodule PropertyDamage.FailureReport do
   - `:variant` - The target the failure happened in, `%{index:, name:}`
     (default: the reference target, or `nil` without targets)
   - `:kind` - The report kind (default: derived from `:failure_reason` by
-    `kind_of/1`)
+    `PropertyDamage.Failure.report_kind/1`)
   - `:concurrency` - The run's `concurrency:` (default `:serial`)
   - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
   - `:compare_counts` - The failing run's per-observation compare counts
@@ -589,7 +583,7 @@ defmodule PropertyDamage.FailureReport do
         logs: Keyword.get(opts, :logs, %{})
       )
 
-    kind = Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end)
+    kind = Keyword.get_lazy(opts, :kind, fn -> Failure.report_kind(failure_reason) end)
 
     reference_trace =
       reference_trace(kind, Keyword.get(opts, :reference_result), trace)
@@ -852,26 +846,6 @@ defmodule PropertyDamage.FailureReport do
   @spec async_entries(t()) :: [Entry.t()]
   def async_entries(%__MODULE__{trace: %RunTrace{} = trace}), do: RunTrace.async_entries(trace)
   def async_entries(%__MODULE__{trace: nil}), do: []
-
-  @doc """
-  The report kind for a failure reason: `:check_failed` for every check kind,
-  `:diverged`, `:did_not_converge`, `:setup_failed`, `:latency_exceeded`, and
-  `:execution_failed` for every execution and framework kind. `nil` for anything that is not a
-  `%Failure{}`.
-  """
-  @spec kind_of(term()) :: kind() | nil
-  def kind_of(%Failure{} = failure) do
-    case Failure.class(failure) do
-      :check -> :check_failed
-      :divergence -> :diverged
-      :convergence -> :did_not_converge
-      :setup -> :setup_failed
-      :latency -> :latency_exceeded
-      class when class in [:execution, :framework] -> :execution_failed
-    end
-  end
-
-  def kind_of(_failure_reason), do: nil
 
   @doc """
   The reference target (the first of `targets`) rebuilt as a
