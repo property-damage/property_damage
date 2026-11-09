@@ -6,7 +6,7 @@ defmodule PropertyDamage.FailureReport.Document do
   report writes it, `PropertyDamage.Persistence.export_json/1`
   exports it, `PropertyDamage.FailureReport.Bundle.build/2` returns it, and
   every HTML failure page carries it in the script tag `pd-bundle`. A program
-  reads one key set whichever way it got the document.
+  reads one key set whichever way it got the document (DR-066).
 
   The document never copies the page's step, event or section text: it names
   them by id and the page prints them. It holds no process id and lists

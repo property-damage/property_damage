@@ -78,7 +78,7 @@ A **Target** (`lib/property_damage/target.ex`) is one system a run executes agai
 - **Campaign** (`lib/property_damage/campaign.ex`, `lib/property_damage/campaign/context.ex`): The run loop behind `PropertyDamage.run/1`. Validates options into a typed `Campaign.Context`, runs the seed-library replay phase, then draws and runs one sequence after another, folding each outcome into the run accumulators (check firings, compare counts, coverage, latency) and handing a failure to `Reproduction`.
 - **Reproduction** (`lib/property_damage/reproduction.ex`): The path after a failure: shrink, re-execute to gather fresh state, place the replay artifact. Also the `shrink_further` worker behind `PropertyDamage.shrink_further/2`.
 - **ReportBuilder** (`lib/property_damage/report_builder.ex`): The one builder of `FailureReport` for every failure path.
-- **Failure / FailureReport / Persistence** (`lib/property_damage/failure.ex`, `lib/property_damage/failure_report.ex`, `lib/property_damage/persistence.ex`): Failure record, the explained report built from it, and versioned save/load.
+- **Failure / FailureReport / Persistence** (`lib/property_damage/failure.ex`, `lib/property_damage/failure_report.ex`, `lib/property_damage/persistence.ex`): Failure record, the explained report built from it, and versioned save/load. A report is an overlay on its `RunTrace`: `seed/1`, `run_number/1`, `model/1`, `timestamp/1`, `command_labels/1`, `failure_reason/1`, `setup_commands/1` and `teardown_commands/1` read the trace and are not struct fields. `FailureReport.Document` (`lib/property_damage/failure_report/document.ex`) is the one JSON document that the `:json` format, `Persistence.export_json/1`, `Bundle.build/2` and the page's `pd-bundle` tag return.
 
 ### Test support
 

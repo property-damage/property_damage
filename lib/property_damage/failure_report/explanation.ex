@@ -13,7 +13,10 @@ defmodule PropertyDamage.FailureReport.Explanation do
   ## The page
 
   A failure page holds one `pd-bundle` script tag (see
-  `PropertyDamage.FailureReport.Bundle`). The bundle bytes are the bytes between
+  `PropertyDamage.FailureReport.Bundle`), the failure document of
+  `PropertyDamage.FailureReport.Document` with its source members. The module
+  reads the bundle formats 1 and 2, so a page written under format 1 stays
+  readable. The bundle bytes are the bytes between
   the tag and its closing `</script>`, unchanged. The bundle hash is the
   lowercase hex SHA-256 of those bytes. An explanation lives in a
   `pd-explanation` script tag that `embed/3` writes right after the bundle tag.

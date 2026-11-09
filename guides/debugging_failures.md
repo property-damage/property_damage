@@ -291,12 +291,12 @@ IO.inspect(failure, pretty: true)
 
 Read it through its fields and accessors:
 
-- **seed** - Random seed for reproducibility
+- **`FailureReport.seed/1`** - Random seed for reproducibility, read from the run's trace
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
 - **shrink_iterations** / **shrink_time_ms** / **shrink_stop** - How much shrinking it took, and why it stopped (`:done`, `:max_iterations` or `:max_time`)
-- **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
-- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which check failed and a human-readable description
+- **`FailureReport.failure_reason/1`** - a `%PropertyDamage.Failure{}` describing what failed (see below). Like `run_number/1`, `model/1`, `timestamp/1`, `command_labels/1`, `setup_commands/1` and `teardown_commands/1`, it reads the run's trace; none of them is a struct field
+- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over the failure reason: which check failed and a human-readable description
 - **state_before_failure** / **state_at_failure** - Projection state before and after the failing step
 - **`FailureReport.steps/1`**, **`failure_step/1`**, **`failure_index/1`** - the run as a list of steps, the failing step, and its reading-order index
 - **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)

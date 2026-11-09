@@ -40,11 +40,27 @@ defmodule PropertyDamage.FailureReport do
   attribute, before against after the failing step, or the reference against
   the variant at the failing boundary. Reproduction binds `targets` once and
   ends with the calls that rerun the failure. The same layout prints as
-  markdown, and a report also prints as JSON or as one compact line.
+  markdown, and a report also prints as one JSON document
+  (`PropertyDamage.FailureReport.Document`) or as one compact line.
 
   A plain `inspect/1` prints a one-line summary. To turn a report into a test,
   a script or a notebook, see `PropertyDamage.Export`; to save it, see
   `PropertyDamage.save_failure/3`.
+
+  ## Fields read from the trace
+
+  The report embeds the `RunTrace` of the run it describes, and reads from it
+  what the trace already holds: `seed/1`, `run_number/1`, `model/1`,
+  `timestamp/1`, `command_labels/1`, `failure_reason/1`, `setup_commands/1` and
+  `teardown_commands/1`. They are functions, not struct fields, so a report and
+  its trace never disagree. `state_before_failure` and `state_at_failure` stay
+  stored, because they are what the executor observed at the failing step.
+
+  ## JSON
+
+  `PropertyDamage.FailureReport.Document.build/2` turns a report into one
+  JSON-ready map with `"format" => 2`. The `:json` format, `Persistence.export_json/1`
+  and the `pd-bundle` tag of a failure page all carry that document.
 
   ## Failure Reasons
 
@@ -136,8 +152,8 @@ defmodule PropertyDamage.FailureReport do
   ## Replay artifact
 
   `run` is the campaign run the failure happened in, counting from 1 (run 3
-  of a `max_runs: 10` campaign); `seed` is the seed that run generated from,
-  so the failing run is run 1 of `seed`.
+  of a `max_runs: 10` campaign); `seed/1` is the seed that run generated from,
+  so the failing run is run 1 of that seed.
 
   A failing run writes a replay artifact after shrinking (see the
   `replay_dir:` run option): one Elixir file holding, as literal data, the

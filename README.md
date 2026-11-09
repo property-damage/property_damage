@@ -403,7 +403,7 @@ See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Run Comparison](#
 
 ### Explaining a failure page
 
-Every HTML failure page carries a bundle: a machine-readable copy of the failure, with the docs and source of the modules behind it. The `pd-explain` skill gives the bundle to an agent. The agent writes an explanation of the failure, and the page then opens on an Explanation tab next to the Run view.
+Every HTML failure page carries a bundle: a machine-readable copy of the failure, with the docs and source of the modules behind it. The copy is the same JSON document `PropertyDamage.Persistence.export_json/1` returns, plus the source members. The `pd-explain` skill gives the bundle to an agent. The agent writes an explanation of the failure, and the page then opens on an Explanation tab next to the Run view.
 
 To install the skill, link it into your project. The link keeps the skill in step with the PropertyDamage you installed. Run the `ln -s` command from your project's `.claude/skills/` directory, which the first command below creates if your project has none. The link target is a path relative to that directory, so count the levels up from `.claude/skills/` to the PropertyDamage checkout.
 

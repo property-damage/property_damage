@@ -761,6 +761,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FailureReport.seed/1`. `FailureReport.from_legacy/2` and `to_legacy/1` are
   removed. Capture the failure again.
 
+- **Breaking: a failure report is one JSON document (DR-066).**
+  `PropertyDamage.FailureReport.Document.build/2` returns it with
+  `"format" => 2`, and `Formatter.format(report, :json)`,
+  `Persistence.export_json/1` (encoded as indented JSON), `Bundle.build/2` and
+  the `pd-bundle` tag of a failure page all return that one key set. The
+  atom-keyed map of `export_json/1`, the formatter's JSON (type
+  `"property_damage_failure_report"`, version `"2.0"`) and the bundle of format
+  1 are gone, with their key names; the failure is under `failure`, the
+  "What this checks" items under `context`, and the source members `modules`,
+  `ids`, `missing_sources` and `redactions` appear only with `sources: true`.
+  `Formatter.reference_json` is removed. `mix pd.explain` still reads pages
+  that carry a format 1 bundle.
+
 - **Breaking: failure files are written at format 19.** `.pd` and `.pdtrace`
   files of format 18 and older are refused with
   `{:error, {:unsupported_format_version, version, 19}}`, because a report's
