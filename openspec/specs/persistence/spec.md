@@ -4,7 +4,7 @@
 
 Persistence provides durable storage and retrieval of failure data, seed management, regression test orchestration, and step-by-step replay for debugging. It enables teams to save discovered failures, build regression suites, share seeds, and interactively debug failures without re-running full test suites.
 
-Reference: DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-020 (Composable, Version-Aware Libraries), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-049 (Expansions, Roots That Run as Several Commands), DR-061 (The Report and the Replay Artifact Record the Run's External Markers)
+Reference: DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-020 (Composable, Version-Aware Libraries), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-049 (Expansions, Roots That Run as Several Commands), DR-061 (The Report and the Replay Artifact Record the Run's External Markers), DR-066 (The Report Is an Overlay on Its Trace, and Serializes as One JSON Document)
 
 ## Requirements
 
@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{kind}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`19`, which renamed the report field `kind` to `report_kind` and refuses a version `18` file; version `18` dropped the parallel-branch fields of `Sequence`, the matching `Position` sections and the `branch_id` field (DR-063); version `17` dropped the fault-injection event source and failure kind (DR-062); version `16` added `external_markers`, the run's atom markers (DR-061); version `15` added `reference_trace`, `reference_state_at_failure` and `shrink_stop` (DR-055) and a divergence's `waited_ms` and `within_ms` (DR-056), and the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires` (the check firings of the run the report describes), and a report lacking `run`, `replay`, `replay_path` or `check_mode` is refused; version `14` added `run`, `replay`, `replay_path` and `replay_status`, and an expansion entry may be `:identity` (DR-050); version `13` added `expansions`, `expansion_counts` and the trace's `expansion` (DR-049); version `12` added `latency` and `metrics` (DR-047); version `11` added `setup_commands` and `teardown_commands` and the sequence's setup and teardown sections (DR-048); version `10` added `compare`, `compare_counts` and `other_failures` in place of `equivalence` and a divergence holds the `@compare` key, the two values and the mismatch, DR-046; the report carries `report_kind`, `variant`, `targets` and `concurrency` in place of `adapter`, DR-045; the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires`, DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone, DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` for the derived per-step state timeline, DR-040; positions are `%Sequence.Position{}` structs, DR-039; the report composes a `RunTrace`, DR-033), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`20`, which dropped the eight fields a report copied from its trace and refuses a version `19` file, DR-066; version `19` renamed the report field `kind` to `report_kind` and refuses a version `18` file; version `18` dropped the parallel-branch fields of `Sequence`, the matching `Position` sections and the `branch_id` field (DR-063); version `17` dropped the fault-injection event source and failure kind (DR-062); version `16` added `external_markers`, the run's atom markers (DR-061); version `15` added `reference_trace`, `reference_state_at_failure` and `shrink_stop` (DR-055) and a divergence's `waited_ms` and `within_ms` (DR-056), and the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires` (the check firings of the run the report describes), and a report lacking `run`, `replay`, `replay_path` or `check_mode` is refused; version `14` added `run`, `replay`, `replay_path` and `replay_status`, and an expansion entry may be `:identity` (DR-050); version `13` added `expansions`, `expansion_counts` and the trace's `expansion` (DR-049); version `12` added `latency` and `metrics` (DR-047); version `11` added `setup_commands` and `teardown_commands` and the sequence's setup and teardown sections (DR-048); version `10` added `compare`, `compare_counts` and `other_failures` in place of `equivalence` and a divergence holds the `@compare` key, the two values and the mismatch, DR-046; the report carries `report_kind`, `variant`, `targets` and `concurrency` in place of `adapter`, DR-045; the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires`, DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone, DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` for the derived per-step state timeline, DR-040; positions are `%Sequence.Position{}` structs, DR-039; the report composes a `RunTrace`, DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -102,12 +102,27 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **AND** the file SHALL carry `latency` (the option as given) and `metrics` (per target name, `nil` when `latency:` is off)
 - **AND** a key-named failure SHALL round trip, including its name when the key is a tuple
 
-#### Scenario: JSON export of the comparison record
+#### Scenario: JSON export is the report document (DR-066)
 
 - **WHEN** `export_json/1` writes a report
-- **THEN** it SHALL write `kind` (the failure's fine kind), `report_kind` (the outcome), `variant`, `targets`, `compare`, `compare_counts` and `other_failures`, and each `other_failures` entry SHALL name its fine kind `kind`
-- **AND** it SHALL write `reference_trace`, `reference_state_at_failure` and `shrink_stop` as the `:json` format writes `reference_trace`, `reference_projections` and the shrinking `stop`, each `null` when the report has none
-- **AND** it SHALL NOT write `adapter` or `equivalence`
+- **THEN** it SHALL return the `PropertyDamage.FailureReport.Document` of the report, encoded as indented JSON, with `"format"` equal to `2`
+- **AND** the string SHALL decode to the same map as `Document.build(report)` and as `Formatter.format(report, :json)`
+- **AND** the document SHALL hold `failure.kind` (the failure's fine kind), `report_kind` (the outcome), `variant`, `targets`, `compare`, `compare_counts` and `other_failures`, and each `other_failures` entry SHALL name its fine kind `kind`
+- **AND** it SHALL hold `reference_trace`, `reference_projections` and the shrinking `stop`, each `null` when the report has none
+- **AND** it SHALL NOT write `adapter`, `equivalence` or the source members `modules`, `ids`, `missing_sources` and `redactions`
+
+#### Scenario: A format-19 file is refused (DR-066)
+
+- **GIVEN** a `.pd` or `.pdtrace` file whose header records version `19` or older
+- **WHEN** `load/1` or `load_trace/1` reads it
+- **THEN** it SHALL return `{:error, {:unsupported_format_version, saved, 20}}` and SHALL NOT return a report
+
+#### Scenario: A report round trips through its accessors (DR-066)
+
+- **GIVEN** a report saved and loaded at version `20`
+- **WHEN** `seed/1`, `run_number/1`, `model/1`, `timestamp/1`, `command_labels/1`, `failure_reason/1`, `setup_commands/1` and `teardown_commands/1` read the loaded report
+- **THEN** each SHALL return what it returned for the report before it was saved
+- **AND** the report SHALL NOT store those eight values apart from its `RunTrace`
 
 #### Scenario: An event-log entry names a source the engine does not produce (DR-062)
 
@@ -122,7 +137,7 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **THEN** it SHALL load the modules of the loaded applications and decode the file once more with `:safe`, and return the report
 - **AND** a file naming a module of no loaded application SHALL return `{:error, :unsafe_terms}`
 
-> Version `17` is now current and versions `1`-`16` are refused. The step from `16` drops the fault-injection event source and failure kind (DR-062). The step from `15` adds the report's `external_markers` and refuses a report lacking it (DR-061). The step from `14` adds the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires`, and refuses a report lacking `run`, `replay`, `replay_path` or `check_mode`. It supersedes the version `14` requirement of DR-050, whose step from `13` added the report's `run`, `replay`, `replay_path` and `replay_status`, and the entry value `:identity`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
+> Version `20` is now current and versions `1`-`19` are refused. The step from `19` drops `seed`, `run_number`, `model`, `timestamp`, `command_labels`, `failure_reason`, `setup_commands` and `teardown_commands` from the report, which reads them from its trace (DR-066). The step from `18` renames the report field `kind` to `report_kind`. The step from `17` drops the parallel-branch fields (DR-063). The step from `16` drops the fault-injection event source and failure kind (DR-062). The step from `15` adds the report's `external_markers` and refuses a report lacking it (DR-061). The step from `14` adds the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires`, and refuses a report lacking `run`, `replay`, `replay_path` or `check_mode`. It supersedes the version `14` requirement of DR-050, whose step from `13` added the report's `run`, `replay`, `replay_path` and `replay_status`, and the entry value `:identity`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
 
 ### Requirement: Replay Artifact File (DR-050)
 

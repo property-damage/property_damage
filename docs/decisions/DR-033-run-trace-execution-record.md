@@ -1,6 +1,6 @@
 # DR-033: Run Trace as the Execution Record
 
-**Status:** Accepted
+**Status:** Accepted. Superseded in part by DR-066: the report no longer stores `seed`, `run_number`, `model`, `timestamp`, `command_labels`, `failure_reason`, `setup_commands` or `teardown_commands`; accessors read them from the trace.
 **Date:** 2026-07-02
 
 > Part of the run-comparison campaign (with DR-034, DR-035, DR-036), which

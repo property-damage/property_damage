@@ -1,6 +1,6 @@
 # DR-055: Failure Report Layout
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-066: the JSON format is the one document of `FailureReport.Document`, which no longer repeats the report struct field by field.
 **Date:** 2026-10-27
 
 ## Context

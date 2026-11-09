@@ -1,6 +1,6 @@
 # DR-058: Failure Report Context and Explanations
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-066: the bundle is the one JSON document of `FailureReport.Document` (format 2, source members under `sources: true`); the explain page reader still accepts bundle format 1.
 **Date:** 2026-10-30
 
 ## Context
