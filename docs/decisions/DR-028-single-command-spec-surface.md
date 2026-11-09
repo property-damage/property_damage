@@ -46,7 +46,7 @@ with the individual static callbacks removed rather than deprecated.
   (`pd.gen.command`, `pd.scaffold`) + `test/support` commands + guides (migrated to the single
   surface).
 - Spec deltas: `openspec/specs/command` (rewrite the Optional Metadata Callbacks +
-  Legacy Callback Fallback requirements), `openspec/specs/concurrency` (idempotent /
+  Legacy Callback Fallback requirements), `openspec/specs/stutter-and-idempotency` (idempotent /
   acceptable-retry), `openspec/specs/shrinking` (read_only → shrink).
 - Supersedes the legacy-fallback portion of DR-019. `CHANGELOG.md` BREAKING entry.
 
