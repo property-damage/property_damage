@@ -3,12 +3,12 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded
-  alias PropertyDamage.Test.{LinkAdapter, LinkModel}
+  alias PropertyDamage.Test.{LinkAdapter, LinkModel, ShrinkSupport}
 
   # ============================================================================
   # Hierarchical shrinking end-to-end coverage.
@@ -57,7 +57,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
     {:ok, result} = Executor.run(sequence, LinkModel, LinkAdapter)
     refute result.success
 
-    Shrinker.shrink(sequence,
+    ShrinkSupport.shrink(sequence,
       failed_at_index: result.failed_at_index,
       failure_reason: result.failure_reason,
       model: LinkModel,
@@ -154,7 +154,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
       assert result.failed_at_index == 1
 
       shrunk =
-        Shrinker.shrink(sequence,
+        ShrinkSupport.shrink(sequence,
           failed_at_index: result.failed_at_index,
           # no :failure_reason on purpose — exercises the nil-signature path
           model: LinkModel,
