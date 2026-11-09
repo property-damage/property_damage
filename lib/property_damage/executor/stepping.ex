@@ -83,7 +83,17 @@ defmodule PropertyDamage.Executor.Stepping do
   require Logger
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor.{Events, Finalization, Settle, Step, StepObserver, Stutter}
+
+  alias PropertyDamage.Executor.{
+    Events,
+    Finalization,
+    Settle,
+    State,
+    Step,
+    StepObserver,
+    Stutter
+  }
+
   alias PropertyDamage.Executor.Stepping.Context
   alias PropertyDamage.Failure
   alias PropertyDamage.Log.Cap
@@ -117,6 +127,16 @@ defmodule PropertyDamage.Executor.Stepping do
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []), do: Step.new_state(model, opts)
+
+  @doc """
+  Run the `@check at: :startup` checks on a fresh state, before the first command.
+
+  Returns what `PropertyDamage.Executor.Step.run_startup_checks/1` returns:
+  `{:ok, state}`, or `{:failed, nil, failure, state}` when a check halts.
+  """
+  @spec run_startup_checks(State.t()) ::
+          {:ok, State.t()} | {:failed, nil, Failure.t(), State.t()}
+  defdelegate run_startup_checks(state), to: Step
 
   @typedoc """
   What the adapter answered for one command, so a caller comparing answers does
