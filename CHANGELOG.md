@@ -659,7 +659,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking: the placeholder is an opaque type read through accessors (DR-067).**
-  `PropertyDamage.Placeholder.t/0` is `@opaque`; code that read `placeholder.id`,
+  `t:PropertyDamage.Placeholder.t/0` is `@opaque`; code that read `placeholder.id`,
   `.path`, `.position`, `.event_module`, `.event_index` or `.resolved` calls
   `Placeholder.id/1`, `path/1`, `position/1`, `event_module/1`,
   `event_index/1`, `resolved?/1` or `value/1`.
