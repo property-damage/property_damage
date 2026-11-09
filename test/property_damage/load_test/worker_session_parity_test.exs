@@ -116,10 +116,8 @@ defmodule PropertyDamage.LoadTest.WorkerSessionParityTest do
     :telemetry.attach(
       handler,
       [:property_damage, :command, :stop],
-      fn _event, _measure, %{variant: %{name: name}}, _config ->
-        send(test_pid, {:engine_command, name})
-      end,
-      nil
+      &__MODULE__.forward_command/4,
+      test_pid
     )
 
     {:ok, recorder} = Agent.start_link(fn -> [] end)
@@ -153,6 +151,10 @@ defmodule PropertyDamage.LoadTest.WorkerSessionParityTest do
     :telemetry.detach(handler)
     {recorder |> Agent.get(& &1) |> Enum.reverse(), results, errors}
   end
+
+  @doc false
+  def forward_command(_event, _measure, %{variant: %{name: name}}, test_pid),
+    do: send(test_pid, {:engine_command, name})
 
   defp engine_commands(name, acc \\ 0) do
     receive do

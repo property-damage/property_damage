@@ -9,11 +9,12 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  alias PropertyDamage.Executor.Timeout
-  alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
+  alias PropertyDamage.{EventQueue, Failure, Generator, PlaceholderRegistry, Runtime, Sequence}
+  alias PropertyDamage.Executor.{Phases, Stepping, Timeout}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection.Checks
   alias PropertyDamage.Sequence.Position
+  alias PropertyDamage.Telemetry
 
   defstruct [
     :worker_id,
@@ -29,6 +30,11 @@ defmodule PropertyDamage.LoadTest.Worker do
     :run_nonce,
     # Seed of this worker's sequences, from `worker_seed/2`.
     :seed,
+    # How a sequence runs: `:legacy` (the worker's own loop) or `:stepping`
+    # (a stepping session over the engine's per-command path).
+    :session,
+    # Stepping session only: the `Stepping.Context`, built once per worker.
+    :context,
     # Stats
     :sequences_executed,
     :commands_executed,
@@ -60,6 +66,9 @@ defmodule PropertyDamage.LoadTest.Worker do
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
   - `:seed` - Run seed the worker's sequences derive from (default: random)
+  - `:session` - Internal. `:legacy` (default) runs a sequence through the
+    worker's own loop; `:stepping` runs it as a stepping session over the
+    engine's per-command path
 
   Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
@@ -143,7 +152,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           check_failures: 0
         }
 
-        {:ok, state}
+        {:ok, with_session(state, Keyword.get(opts, :session, :legacy))}
 
       {:error, reason} ->
         {:stop, PropertyDamage.Failure.setup_failed(reason)}
@@ -174,8 +183,27 @@ defmodule PropertyDamage.LoadTest.Worker do
     {:reply, stats, state}
   end
 
+  # A stepping session owns an event queue for the life of the worker.
+  defp with_session(state, :legacy), do: %{state | session: :legacy}
+
+  defp with_session(state, :stepping) do
+    {:ok, event_queue} = EventQueue.start_link()
+
+    context = %Stepping.Context{
+      model: state.model,
+      adapter: state.target.adapter,
+      adapter_context: state.adapter_context,
+      event_queue: event_queue,
+      target_name: state.target.name
+    }
+
+    %{state | session: :stepping, context: context}
+  end
+
   @impl true
   def terminate(_reason, state) do
+    if state.context, do: EventQueue.stop(state.context.event_queue)
+
     # Teardown adapter context on worker shutdown
     if state.adapter_context do
       PropertyDamage.Log.inline(fn -> state.target.adapter.teardown(state.adapter_context) end)
@@ -195,7 +223,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     sequence = Generator.generate_value(generator, sequence_seed)
 
     # Execute sequence using persistent adapter context
-    case execute_sequence_commands(sequence, state) do
+    case run_sequence(sequence, sequence_seed, state) do
       {:ok, commands_run, errors, check_failure_count} ->
         result = %{
           commands_run: commands_run,
@@ -218,6 +246,12 @@ defmodule PropertyDamage.LoadTest.Worker do
         {:error, reason, new_state}
     end
   end
+
+  defp run_sequence(sequence, _seed, %{session: :legacy} = state),
+    do: execute_sequence_commands(sequence, state)
+
+  defp run_sequence(sequence, seed, %{session: :stepping} = state),
+    do: execute_stepped_sequence(sequence, seed, state)
 
   defp execute_sequence_commands(sequence, state) do
     commands = Sequence.to_list(sequence)
@@ -401,6 +435,206 @@ defmodule PropertyDamage.LoadTest.Worker do
         {:error, {:unresolved_placeholder, reason}}
     end
   end
+
+  # ============================================================================
+  # Stepping session
+  # ============================================================================
+
+  # One sequence as a stepping session: the engine's startup checks, setup
+  # commands, each root through `Stepping.step/4` (timed), a drain after each
+  # root, finalization, then teardown commands. The tally counts commands
+  # stepped, errors and check failures.
+  defp execute_stepped_sequence(sequence, seed, state) do
+    ctx = state.context
+
+    # The teardown commands are drawn after the roots, as a property run does.
+    sequence = Generator.teardown_commands(state.model, sequence, seed)
+
+    exec =
+      Stepping.init_state(state.model,
+        event_queue: ctx.event_queue,
+        check_mode: state.check_mode,
+        placeholder_registry: sequence.registry,
+        rng_seed: seed,
+        run_nonce: state.run_nonce,
+        mint_epoch: state.worker_id,
+        telemetry:
+          Telemetry.engine_context(
+            %{index: state.target.index, name: state.target.name},
+            state.sequences_executed
+          )
+      )
+
+    tally = %{commands_run: 0, errors: 0, check_failures: 0, seen: 0}
+
+    {outcome, tally} =
+      case Stepping.run_startup_checks(exec) do
+        {:ok, exec} ->
+          run_stepped_phases(sequence, exec, tally, state)
+
+        {:failed, nil, failure, failed} ->
+          tally = count_check_failure(tally, failure, nil, state)
+          {{:failed, nil, failure, failed}, tally}
+      end
+
+    {result, tally} = finish_session(outcome, tally, ctx, state)
+
+    # A startup failure ran no setup command, so no teardown command runs.
+    if not match?({:failed, nil, _, _}, outcome) do
+      Phases.run_teardown(sequence.teardown, result.exec, ctx)
+    end
+
+    {:ok, tally.commands_run, tally.errors, tally.check_failures}
+  end
+
+  defp run_stepped_phases(sequence, exec, tally, state) do
+    case Phases.run_setup(sequence.setup, exec, state.context) do
+      {:ok, exec} ->
+        sequence
+        |> Sequence.to_list()
+        |> Enum.with_index()
+        |> Enum.reduce_while({exec, tally}, &step_root(&1, &2, state))
+
+      {:failed, reason, failed} ->
+        {{:failed, nil, reason, failed}, %{tally | errors: tally.errors + 1}}
+    end
+  end
+
+  # One root: think, then time the engine step, record the request, fold the
+  # check failures the step recorded and drain the event queue. Returns
+  # `{:cont, {exec, tally}}` to go on or `{:halt, {{:failed, ...}, tally}}` to
+  # end the sequence.
+  defp step_root({command, index}, {exec, tally}, state) do
+    maybe_think(state.think_time_range)
+
+    started = System.monotonic_time(:microsecond)
+    stepped = Stepping.step(command, index, exec, state.context)
+    latency_ms = (System.monotonic_time(:microsecond) - started) / 1000.0
+    tally = %{tally | commands_run: tally.commands_run + 1}
+    module = command.__struct__
+
+    case stepped do
+      {:ok, exec, _outcome} ->
+        Metrics.record_request(state.metrics, module, latency_ms, :ok)
+        {exec, tally} = fold_recorded(exec, tally, state)
+        drain_root(exec, tally, index, state)
+
+      # A check that halted: the command itself succeeded.
+      {:error, failure, failed, {:ok, _events}} ->
+        Metrics.record_request(state.metrics, module, latency_ms, :ok)
+
+        if Failure.class(failure) == :check do
+          tally = count_check_failure(tally, failure, module, state)
+          {:halt, {{:failed, index, failure, failed}, tally}}
+        else
+          # Not a check (a projection rejected an event): the step failed.
+          error_request(state, module, 0)
+          {:halt, {{:failed, index, failure, failed}, %{tally | errors: tally.errors + 1}}}
+        end
+
+      # The adapter errored or raised, or a placeholder did not resolve. The
+      # failed state is the state before the command with its adapter time
+      # and logs, so the session goes on from it, as the worker's own loop does.
+      {:error, _failure, failed, outcome} ->
+        Metrics.record_request(
+          state.metrics,
+          module,
+          latency_ms,
+          {:error, categorize_outcome(outcome)}
+        )
+
+        drain_root(failed, %{tally | errors: tally.errors + 1}, index, state)
+    end
+  end
+
+  defp error_request(state, module, latency_ms),
+    do: Metrics.record_request(state.metrics, module, latency_ms, {:error, :unknown_error})
+
+  defp drain_root(exec, tally, index, state) do
+    case Stepping.drain(exec, state.context) do
+      {:ok, drained} ->
+        {:cont, {drained, tally}}
+
+      {:error, failure, failed} ->
+        tally = count_check_failure(tally, failure, nil, state)
+        {:halt, {{:failed, index, failure, failed}, tally}}
+    end
+  end
+
+  # The outcome the engine reports for a command that was not answered `{:ok, _}`,
+  # in the categories of `categorize_error/1`.
+  defp categorize_outcome({:error, reason}), do: categorize_error(reason)
+  defp categorize_outcome({:raised, _exception}), do: :adapter_error
+  defp categorize_outcome(:not_called), do: :unknown_error
+
+  # Finalizes the session and counts what finalization reports: recorded
+  # failures not yet counted and, for a run that did not already fail, the
+  # failure that ended it (an unsettled eventual check, a teardown check).
+  defp finish_session(outcome, tally, ctx, state) do
+    result = Stepping.finalize(outcome, ctx)
+
+    tally =
+      result.check_failures
+      |> Enum.drop(tally.seen)
+      |> Enum.reduce(tally, &record_recorded(&2, &1, state))
+
+    tally =
+      if result.failure_reason != nil and not match?({:failed, _, _, _}, outcome),
+        do: count_check_failure(tally, result.failure_reason, nil, state),
+        else: tally
+
+    {Map.put(result, :exec, final_state(outcome)), tally}
+  end
+
+  defp final_state({:failed, _index, _failure, state}), do: state
+  defp final_state(state), do: state
+
+  # Folds the failures a `:record`-mode step added to the state.
+  defp fold_recorded(exec, tally, state) do
+    added = length(exec.check_failures) - tally.seen
+
+    tally =
+      exec.check_failures
+      |> Enum.take(added)
+      |> Enum.reverse()
+      |> Enum.reduce(tally, &record_recorded(&2, &1, state))
+
+    {exec, tally}
+  end
+
+  defp record_recorded(tally, recorded, state) do
+    {exception, _stacktrace} = split_reason(recorded.reason)
+    failure = Map.put(recorded, :reason, exception)
+    Metrics.record_check_failure(state.metrics, exception.__struct__, recorded.module, failure)
+    %{tally | check_failures: tally.check_failures + 1, seen: tally.seen + 1}
+  end
+
+  # A failure the engine halted on.
+  defp count_check_failure(tally, %Failure{} = failure, module, state) do
+    exception =
+      case Failure.detail(failure) do
+        {exception, _stacktrace} when is_exception(exception) -> exception
+        exception when is_exception(exception) -> exception
+        other -> %RuntimeError{message: inspect(other)}
+      end
+
+    record = %{
+      reason: exception,
+      command_index: tally.commands_run - 1,
+      step_type: :command,
+      module: module,
+      timestamp: System.monotonic_time(:millisecond)
+    }
+
+    Metrics.record_check_failure(state.metrics, exception.__struct__, module, record)
+    %{tally | check_failures: tally.check_failures + 1}
+  end
+
+  defp split_reason({exception, stacktrace}) when is_exception(exception),
+    do: {exception, stacktrace}
+
+  defp split_reason(exception) when is_exception(exception), do: {exception, []}
+  defp split_reason(other), do: {%RuntimeError{message: inspect(other)}, []}
 
   # ============================================================================
   # Helpers
