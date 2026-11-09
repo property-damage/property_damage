@@ -145,8 +145,7 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
         event_module: PropertyDamage.Test.ReplayFixtures.Opened,
         path: [:id],
         position: %PropertyDamage.Sequence.Position{section: {:leaf, 2}, offset: 1},
-        event_index: 0,
-        resolved: nil
+        event_index: 0
       }
       """
 
@@ -186,6 +185,23 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
       message = refused(artifact(":ok", format: 4))
       assert message =~ "header"
       assert message =~ ~r/format:? 4/
+    end
+  end
+
+  describe "refuses an artifact written at the previous format" do
+    @format_3 Path.join([__DIR__, "..", "fixtures", "replay", "format_3_artifact.exs"])
+
+    test "the fixture is a complete artifact that holds a placeholder" do
+      assert File.read!(@format_3) =~ "%PropertyDamage.Placeholder{"
+    end
+
+    @tag :known_defect
+    test "and names the format it reads" do
+      assert {:error, reason} = R.read_artifact(@format_3)
+
+      message = R.reason_text(reason)
+      assert message =~ "the replay artifact header names format 3; this version reads format"
+      refute message =~ "reads format 3"
     end
   end
 

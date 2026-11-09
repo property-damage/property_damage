@@ -95,7 +95,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg = PlaceholderRegistry.resolve(reg, p.id, "order_123")
 
-      assert PlaceholderRegistry.get(reg, p.id).resolved == "order_123"
+      assert Placeholder.value!(PlaceholderRegistry.get(reg, p.id)) == "order_123"
     end
 
     test "returns the registry unchanged for an unknown id" do
@@ -105,7 +105,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg2 = PlaceholderRegistry.resolve(reg, make_ref(), "value")
 
-      assert PlaceholderRegistry.get(reg2, p.id).resolved == nil
+      refute Placeholder.resolved?(PlaceholderRegistry.get(reg2, p.id))
     end
 
     test "resolves only the targeted placeholder when several exist" do
@@ -119,8 +119,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
         |> PlaceholderRegistry.register(p2)
         |> PlaceholderRegistry.resolve(p2.id, "order_456")
 
-      assert PlaceholderRegistry.get(reg, p1.id).resolved == nil
-      assert PlaceholderRegistry.get(reg, p2.id).resolved == "order_456"
+      refute Placeholder.resolved?(PlaceholderRegistry.get(reg, p1.id))
+      assert Placeholder.value!(PlaceholderRegistry.get(reg, p2.id)) == "order_456"
     end
   end
 

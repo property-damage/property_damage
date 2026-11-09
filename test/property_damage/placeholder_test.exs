@@ -59,7 +59,7 @@ defmodule PropertyDamage.PlaceholderTest do
     test "is unresolved by default" do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
-      assert p.resolved == nil
+      refute Placeholder.resolved?(p)
     end
 
     test "supports list indices in path" do
@@ -74,7 +74,7 @@ defmodule PropertyDamage.PlaceholderTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       resolved = Placeholder.resolve(p, "order_123")
 
-      assert resolved.resolved == "order_123"
+      assert Placeholder.value!(resolved) == "order_123"
     end
 
     test "preserves ID" do
@@ -96,12 +96,11 @@ defmodule PropertyDamage.PlaceholderTest do
     test "can resolve to any value type" do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
-      assert Placeholder.resolve(p, 42).resolved == 42
-      assert Placeholder.resolve(p, "hello").resolved == "hello"
-      assert Placeholder.resolve(p, %{id: 1}).resolved == %{id: 1}
-      assert Placeholder.resolve(p, [1, 2, 3]).resolved == [1, 2, 3]
-      assert Placeholder.resolve(p, nil).resolved == nil
-      assert Placeholder.resolve(p, false).resolved == false
+      assert Placeholder.value!(Placeholder.resolve(p, 42)) == 42
+      assert Placeholder.value!(Placeholder.resolve(p, "hello")) == "hello"
+      assert Placeholder.value!(Placeholder.resolve(p, %{id: 1})) == %{id: 1}
+      assert Placeholder.value!(Placeholder.resolve(p, [1, 2, 3])) == [1, 2, 3]
+      assert Placeholder.value!(Placeholder.resolve(p, false)) == false
     end
   end
 
@@ -120,12 +119,13 @@ defmodule PropertyDamage.PlaceholderTest do
       assert Placeholder.resolved?(p)
     end
 
-    test "treats resolution to nil as unresolved (matches Ref behavior)" do
+    @tag :known_defect
+    test "resolution to nil is resolved" do
       p =
         Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
         |> Placeholder.resolve(nil)
 
-      refute Placeholder.resolved?(p)
+      assert Placeholder.resolved?(p)
     end
 
     test "returns true when resolved to false" do

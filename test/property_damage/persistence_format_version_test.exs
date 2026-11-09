@@ -134,6 +134,25 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
     end
   end
 
+  describe "a report saved at format 20, which holds a placeholder" do
+    @format_20 Path.join([__DIR__, "..", "fixtures", "persistence", "format_20_report.pd"])
+
+    test "carries version 20 in its header" do
+      assert saved_header(@format_20) == 20
+    end
+
+    @tag :known_defect
+    test "is refused by load/1" do
+      assert {:error, {:unsupported_format_version, 20, @version}} == Persistence.load(@format_20)
+    end
+
+    @tag :known_defect
+    test "is refused by load_trace/1" do
+      assert {:error, {:unsupported_format_version, 20, @version}} ==
+               Persistence.load_trace(@format_20)
+    end
+  end
+
   describe "a saved report" do
     @tag :tmp_dir
     test "carries the current version in its header and payload, and loads back intact", %{
