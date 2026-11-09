@@ -4,7 +4,7 @@
 
 Commands are the semantic building blocks of stateful property-based tests. Each command defines a pure generator that produces field maps, a specification describing execution and shrinking behavior, and optional metadata callbacks. Commands are deliberately decoupled from state shape and execution transport, enabling reuse across different models and adapters.
 
-Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-058 (Failure Report Context and Explanations)
+Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-058 (Failure Report Context and Explanations), DR-067 (The Placeholder Is a Public Opaque Type with an Explicit Unresolved Marker)
 
 ## Requirements
 
