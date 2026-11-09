@@ -148,7 +148,7 @@ defmodule PropertyDamage.Variant do
     Verdict
   }
 
-  alias PropertyDamage.Executor.{Phases, Step, Stepping}
+  alias PropertyDamage.Executor.{Phases, State, Step, Stepping}
   alias PropertyDamage.Runtime.RunServices
 
   @setup_slot 1
@@ -498,7 +498,7 @@ defmodule PropertyDamage.Variant do
   def handle_call({:observe, root, keys}, _from, %{phase: phase} = state)
       when phase in [:ready, :finished] do
     projections =
-      if phase == :finished, do: state.result.projections, else: state.exec.projections
+      if phase == :finished, do: state.result.projections, else: State.projections(state.exec)
 
     command = elem(state.commands, root)
     {:reply, {:ok, Map.new(keys, &{&1, observe_key(&1, projections, command)})}, state}
@@ -725,7 +725,7 @@ defmodule PropertyDamage.Variant do
           )
       )
 
-    exec = %{exec | logs: state.logs}
+    exec = State.put_logs(exec, state.logs)
 
     state = %{state | ctx: setup_context(state, adapter_context)}
 
@@ -796,7 +796,7 @@ defmodule PropertyDamage.Variant do
           %{
             result
             | event_log: result.event_log ++ entries,
-              logs: PropertyDamage.Log.merge(result.logs, exec.logs)
+              logs: PropertyDamage.Log.merge(result.logs, State.logs(exec))
           }
       end
 
@@ -876,7 +876,8 @@ defmodule PropertyDamage.Variant do
     end)
     |> case do
       {:cont, state} ->
-        {:cont, state, {:ok, root_events(state.exec.event_log, before.event_log, index)}}
+        {:cont, state,
+         {:ok, root_events(State.event_log(state.exec), State.event_log(before), index)}}
 
       {:halt, state} ->
         {:halt, state}
@@ -924,7 +925,7 @@ defmodule PropertyDamage.Variant do
   end
 
   defp catch_up_at(state, root, mode) do
-    log_before = length(state.exec.event_log)
+    log_before = length(State.event_log(state.exec))
 
     stepped =
       case mode do
@@ -935,7 +936,7 @@ defmodule PropertyDamage.Variant do
     with {:cont, state} <- stepped,
          {{:ok, _observed}, state} <- finish_advance({state, []}, root),
          {:ok, state} <- surface_expired_eventually(state) do
-      {{:ok, length(state.exec.event_log) - log_before}, state}
+      {{:ok, length(State.event_log(state.exec)) - log_before}, state}
     else
       {:halt, state} -> {{:failed, state.failure}, state}
       {{:failed, _failure} = failed, state} -> {failed, state}
@@ -969,12 +970,12 @@ defmodule PropertyDamage.Variant do
   # it, so every variant keeps re-reading alike.
   defp reread_finished(%{halted: nil, result: result} = state, root) do
     log_before = length(result.event_log)
-    state = %{state | phase: :ready, exec: finished_exec(state.exec, result)}
+    state = %{state | phase: :ready, exec: State.put_result(state.exec, result)}
 
     case reread_root(state, root) do
       {:cont, state} ->
         Stepping.stop_pollers(state.exec)
-        exec = %{state.exec | active_pollers: [], active_resource_pollers: []}
+        exec = State.clear_pollers(state.exec)
         result = refinished_result(result, exec)
         delivered = length(result.event_log) - log_before
         {{:ok, delivered}, %{state | phase: :finished, exec: exec, result: result}}
@@ -988,41 +989,16 @@ defmodule PropertyDamage.Variant do
   # A variant that halted steps nothing more.
   defp reread_finished(state, _root), do: {{:ok, 0}, state}
 
-  # The executor state a finished run left: the result holds what
-  # finalization folded and checked after the last request.
-  defp finished_exec(exec, result) do
-    %{
-      exec
-      | projections: result.projections,
-        event_log: Enum.reverse(result.event_log),
-        check_counters: result.check_counters,
-        check_failures: Enum.reverse(result.check_failures),
-        command_fold_ordinals: result.command_fold_ordinals,
-        fold_counter: next_fold(exec.fold_counter, result),
-        active_pollers: [],
-        active_resource_pollers: []
-    }
-  end
-
-  # The next fold ordinal after everything finalization folded.
-  defp next_fold(counter, result) do
-    folded =
-      for(%{fold_index: index} when is_integer(index) <- result.event_log, do: index + 1) ++
-        Enum.map(Map.values(result.command_fold_ordinals), &(&1 + 1))
-
-    Enum.max([counter | folded])
-  end
-
   defp refinished_result(result, exec) do
     %{
       result
-      | event_log: Enum.reverse(exec.event_log),
-        executed: exec.executed,
-        projections: exec.projections,
-        check_counters: exec.check_counters,
-        check_failures: Enum.reverse(exec.check_failures),
-        command_fold_ordinals: exec.command_fold_ordinals,
-        success: exec.check_failures == []
+      | event_log: Enum.reverse(State.event_log(exec)),
+        executed: State.executed(exec),
+        projections: State.projections(exec),
+        check_counters: State.check_counters(exec),
+        check_failures: Enum.reverse(State.check_failures(exec)),
+        command_fold_ordinals: State.command_fold_ordinals(exec),
+        success: State.check_failures(exec) == []
     }
   end
 
@@ -1033,7 +1009,7 @@ defmodule PropertyDamage.Variant do
   # event opened the window, instead of at the end of the run.
   defp surface_expired_eventually(%{check_mode: :halt} = state) do
     state = collect_poller_results(state)
-    active = MapSet.new(state.exec.active_pollers, & &1.id)
+    active = MapSet.new(State.active_pollers(state.exec), & &1.id)
 
     expired =
       Enum.find(Enum.reverse(state.stash), fn
@@ -1052,10 +1028,7 @@ defmodule PropertyDamage.Variant do
         failure = expired_failure(ended, info)
         root = Map.get(info.triggered_by, :command_index)
 
-        exec = %{
-          state.exec
-          | active_pollers: Enum.reject(state.exec.active_pollers, &(&1.id == id))
-        }
+        exec = State.drop_poller(state.exec, id)
 
         state = %{state | stash: List.delete(state.stash, {:poller_result, id, result})}
 
@@ -1088,7 +1061,7 @@ defmodule PropertyDamage.Variant do
   defp record_latency(%{measure_latency: false} = state, _index, _stepped), do: state
 
   defp record_latency(state, key, stepped) do
-    case elem(stepped, tuple_size(stepped) - 2).last_execute_us do
+    case State.last_execute_us(elem(stepped, tuple_size(stepped) - 2)) do
       nil -> state
       elapsed -> %{state | latencies: [{key, elapsed} | state.latencies]}
     end
@@ -1128,8 +1101,12 @@ defmodule PropertyDamage.Variant do
   # was (DR-025), which may be earlier than the command being stepped. The
   # engine records that command on the failed state, and the finished result
   # reports it as `failed_at_index`; the failure's root says the same.
-  defp attributed_root(%{async_failed_index: :unset}, root), do: root
-  defp attributed_root(%{async_failed_index: attributed}, _root), do: attributed
+  defp attributed_root(failed_state, root) do
+    case State.async_failed_index(failed_state) do
+      :unset -> root
+      attributed -> attributed
+    end
+  end
 
   # The event values of one command's :injected entries, then its :command
   # entries, in fold order. Only entries the step added are examined.
@@ -1213,14 +1190,14 @@ defmodule PropertyDamage.Variant do
   # A finished run's result also holds the lines its finalization wrote, which
   # the executor state does not.
   defp step_logs(%{result: %{logs: logs}, exec: exec}),
-    do: PropertyDamage.Log.merge(logs, exec.logs)
+    do: PropertyDamage.Log.merge(logs, State.logs(exec))
 
-  defp step_logs(%{exec: exec}), do: exec.logs
+  defp step_logs(%{exec: exec}), do: State.logs(exec)
 
   defp stop_pollers(exec) do
-    for poller <- exec.active_pollers, do: best_effort(fn -> StatePoller.stop(poller) end)
+    for poller <- State.active_pollers(exec), do: best_effort(fn -> StatePoller.stop(poller) end)
 
-    for poller <- exec.active_resource_pollers,
+    for poller <- State.active_resource_pollers(exec),
         do: best_effort(fn -> ResourcePoller.stop(poller) end)
   end
 
@@ -1294,8 +1271,8 @@ defmodule PropertyDamage.Variant do
 
   defp guard_pollers(%{exec: exec} = state) do
     pids =
-      Enum.map(exec.active_pollers, & &1.pid) ++
-        Enum.map(exec.active_resource_pollers, & &1.pid)
+      Enum.map(State.active_pollers(exec), & &1.pid) ++
+        Enum.map(State.active_resource_pollers(exec), & &1.pid)
 
     if pids != [], do: guard(state, pids)
     state

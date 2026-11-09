@@ -182,4 +182,113 @@ defmodule PropertyDamage.Executor.State do
           keep_attempts: pos_integer(),
           telemetry: map() | nil
         }
+
+  # ============================================================================
+  # Reads
+  # ============================================================================
+
+  @doc "The projection states, by projection module."
+  @spec projections(t()) :: map()
+  def projections(%__MODULE__{projections: projections}), do: projections
+
+  @doc "The log lines the run's user code wrote, by the step they belong to (DR-054)."
+  @spec logs(t()) :: PropertyDamage.Log.logs()
+  def logs(%__MODULE__{logs: logs}), do: logs
+
+  @doc "The recorded event-log entries, newest first."
+  @spec event_log(t()) :: list()
+  def event_log(%__MODULE__{event_log: event_log}), do: event_log
+
+  @doc "The next fold ordinal of the run (DR-040)."
+  @spec fold_counter(t()) :: non_neg_integer()
+  def fold_counter(%__MODULE__{fold_counter: fold_counter}), do: fold_counter
+
+  @doc "The resolved commands sent to the adapter, by position (DR-033)."
+  @spec executed(t()) :: %{term() => struct()}
+  def executed(%__MODULE__{executed: executed}), do: executed
+
+  @doc "The check firing counters."
+  @spec check_counters(t()) :: map()
+  def check_counters(%__MODULE__{check_counters: counters}), do: counters
+
+  @doc "The recorded `:record`-mode check failures, newest first."
+  @spec check_failures(t()) :: list()
+  def check_failures(%__MODULE__{check_failures: failures}), do: failures
+
+  @doc "The fold ordinal of each command, by position (DR-040)."
+  @spec command_fold_ordinals(t()) :: %{term() => non_neg_integer()}
+  def command_fold_ordinals(%__MODULE__{command_fold_ordinals: ordinals}), do: ordinals
+
+  @doc "The running `@eventually` pollers."
+  @spec active_pollers(t()) :: list()
+  def active_pollers(%__MODULE__{active_pollers: pollers}), do: pollers
+
+  @doc "The running resource pollers."
+  @spec active_resource_pollers(t()) :: list()
+  def active_resource_pollers(%__MODULE__{active_resource_pollers: pollers}), do: pollers
+
+  @doc """
+  The microseconds the adapter's `execute/3` took for the most recent
+  command, or `nil` when that command never reached the adapter.
+  """
+  @spec last_execute_us(t()) :: non_neg_integer() | nil
+  def last_execute_us(%__MODULE__{last_execute_us: us}), do: us
+
+  @doc """
+  The command index an async check failure is attributed to, or `:unset` on
+  a state that did not fail that way (DR-025).
+  """
+  @spec async_failed_index(t()) :: non_neg_integer() | {:setup, non_neg_integer()} | nil | :unset
+  def async_failed_index(%__MODULE__{async_failed_index: index}), do: index
+
+  # ============================================================================
+  # Updates
+  # ============================================================================
+
+  @doc "Replaces the state's log lines with `logs`."
+  @spec put_logs(t(), PropertyDamage.Log.logs()) :: t()
+  def put_logs(%__MODULE__{} = state, logs), do: %{state | logs: logs}
+
+  @doc """
+  Empties the state's lists of running pollers, after the caller stopped
+  them.
+  """
+  @spec clear_pollers(t()) :: t()
+  def clear_pollers(%__MODULE__{} = state),
+    do: %{state | active_pollers: [], active_resource_pollers: []}
+
+  @doc "Removes the `@eventually` poller whose id is `id` from the running pollers."
+  @spec drop_poller(t(), term()) :: t()
+  def drop_poller(%__MODULE__{} = state, id),
+    do: %{state | active_pollers: Enum.reject(state.active_pollers, &(&1.id == id))}
+
+  @doc """
+  The state a finished run left, from the run's `result`: the projections,
+  event log, check counters and failures and command fold ordinals the
+  result holds, the fold counter past everything finalization folded, and no
+  running pollers.
+  """
+  @spec put_result(t(), map()) :: t()
+  def put_result(%__MODULE__{} = state, result) do
+    %{
+      state
+      | projections: result.projections,
+        event_log: Enum.reverse(result.event_log),
+        check_counters: result.check_counters,
+        check_failures: Enum.reverse(result.check_failures),
+        command_fold_ordinals: result.command_fold_ordinals,
+        fold_counter: next_fold(state.fold_counter, result),
+        active_pollers: [],
+        active_resource_pollers: []
+    }
+  end
+
+  # The next fold ordinal after everything finalization folded.
+  defp next_fold(counter, result) do
+    folded =
+      for(%{fold_index: index} when is_integer(index) <- result.event_log, do: index + 1) ++
+        Enum.map(Map.values(result.command_fold_ordinals), &(&1 + 1))
+
+    Enum.max([counter | folded])
+  end
 end
