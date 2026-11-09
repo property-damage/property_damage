@@ -25,14 +25,24 @@ defmodule PropertyDamage.StutterUsingTest do
   defp violation!(retry, stutter) do
     assert {:error, report} = run(retry, stutter)
     assert report.report_kind == :check_failed
-    assert Failure.kind(report.failure_reason) == :idempotency_violation
+
+    assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) ==
+             :idempotency_violation
+
     report
   end
 
   # The mismatch detail recorded anywhere in the violation.
   defp detail(report, match?) do
-    found = Compare.deep_find(Failure.detail(report.failure_reason), match?)
-    assert found, "no mismatch detail in #{inspect(Failure.detail(report.failure_reason))}"
+    found =
+      Compare.deep_find(
+        Failure.detail(PropertyDamage.FailureReport.failure_reason(report)),
+        match?
+      )
+
+    assert found,
+           "no mismatch detail in #{inspect(Failure.detail(PropertyDamage.FailureReport.failure_reason(report)))}"
+
     found
   end
 
@@ -209,7 +219,10 @@ defmodule PropertyDamage.StutterUsingTest do
     test "a violation keeps its shrinker identity" do
       report = violation!(:different, [])
 
-      assert Failure.signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(
+               PropertyDamage.FailureReport.failure_reason(report),
+               report.variant.index
+             ) ==
                {:idempotency_violation, nil, 0}
     end
   end

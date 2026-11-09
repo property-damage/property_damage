@@ -114,12 +114,13 @@ defmodule PropertyDamage.Progress.Printer do
       IO.puts("  Target:       [#{variant.index}] #{variant.name}")
     end
 
-    IO.puts("  Run:          #{report.run_number + 1}")
-    IO.puts("  Seed:         #{report.seed}")
+    IO.puts("  Run:          #{FailureReport.run_number(report) + 1}")
+    IO.puts("  Seed:         #{FailureReport.seed(report)}")
 
     IO.puts(
       "  Failed at:    " <>
-        case {FailureReport.failure_index(report), Naming.setup_location(report.failure_reason)} do
+        case {FailureReport.failure_index(report),
+              Naming.setup_location(FailureReport.failure_reason(report))} do
           {_index, location} when is_binary(location) -> location
           {nil, nil} -> "not localized to a command"
           {index, nil} -> "Command #{index + 1}"
@@ -142,7 +143,7 @@ defmodule PropertyDamage.Progress.Printer do
 
     # Failure reason with formatted error message
     IO.puts("  Reason:")
-    error_msg = Error.format(report.failure_reason, %{})
+    error_msg = Error.format(FailureReport.failure_reason(report), %{})
     # Indent the error message
     error_lines = String.split(error_msg, "\n")
 
@@ -170,7 +171,7 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("    PropertyDamage.run(")
     IO.puts("      model: YourModel,")
     IO.puts("      targets: [YourAdapter],")
-    IO.puts("      seed: #{report.seed},")
+    IO.puts("      seed: #{FailureReport.seed(report)},")
     IO.puts("      max_runs: 1")
     IO.puts("    )")
     IO.puts("")
@@ -203,7 +204,7 @@ defmodule PropertyDamage.Progress.Printer do
   @spec print_latency_verdicts(FailureReport.t()) :: :ok
   def print_latency_verdicts(%FailureReport{report_kind: :latency_exceeded} = report) do
     breaches =
-      [{report.variant, report.failure_reason}] ++
+      [{report.variant, FailureReport.failure_reason(report)}] ++
         Enum.map(report.other_failures, &{&1.variant, &1.failure})
 
     for {variant, failure} <- breaches do

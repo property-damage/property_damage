@@ -92,7 +92,7 @@ defmodule PropertyDamage.FlakyFailureReportTest do
            "expected the observed adapter error, got a contentless Unknown Failure"
 
     assert FailureReport.kind(report) == :adapter_error
-    assert report.failure_reason == Failure.adapter_error(:flaky_boom)
+    assert FailureReport.failure_reason(report) == Failure.adapter_error(:flaky_boom)
     assert report.failed_at_index == 0
   end
 end

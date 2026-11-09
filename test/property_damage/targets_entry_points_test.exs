@@ -77,7 +77,7 @@ defmodule PropertyDamage.TargetsEntryPointsTest do
     end
 
     test "Replay.start/2 rejects adapter_config: and accepts a targets: override" do
-      report = %FailureReport{model: nil, targets: [{SimpleAdapter, []}]}
+      report = %FailureReport{targets: [{SimpleAdapter, []}]}
 
       assert_retired(
         fn -> Replay.start(report, adapter_config: %{a: 1}) end,
@@ -118,7 +118,10 @@ defmodule PropertyDamage.TargetsEntryPointsTest do
 
   describe "generated source" do
     test "the reproduction command names the adapter under targets:" do
-      report = %FailureReport{seed: 5, model: ExecutorModel, targets: [{SimpleAdapter, []}]}
+      report = %FailureReport{
+        trace: %PropertyDamage.RunTrace{seed: 5, model: ExecutorModel},
+        targets: [{SimpleAdapter, []}]
+      }
 
       assert FailureReport.reproduction_command(report) ==
                "PropertyDamage.run(model: PropertyDamage.Test.ExecutorModel, " <>
@@ -145,14 +148,17 @@ defmodule PropertyDamage.TargetsEntryPointsTest do
     commands = [%PropertyDamage.Test.Commands.CreateItem{name: "a", quantity: 1}]
 
     %FailureReport{
-      seed: 1,
-      run_number: 1,
       failed_at_index: 0,
-      failure_reason: PropertyDamage.Failure.check_failed(:check, "boom"),
       original_sequence: PropertyDamage.Sequence.linear(commands),
-      trace: PropertyDamage.RunTrace.new(plan: PropertyDamage.Sequence.linear(commands)),
-      timestamp: ~U[2025-12-26 14:30:00Z],
-      model: ExecutorModel,
+      trace:
+        PropertyDamage.RunTrace.new(
+          plan: PropertyDamage.Sequence.linear(commands),
+          seed: 1,
+          run_number: 1,
+          outcome: {:fail, PropertyDamage.Failure.check_failed(:check, "boom")},
+          timestamp: ~U[2025-12-26 14:30:00Z],
+          model: ExecutorModel
+        ),
       targets: [{SimpleAdapter, []}]
     }
   end

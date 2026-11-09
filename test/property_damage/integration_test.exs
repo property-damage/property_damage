@@ -94,7 +94,7 @@ defmodule PropertyDamage.IntegrationTest do
       failure = hd(result.failures)
       assert %PropertyDamage.FailureReport{} = failure
       assert PropertyDamage.FailureReport.check_name(failure) == :quantity_limit
-      assert is_integer(failure.seed)
+      assert is_integer(PropertyDamage.FailureReport.seed(failure))
     end
 
     test "stop_on_failure: true halts after the first failing run" do
@@ -320,7 +320,7 @@ defmodule PropertyDamage.IntegrationTest do
 
       assert decoded["failures"] == [
                %{
-                 "seed" => failure.seed,
+                 "seed" => PropertyDamage.FailureReport.seed(failure),
                  "check" => inspect(PropertyDamage.FailureReport.check_name(failure)),
                  "error" => PropertyDamage.FailureReport.failure_message(failure)
                }

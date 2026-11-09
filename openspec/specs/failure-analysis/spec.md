@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes by replaying the shrunk sequence from the replay artifact and matching the failure signature, explores neighbouring seeds as a separate capability with no verdict, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations), DR-064 (Fixes Are Verified on the Replay Artifact)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations), DR-064 (Fixes Are Verified on the Replay Artifact), DR-066 (The Report Is an Overlay on Its Trace, and Serializes as One JSON Document)
 
 ## Requirements
 
@@ -29,7 +29,7 @@ and `partial_events/1` accessors.
 #### Scenario: Report views derive from the failure reason
 
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
-- **THEN** `FailureReport.kind/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
+- **THEN** `FailureReport.kind/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `PropertyDamage.FailureReport.failure_reason(report)` rather than stored as denormalized fields
 
 ### Requirement: A Failed Check Records Its Projection (DR-058)
 
@@ -279,13 +279,23 @@ The system SHALL produce structured failure reports containing location (run num
 #### Scenario: Report creation
 
 - **WHEN** a test failure occurs
-- **THEN** a `FailureReport` SHALL be created with seed, run_number, original_sequence, failed_at_index, failure_reason, and an embedded `RunTrace` whose plan serves as the shrunk sequence (DR-033)
+- **THEN** a `FailureReport` SHALL be created with original_sequence, failed_at_index and an embedded `RunTrace` whose plan serves as the shrunk sequence (DR-033)
+- **AND** `seed/1`, `run_number/1`, `model/1`, `timestamp/1`, `command_labels/1`, `failure_reason/1`, `setup_commands/1` and `teardown_commands/1` SHALL read their values from that trace, and the report SHALL NOT store them (DR-066)
 
 #### Scenario: Multiple output formats
 
 - **WHEN** a report is formatted
 - **THEN** the system SHALL support `:terminal`, `:markdown`, `:json`, and `:compact` output formats
-- **AND** the `:json` format SHALL keep every field of the report, the sections the printed formats dropped included (DR-055)
+- **AND** the `:json` format SHALL be the one document of `PropertyDamage.FailureReport.Document` (`"format"` equal to `2`), which names every field of the report and the sections the printed formats dropped (DR-055, DR-066)
+- **AND** `Persistence.export_json/1` and `Bundle.build/2` SHALL return that same document, the first encoded as indented JSON (DR-066)
+
+#### Scenario: A section that fails to build does not lose the JSON document (DR-066)
+
+- **GIVEN** a report whose Failure section raises while it is built, because a projection's `__compares__/0` raises
+- **WHEN** the report is formatted as `:json`
+- **THEN** the document SHALL hold `logs` as it does for a report that builds, SHALL leave the Failure section out of `sections` and SHALL hold an empty `failure.fields`
+- **AND** it SHALL hold a `render_errors` list with one `{"section": "failure", "message": ...}` entry carrying the exception's message, and the raise SHALL be logged as a warning that names the section
+- **AND** a report whose sections all build SHALL have no `render_errors` key
 
 #### Scenario: Report with error origin
 
@@ -417,7 +427,7 @@ Each item SHALL print its label at column 2 and its name (a module, `Module.func
 
 ### Requirement: Regenerating a Target's Sequence (DR-050)
 
-`PropertyDamage.Expansion.for(model, seed, run, name, opts \\ [])` SHALL return `{:ok, %{prefix: [struct], roots: [struct], choices: [choice], sequence: [struct]}}` for the target `name`, or `{:error, message}` naming the model, the run, the name or the option at fault. It SHALL run no target and no adapter. `run` SHALL count from 1, and run n SHALL generate from `PropertyDamage.Generator.run_seed(seed, n - 1)`, so `for(model, report.seed, 1, name)` regenerates a failing run as it ran before shrinking. `sequence` SHALL equal the commands the named target executed (the setup prefix, then every root's commands in order, without the teardown), and the result SHALL be the same in every OS process. `opts` SHALL accept `:targets` (the run's `targets:`, from which the name's `expansion:` mode and the reference are read; without it, the name is a `:random` target) and `:max_commands`.
+`PropertyDamage.Expansion.for(model, seed, run, name, opts \\ [])` SHALL return `{:ok, %{prefix: [struct], roots: [struct], choices: [choice], sequence: [struct]}}` for the target `name`, or `{:error, message}` naming the model, the run, the name or the option at fault. It SHALL run no target and no adapter. `run` SHALL count from 1, and run n SHALL generate from `PropertyDamage.Generator.run_seed(seed, n - 1)`, so `for(model, PropertyDamage.FailureReport.seed(report), 1, name)` regenerates a failing run as it ran before shrinking. `sequence` SHALL equal the commands the named target executed (the setup prefix, then every root's commands in order, without the teardown), and the result SHALL be the same in every OS process. `opts` SHALL accept `:targets` (the run's `targets:`, from which the name's `expansion:` mode and the reference are read; without it, the name is a `:random` target) and `:max_commands`.
 
 #### Scenario: The result equals what the target ran
 - **GIVEN** a run recorded with a recording adapter
@@ -633,7 +643,7 @@ The environment variable `PD_LOG` SHALL hold the same filter as text, `only:a,b 
 
 When a filter applied, the `:terminal` and `:markdown` reports SHALL print, once, a `Log filter` field at the end of the Failure section that names every listed tag of both parts and the source, `(from the log: option)` or `(from PD_LOG)`; without a filter they SHALL print no such field. A tag listed in `only:` or `except:` that no line of the report carries (no line of `setup_log` and of the failing target's and the reference's trace) SHALL be named, in the order given and without duplicates, in one `Log warning` field after it: `no line carries the tag :sed`. The warning SHALL be absent when every listed tag is carried.
 
-The `:json` format SHALL gain a top-level `logs` key built from the same layout and filter as the terminal: `filter` (`only`, `except`, `source` as `"log_option"` or `"PD_LOG"`; null without a filter), `unknown_tags`, `setup` (the setup lines once), `target` and `reference` (null when the report lists one target), each with `name`, `adapter_setup`, `adapter_teardown` and `steps` (`label`, `root` and `lines`, in report order). A line SHALL be `kind: "line"`, `message` (plain text: a string as written, any other value through `inspect/2` with `pretty: true`, a function called with the raise marker), `tags` (strings), `file`, `line`, `offset_ms` and `attempt`; a gap SHALL be `kind: "gap"`, `attempts` and `lines`. A hidden line SHALL appear nowhere in `logs`, and every other JSON key SHALL be unchanged. The JSON output is not the persistence format.
+The document of the `:json` format SHALL hold a top-level `logs` key built from the same layout and filter as the terminal: `filter` (`only`, `except`, `source` as `"log_option"` or `"PD_LOG"`; null without a filter), `unknown_tags`, `setup` (the setup lines once), `target` and `reference` (null when the report lists one target), each with `name`, `adapter_setup`, `adapter_teardown` and `steps` (`label`, `root` and `lines`, in report order). A line SHALL be `kind: "line"`, `message` (plain text: a string as written, any other value through `inspect/2` with `pretty: true`, a function called with the raise marker), `tags` (strings), `file`, `line`, `offset_ms` and `attempt`; a gap SHALL be `kind: "gap"`, `attempts` and `lines`. A hidden line SHALL appear nowhere in `logs`, and every other JSON key SHALL be unchanged. The JSON output is not the persistence format.
 
 #### Scenario: only: shows the tagged and the untagged lines
 - **WHEN** a step logged lines tagged `[:http]`, `[:http, :headers]`, `[:seed]` and one untagged, and the report prints under `only: [:headers]`
@@ -701,7 +711,7 @@ The page SHALL be named after the model, the failing target, the failure kind th
 
 ### Requirement: The HTML Page Carries a JSON Bundle (DR-058)
 
-Every page `PropertyDamage.FailureReport.HTML.render/1` returns SHALL carry exactly one script tag of type `application/json` with the id `pd-bundle`, on the line after the tag that holds the report text, and `HTML.write_index/1` SHALL write none (DR-058). The tag SHALL hold `Bundle.build(report, [])` encoded so that no text in it can close the tag. The viewer's script SHALL NOT read the tag. The bundle SHALL be deterministic: it SHALL hold no timestamp and no process id, and it SHALL list everything in a stable order.
+Every page `PropertyDamage.FailureReport.HTML.render/1` returns SHALL carry exactly one script tag of type `application/json` with the id `pd-bundle`, on the line after the tag that holds the report text, and `HTML.write_index/1` SHALL write none (DR-058). The tag SHALL hold `Document.build(report, sources: true)` (the same map `Bundle.build/2` returns for those options) encoded so that no text in it can close the tag. The viewer's script SHALL NOT read the tag. The bundle SHALL be deterministic: it SHALL hold no timestamp and no process id, and it SHALL list everything in a stable order.
 
 The bundle SHALL name the failure's fields, the context items, the steps and events of each target's listing, and the sections by id, and SHALL NOT copy the text the page prints for any of them. `ids` SHALL list every id the bundle declares once. An id SHALL be `failure:<label>`, `context:<label>`, `step:<target>:<label>`, `entry:<target>:<label>:<n>`, `section:<title>` or `source:<Module>.<function>/<arity>`, with the text as the page prints it; from its second occurrence in one section, a repeated label SHALL carry an ordinal suffix (`:2`). Entries SHALL count the events under a step after the log filter, and the lines under the adapter's `setup/1` and `teardown/1` notes and the events tied to no command SHALL be counted per target and filed under no step.
 
@@ -709,7 +719,7 @@ The bundle SHALL hold, for the model, its projections, the commands and events o
 
 #### Scenario: One bundle per page
 - **WHEN** a report is rendered with `HTML.render/1` or written with `HTML.write/2`
-- **THEN** the page SHALL hold one `pd-bundle` tag whose content decodes to `Bundle.build(report, [])`, and the directory's `index.html` SHALL hold none (DR-058)
+- **THEN** the page SHALL hold one `pd-bundle` tag whose content decodes to `Document.build(report, sources: true)`, and the directory's `index.html` SHALL hold none (DR-058)
 
 #### Scenario: Source text cannot close the tag
 - **WHEN** an adapter's source holds the text `</script>`
@@ -745,7 +755,7 @@ The bundle SHALL hold, for the model, its projections, the commands and events o
 
 ### Requirement: Explaining a Failure Page (DR-058)
 
-`mix pd.explain PAGE` SHALL read one failure page, load no project code and call no model of its own (DR-058). It SHALL read the bundle from the page's one `pd-bundle` tag and SHALL exit with 1, with every error on standard error and standard output empty, when the page has no bundle, more than one, a bundle that is not a JSON object, or a bundle format the version does not read. The bundle hash SHALL be the lowercase hex SHA-256 of the bytes between the bundle tag and its closing `</script>`.
+`mix pd.explain PAGE` SHALL read one failure page, load no project code and call no model of its own (DR-058). It SHALL read the bundle from the page's one `pd-bundle` tag and SHALL exit with 1, with every error on standard error and standard output empty, when the page has no bundle, more than one, a bundle that is not a JSON object, or a bundle format the version does not read (it reads formats `1` and `2`, DR-066). The bundle hash SHALL be the lowercase hex SHA-256 of the bytes between the bundle tag and its closing `</script>`.
 
 Without an option, the task SHALL write `bundle.json` (the bundle bytes) and `instructions.md` into the directory `PAGE.explain`, create the directory when missing, remove nothing else in it, and print the absolute paths of the two files, the prompt version and the bundle hash, one per line. If the page already holds an explanation of this bundle for this prompt version, the task SHALL print one line saying so, write nothing and exit with 0. With `--prompt`, the task SHALL print the instructions, a newline, the bundle bytes and a newline to standard output, and nothing else, and SHALL write nothing.
 

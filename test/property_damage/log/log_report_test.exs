@@ -37,7 +37,7 @@ defmodule PropertyDamage.Log.ReportTest do
     assert report.report_kind == :execution_failed
 
     assert %Failure{type: %Failure.Execution{detail: %CommandTimeoutError{}}} =
-             report.failure_reason
+             FailureReport.failure_reason(report)
 
     expected = [{"GET /accounts/alice", ["http", "url"]}, {"waiting for bob", ["http"]}]
     listing = F.listing(F.plain(report), nil)

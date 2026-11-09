@@ -39,7 +39,7 @@ defmodule PropertyDamage.ReportFooterTest do
       report = failing(two(), seed: @run3_seed, max_runs: 5, max_commands: @run3_max_commands)
 
       assert R.report_run(report) == 3
-      assert report.seed == R.run_seed_for(@run3_seed, 3)
+      assert FailureReport.seed(report) == R.run_seed_for(@run3_seed, 3)
 
       path = R.replay_path!(report)
       assert %{seed: seed, run: 1} = R.field(report, :replay)
@@ -102,7 +102,7 @@ defmodule PropertyDamage.ReportFooterTest do
                "PropertyDamage.run(model: PropertyDamage.Test.ExpansionFor.Model, " <>
                  "targets: #{FailureReport.targets_source(report)}, " <>
                  "compare: [converge_within: 1], max_commands: 8, " <>
-                 "seed: #{report.seed}, max_runs: 1)"
+                 "seed: #{FailureReport.seed(report)}, max_runs: 1)"
     end
   end
 

@@ -1,6 +1,6 @@
 # DR-041: Structured Failure Vocabulary (`%Failure{}`)
 
-**Status:** Accepted. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. Amended by DR-045: the shrinker signature is `{kind, name, variant_index}`, from `Failure.signature/2` (it moved there from the shrinker); `Failure` gains the `Divergence` and `Setup` types.
+**Status:** Accepted. Amended by DR-066: `failure_reason` is no longer a struct field; `FailureReport.failure_reason/1` reads it from the trace outcome. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. Amended by DR-045: the shrinker signature is `{kind, name, variant_index}`, from `Failure.signature/2` (it moved there from the shrinker); `Failure` gains the `Divergence` and `Setup` types.
 **Date:** 2026-07-04
 
 > Follows the DR-039 / DR-040 persistence-refusal precedent for the format bump.

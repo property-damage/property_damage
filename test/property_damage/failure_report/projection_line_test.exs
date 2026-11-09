@@ -20,7 +20,11 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
   defp failure_fields(text), do: text |> failure_lines() |> L.fields()
 
   defp with_reason(report, reason),
-    do: %{report | failure_reason: reason, report_kind: Failure.report_kind(reason)}
+    do: %{
+      report
+      | trace: %{report.trace | outcome: {:fail, reason}},
+        report_kind: Failure.report_kind(reason)
+    }
 
   defp assert_line_after_check(text, projection) do
     lines = failure_lines(text)
@@ -62,7 +66,9 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
   describe "a check failure that has no projection" do
     test "prints no Projection line in the terminal or the markdown" do
       report = L.hand_built()
-      assert %Failure{type: %Failure.Check{kind: :check_failed}} = report.failure_reason
+
+      assert %Failure{type: %Failure.Check{kind: :check_failed}} =
+               FailureReport.failure_reason(report)
 
       for text <- [L.plain(report), L.markdown(report)] do
         assert [%{value: "settled_amount"}] = L.fields_labeled(text, "Check")
@@ -80,7 +86,9 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
     test "of a run that no check judged (a repeated command) prints no line and has a null key" do
       report = L.report(:idempotency)
 
-      assert %Failure{type: %Failure.Check{kind: :idempotency_violation}} = report.failure_reason
+      assert %Failure{type: %Failure.Check{kind: :idempotency_violation}} =
+               FailureReport.failure_reason(report)
+
       assert_no_projection_line(L.plain(report))
 
       failure = json_failure(report)
@@ -113,7 +121,9 @@ defmodule PropertyDamage.FailureReport.ProjectionLineTest do
     test "of a poll error prints no Projection line and has no projection key" do
       report = with_reason(L.hand_built(), Failure.poll_error(%RuntimeError{message: "boom"}))
 
-      assert %Failure{type: %Failure.Execution{kind: :poll_error}} = report.failure_reason
+      assert %Failure{type: %Failure.Execution{kind: :poll_error}} =
+               FailureReport.failure_reason(report)
+
       assert_no_projection_line(L.plain(report))
       assert_no_projection_line(L.markdown(report))
       refute Map.has_key?(json_failure(report), "projection")

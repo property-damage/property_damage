@@ -176,7 +176,7 @@ defmodule PropertyDamage.EventuallyVerdictTest do
              )
 
     assert %Failure{type: %Failure.Check{kind: :check_failed, name: :payment_confirmed}} =
-             report.failure_reason
+             FailureReport.failure_reason(report)
   end
 
   test "with two targets under check_mode: :record a raising predicate keeps its poll context" do
@@ -198,9 +198,9 @@ defmodule PropertyDamage.EventuallyVerdictTest do
                name: :payment_settled,
                context: %{poll_count: 1}
              }
-           } = report.failure_reason
+           } = FailureReport.failure_reason(report)
 
-    assert %KeyError{key: :settlements} = exception(report.failure_reason)
+    assert %KeyError{key: :settlements} = exception(FailureReport.failure_reason(report))
 
     text = FailureReport.failure_message(report)
     assert text =~ "payment_settled"

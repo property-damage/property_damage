@@ -76,15 +76,15 @@ defmodule PropertyDamage.ReplayArtifactTest do
     %{
       format: 3,
       model: model,
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       run: 1,
       external_markers: [],
       targets: [%{name: "ref", expansion: :random}, %{name: "second", expansion: :random}],
       failure: %{
-        signature: Failure.signature(report.failure_reason, report.variant.index),
+        signature: Failure.signature(FailureReport.failure_reason(report), report.variant.index),
         root_index: report.failed_at_index
       },
-      prefix: report.setup_commands,
+      prefix: FailureReport.setup_commands(report),
       roots: Enum.zip_with(ids, R.roots(report), &%{root_id: &1, command: &2}),
       choices:
         Map.new(choices, fn {name, list} -> {name, Enum.map(list, &R.recorded_choice/1)} end)
@@ -111,8 +111,8 @@ defmodule PropertyDamage.ReplayArtifactTest do
       dir = R.missing_dir!()
       report = failing(replay_dir: dir)
 
-      path = Path.join(dir, "Model_seed#{report.seed}.replay.exs")
-      assert R.artifact_name(report) == "Model_seed#{report.seed}.replay.exs"
+      path = Path.join(dir, "Model_seed#{FailureReport.seed(report)}.replay.exs")
+      assert R.artifact_name(report) == "Model_seed#{FailureReport.seed(report)}.replay.exs"
       assert R.field(report, :replay_path) == path
       assert R.files(dir) == [R.artifact_name(report)]
     end
@@ -131,7 +131,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
 
       assert first == @header
       assert "# model: PropertyDamage.Test.ExpansionFor.Model" in lines
-      assert "# seed: #{report.seed}" in lines
+      assert "# seed: #{FailureReport.seed(report)}" in lines
       assert Enum.any?(lines, &String.starts_with?(&1, "# run: 1"))
       assert ~s|# target "ref" (reference), expansion: :random| in lines
       assert ~s|# target "second", expansion: :random| in lines
@@ -180,9 +180,9 @@ defmodule PropertyDamage.ReplayArtifactTest do
       report = failing()
       path = R.replay_path!(report)
 
-      assert report.teardown_commands != []
+      assert FailureReport.teardown_commands(report) != []
       refute File.read!(path) =~ "ExpansionFor.Close"
-      assert R.term!(path).prefix == report.setup_commands
+      assert R.term!(path).prefix == FailureReport.setup_commands(report)
     end
 
     test "prints its top-level keys and the failure's keys in sorted order" do
@@ -228,7 +228,9 @@ defmodule PropertyDamage.ReplayArtifactTest do
 
     test "a divergence is recorded as data: the mismatch exception never reaches the file" do
       report = failing()
-      assert %PropertyDamage.ComparisonMismatch{} = report.failure_reason.type.mismatch
+
+      assert %PropertyDamage.ComparisonMismatch{} =
+               FailureReport.failure_reason(report).type.mismatch
 
       path = R.replay_path!(report)
       text = File.read!(path)

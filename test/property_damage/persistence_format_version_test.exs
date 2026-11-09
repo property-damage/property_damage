@@ -4,6 +4,8 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
   # engine never produces is refused rather than loaded.
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.{FailureReport, Persistence}
 
   # Reports saved at earlier format versions. A format-17 report's sequence
@@ -105,15 +107,30 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
   describe "an older format version" do
     test "is refused by load/1" do
       for {version, path} <- @older_fixtures do
-        assert {:error, {:unsupported_format_version, ^version, 19}} = Persistence.load(path)
+        assert {:error, {:unsupported_format_version, ^version, @version}} =
+                 Persistence.load(path)
       end
     end
 
     test "is refused by load_trace/1" do
       for {version, path} <- @older_fixtures do
-        assert {:error, {:unsupported_format_version, ^version, 19}} =
+        assert {:error, {:unsupported_format_version, ^version, @version}} =
                  Persistence.load_trace(path)
       end
+    end
+  end
+
+  describe "the previous format version" do
+    @format_19 Path.join([__DIR__, "..", "fixtures", "persistence", "format_19_report.pd"])
+
+    test "is refused by load/1" do
+      assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
+               Persistence.load(@format_19)
+    end
+
+    test "is refused by load_trace/1" do
+      assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
+               Persistence.load_trace(@format_19)
     end
   end
 
@@ -126,14 +143,14 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
       {:ok, path} = Persistence.save(report, dir)
 
       version = saved_header(path)
-      assert version == 19
+      assert version == @version
 
       <<"PD", _v::8, _crc::32, bin::binary>> = File.read!(path)
-      assert %{format_version: 19} = :erlang.binary_to_term(bin)
+      assert %{format_version: @version} = :erlang.binary_to_term(bin)
 
       assert {:ok, loaded} = Persistence.load(path)
-      assert loaded.failure_reason == report.failure_reason
-      assert loaded.seed == report.seed
+      assert FailureReport.failure_reason(loaded) == FailureReport.failure_reason(report)
+      assert FailureReport.seed(loaded) == FailureReport.seed(report)
       assert FailureReport.shrunk_sequence(loaded) == FailureReport.shrunk_sequence(report)
       assert FailureReport.event_log(loaded) == FailureReport.event_log(report)
       assert FailureReport.event_log(loaded) != []

@@ -82,7 +82,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       end
 
       assert reference["target"] == "a"
-      assert reference["seed"] == report.seed
+      assert reference["seed"] == FailureReport.seed(report)
       assert reference["sequence"] == json["sequence"]
       assert [_ | _] = paid_by(reference["event_log"])
       assert Enum.uniq(paid_by(reference["event_log"])) == ["a"]
@@ -128,7 +128,7 @@ defmodule PropertyDamage.FailureReportReferenceTest do
       assert timeout.report_kind == :execution_failed
 
       assert Compare.deep_find(
-               timeout.failure_reason,
+               PropertyDamage.FailureReport.failure_reason(timeout),
                &is_struct(&1, PropertyDamage.CommandTimeoutError)
              )
 

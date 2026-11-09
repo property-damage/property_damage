@@ -7,6 +7,8 @@ defmodule PropertyDamage.Log.SetupLogTest do
   # JSON output holds them under `logs` only.
   use ExUnit.Case, async: false
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Persistence
   alias PropertyDamage.Test.LogFixtures, as: F
@@ -186,7 +188,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
     # The decoded term of a saved file, inspected in full.
     defp saved_text(path) do
       bytes = File.read!(path)
-      assert <<"PD", 19, _checksum::32, term::binary>> = bytes
+      assert <<"PD", @version, _checksum::32, term::binary>> = bytes
       inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     end
 

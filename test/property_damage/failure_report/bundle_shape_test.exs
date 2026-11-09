@@ -1,5 +1,5 @@
 defmodule PropertyDamage.FailureReport.BundleShapeTest do
-  # The shape of the bundle that every HTML failure page carries: the keys it
+  # The shape of the JSON document that every HTML failure page carries: the keys it
   # holds, the listing it describes (read back from the page's own text), the
   # modules behind the report, and the fact that it refers to the page by id
   # and never copies a printed line.
@@ -11,7 +11,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
   alias PropertyDamage.Test.ContextSection
   alias PropertyDamage.Test.ReportLayout, as: RL
 
-  @top ~w(format pd_version failure context listing sections modules ids missing_sources redactions)
+  @top ~w(format pd_version timestamp location failure context logs listing sections modules ids missing_sources redactions)
 
   @target_keys ~w(name role adapter steps adapter_setup adapter_teardown untied)
   @step_keys ~w(id label command ran_as failed entries)
@@ -41,7 +41,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
 
   defp assert_top_level(bundle) do
     keys_present(bundle, @top, "the bundle")
-    assert bundle["format"] == 1
+    assert bundle["format"] == 2
     assert bundle["pd_version"] == to_string(Application.spec(:property_damage, :vsn))
     assert is_map(bundle["failure"])
     assert is_list(bundle["context"])
@@ -134,7 +134,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
     test "carries the format and the version of the application" do
       bundle = B.build(RL.report(:check_failed))
 
-      assert bundle["format"] === 1
+      assert bundle["format"] === 2
       assert bundle["pd_version"] == to_string(Application.spec(:property_damage, :vsn))
       assert bundle["pd_version"] != ""
     end
@@ -149,7 +149,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       assert bundle["failure"]["kind"] in [kind, String.replace(kind, "_", " ")]
 
       [first | _] =
-        report |> Formatter.format(:json, []) |> Jason.decode!() |> Map.fetch!("what_this_checks")
+        report |> Formatter.format(:json, []) |> Jason.decode!() |> Map.fetch!("context")
 
       assert squash(bundle["failure"]["meaning"]) == squash(first["text"])
     end
@@ -176,9 +176,11 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
           report
           |> Formatter.format(:json, [])
           |> Jason.decode!()
-          |> Map.fetch!("what_this_checks")
+          |> Map.fetch!("context")
 
-        assert Enum.map(bundle["context"], &Map.delete(&1, "id")) == printed
+        assert Enum.map(bundle["context"], &Map.delete(&1, "id")) ==
+                 Enum.map(printed, &Map.delete(&1, "id"))
+
         assert Enum.all?(bundle["context"], &is_binary(&1["id"]))
       end
     end
@@ -293,9 +295,9 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
         assert roles ==
                  Enum.sort_by(roles, fn role -> Enum.find_index(@role_order, &(&1 == role)) end)
 
-        if report.model do
+        if FailureReport.model(report) do
           assert [%{"module" => model, "role" => "model"} | _] = modules
-          assert model == inspect(report.model)
+          assert model == inspect(FailureReport.model(report))
         end
       end
     end
@@ -305,7 +307,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       modules = B.build(report)["modules"]
       by_role = fn role -> for m <- modules, m["role"] == role, do: m["module"] end
 
-      assert by_role.("model") == [inspect(report.model)]
+      assert by_role.("model") == [inspect(FailureReport.model(report))]
 
       projection = fn module -> inspect(module) end
 
@@ -454,7 +456,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       on_exit(fn -> ContextSection.purge(system) end)
       report = ContextSection.poll_error(system)
 
-      assert %Failure{} = report.failure_reason
+      assert %Failure{} = FailureReport.failure_reason(report)
       assert B.build(report)["failure"]["kind"] in ["poll_error", "poll error"]
     end
   end

@@ -111,7 +111,9 @@ defmodule PropertyDamage.CompareCountersTest do
     {totals, paid, never} = keys(ctx)
     report = failed_report(ctx)
 
-    assert {_projection, :totals} = Failure.name(report.failure_reason)
+    assert {_projection, :totals} =
+             Failure.name(PropertyDamage.FailureReport.failure_reason(report))
+
     counts = Compare.field(report, :compare_counts)
 
     # Root 0 agreed, root 1 waited and agreed, root 2 waited and diverged.

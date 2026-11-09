@@ -184,7 +184,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   end
 
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.report_kind == Failure.report_kind(report.failure_reason)
+    assert report.report_kind == Failure.report_kind(FailureReport.failure_reason(report))
   end
 
   defp reproduce(report) do
@@ -212,7 +212,7 @@ defmodule PropertyDamage.ReportReproductionTest do
         assert {:error, report} = run(targets, seed: seed)
 
         assert %Failure{type: %Failure.Execution{kind: :resource_poller_error}} =
-                 report.failure_reason
+                 FailureReport.failure_reason(report)
 
         assert report.report_kind == :execution_failed
         assert_kind_agrees(report)
@@ -314,7 +314,7 @@ defmodule PropertyDamage.ReportReproductionTest do
 
       assert {:error, report} = run(counter_targets(), seed: seed, stutter: @stutter)
       assert_kind_agrees(report)
-      assert Failure.kind(report.failure_reason) == :idempotency_violation
+      assert Failure.kind(FailureReport.failure_reason(report)) == :idempotency_violation
       assert report.variant.index == 1
       assert report.stutter[:probability] == 1.0
       assert report.stutter[:commands] == [Flip]
@@ -323,7 +323,7 @@ defmodule PropertyDamage.ReportReproductionTest do
 
       assert {:error, repro} = reproduce(report)
       assert_kind_agrees(repro)
-      assert Failure.kind(repro.failure_reason) == :idempotency_violation
+      assert Failure.kind(FailureReport.failure_reason(repro)) == :idempotency_violation
       assert repro.variant.index == 1
 
       assert {:error, unshrunk} =
@@ -331,7 +331,7 @@ defmodule PropertyDamage.ReportReproductionTest do
 
       assert {:ok, smaller} = PropertyDamage.shrink_further(unshrunk, strategy: :quick)
       assert_kind_agrees(smaller)
-      assert Failure.kind(smaller.failure_reason) == :idempotency_violation
+      assert Failure.kind(FailureReport.failure_reason(smaller)) == :idempotency_violation
       assert smaller.stutter == unshrunk.stutter
       assert shrunk_modules(smaller) == [Arm, Flip]
     end

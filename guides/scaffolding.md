@@ -402,7 +402,7 @@ produces a result like this (the keys and values vary with the seed; the `Failur
   %OpenapiBench.Generated.Commands.GetValue{key: 3}
 ]
 
-# report.failure_reason:
+# PropertyDamage.FailureReport.failure_reason(report):
 %PropertyDamage.Failure{
   type: %PropertyDamage.Failure.Check{
     kind: :check_failed,

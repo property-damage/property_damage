@@ -191,13 +191,13 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
     assert {:error, report} = run(seed_library: path, max_runs: 3)
     assert {:ok, lib} = SeedLibrary.load(path)
-    assert Enum.any?(lib.entries, &(&1.seed == report.seed))
+    assert Enum.any?(lib.entries, &(&1.seed == PropertyDamage.FailureReport.seed(report)))
 
     # A second run rediscovers the same seed first via replay and halts; no
     # duplicate entry is appended.
     assert {:error, _} = run(seed_library: path, max_runs: 3)
     {:ok, lib2} = SeedLibrary.load(path)
-    assert Enum.count(lib2.entries, &(&1.seed == report.seed)) == 1
+    assert Enum.count(lib2.entries, &(&1.seed == PropertyDamage.FailureReport.seed(report))) == 1
   end
 
   test "a passing replay increments the streak; the Kth consecutive pass prunes" do
@@ -231,7 +231,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     assert {:error, report} = run(seed_library: path, max_runs: 50, on_progress: on_progress)
 
     # The representative report is the library seed, re-derived at run 0.
-    assert report.seed == 777
+    assert PropertyDamage.FailureReport.seed(report) == 777
     assert entry(path, 777).consecutive_passes == 0
 
     updates = drain_progress([])
@@ -270,8 +270,10 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
       path = Path.join(dir, "seeds.json")
       on_exit(fn -> File.rm_rf(dir) end)
 
-      assert {:error, %PropertyDamage.FailureReport{seed: seed}} =
+      assert {:error, %PropertyDamage.FailureReport{} = report} =
                run(seed_library: path, verbose: false)
+
+      seed = PropertyDamage.FailureReport.seed(report)
 
       assert %{seed: ^seed} = entry(path, seed)
     end
@@ -308,8 +310,11 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
         )
 
       assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} = result
-      assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
-      assert report.seed == 4242
+
+      assert PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report)) ==
+               :setup_failed
+
+      assert PropertyDamage.FailureReport.seed(report) == 4242
     end
 
     @tag :capture_log
@@ -328,9 +333,9 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
                )
 
       assert %RuntimeError{message: "injector setup boom"} =
-               PropertyDamage.Failure.detail(report.failure_reason)
+               PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
 
-      assert report.seed == 4242
+      assert PropertyDamage.FailureReport.seed(report) == 4242
 
       assert_received {:leaked_event_queue, event_queue}
       ref = Process.monitor(event_queue)
@@ -359,7 +364,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
                  max_runs: 1
                )
 
-      assert report.seed == 7
+      assert PropertyDamage.FailureReport.seed(report) == 7
       assert report.report_kind == :check_failed
 
       assert [

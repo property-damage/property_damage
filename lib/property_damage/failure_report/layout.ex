@@ -40,6 +40,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
 
+  require Logger
+
   alias PropertyDamage.Failure.Naming
   alias PropertyDamage.FailureReport.Context
   alias PropertyDamage.Log.{Filter, Gap, Line}
@@ -89,36 +91,59 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec build(FailureReport.t(), keyword()) :: t()
   def build(%FailureReport{} = report, opts \\ []) do
-    {layout, _listing, _context} = assemble(report, opts)
+    {layout, _listing, _context, []} = assemble(report, opts, false)
     layout
   end
 
-  # One reading of the report: the layout, the data of its listing, and the
-  # items of the "What this checks" section.
-  defp assemble(report, opts) do
+  # One reading of the report: the layout, the data of its listing, the
+  # items of the "What this checks" section, and the render errors. With
+  # `guard?` false a section that raises lets the raise through. With it true
+  # the section is left out of the layout, the raise is logged, and an error
+  # `%{section: name, message: text}` names it.
+  defp assemble(report, opts, guard?) do
     listing = listing_data(report, opts)
     %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
     context = Context.items(report, focus, context_targets(report))
 
-    sections =
-      [
-        failure_section(report, focus, filter, unknown),
-        context_section(context),
-        setup && setup.section,
-        listing.section,
-        projections_section(report, variant, focus),
-        reproduction_section(report)
-      ]
-      |> Enum.reject(&is_nil/1)
+    guarded = [
+      {"failure", fn -> failure_section(report, focus, filter, unknown) end},
+      {"context", fn -> context_section(context) end},
+      {"setup", fn -> setup && setup.section end},
+      {"listing", fn -> listing.section end},
+      {"projections", fn -> projections_section(report, variant, focus) end},
+      {"reproduction", fn -> reproduction_section(report) end}
+    ]
+
+    {sections, errors} =
+      Enum.reduce(guarded, {[], []}, fn {name, build}, {sections, errors} ->
+        case guard_section(name, build, guard?) do
+          {:ok, section} -> {[section | sections], errors}
+          {:error, error} -> {sections, [error | errors]}
+        end
+      end)
+
+    sections = sections |> Enum.reverse() |> Enum.reject(&is_nil/1)
+    errors = Enum.reverse(errors)
 
     layout = %__MODULE__{
       banner: banner(report),
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       sections: sections,
       logs: logs_of(listing)
     }
 
-    {layout, listing, context}
+    {layout, listing, context, errors}
+  end
+
+  defp guard_section(_name, build, false), do: {:ok, build.()}
+
+  defp guard_section(name, build, true) do
+    {:ok, build.()}
+  rescue
+    exception ->
+      message = Exception.message(exception)
+      Logger.warning("failure report: the #{name} section could not be built: #{message}")
+      {:error, %{section: name, message: message}}
   end
 
   # What the JSON bundle of an HTML page is built from, read once so that a
@@ -132,18 +157,22 @@ defmodule PropertyDamage.FailureReport.Layout do
   #     of the events tied to no command
   #   * `setup_commands`, `projections`, `reproduction` - the data of the
   #     Setup, Projections and Reproduction sections
+  #   * `render_errors` - one `%{section: name, message: text}` for each
+  #     section whose builder raised; the layout leaves that section out
   @doc false
   @spec bundle_data(FailureReport.t(), keyword()) :: map()
   def bundle_data(%FailureReport{} = report, opts \\ []) do
-    {layout, listing, context} = assemble(report, opts)
+    {layout, listing, context, errors} = assemble(report, opts, true)
+    failed = Enum.map(errors, & &1.section)
 
     %{
       layout: layout,
       context: context,
       targets: Enum.map(listing.listed, &target_data/1),
       setup_commands: setup_command_data(report),
-      projections: projection_data(report),
-      reproduction: reproduction_data(report)
+      projections: if("projections" in failed, do: [], else: projection_data(report)),
+      reproduction: if("reproduction" in failed, do: nil, else: reproduction_data(report)),
+      render_errors: errors
     }
   end
 
@@ -224,9 +253,9 @@ defmodule PropertyDamage.FailureReport.Layout do
     logs = (trace && Map.get(trace, :logs)) || %{}
 
     items =
-      phase_items(:setup, report.setup_commands, log, logs) ++
+      phase_items(:setup, FailureReport.setup_commands(report), log, logs) ++
         root_items(plan, steps, choices(trace, name)) ++
-        phase_items(:teardown, report.teardown_commands, log, logs)
+        phase_items(:teardown, FailureReport.teardown_commands(report), log, logs)
 
     timestamps =
       Enum.map(log, & &1.timestamp) ++
@@ -379,7 +408,10 @@ defmodule PropertyDamage.FailureReport.Layout do
     found(items, match) || %{label: "[#{root}]", command: compared_command(report), match: match}
   end
 
-  defp focus(%FailureReport{failure_reason: %Failure{type: %Failure.Setup{} = setup}}, items)
+  defp focus(%FailureReport{} = report, items),
+    do: focus_failure(FailureReport.failure_reason(report), items)
+
+  defp focus_failure(%Failure{type: %Failure.Setup{} = setup}, items)
        when setup.cause != :adapter_setup and is_integer(setup.setup_index) do
     match = &(&1.kind == :setup and &1.position.offset == setup.setup_index)
 
@@ -391,7 +423,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       }
   end
 
-  defp focus(_report, items), do: found(items, & &1.failed?)
+  defp focus_failure(_failure, items), do: found(items, & &1.failed?)
 
   defp found(items, match) do
     case Enum.find(items, match) do
@@ -400,10 +432,10 @@ defmodule PropertyDamage.FailureReport.Layout do
     end
   end
 
-  defp compared_command(%FailureReport{failure_reason: %Failure{type: %{command: command}}}),
-    do: command
+  defp compared_command(report), do: report |> FailureReport.failure_reason() |> command_of()
 
-  defp compared_command(_report), do: nil
+  defp command_of(%Failure{type: %{command: command}}), do: command
+  defp command_of(_failure), do: nil
 
   defp outcome(:diverged), do: "diverged"
   defp outcome(:did_not_converge), do: "did not converge"
@@ -415,7 +447,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp failure_section(report, focus, filter, unknown) do
     fields =
-      [{"Failure", [kind_text(report.failure_reason)]}] ++
+      [{"Failure", [kind_text(FailureReport.failure_reason(report))]}] ++
         name_fields(report) ++
         target_fields(report) ++
         at_fields(focus) ++
@@ -458,15 +490,17 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp kind_text(_failure_reason), do: "unknown"
 
-  defp name_fields(%FailureReport{failure_reason: %Failure{type: %type{key: key}}})
+  # The invariant the failing check validates (DR-026), when its name says
+  # more than the check's, then the check.
+  defp name_fields(report), do: name_fields(FailureReport.failure_reason(report), report)
+
+  defp name_fields(%Failure{type: %type{key: key}}, _report)
        when type in [Failure.Divergence, Failure.Convergence],
        do: [{"Observation", [Naming.format_name(key)]}]
 
-  defp name_fields(%FailureReport{failure_reason: %Failure{type: %Failure.Latency{}}}), do: []
+  defp name_fields(%Failure{type: %Failure.Latency{}}, _report), do: []
 
-  # The invariant the failing check validates (DR-026), when its name says
-  # more than the check's, then the check.
-  defp name_fields(report) do
+  defp name_fields(_failure, report) do
     check = report |> FailureReport.check_name() |> check_text()
 
     invariant =
@@ -484,15 +518,13 @@ defmodule PropertyDamage.FailureReport.Layout do
   end
 
   # The projection whose check failed, for a failed check or a timed-out poll.
-  defp projection_field(%FailureReport{
-         failure_reason: %Failure{
-           type: %Failure.Check{kind: kind, projection: projection}
-         }
-       })
+  defp projection_field(report), do: report |> FailureReport.failure_reason() |> projection_of()
+
+  defp projection_of(%Failure{type: %Failure.Check{kind: kind, projection: projection}})
        when kind in [:check_failed, :poll_timeout] and not is_nil(projection),
        do: [{"Projection", [inspect(projection)]}]
 
-  defp projection_field(_report), do: []
+  defp projection_of(_failure), do: []
 
   defp check_text(nil), do: nil
   defp check_text(name), do: Naming.format_name(name)
@@ -521,7 +553,9 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp at_fields(%{label: label, command: command}),
     do: [{"At", [label, " ", {:value, command}]}]
 
-  defp detail_fields(%FailureReport{failure_reason: %Failure{type: type} = failure} = report) do
+  defp detail_fields(report), do: detail_fields(FailureReport.failure_reason(report), report)
+
+  defp detail_fields(%Failure{type: type} = failure, report) do
     case type do
       %Failure.Divergence{} -> divergence_fields(report, type)
       %Failure.Convergence{} -> convergence_fields(report, type)
@@ -533,7 +567,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     end
   end
 
-  defp detail_fields(%FailureReport{failure_reason: reason}),
+  defp detail_fields(reason, _report),
     do: [{"Message", [{:value, reason}]}]
 
   defp message_fields(report, failure) do
@@ -687,14 +721,15 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp hint_fields(_evidence), do: []
 
   # Every further observation that disagreed at the same boundary.
-  defp also_differed_fields(
-         %FailureReport{failure_reason: %Failure{type: %{other_keys: others}}} = report
-       )
+  defp also_differed_fields(report),
+    do: also_differed_fields(FailureReport.failure_reason(report), report)
+
+  defp also_differed_fields(%Failure{type: %{other_keys: others}}, report)
        when is_list(others) do
     for other <- others, do: {"Also differed", other_key_parts(report, other)}
   end
 
-  defp also_differed_fields(_report), do: []
+  defp also_differed_fields(_failure, _report), do: []
 
   defp other_key_parts(report, %{variant: variant, failure: %Failure{type: type}}) do
     name = Naming.format_name(Map.get(type, :key))
@@ -1396,7 +1431,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   # The setup commands of the run, as the listing labels them.
   defp setup_command_data(report) do
-    for {command, offset} <- Enum.with_index(report.setup_commands) do
+    for {command, offset} <- Enum.with_index(FailureReport.setup_commands(report)) do
       %{label: Position.label(Position.setup(offset)), command: command}
     end
   end
@@ -1440,7 +1475,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
     %{
       roots: roots,
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       command: bind(FailureReport.reproduction_command(report), report)
     }
   end

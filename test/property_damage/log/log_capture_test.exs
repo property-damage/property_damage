@@ -103,7 +103,7 @@ defmodule PropertyDamage.Log.CaptureTest do
       report = F.report!(PropertyDamage.Test.LogFixtures.ScopelessModel, [target])
 
       assert report.error_origin == :test_code_error
-      assert F.deep_find(report.failure_reason, &is_struct(&1, F.no_scope_error()))
+      assert F.deep_find(FailureReport.failure_reason(report), &is_struct(&1, F.no_scope_error()))
     end
 
     @tag capture_log: true

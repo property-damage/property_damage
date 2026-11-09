@@ -258,12 +258,12 @@ defmodule PropertyDamage.ReplayTest do
 
   describe "guards" do
     test "missing model" do
-      failure = %FailureReport{model: nil, targets: [{CounterAdapter, []}]}
+      failure = %FailureReport{targets: [{CounterAdapter, []}]}
       assert {:error, :missing_model} = Replay.start(failure)
     end
 
     test "missing adapter" do
-      failure = %FailureReport{model: CounterModel, targets: []}
+      failure = %FailureReport{trace: %PropertyDamage.RunTrace{model: CounterModel}, targets: []}
       assert {:error, :missing_adapter} = Replay.start(failure)
     end
   end
@@ -324,7 +324,7 @@ defmodule PropertyDamage.ReplayTest do
     test "Replay.run sets the target up with its config, runs the setup commands before step 0 and the teardown commands before teardown/1" do
       pid = self()
       failure = recorded_lifecycle_failure()
-      assert failure.setup_commands == [%Prepare{tag: "fixture"}]
+      assert FailureReport.setup_commands(failure) == [%Prepare{tag: "fixture"}]
 
       {:ok, steps} =
         Replay.run(failure, targets: [{LifecycleCounterAdapter, config: %{test_pid: pid}}])

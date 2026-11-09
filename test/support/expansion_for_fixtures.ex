@@ -424,7 +424,7 @@ defmodule PropertyDamage.Test.ExpansionFor do
   @doc false
   # The `{seed, run}` that regenerates the failing run of `report`: its
   # effective seed, as run 1.
-  def report_coordinates(report), do: {report.seed, 1}
+  def report_coordinates(report), do: {PropertyDamage.FailureReport.seed(report), 1}
 
   @doc false
   # The campaign run (1-based) `report` failed in.

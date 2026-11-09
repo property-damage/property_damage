@@ -86,7 +86,7 @@ defmodule ObanBench.RetryTest do
                  name: :exactly_once,
                  detail: %PropertyDamage.CheckFailed{data: %{observed: 2, expected: 1}}
                }
-             } = report.failure_reason
+             } = PropertyDamage.FailureReport.failure_reason(report)
 
       commands =
         PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))

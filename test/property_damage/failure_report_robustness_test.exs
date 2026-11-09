@@ -121,22 +121,21 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     end
   end
 
-  describe "from_legacy preserves the stacktrace" do
-    test "a stacktrace passed via opts reaches the struct and the origin classifier" do
-      legacy = %{
-        seed: 1,
-        run_number: 0,
-        original_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
-        shrunk_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
-        failed_at_index: 0,
-        failure_reason: Failure.adapter_error(%RuntimeError{message: "boom"}),
-        shrink_iterations: 0,
-        shrink_time_ms: 0
-      }
-
+  describe "new/1 keeps the stacktrace" do
+    test "a stacktrace passed in opts reaches the struct and the origin classifier" do
+      sequence = PropertyDamage.Sequence.linear([%SomeEvent{id: 1}])
       stacktrace = [{MyApp.Commands.CreateUser, :run, 1, [file: ~c"x.ex", line: 1]}]
 
-      rep = FailureReport.from_legacy(legacy, stacktrace: stacktrace)
+      rep =
+        FailureReport.new(
+          seed: 1,
+          run_number: 0,
+          original_sequence: sequence,
+          shrunk_sequence: sequence,
+          failed_at_index: 0,
+          failure_reason: Failure.adapter_error(%RuntimeError{message: "boom"}),
+          stacktrace: stacktrace
+        )
 
       assert rep.stacktrace == stacktrace
       # The classifier ran with the stacktrace, so it could attribute origin.

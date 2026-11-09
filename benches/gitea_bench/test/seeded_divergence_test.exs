@@ -58,7 +58,7 @@ defmodule SeededDivergenceTest do
 
     assert divergent, "expected at least one seeded sequence to diverge"
 
-    divergence = Failure.detail(divergent.failure_reason)
+    divergence = Failure.detail(PropertyDamage.FailureReport.failure_reason(divergent))
     assert is_integer(divergence.root)
 
     # The report describes the shrunk reproduction, so its root indexes the
@@ -75,7 +75,7 @@ defmodule SeededDivergenceTest do
              &match?(%Login{}, &1)
            )
 
-    assert divergent.setup_commands == [%Login{}]
+    assert PropertyDamage.FailureReport.setup_commands(divergent) == [%Login{}]
 
     # The label color observation differs: the same labels exist on both
     # forges, and the label the failing CreateLabel made has another color.

@@ -104,6 +104,8 @@ defmodule PropertyDamage.Model.Projection.StatisticsRunTest do
     assert {:error, report} = run(BudgetModel, SlowAdapter)
 
     assert report.report_kind == :check_failed
-    assert %Failure{type: %Failure.Check{name: :p99_under_budget}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Check{name: :p99_under_budget}} =
+             PropertyDamage.FailureReport.failure_reason(report)
   end
 end

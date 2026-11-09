@@ -75,7 +75,11 @@ defmodule CachexBench.ExpansionsTest do
       assert report.variant == %{index: 1, name: "second"}
 
       signature = {:diverged, {CachexBench.Projection, :expected_contents}, 1}
-      assert Failure.signature(report.failure_reason, report.variant.index) == signature
+
+      assert Failure.signature(
+               PropertyDamage.FailureReport.failure_reason(report),
+               report.variant.index
+             ) == signature
 
       roots = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
       assert length(roots) < length(Sequence.to_list(report.original_sequence))

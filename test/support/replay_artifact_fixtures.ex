@@ -458,8 +458,8 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   # The artifact file name for `report`: the model's last name segment and
   # the report's seed.
   def artifact_name(report) do
-    segment = report.model |> Module.split() |> List.last()
-    "#{segment}_seed#{report.seed}.replay.exs"
+    segment = FailureReport.model(report) |> Module.split() |> List.last()
+    "#{segment}_seed#{FailureReport.seed(report)}.replay.exs"
   end
 
   # ==========================================================================

@@ -100,7 +100,8 @@ defmodule PropertyDamage.MockCallbackFailureTest do
     assert report.report_kind == :execution_failed
     assert report.failed_at_index == 1
 
-    assert {^mock, ^callback, %RuntimeError{}} = report.failure_reason.type.detail
+    assert {^mock, ^callback, %RuntimeError{}} =
+             PropertyDamage.FailureReport.failure_reason(report).type.detail
 
     text = F.plain(report)
     assert text =~ inspect(mock)

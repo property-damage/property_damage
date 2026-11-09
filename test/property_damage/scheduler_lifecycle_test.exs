@@ -280,7 +280,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == first_create
-      assert Failure.detail(report.failure_reason) == :refused
+      assert Failure.detail(FailureReport.failure_reason(report)) == :refused
       assert report.other_failures == []
 
       messages = take_messages(:received)
@@ -302,7 +302,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == first_create
-      assert Failure.detail(report.failure_reason) == :refused
+      assert Failure.detail(FailureReport.failure_reason(report)) == :refused
 
       # With no other variant left to compare, the run ended there: no Use
       # reached either adapter.

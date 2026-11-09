@@ -15,7 +15,7 @@ defmodule PropertyDamage.ReplayPathsTest do
   @model F.Model
   @seed 2
   @max_commands 8
-  @version 19
+  @version PropertyDamage.Persistence.version()
 
   @base_url "http://localhost:4000"
 
@@ -63,7 +63,9 @@ defmodule PropertyDamage.ReplayPathsTest do
   defp without_trace_choices(report), do: %{report | trace: %{report.trace | expansion: nil}}
 
   defp identity(report),
-    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
+    do:
+      {report.report_kind, Failure.name(FailureReport.failure_reason(report)),
+       report.variant.index}
 
   defp leaves_at(report, name, root) do
     report |> term() |> Map.fetch!(:choices) |> Map.fetch!(name) |> Enum.at(root)
@@ -208,7 +210,7 @@ defmodule PropertyDamage.ReplayPathsTest do
       report = check_failing() |> R.put_field(:replay_path, nil)
       exunit = Export.to_exunit(report)
 
-      assert exunit =~ "seed: #{report.seed}"
+      assert exunit =~ "seed: #{FailureReport.seed(report)}"
       refute exunit =~ "only: [replay:"
     end
   end

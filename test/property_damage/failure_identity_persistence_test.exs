@@ -14,7 +14,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
   @fixtures Path.join([__DIR__, "..", "fixtures"])
   @persistence_fixtures Path.join(@fixtures, "persistence")
-  @current_version 19
+  @current_version PropertyDamage.Persistence.version()
 
   defmodule Send do
     @behaviour PropertyDamage.Command
@@ -84,10 +84,15 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
   # The real report with its failure swapped for an idempotency violation, a
   # fine kind that sorts into the `:check_failed` outcome, so the two levels
   # of name differ.
+  defp no_failure_report do
+    report = failing_report()
+    %{report | trace: %{report.trace | outcome: :pass}}
+  end
+
   defp idempotency_report do
     report = failing_report()
     failure = Failure.from_signature(:idempotency_violation, nil)
-    %{report | failure_reason: failure}
+    %{report | trace: %{report.trace | outcome: {:fail, failure}}}
   end
 
   defp header_version(path) do
@@ -112,7 +117,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       tmp_dir: dir
     } do
       # Control: the refusal above is about the header version, not the file.
-      # Re-framing the same bytes under header 19 gets past the version check
+      # Re-framing the same bytes under the current header version gets past the version check
       # (it may fail later, on its checksum or payload, but not as unsupported).
       path = Path.join(@persistence_fixtures, "format_18_report.pd")
       <<"PD", _v::8, rest::binary>> = File.read!(path)
@@ -125,7 +130,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
   describe "a saved report" do
     @tag :tmp_dir
-    test "round-trips at format 19 with its report kind derived from the failure", %{
+    test "round-trips at the current format with its report kind derived from the failure", %{
       tmp_dir: dir
     } do
       report = failing_report()
@@ -139,7 +144,10 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
       assert {:ok, loaded} = Persistence.load(path)
       assert loaded == report
-      assert Map.get(loaded, :report_kind) == Failure.report_kind(loaded.failure_reason)
+
+      assert Map.get(loaded, :report_kind) ==
+               Failure.report_kind(FailureReport.failure_reason(loaded))
+
       assert Map.get(loaded, :report_kind) == :check_failed
     end
   end
@@ -150,8 +158,8 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
     test "names the fine kind `kind` and the outcome `report_kind`" do
       json = exported(idempotency_report())
 
-      assert json["version"] == @current_version
-      assert json["kind"] == "idempotency_violation"
+      assert json["format"] == 2
+      assert json["failure"]["kind"] == "idempotency_violation"
       assert json["report_kind"] == "check_failed"
       refute Map.has_key?(json, "failure_type")
     end
@@ -159,10 +167,10 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
     test "gives each real check failure the same fine kind and outcome words" do
       json = exported(failing_report())
 
-      assert json["kind"] == "check_failed"
+      assert json["failure"]["kind"] == "check_failed"
       assert json["report_kind"] == "check_failed"
 
-      assert json["check_name"] ==
+      assert json["failure"]["check_name"] ==
                "at_most_one"
     end
 
@@ -170,11 +178,15 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       report = failing_report()
       other = Failure.from_signature(:adapter_error, nil)
 
-      with_other = %{report | other_failures: [%{variant: 0, root: 1, failure: other}]}
+      with_other = %{
+        report
+        | other_failures: [%{variant: %{index: 0, name: "a"}, root: 1, failure: other}]
+      }
+
       assert [entry] = exported(with_other)["other_failures"]
 
       assert entry["kind"] == "adapter_error"
-      assert entry["name"] == nil
+      assert entry["check_name"] == nil
       refute Map.has_key?(entry, "failure_type")
     end
   end
@@ -238,12 +250,12 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(FailureReport, :kind, [report]) == :idempotency_violation
       assert Map.get(report, :report_kind) == :check_failed
-      assert Failure.kind(report.failure_reason) == :idempotency_violation
+      assert Failure.kind(FailureReport.failure_reason(report)) == :idempotency_violation
     end
 
     test "FailureReport.kind/1 is :unknown without a failure" do
       # credo:disable-for-next-line Credo.Check.Refactor.Apply
-      assert apply(FailureReport, :kind, [%{failing_report() | failure_reason: nil}]) == :unknown
+      assert apply(FailureReport, :kind, [no_failure_report()]) == :unknown
     end
 
     test "FailureReport.kind_summary/1 replaces failure_type_summary/1" do

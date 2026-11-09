@@ -324,7 +324,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
 
-      assert Failure.signature(report.failure_reason, 1) ==
+      assert Failure.signature(FailureReport.failure_reason(report), 1) ==
                {:diverged, {Answers, :flips}, 1}
 
       shrunk = FailureReport.shrunk_sequence(report)
@@ -332,7 +332,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
       assert length(original) > 3
       refute Enum.any?(Sequence.to_list(shrunk), &match?(%Count{}, &1))
       assert Sequence.setup_commands(shrunk) == [%Count{}]
-      assert report.setup_commands == [%Count{}]
+      assert FailureReport.setup_commands(report) == [%Count{}]
 
       # The exploration run, every shrink attempt (the failed one included)
       # and the reproduction each executed Count once per target.
@@ -394,7 +394,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
 
       {last_root, _index, _command} = shrunk |> Sequence.indexed() |> List.last()
       assert thing.id in PlaceholderRegistry.ids_at_position(shrunk.registry, last_root)
-      assert report.teardown_commands == Sequence.teardown_commands(shrunk)
+      assert FailureReport.teardown_commands(report) == Sequence.teardown_commands(shrunk)
     end
 
     test "validates a candidate from the state the setup commands leave" do
@@ -445,7 +445,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
         executions = recorded(recorder) |> executions("a") |> Enum.drop(before)
         assert length(executions) == 1 + (smaller.shrink_iterations - report.shrink_iterations)
         assert_cleanup_names_last_thing(executions, "a")
-        assert smaller.setup_commands == report.setup_commands
+        assert FailureReport.setup_commands(smaller) == FailureReport.setup_commands(report)
       end)
     end
   end

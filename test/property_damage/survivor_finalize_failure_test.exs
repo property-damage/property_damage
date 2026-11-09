@@ -87,7 +87,7 @@ defmodule PropertyDamage.SurvivorFinalizeFailureTest do
     assert report.report_kind == :check_failed
     assert report.variant == %{index: 0, name: "a"}
     assert report.failed_at_index == 0
-    assert Failure.kind(report.failure_reason) == :poll_timeout
+    assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) == :poll_timeout
 
     assert Enum.map(Compare.field(report, :other_failures), &summary/1) == [
              {%{index: 2, name: "c"}, 3, :adapter_error}

@@ -148,7 +148,9 @@ defmodule PropertyDamage.ExpansionDocShrinkTest do
     assert {:error, report} = D.run(seed: @seed, fail: D.leaf(@fail))
 
     assert {:ok, %{choices: before}} =
-             Expansion.for(D.Model, report.seed, 1, "a", max_commands: 6)
+             Expansion.for(D.Model, PropertyDamage.FailureReport.seed(report), 1, "a",
+               max_commands: 6
+             )
 
     {spec, report, before}
   end

@@ -57,11 +57,11 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       report = check_report()
       [_, title] = Regex.run(~r{<title>(.*?)</title>}, HTML.render(report))
 
-      assert title =~ inspect(report.model)
+      assert title =~ inspect(PropertyDamage.FailureReport.model(report))
       {adapter, _entry} = hd(report.targets)
       assert title =~ "#{adapter |> Module.split() |> List.last()}.alice"
       assert title =~ to_string(report.report_kind)
-      assert title =~ "seed #{report.seed}"
+      assert title =~ "seed #{PropertyDamage.FailureReport.seed(report)}"
     end
 
     test "no text in the report can close the script that holds it" do

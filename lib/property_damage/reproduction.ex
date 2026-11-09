@@ -284,7 +284,10 @@ defmodule PropertyDamage.Reproduction do
   # that replayed an artifact writes none of its own unless shrinking found a
   # smaller failure; it records whether the artifact reproduced.
   defp with_replay(ctx, report) do
-    report = %{report | run: report.run_number && report.run_number + 1}
+    report = %{
+      report
+      | run: FailureReport.run_number(report) && FailureReport.run_number(report) + 1
+    }
 
     case ReplayArtifact.build(report) do
       nil ->
@@ -371,7 +374,7 @@ defmodule PropertyDamage.Reproduction do
           {:ok, FailureReport.t()} | {:error, term()}
   def shrink_further(%FailureReport{} = report, opts, caller) do
     cond do
-      is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
+      is_nil(FailureReport.model(report)) or is_nil(FailureReport.reference_target(report)) ->
         {:error, :missing_model_or_target}
 
       report.report_kind in [:setup_failed, :latency_exceeded] ->
@@ -414,7 +417,7 @@ defmodule PropertyDamage.Reproduction do
     strategy = Keyword.get(opts, :strategy, :thorough)
 
     ctx = %Context{
-      model: report.model,
+      model: FailureReport.model(report),
       targets: targets,
       target: hd(targets),
       # Carry the original run's nonce (DR-034) so re-shrinking mints the same
@@ -433,13 +436,13 @@ defmodule PropertyDamage.Reproduction do
 
     found = %{
       sequence: sequence,
-      run_seed: report.seed,
-      run_number: report.run_number,
+      run_seed: FailureReport.seed(report),
+      run_number: FailureReport.run_number(report),
       failure: %{
         report_kind: report.report_kind,
         variant: report.variant || ReportBuilder.variant_of(ctx.target),
         root: report.failed_at_index,
-        reason: report.failure_reason,
+        reason: FailureReport.failure_reason(report),
         stacktrace: report.stacktrace
       }
     }
@@ -468,7 +471,7 @@ defmodule PropertyDamage.Reproduction do
             granularity_threshold: strategy_threshold(strategy)
           ),
         # The report's seed is the run's effective seed.
-        rng_seed: report.seed,
+        rng_seed: FailureReport.seed(report),
         mint_epoch_counter: mint_epoch_counter,
         expansion: traced,
         root_ids: Expansion.root_ids(traced)

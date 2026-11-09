@@ -32,9 +32,11 @@ defmodule PropertyDamage.Persistence do
 
   A file of an older format version is refused with
   `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
-  failure under the current version. Format 19 renamed the report's `kind`
-  field to `report_kind`, so a format 18 file no longer decodes into the
-  current report.
+  failure under the current version. Format 20 dropped the eight fields a
+  report copied from its trace (`seed`, `run_number`, `model`, `timestamp`,
+  `command_labels`, `failure_reason`, `setup_commands`, `teardown_commands`),
+  which the report now reads from the trace, so a format 19 file no longer
+  decodes into the current report.
 
   ## Naming Convention
 
@@ -61,10 +63,10 @@ defmodule PropertyDamage.Persistence do
   file holds.
   """
 
-  alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
-  alias PropertyDamage.FailureReport.Formatter
+  alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.Document
 
-  @version 19
+  @version 20
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -92,6 +94,10 @@ defmodule PropertyDamage.Persistence do
           filename: String.t(),
           overwrite: boolean()
         ]
+
+  @doc "The format version `save/3` writes and `load/1` accepts."
+  @spec version() :: pos_integer()
+  def version, do: @version
 
   @doc """
   Save a failure report to disk.
@@ -345,64 +351,20 @@ defmodule PropertyDamage.Persistence do
   @doc """
   Export a failure to JSON format for external tools.
 
-  A comparison failure's reference side is written as `reference_trace`,
-  `reference_state_at_failure` and `shrink_stop`, in the shape the `:json`
-  format gives `reference_trace`, `reference_projections` and the shrinking
-  `stop`; each is `null` when the report has none.
+  The result is the one document of `PropertyDamage.FailureReport.Document`
+  (see its moduledoc for the keys), encoded as indented JSON.
 
   Note: JSON export is lossy - some Elixir-specific data may be simplified.
   Use `save/3` for lossless storage.
   """
   @spec export_json(FailureReport.t()) :: String.t()
   def export_json(%FailureReport{} = report) do
-    reference = Formatter.reference_json(report)
-
-    %{
-      version: @version,
-      seed: report.seed,
-      run_number: report.run_number,
-      failed_at_index: report.failed_at_index,
-      kind: FailureReport.kind(report),
-      check_name: name_string(FailureReport.check_name(report)),
-      failure_message: FailureReport.failure_message(report),
-      shrink_iterations: report.shrink_iterations,
-      shrink_time_ms: report.shrink_time_ms,
-      timestamp: DateTime.to_iso8601(report.timestamp),
-      model: report.model && inspect(report.model),
-      report_kind: report.report_kind,
-      variant: report.variant,
-      targets: Enum.map(report.targets, &export_target/1),
-      compare: Map.new(report.compare),
-      compare_counts:
-        Map.new(report.compare_counts, fn {key, counts} -> {name_string(key), counts} end),
-      other_failures: Enum.map(report.other_failures, &export_other_failure/1),
-      stutter: report.stutter && inspect(report.stutter),
-      max_commands: report.max_commands,
-      shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
-      setup_commands: Enum.map(report.setup_commands, &inspect/1),
-      teardown_commands: Enum.map(report.teardown_commands, &inspect/1),
-      original_command_count: length(Sequence.to_list(report.original_sequence)),
-      reference_trace: reference.trace,
-      reference_state_at_failure: reference.projections,
-      shrink_stop: reference.stop,
-      reproduction_command: FailureReport.reproduction_command(report)
-    }
-    |> Jason.encode!(pretty: true)
+    report |> Document.build() |> Jason.encode!(pretty: true)
   end
 
   # ============================================================================
   # Private Helpers
   # ============================================================================
-
-  defp export_other_failure(%{variant: variant, root: root, failure: failure}) do
-    %{
-      variant: variant,
-      root: root,
-      kind: Failure.kind(failure),
-      name: name_string(Failure.name(failure)),
-      message: FailureReport.failure_message(failure)
-    }
-  end
 
   # A failure's name as JSON and in a file name: a module by its Elixir name,
   # a `{projection, function}` key as `Projection.function`, any other atom as
@@ -417,18 +379,6 @@ defmodule PropertyDamage.Persistence do
       "Elixir." <> module -> module
       string -> string
     end
-  end
-
-  # A `targets:` entry as JSON: the adapter and name as strings, the config,
-  # injectors and mocks inspected (they may hold terms JSON cannot encode).
-  defp export_target({adapter, entry}) do
-    %{
-      adapter: inspect(adapter),
-      name: Keyword.get(entry, :name),
-      config: inspect(Keyword.get(entry, :config, %{})),
-      injectors: Enum.map(Keyword.get(entry, :injectors, []), &inspect/1),
-      mocks: inspect(Keyword.get(entry, :mocks, []))
-    }
   end
 
   defp do_save(report, path) do
@@ -502,6 +452,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V20 format: a report no longer stores `seed`, `run_number`, `model`,
+  # `timestamp`, `command_labels`, `failure_reason`, `setup_commands` and
+  # `teardown_commands`; it reads them from its trace.
   # V19 format: a report's outcome field is `report_kind` (it was `kind`), so
   # `kind` names only the fine kind of a failure in a report, a saved file and
   # the JSON export.
@@ -569,7 +522,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-18 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-19 are refused (DR-041, following DR-039/DR-040).
+  # A v19 report stores the eight fields v20 dropped, so it no longer decodes
+  # into the current report.
   # A v18 report stores its outcome in a `kind` field that v19 renamed
   # `report_kind`.
   # A v17 sequence, trace or event-log entry may carry the parallel-branch
@@ -882,13 +837,13 @@ defmodule PropertyDamage.Persistence do
 
   defp generate_filename(%FailureReport{} = report) do
     timestamp =
-      report.timestamp
+      FailureReport.timestamp(report)
       |> DateTime.to_iso8601(:basic)
       |> String.slice(0, 15)
 
     type = FailureReport.kind(report) || "unknown"
     check = name_string(FailureReport.check_name(report)) || "none"
-    seed = report.seed
+    seed = FailureReport.seed(report)
 
     "#{timestamp}-#{type}-#{check}-seed#{seed}#{@extension}"
   end
@@ -924,19 +879,19 @@ defmodule PropertyDamage.Persistence do
         case load(path) do
           {:ok, report} ->
             %{
-              seed: report.seed,
+              seed: FailureReport.seed(report),
               kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
-              timestamp: report.timestamp,
+              timestamp: FailureReport.timestamp(report),
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 
           {:ok, report, _warnings} ->
             %{
-              seed: report.seed,
+              seed: FailureReport.seed(report),
               kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
-              timestamp: report.timestamp,
+              timestamp: FailureReport.timestamp(report),
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 

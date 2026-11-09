@@ -470,7 +470,7 @@ defmodule PropertyDamage.Integration do
           "#{String.pad_leading("#{stats.total_commands}", 3)} commands ✓"
 
         {:error, failure} ->
-          "failed at command #{PropertyDamage.FailureReport.failure_index(failure)} ✗ (seed #{failure.seed})"
+          "failed at command #{PropertyDamage.FailureReport.failure_index(failure)} ✗ (seed #{PropertyDamage.FailureReport.seed(failure)})"
       end
 
     IO.puts("Run #{String.pad_leading("#{run_num}", 3)}/#{max_runs}: #{detail}")
@@ -529,10 +529,10 @@ defmodule PropertyDamage.Integration do
         IO.puts("")
         IO.puts("First failure:")
         failure = hd(result.failures)
-        IO.puts("  Seed: #{failure.seed}")
+        IO.puts("  Seed: #{PropertyDamage.FailureReport.seed(failure)}")
 
         IO.puts(
-          "  Invariant: #{inspect(PropertyDamage.FailureReport.check_name(failure) || failure.failure_reason)}"
+          "  Invariant: #{inspect(PropertyDamage.FailureReport.check_name(failure) || PropertyDamage.FailureReport.failure_reason(failure))}"
         )
       end
     end
@@ -672,7 +672,7 @@ defmodule PropertyDamage.Integration do
       |> Enum.with_index(1)
       |> Enum.each(fn {failure, idx} ->
         IO.puts(
-          "  #{idx}. Seed: #{failure.seed}, Check: #{inspect(PropertyDamage.FailureReport.check_name(failure))}"
+          "  #{idx}. Seed: #{PropertyDamage.FailureReport.seed(failure)}, Check: #{inspect(PropertyDamage.FailureReport.check_name(failure))}"
         )
       end)
 
@@ -718,7 +718,7 @@ defmodule PropertyDamage.Integration do
         """
         ### Failure #{idx}
 
-        - **Seed**: `#{failure.seed}`
+        - **Seed**: `#{PropertyDamage.FailureReport.seed(failure)}`
         - **Check**: `#{inspect(PropertyDamage.FailureReport.check_name(failure))}`
         - **Error**: #{PropertyDamage.FailureReport.failure_message(failure) || "N/A"}
         """
@@ -748,7 +748,7 @@ defmodule PropertyDamage.Integration do
 
   defp json_failure(failure) do
     %{
-      seed: failure.seed,
+      seed: PropertyDamage.FailureReport.seed(failure),
       check: inspect(PropertyDamage.FailureReport.check_name(failure)),
       error: PropertyDamage.FailureReport.failure_message(failure)
     }
@@ -759,7 +759,7 @@ defmodule PropertyDamage.Integration do
       result.failures
       |> Enum.map_join("", fn failure ->
         """
-            <testcase name="seed_#{failure.seed}" classname="#{inspect(result.model)}" time="0">
+            <testcase name="seed_#{PropertyDamage.FailureReport.seed(failure)}" classname="#{inspect(result.model)}" time="0">
               <failure message="#{escape_xml(inspect(PropertyDamage.FailureReport.check_name(failure)))}">
                 #{escape_xml(PropertyDamage.FailureReport.failure_message(failure) || "Check failed")}
               </failure>

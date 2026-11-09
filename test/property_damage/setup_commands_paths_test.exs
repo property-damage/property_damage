@@ -290,7 +290,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
       assert report.failed_at_index == nil
 
       assert %Failure.Setup{cause: :check, setup_index: 1, command: %Login{}} =
-               report.failure_reason.type
+               FailureReport.failure_reason(report).type
     end
   end
 
@@ -319,7 +319,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
       assert report.report_kind == :setup_failed
 
       assert %Failure.Setup{cause: :check, setup_index: 1, command: %Login{}} =
-               report.failure_reason.type
+               FailureReport.failure_reason(report).type
 
       # Tick has no events: every third Tick fires the check, counted from the
       # first root.

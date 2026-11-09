@@ -147,9 +147,11 @@ defmodule PropertyDamage.CompareTimingTest do
 
       assert report.report_kind == :did_not_converge
       assert report.failed_at_index == 0
-      assert Failure.name(report.failure_reason) == key(ctx, :balances, :balance)
 
-      waited = Map.fetch!(report.failure_reason.type, :waited_ms)
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :balances, :balance)
+
+      waited = Map.fetch!(PropertyDamage.FailureReport.failure_reason(report).type, :waited_ms)
       settle_timeout_ms = 400
       margin_ms = 250
       assert waited >= 100
@@ -172,7 +174,7 @@ defmodule PropertyDamage.CompareTimingTest do
       assert elapsed < 1_500
       assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert Failure.kind(report.failure_reason) == :poll_timeout
+      assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) == :poll_timeout
     end
 
     test "a bound shorter than a window ends the run as did not converge", ctx do

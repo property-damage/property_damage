@@ -68,10 +68,11 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     # The kind and name are the components of the failure signature, so a
     # fingerprint names a failure as its replay artifact does. The variant index
     # is no part of a fingerprint.
-    {kind, check_name, _variant_index} = Failure.signature(report.failure_reason, 0)
+    {kind, check_name, _variant_index} =
+      Failure.signature(FailureReport.failure_reason(report), 0)
 
     %__MODULE__{
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       kind: kind,
       check_name: check_name,
       command_type: extract_command_type(command),

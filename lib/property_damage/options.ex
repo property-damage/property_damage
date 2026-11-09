@@ -1546,7 +1546,7 @@ defmodule PropertyDamage.Options do
   @export_exunit_schema_definition [
     model: [
       type: :atom,
-      doc: "Model module (defaults to report.model)."
+      doc: "Model module (defaults to FailureReport.model(report))."
     ],
     targets: [
       type: {:custom, __MODULE__, :validate_targets, []},

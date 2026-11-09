@@ -128,8 +128,8 @@ defmodule PropertyDamage.SeedLibrary do
   @spec add(t(), PropertyDamage.FailureReport.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def add(library, %PropertyDamage.FailureReport{} = failure, opts \\ []) do
     entry = %{
-      seed: failure.seed,
-      model: inspect(failure.model),
+      seed: PropertyDamage.FailureReport.seed(failure),
+      model: inspect(PropertyDamage.FailureReport.model(failure)),
       kind: PropertyDamage.FailureReport.kind(failure),
       check_name: descriptive_name(PropertyDamage.FailureReport.check_name(failure)),
       tags: Keyword.get(opts, :tags, []),

@@ -150,14 +150,18 @@ defmodule PropertyDamage.ExportTest do
     ]
 
     %FailureReport{
-      seed: 512_902_757,
-      run_number: 1,
       failed_at_index: 2,
-      failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
       original_sequence: %Sequence{prefix: commands},
-      trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-      timestamp: ~U[2025-12-26 14:30:00Z],
-      model: TestModel,
+      trace:
+        PropertyDamage.RunTrace.new(
+          plan: %Sequence{prefix: commands},
+          seed: 512_902_757,
+          run_number: 1,
+          outcome:
+            {:fail, Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative")},
+          timestamp: ~U[2025-12-26 14:30:00Z],
+          model: TestModel
+        ),
       targets: [{TestHTTPAdapter, []}]
     }
   end
@@ -303,13 +307,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%Provision{spec: nil}, %Consume{target: ph}]
 
       report = %FailureReport{
-        seed: 1,
         failed_at_index: 1,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
 
       %{report: report, var: "provisioned_id_0"}
@@ -373,13 +380,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
-        seed: 1,
         failed_at_index: 1,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
 
       script =
@@ -404,13 +414,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
-        seed: 1,
         failed_at_index: 1,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
 
       %{report: report}
@@ -463,13 +476,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
-        seed: 1,
         failed_at_index: 1,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
 
       script =
@@ -515,13 +531,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%FetchTx{}]
 
       %FailureReport{
-        seed: 1,
         failed_at_index: 0,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
     end
 
@@ -578,13 +597,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%ListAccounts{status: "active"}]
 
       %FailureReport{
-        seed: 1,
         failed_at_index: 0,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
     end
 
@@ -694,11 +716,14 @@ defmodule PropertyDamage.ExportTest do
       commands = [%PidCommand{pid: self(), name: "worker"}]
 
       failure = %FailureReport{
-        seed: 123,
-        failure_reason: Failure.check_failed(:NonNegativeBalance, "boom"),
         original_sequence: %Sequence{prefix: commands},
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 123,
+            outcome: {:fail, Failure.check_failed(:NonNegativeBalance, "boom")},
+            model: TestModelStub
+          ),
         targets: [{TestHTTPAdapter, []}]
       }
 
@@ -711,7 +736,8 @@ defmodule PropertyDamage.ExportTest do
     end
 
     test "the generated test body compiles clean (no unused-var/#PID diagnostics)" do
-      failure = %{create_test_failure_report() | model: TestModelStub}
+      report = create_test_failure_report()
+      failure = %{report | trace: %{report.trace | model: TestModelStub}}
 
       code = Export.to_exunit(failure, module_name: PDExportWaeCheck)
 
@@ -957,7 +983,10 @@ defmodule PropertyDamage.ExportTest do
       assert Common.generate_filename(failure, :exunit) ==
                Common.generate_filename(failure, :exunit)
 
-      other = %{failure | failure_reason: Failure.check_failed(:Other, "different")}
+      other = %{
+        failure
+        | trace: %{failure.trace | outcome: {:fail, Failure.check_failed(:Other, "different")}}
+      }
 
       refute Common.generate_filename(other, :exunit) ==
                Common.generate_filename(failure, :exunit)
@@ -1021,13 +1050,16 @@ defmodule PropertyDamage.ExportTest do
       commands = [%Provision{spec: nil}, %Consume{target: ph}]
 
       %FailureReport{
-        seed: 1,
         failed_at_index: 1,
-        failure_reason: Failure.check_failed(nil, "check failed"),
-        trace: PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands}),
-        model: TestModelStub,
-        targets: [{TestHTTPAdapter, []}],
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands},
+            seed: 1,
+            outcome: {:fail, Failure.check_failed(nil, "check failed")},
+            model: TestModelStub,
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          ),
+        targets: [{TestHTTPAdapter, []}]
       }
     end
 

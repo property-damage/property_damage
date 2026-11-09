@@ -291,12 +291,12 @@ IO.inspect(failure, pretty: true)
 
 Read it through its fields and accessors:
 
-- **seed** - Random seed for reproducibility
+- **`FailureReport.seed/1`** - Random seed for reproducibility, read from the run's trace
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
 - **shrink_iterations** / **shrink_time_ms** / **shrink_stop** - How much shrinking it took, and why it stopped (`:done`, `:max_iterations` or `:max_time`)
-- **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
-- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which check failed and a human-readable description
+- **`FailureReport.failure_reason/1`** - a `%PropertyDamage.Failure{}` describing what failed (see below). Like `run_number/1`, `model/1`, `timestamp/1`, `command_labels/1`, `setup_commands/1` and `teardown_commands/1`, it reads the run's trace; none of them is a struct field
+- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over the failure reason: which check failed and a human-readable description
 - **state_before_failure** / **state_at_failure** - Projection state before and after the failing step
 - **`FailureReport.steps/1`**, **`failure_step/1`**, **`failure_index/1`** - the run as a list of steps, the failing step, and its reading-order index
 - **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)
@@ -309,7 +309,7 @@ walkthrough.
 
 ### The `%Failure{}` reason
 
-`report.failure_reason` is a `%PropertyDamage.Failure{}` — one structured type
+`PropertyDamage.FailureReport.failure_reason(report)` is a `%PropertyDamage.Failure{}` — one structured type
 for *why* the run stopped. It nests a class struct under `type` and records the
 branch (if any) on the envelope:
 
@@ -476,7 +476,7 @@ To run the same failure from its seed instead, use the seed:
 {:error, rerun} = PropertyDamage.run(
   model: MyApp.Model,
   targets: [MyApp.Adapter],
-  seed: failure.seed,
+  seed: PropertyDamage.FailureReport.seed(failure),
   max_runs: 1
 )
 ```
@@ -494,10 +494,10 @@ no adapter is touched:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-# run is 1-based; failure.seed is the seed the failing run generated from.
+# run is 1-based; PropertyDamage.FailureReport.seed(failure) is the seed the failing run generated from.
 # The bank has one target, named "Adapter" after its adapter module.
 {:ok, %{sequence: sequence}} =
-  PropertyDamage.Expansion.for(MyApp.Model, failure.seed, 1, "Adapter")
+  PropertyDamage.Expansion.for(MyApp.Model, PropertyDamage.FailureReport.seed(failure), 1, "Adapter")
 ```
 
 With several targets, name the one you want: `"second"` in the examples below.
@@ -510,11 +510,11 @@ depends on the reference. To run part of a campaign, use `only:`:
 ```elixir
 # Run 1 of the seed, the reference and the target named "second".
 PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "second"}],
-  seed: failure.seed, only: [run: 1, variants: ["second"]])
+  seed: PropertyDamage.FailureReport.seed(failure), only: [run: 1, variants: ["second"]])
 
 # Run "second" alone, with the model's checks and no @compare.
 PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "second"}],
-  seed: failure.seed, only: [run: 1, variants: ["second"], with_reference: false])
+  seed: PropertyDamage.FailureReport.seed(failure), only: [run: 1, variants: ["second"], with_reference: false])
 ```
 
 `with_reference: false` is legal only with exactly one non-reference name.
@@ -755,8 +755,8 @@ same seed (same seed and model ⇒ same plan ⇒ comparable):
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides: identical plan, different SUT behavior.
-before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: PropertyDamage.FailureReport.seed(failure))
+after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: PropertyDamage.FailureReport.seed(failure))
 
 comparison = RunComparison.compare([before, after_])
 ```
@@ -796,7 +796,7 @@ shared SUT:
 {_traces, comparison} =
   RunComparison.investigate(
     runs: 10,
-    capture: [model: MyModel, targets: [MyAdapter], seed: failure.seed]
+    capture: [model: MyModel, targets: [MyAdapter], seed: PropertyDamage.FailureReport.seed(failure)]
   )
 ```
 
@@ -950,7 +950,7 @@ assert {:ok, _stats} =
          PropertyDamage.run(
            model: MyModel,
            targets: [MyAdapter],
-           seed: failure.seed
+           seed: PropertyDamage.FailureReport.seed(failure)
          )
 ```
 
@@ -1190,7 +1190,7 @@ failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 {_traces, comparison} =
   PropertyDamage.RunComparison.investigate(
     runs: 10,
-    capture: [model: MyModel, targets: [MyAdapter], seed: failure.seed]
+    capture: [model: MyModel, targets: [MyAdapter], seed: PropertyDamage.FailureReport.seed(failure)]
   )
 
 summary = PropertyDamage.RunComparison.outcome_summary(comparison)

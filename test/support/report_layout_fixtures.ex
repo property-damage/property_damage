@@ -563,7 +563,7 @@ defmodule PropertyDamage.Test.ReportLayout do
     comparison? = report.report_kind in [:diverged, :did_not_converge]
 
     %{
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       banner:
         if(report.error_origin == :test_code_error, do: "TEST CODE ERROR", else: "BUG DETECTED!"),
       label: label,
@@ -602,16 +602,17 @@ defmodule PropertyDamage.Test.ReportLayout do
       when kind in [:diverged, :did_not_converge] and is_integer(i),
       do: "[#{i}]"
 
-  def expected_label(%FailureReport{
-        failure_reason: %Failure{type: %Failure.Setup{cause: cause, setup_index: i}}
-      })
-      when cause != :adapter_setup and is_integer(i),
-      do: "[setup #{i}]"
-
   def expected_label(%FailureReport{} = report) do
-    case FailureReport.failure_step(report) do
-      nil -> nil
-      %Step{position: position} -> step_label(position, report.failed_at_index)
+    case FailureReport.failure_reason(report) do
+      %Failure{type: %Failure.Setup{cause: cause, setup_index: i}}
+      when cause != :adapter_setup and is_integer(i) ->
+        "[setup #{i}]"
+
+      _other ->
+        case FailureReport.failure_step(report) do
+          nil -> nil
+          %Step{position: position} -> step_label(position, report.failed_at_index)
+        end
     end
   end
 

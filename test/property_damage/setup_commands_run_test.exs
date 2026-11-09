@@ -296,10 +296,10 @@ defmodule PropertyDamage.SetupCommandsRunTest do
 
       assert report.report_kind == :setup_failed
       assert report.failed_at_index == nil
-      assert Failure.kind(report.failure_reason) == :setup_failed
+      assert Failure.kind(FailureReport.failure_reason(report)) == :setup_failed
 
       assert %Failure{type: %Failure.Setup{cause: :check, setup_index: 1, command: %Login{}}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
       assert_setup_ran(recorded(recorder), "a")
       assert for({:execute, "a", %Act{}} <- recorded(recorder), do: 1) == []
@@ -403,7 +403,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
                    setup_index: 0,
                    command: %CreateUser{}
                  }
-               } = report.failure_reason
+               } = FailureReport.failure_reason(report)
 
         assert SetupCommands.executed(recorded(recorder), "b") |> Enum.filter(&match?(%Act{}, &1)) ==
                  []
@@ -434,7 +434,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
                    setup_index: 0,
                    command: %CreateUser{}
                  }
-               } = report.failure_reason
+               } = FailureReport.failure_reason(report)
       end
     end
 

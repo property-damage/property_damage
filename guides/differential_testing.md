@@ -178,7 +178,7 @@ true = stats.compare_counts[{Bank.Projections.Ledger, :balance}].compared_at > 0
 
 :diverged = report.report_kind
 "candidate" = report.variant.name
-{Bank.Projections.Ledger, :balance} = PropertyDamage.Failure.name(report.failure_reason)
+{Bank.Projections.Ledger, :balance} = PropertyDamage.Failure.name(PropertyDamage.FailureReport.failure_reason(report))
 ```
 
 The first target in the `targets:` list is the reference: its values are
@@ -586,7 +586,7 @@ with `report_kind: :did_not_converge`. Both carry:
 |-------|---------|
 | `variant` | `%{index, name}` of the first target (in target order) that differed from the reference or was still pending |
 | `failed_at_index` | 0-based index of the root where the loop ended |
-| `failure_reason` | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value`, `mismatch`, `using` (the observation's `using:` term, `nil` under `==`), `waited_ms`, `within_ms` and `other_keys` (the further keys that failed at the same boundary); `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), `waited_ms`, `within_ms` and `other_keys`. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
+| `failure_reason/1` (an accessor, not a field) | a `%PropertyDamage.Failure{}`. `Failure.Divergence` holds `key`, `root`, `command` (the root command), `reference_value`, `variant_value`, `mismatch`, `using` (the observation's `using:` term, `nil` under `==`), `waited_ms`, `within_ms` and `other_keys` (the further keys that failed at the same boundary); `Failure.Convergence` holds `key`, `root`, `command`, `reason` (the `{:pending, reason}` term), `waited_ms`, `within_ms` and `other_keys`. `Failure.name/1` is the `@compare` key `{Projection, function}` for both |
 | `compare` | `[converge_within: ms]` |
 | `compare_counts` | the counters per key |
 | `other_failures` | the failures found in the run besides this one (see [Adapter errors](#adapter-errors)) |
@@ -598,7 +598,7 @@ with `report_kind: :did_not_converge`. Both carry:
 case PropertyDamage.run(model: MyModel, targets: [Reference, Candidate]) do
   {:error, %PropertyDamage.FailureReport{report_kind: :diverged} = report} ->
     %PropertyDamage.Failure.Divergence{key: {projection, function}, mismatch: mismatch} =
-      report.failure_reason.type
+      PropertyDamage.FailureReport.failure_reason(report).type
 
     IO.puts("#{report.variant.name} diverged on #{inspect(projection)}.#{function}")
     IO.puts(Exception.message(mismatch))

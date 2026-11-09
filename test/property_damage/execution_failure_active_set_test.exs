@@ -64,8 +64,8 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       assert report.failed_at_index == 1
 
       # An error answer keeps its reason and has no stacktrace.
-      assert Failure.kind(report.failure_reason) == :adapter_error
-      assert Failure.detail(report.failure_reason) == {:refused, 1}
+      assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) == :adapter_error
+      assert Failure.detail(PropertyDamage.FailureReport.failure_reason(report)) == {:refused, 1}
       assert report.stacktrace == nil
     end
 
@@ -78,12 +78,15 @@ defmodule PropertyDamage.ExecutionFailureActiveSetTest do
       assert report.variant == %{index: 0, name: "a"}
       assert report.failed_at_index == 1
 
-      assert Failure.kind(report.failure_reason) == :adapter_error
-      assert %RuntimeError{message: "book 1 exploded"} = Failure.detail(report.failure_reason)
+      assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) == :adapter_error
+
+      assert %RuntimeError{message: "book 1 exploded"} =
+               Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
+
       assert [_ | _] = report.stacktrace
 
       # Told apart from an error answer by the detail and the stacktrace.
-      refute Failure.detail(report.failure_reason) == {:refused, 1}
+      refute Failure.detail(PropertyDamage.FailureReport.failure_reason(report)) == {:refused, 1}
     end
   end
 

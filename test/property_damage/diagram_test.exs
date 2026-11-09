@@ -187,13 +187,17 @@ defmodule PropertyDamage.DiagramTest do
       ]
 
       report = %FailureReport{
-        seed: 12_345,
-        run_number: 1,
         failed_at_index: 1,
         original_sequence: sequence,
-        failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance is -50"),
-        trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
-        timestamp: DateTime.utc_now()
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: sequence,
+            event_log: event_log,
+            seed: 12_345,
+            run_number: 1,
+            outcome: {:fail, Failure.check_failed(:NonNegativeBalance, "Balance is -50")},
+            timestamp: DateTime.utc_now()
+          )
       }
 
       diagram = Diagram.from_failure_report(report, :mermaid)
@@ -320,13 +324,17 @@ defmodule PropertyDamage.DiagramTest do
       ]
 
       %FailureReport{
-        seed: 12_345,
-        run_number: 1,
         failed_at_index: 1,
         original_sequence: sequence,
-        failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance is -50"),
-        trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
-        timestamp: ~U[2025-01-01 00:00:00Z]
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: sequence,
+            event_log: event_log,
+            seed: 12_345,
+            run_number: 1,
+            outcome: {:fail, Failure.check_failed(:NonNegativeBalance, "Balance is -50")},
+            timestamp: ~U[2025-01-01 00:00:00Z]
+          )
       }
     end
 

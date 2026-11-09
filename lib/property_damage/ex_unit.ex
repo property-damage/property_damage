@@ -205,25 +205,25 @@ defmodule PropertyDamage.ExUnit do
     end
   end
 
-  defp format_legacy_failure(report) do
+  defp format_legacy_failure(legacy) do
     """
     Property test failed!
 
-    Seed: #{report.seed}
-    Run: #{report.run_number + 1}
+    Seed: #{legacy.seed}
+    Run: #{legacy.run_number + 1}
 
-    Original sequence (#{length(report.original_commands || [])} commands):
-    #{format_commands(report.original_commands || [])}
+    Original sequence (#{length(legacy.original_commands || [])} commands):
+    #{format_commands(legacy.original_commands || [])}
 
-    Shrunk sequence (#{length(report.shrunk_commands || [])} commands):
-    #{format_commands(report.shrunk_commands || [])}
+    Shrunk sequence (#{length(legacy.shrunk_commands || [])} commands):
+    #{format_commands(legacy.shrunk_commands || [])}
 
-    Failed at command ##{report.failed_at_index}:
-    #{format_failure_reason(report.failure_reason)}
+    Failed at command ##{legacy.failed_at_index}:
+    #{format_failure_reason(legacy.failure_reason)}
 
-    Shrinking: #{report.shrink_iterations} iterations in #{report.shrink_time_ms}ms
+    Shrinking: #{legacy.shrink_iterations} iterations in #{legacy.shrink_time_ms}ms
 
-    To reproduce, add: seed: #{report.seed}
+    To reproduce, add: seed: #{legacy.seed}
     """
   end
 

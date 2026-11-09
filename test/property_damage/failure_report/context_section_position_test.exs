@@ -35,7 +35,7 @@ defmodule PropertyDamage.FailureReport.ContextSectionPositionTest do
         report = L.report(unquote(kind))
         items = U.json_items!(report)
 
-        assert is_list(items) and items != [], "no what_this_checks list"
+        assert is_list(items) and items != [], "no context list"
         assert [%{"label" => label, "name" => nil, "missing" => false} | _] = items
         assert label == U.kind_label(U.kind(report))
       end

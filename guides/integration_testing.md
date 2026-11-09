@@ -310,7 +310,7 @@ failures (deduplicated by fingerprint), rather than a fixed number of runs:
 # can hold fewer than `stop_after` entries, or none.
 for bug <- bugs do
   IO.puts("#{inspect(bug.fingerprint.check_name)}: " <>
-          "seed #{bug.failure.seed}, seen #{bug.occurrences}x " <>
+          "seed #{PropertyDamage.FailureReport.seed(bug.failure)}, seen #{bug.occurrences}x " <>
           "(first on run #{bug.first_seen_run})")
 end
 ```

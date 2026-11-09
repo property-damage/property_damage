@@ -271,10 +271,10 @@ defmodule PropertyDamage.ReportRunRecordTest do
   describe "the replay call" do
     test "names a non-default convergence bound" do
       report = %FailureReport{
-        model: GuardedStepModel,
         targets: [{StepAdapter, name: "a"}],
         compare: [converge_within: 100],
-        replay_path: "dir/GuardedStepModel_seed1.replay.exs"
+        replay_path: "dir/GuardedStepModel_seed1.replay.exs",
+        trace: PropertyDamage.RunTrace.new(model: GuardedStepModel)
       }
 
       assert FailureReport.replay_command(report) =~ "compare: [converge_within: 100]"
@@ -286,7 +286,11 @@ defmodule PropertyDamage.ReportRunRecordTest do
 
   describe "error paths" do
     test "shrink_further/2 names a missing model or target" do
-      report = %FailureReport{seed: 1, model: nil, targets: [{StepAdapter, []}]}
+      report = %FailureReport{
+        trace: %PropertyDamage.RunTrace{seed: 1},
+        targets: [{StepAdapter, []}]
+      }
+
       assert {:error, :missing_model_or_target} = PropertyDamage.shrink_further(report)
     end
 

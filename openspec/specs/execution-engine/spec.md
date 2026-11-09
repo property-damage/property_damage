@@ -876,7 +876,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **AND** the terminal output SHALL print the entry of each target at root 5, the reference marked
 
 #### Scenario: A report reproduces from its seed
-- **WHEN** `PropertyDamage.run/1` runs again with `seed: report.seed, max_runs: 1` and the same target names
+- **WHEN** `PropertyDamage.run/1` runs again with `seed: PropertyDamage.FailureReport.seed(report), max_runs: 1` and the same target names
 - **THEN** the new report's `expansions` SHALL equal the original's for the unshrunk run
 
 #### Scenario: An exported script runs what the reference ran

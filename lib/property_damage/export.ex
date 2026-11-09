@@ -89,7 +89,7 @@ defmodule PropertyDamage.Export do
 
   ## Options
 
-  - `:model` - Model module (defaults to report.model)
+  - `:model` - Model module (defaults to FailureReport.model(report))
   - `:targets` - A list with exactly one entry: the target the generated test
     runs against (defaults to the report's reference target); see
     `PropertyDamage.Target`

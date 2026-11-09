@@ -6,6 +6,8 @@ defmodule PropertyDamage.Log.PersistenceTest do
   # whole sentinel got it from a line.
   use ExUnit.Case, async: false
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Persistence
   alias PropertyDamage.Test.LogFixtures, as: F
@@ -37,7 +39,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
   # The file's bytes, and the term it holds decoded and inspected in full.
   defp saved(path) do
     bytes = File.read!(path)
-    assert <<"PD", 19, _checksum::32, term::binary>> = bytes
+    assert <<"PD", @version, _checksum::32, term::binary>> = bytes
     {bytes, inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)}
   end
 
@@ -55,7 +57,7 @@ defmodule PropertyDamage.Log.PersistenceTest do
   end
 
   test "a saved report drops every line and loads with logs: %{} on both traces", %{dir: dir} do
-    # Persisted trace round trip: version 19, no line text in the file.
+    # Persisted trace round trip: current version, no line text in the file.
     report = diverged_report()
     assert F.field(report.trace, :logs, %{}) != %{}, "control: the variant's trace holds lines"
     assert F.field(report.reference_trace, :logs, %{}) != %{}, "control: the reference's too"

@@ -68,7 +68,7 @@ defmodule PropertyDamage.OtherFailuresReportTest do
              %{
                "variant" => %{"index" => 1, "name" => "b"},
                "root" => 4,
-               "type" => "adapter_error"
+               "kind" => "adapter_error"
              }
            ] =
              formatted["other_failures"]

@@ -337,8 +337,8 @@ defmodule PropertyDamage.FailureIntelligence do
       )
 
       Enum.each(results, fn
-        {failure, %{status: status}} -> IO.puts("Seed \#{failure.seed}: \#{status}")
-        {failure, {:error, reason}} -> IO.puts("Seed \#{failure.seed}: \#{reason}")
+        {failure, %{status: status}} -> IO.puts("Seed \#{FailureReport.seed(failure)}: \#{status}")
+        {failure, {:error, reason}} -> IO.puts("Seed \#{FailureReport.seed(failure)}: \#{reason}")
       end)
   """
   @spec verify_fixes([FailureReport.t()], module(), keyword()) :: [
@@ -368,7 +368,7 @@ defmodule PropertyDamage.FailureIntelligence do
       )
 
       Enum.each(result.failures, fn %{seed: seed, report: report} ->
-        IO.puts("Seed \#{seed} fails: \#{inspect(report.failure_reason)}")
+        IO.puts("Seed \#{seed} fails: \#{inspect(FailureReport.failure_reason(report))}")
       end)
 
   ## Return Value

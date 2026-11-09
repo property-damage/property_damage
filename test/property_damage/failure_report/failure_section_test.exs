@@ -82,7 +82,13 @@ defmodule PropertyDamage.FailureReport.FailureSectionTest do
   describe "an Other failure line" do
     test "tied to no root names no root" do
       base = L.report(:latency_exceeded)
-      other = %{variant: %{name: "bob", index: 1}, root: nil, failure: base.failure_reason}
+
+      other = %{
+        variant: %{name: "bob", index: 1},
+        root: nil,
+        failure: PropertyDamage.FailureReport.failure_reason(base)
+      }
+
       block = %{base | other_failures: [other]} |> L.plain() |> other_failure_block()
 
       assert block =~ ~s(latency exceeded p99 in target "bob" \(index 1\): )
@@ -90,7 +96,7 @@ defmodule PropertyDamage.FailureReport.FailureSectionTest do
     end
 
     test "for a divergence names the observation once and prints the two values" do
-      failure = L.report(:diverged).failure_reason
+      failure = PropertyDamage.FailureReport.failure_reason(L.report(:diverged))
       other = %{variant: %{name: "carol", index: 2}, root: 1, failure: failure}
       report = %{L.report(:check_failed) | other_failures: [other]}
       block = report |> L.plain() |> other_failure_block()

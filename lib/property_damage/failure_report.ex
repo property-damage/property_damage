@@ -40,15 +40,31 @@ defmodule PropertyDamage.FailureReport do
   attribute, before against after the failing step, or the reference against
   the variant at the failing boundary. Reproduction binds `targets` once and
   ends with the calls that rerun the failure. The same layout prints as
-  markdown, and a report also prints as JSON or as one compact line.
+  markdown, and a report also prints as one JSON document
+  (`PropertyDamage.FailureReport.Document`) or as one compact line.
 
   A plain `inspect/1` prints a one-line summary. To turn a report into a test,
   a script or a notebook, see `PropertyDamage.Export`; to save it, see
   `PropertyDamage.save_failure/3`.
 
+  ## Fields read from the trace
+
+  The report embeds the `RunTrace` of the run it describes, and reads from it
+  what the trace already holds: `seed/1`, `run_number/1`, `model/1`,
+  `timestamp/1`, `command_labels/1`, `failure_reason/1`, `setup_commands/1` and
+  `teardown_commands/1`. They are functions, not struct fields, so a report and
+  its trace never disagree. `state_before_failure` and `state_at_failure` stay
+  stored, because they are what the executor observed at the failing step.
+
+  ## JSON
+
+  `PropertyDamage.FailureReport.Document.build/2` turns a report into one
+  JSON-ready map with `"format" => 2`. The `:json` format, `Persistence.export_json/1`
+  and the `pd-bundle` tag of a failure page all carry that document.
+
   ## Failure Reasons
 
-  The `failure_reason` field holds a `%PropertyDamage.Failure{}` describing what
+  `failure_reason/1` returns the `%PropertyDamage.Failure{}` describing what
   failed (see that module for the three levels of failure name: class, kind
   and report kind).
 
@@ -105,7 +121,7 @@ defmodule PropertyDamage.FailureReport do
   `reproduction_command/1` names that seed and `max_runs:`, while every other
   failure reproduces one run of its own `seed` with `max_runs: 1`.
 
-  `setup_commands` and `teardown_commands` list the setup and teardown
+  `setup_commands/1` and `teardown_commands/1` list the setup and teardown
   commands of the reported sequence (the shrunk one when it reproduced, else
   the original), which every reproduction runs before and after the roots.
 
@@ -136,8 +152,8 @@ defmodule PropertyDamage.FailureReport do
   ## Replay artifact
 
   `run` is the campaign run the failure happened in, counting from 1 (run 3
-  of a `max_runs: 10` campaign); `seed` is the seed that run generated from,
-  so the failing run is run 1 of `seed`.
+  of a `max_runs: 10` campaign); `seed/1` is the seed that run generated from,
+  so the failing run is run 1 of that seed.
 
   A failing run writes a replay artifact after shrinking (see the
   `replay_dir:` run option): one Elixir file holding, as literal data, the
@@ -272,8 +288,6 @@ defmodule PropertyDamage.FailureReport do
 
   @type t :: %__MODULE__{
           # Location
-          seed: integer(),
-          run_number: non_neg_integer(),
           failed_at_index: non_neg_integer() | nil,
           original_failed_at_index: non_neg_integer() | nil,
 
@@ -318,8 +332,6 @@ defmodule PropertyDamage.FailureReport do
           # The setup and teardown commands of the reported sequence (the
           # shrunk one when it reproduced, else the original), with concrete
           # arguments and placeholders symbolic.
-          setup_commands: [struct()],
-          teardown_commands: [struct()],
 
           # The generated plan of the failing exploration run (before shrinking).
           # Distinct from `trace.plan`, which is the shrunk minimal reproduction
@@ -330,7 +342,6 @@ defmodule PropertyDamage.FailureReport do
           # message / idempotency violation / poll-timeout info are derived views
           # over this, exposed as accessor functions (kind/1, check_name/1,
           # failure_message/1, idempotency_violation/1, poll_timeout_info/1).
-          failure_reason: Failure.t() | nil,
 
           # State snapshots
           state_before_failure: %{atom() => any()} | nil,
@@ -342,8 +353,6 @@ defmodule PropertyDamage.FailureReport do
           shrink_stop: PropertyDamage.Shrinker.stop_reason() | nil,
 
           # Metadata
-          model: module() | nil,
-          timestamp: DateTime.t(),
 
           # Error origin classification
           error_origin: ErrorOrigin.origin() | nil,
@@ -400,21 +409,13 @@ defmodule PropertyDamage.FailureReport do
           # to, or nil; and what became of it.
           replay: map() | {:refused, map()} | nil,
           replay_path: String.t() | nil,
-          replay_status: replay_status(),
-
-          # Human-readable command labels (DR-028 amendment): keyed by the
-          # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
-          # which every formatter/exporter iterates with). Only commands whose
-          # `label/2` returns a non-nil string appear.
-          command_labels: %{non_neg_integer() => String.t()}
+          replay_status: replay_status()
         }
 
   # The report is the complete record of a run, so it holds more fields than
   # the struct-size check allows.
   # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
-  defstruct seed: nil,
-            run_number: nil,
-            failed_at_index: nil,
+  defstruct failed_at_index: nil,
             original_failed_at_index: nil,
             report_kind: nil,
             variant: nil,
@@ -433,17 +434,12 @@ defmodule PropertyDamage.FailureReport do
             trace: nil,
             reference_trace: nil,
             reference_state_at_failure: nil,
-            setup_commands: [],
-            teardown_commands: [],
             original_sequence: nil,
-            failure_reason: nil,
             state_before_failure: nil,
             state_at_failure: nil,
             shrink_iterations: 0,
             shrink_time_ms: 0,
             shrink_stop: :done,
-            model: nil,
-            timestamp: nil,
             error_origin: nil,
             error_origin_details: nil,
             stacktrace: nil,
@@ -454,7 +450,6 @@ defmodule PropertyDamage.FailureReport do
             compare_counts: %{},
             expansions: %{},
             expansion_counts: %{},
-            command_labels: %{},
             run: nil,
             replay: nil,
             replay_path: nil,
@@ -593,8 +588,6 @@ defmodule PropertyDamage.FailureReport do
       reference_trace(report_kind, Keyword.get(opts, :reference_result), trace)
 
     %__MODULE__{
-      seed: seed,
-      run_number: run_number,
       failed_at_index: failed_at_index,
       original_failed_at_index: Keyword.get(opts, :original_failed_at_index, failed_at_index),
       report_kind: report_kind,
@@ -614,17 +607,12 @@ defmodule PropertyDamage.FailureReport do
       trace: trace,
       reference_trace: reference_trace,
       reference_state_at_failure: reference_state(reference_trace, failed_at_index),
-      setup_commands: Sequence.setup_commands(shrunk_sequence),
-      teardown_commands: Sequence.teardown_commands(shrunk_sequence),
       original_sequence: original_sequence,
-      failure_reason: failure_reason,
       state_before_failure: projections_before,
       state_at_failure: projections,
       shrink_iterations: Keyword.get(opts, :shrink_iterations, 0),
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
       shrink_stop: Keyword.get(opts, :shrink_stop, :done),
-      model: Keyword.get(opts, :model),
-      timestamp: timestamp,
       error_origin: classification.origin,
       error_origin_details: classification.details,
       stacktrace: stacktrace,
@@ -638,8 +626,7 @@ defmodule PropertyDamage.FailureReport do
           Keyword.get(opts, :expansion),
           Keyword.get_lazy(opts, :last_root, fn -> executed_root(report_kind, failed_at_index) end)
         ),
-      expansion_counts: Keyword.get(opts, :expansion_counts, %{}),
-      command_labels: command_labels
+      expansion_counts: Keyword.get(opts, :expansion_counts, %{})
     }
   end
 
@@ -776,51 +763,6 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
-  Convert from the legacy failure_report map format.
-
-  This allows gradual migration from the old format.
-  """
-  @spec from_legacy(map(), keyword()) :: t()
-  def from_legacy(legacy_report, opts \\ []) do
-    new(
-      seed: legacy_report.seed,
-      run_number: legacy_report.run_number,
-      original_sequence: legacy_report.original_sequence,
-      shrunk_sequence: legacy_report.shrunk_sequence,
-      failed_at_index: legacy_report.failed_at_index,
-      failure_reason: legacy_report.failure_reason,
-      shrink_iterations: legacy_report.shrink_iterations,
-      shrink_time_ms: legacy_report.shrink_time_ms,
-      event_log: Keyword.get(opts, :event_log, []),
-      projections: Keyword.get(opts, :projections, %{}),
-      model: Keyword.get(opts, :model),
-      targets: Keyword.get(opts, :targets, []),
-      # Forward the stacktrace so the converted report keeps it and the origin
-      # classifier can attribute the failure (it was silently dropped before).
-      stacktrace: Keyword.get(opts, :stacktrace)
-    )
-  end
-
-  @doc """
-  Convert to the legacy failure_report map format.
-
-  For backwards compatibility with existing code.
-  """
-  @spec to_legacy(t()) :: map()
-  def to_legacy(%__MODULE__{} = report) do
-    %{
-      seed: report.seed,
-      run_number: report.run_number,
-      original_sequence: report.original_sequence,
-      shrunk_sequence: shrunk_sequence(report),
-      failed_at_index: report.failed_at_index,
-      failure_reason: report.failure_reason,
-      shrink_iterations: report.shrink_iterations,
-      shrink_time_ms: report.shrink_time_ms
-    }
-  end
-
-  @doc """
   The plan the report describes: the shrunk minimal reproduction (or the
   original failing run when it did not reproduce; see DR-033).
 
@@ -840,6 +782,74 @@ defmodule PropertyDamage.FailureReport do
   @spec event_log(t()) :: [Entry.t()]
   def event_log(%__MODULE__{trace: %RunTrace{event_log: log}}), do: log
   def event_log(%__MODULE__{trace: nil}), do: []
+
+  @doc """
+  The seed the failing run generated from. Accessor over the embedded
+  `RunTrace`; `nil` for a report with no trace.
+  """
+  @spec seed(t()) :: integer() | nil
+  def seed(%__MODULE__{trace: %RunTrace{seed: seed}}), do: seed
+  def seed(%__MODULE__{trace: nil}), do: nil
+
+  @doc """
+  The zero-based number of the run that failed. Accessor over the embedded
+  `RunTrace`; `nil` for a report with no trace.
+  """
+  @spec run_number(t()) :: non_neg_integer() | nil
+  def run_number(%__MODULE__{trace: %RunTrace{run_number: run_number}}), do: run_number
+  def run_number(%__MODULE__{trace: nil}), do: nil
+
+  @doc """
+  The model module the run exercised. Accessor over the embedded `RunTrace`;
+  `nil` for a report with no trace or no model.
+  """
+  @spec model(t()) :: module() | nil
+  def model(%__MODULE__{trace: %RunTrace{model: model}}), do: model
+  def model(%__MODULE__{trace: nil}), do: nil
+
+  @doc """
+  When the report was built. Accessor over the embedded `RunTrace`; `nil` for a
+  report with no trace.
+  """
+  @spec timestamp(t()) :: DateTime.t() | nil
+  def timestamp(%__MODULE__{trace: %RunTrace{timestamp: timestamp}}), do: timestamp
+  def timestamp(%__MODULE__{trace: nil}), do: nil
+
+  @doc """
+  The human-readable command labels, keyed by flattened command index. Accessor
+  over the embedded `RunTrace`; `%{}` for a report with no trace.
+  """
+  @spec command_labels(t()) :: %{non_neg_integer() => String.t()}
+  def command_labels(%__MODULE__{trace: %RunTrace{command_labels: labels}}), do: labels
+  def command_labels(%__MODULE__{trace: nil}), do: %{}
+
+  @doc """
+  The failure the run ended with: the reason inside the trace's `{:fail, reason}`
+  outcome. Returns `nil` for a report with no trace or a trace that did not fail.
+  """
+  @spec failure_reason(t()) :: Failure.t() | nil
+  def failure_reason(%__MODULE__{trace: %RunTrace{outcome: {:fail, reason}}}), do: reason
+  def failure_reason(%__MODULE__{}), do: nil
+
+  @doc """
+  The setup commands of the plan the report describes. Accessor over the
+  embedded `RunTrace` plan; `[]` for a report with no plan.
+  """
+  @spec setup_commands(t()) :: [struct()]
+  def setup_commands(%__MODULE__{trace: %RunTrace{plan: %Sequence{} = plan}}),
+    do: Sequence.setup_commands(plan)
+
+  def setup_commands(%__MODULE__{}), do: []
+
+  @doc """
+  The teardown commands of the plan the report describes. Accessor over the
+  embedded `RunTrace` plan; `[]` for a report with no plan.
+  """
+  @spec teardown_commands(t()) :: [struct()]
+  def teardown_commands(%__MODULE__{trace: %RunTrace{plan: %Sequence{} = plan}}),
+    do: Sequence.teardown_commands(plan)
+
+  def teardown_commands(%__MODULE__{}), do: []
 
   @doc """
   The event-log entries with no command attribution (`command_index: nil`).
@@ -960,44 +970,53 @@ defmodule PropertyDamage.FailureReport do
 
   @doc "The failure's kind (`PropertyDamage.Failure.kind/1`), or `:unknown`."
   @spec kind(t()) :: kind()
-  def kind(%__MODULE__{failure_reason: %Failure{} = f}), do: Failure.kind(f)
-  def kind(%__MODULE__{}), do: :unknown
+  def kind(%__MODULE__{} = report) do
+    case failure_reason(report) do
+      %Failure{} = f -> Failure.kind(f)
+      _none -> :unknown
+    end
+  end
 
   @doc "The failing check/projection name, or `nil`."
   @spec check_name(t()) :: Failure.name()
-  def check_name(%__MODULE__{failure_reason: fr}), do: failure_check_name(fr)
+  def check_name(%__MODULE__{} = report), do: report |> failure_reason() |> failure_check_name()
 
   @doc """
   A human-readable message describing the report's failure, or `nil`. Also
   takes a bare `%PropertyDamage.Failure{}`, such as one of `other_failures`.
   """
   @spec failure_message(t() | Failure.t()) :: String.t() | nil
-  def failure_message(%__MODULE__{failure_reason: %Failure{} = f}), do: message_for(f)
-  def failure_message(%__MODULE__{}), do: nil
+  def failure_message(%__MODULE__{} = report) do
+    case failure_reason(report) do
+      %Failure{} = f -> message_for(f)
+      _none -> nil
+    end
+  end
+
   def failure_message(%Failure{} = failure), do: message_for(failure)
 
   @doc "The `%Stutter.Violation{}` for an idempotency failure, or `nil`."
   @spec idempotency_violation(t()) :: map() | nil
-  def idempotency_violation(%__MODULE__{
-        failure_reason: %Failure{type: %Check{kind: :idempotency_violation, detail: v}}
-      }),
-      do: v
-
-  def idempotency_violation(%__MODULE__{}), do: nil
+  def idempotency_violation(%__MODULE__{} = report) do
+    case failure_reason(report) do
+      %Failure{type: %Check{kind: :idempotency_violation, detail: v}} -> v
+      _other -> nil
+    end
+  end
 
   @doc "The poll-timeout info map for a `@eventually` timeout, or `nil`."
   @spec poll_timeout_info(t()) :: map() | nil
-  def poll_timeout_info(%__MODULE__{
-        failure_reason: %Failure{type: %Check{kind: :poll_timeout, detail: info}}
-      }),
-      do: info
-
-  def poll_timeout_info(%__MODULE__{}), do: nil
+  def poll_timeout_info(%__MODULE__{} = report) do
+    case failure_reason(report) do
+      %Failure{type: %Check{kind: :poll_timeout, detail: info}} -> info
+      _other -> nil
+    end
+  end
 
   @doc "The named invariant the failing check validates (DR-026), or `nil`."
   @spec invariant_name(t()) :: atom() | nil
-  def invariant_name(%__MODULE__{model: model} = report) do
-    {name, _description} = resolve_invariant(model, check_name(report))
+  def invariant_name(%__MODULE__{} = report) do
+    {name, _description} = resolve_invariant(model(report), check_name(report))
     name
   end
 
@@ -1069,7 +1088,8 @@ defmodule PropertyDamage.FailureReport do
   `max_runs: 1`.
   """
   @spec reproduction_command(t()) :: String.t()
-  def reproduction_command(%__MODULE__{model: model, targets: targets} = report) do
+  def reproduction_command(%__MODULE__{targets: targets} = report) do
+    model = model(report)
     {seed, max_runs} = reproduced_runs(report)
 
     options =
@@ -1096,7 +1116,7 @@ defmodule PropertyDamage.FailureReport do
   defp reproduced_runs(%__MODULE__{report_kind: :latency_exceeded, campaign: %{} = campaign}),
     do: {campaign.seed, campaign.max_runs}
 
-  defp reproduced_runs(%__MODULE__{seed: seed}), do: {seed, 1}
+  defp reproduced_runs(%__MODULE__{} = report), do: {seed(report), 1}
 
   @doc """
   The call that replays the report's artifact: `PropertyDamage.run/1` with the
@@ -1110,7 +1130,9 @@ defmodule PropertyDamage.FailureReport do
   @spec replay_command(t()) :: String.t() | nil
   def replay_command(%__MODULE__{replay_path: nil}), do: nil
 
-  def replay_command(%__MODULE__{model: model, replay_path: path} = report) do
+  def replay_command(%__MODULE__{replay_path: path} = report) do
+    model = model(report)
+
     options =
       [
         "model: #{inspect(model)}",
@@ -1143,7 +1165,10 @@ defmodule PropertyDamage.FailureReport do
     end
   end
 
-  defp expansion_call(%__MODULE__{model: model, seed: seed} = report, name) do
+  defp expansion_call(%__MODULE__{} = report, name) do
+    model = model(report)
+    seed = seed(report)
+
     options =
       [
         names_targets?(report, name) && "targets: #{targets_source(report)}",
@@ -1509,7 +1534,7 @@ defimpl Inspect, for: PropertyDamage.FailureReport do
 
     Inspect.Algebra.concat([
       "#FailureReport<",
-      "seed: #{inspect(report.seed)}, ",
+      "seed: #{inspect(PropertyDamage.FailureReport.seed(report))}, ",
       "type: #{inspect(type)}, ",
       "failed_at: #{inspect(report.failed_at_index)}, ",
       "error: #{String.replace(error, ~r/\s*\n\s*/, " ")}",

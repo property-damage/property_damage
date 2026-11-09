@@ -101,8 +101,8 @@ defmodule PropertyDamage.ReportBuilderCharacterizationTest do
     %{
       kind: report.report_kind,
       plan_source: trace.plan_source,
-      seed: report.seed,
-      run_number: report.run_number,
+      seed: FailureReport.seed(report),
+      run_number: FailureReport.run_number(report),
       failed_at_index: report.failed_at_index,
       original_failed_at_index: report.original_failed_at_index,
       variant: report.variant,

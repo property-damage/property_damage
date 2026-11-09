@@ -243,9 +243,9 @@ defmodule Mix.Tasks.Pd.Replay do
         seq -> length(Sequence.to_list(seq))
       end
 
-    IO.puts("Model:    #{inspect(failure.model)}")
+    IO.puts("Model:    #{inspect(PropertyDamage.FailureReport.model(failure))}")
     IO.puts("Targets:  #{PropertyDamage.FailureReport.targets_source(failure)}")
-    IO.puts("Seed:     #{inspect(failure.seed)}")
+    IO.puts("Seed:     #{inspect(PropertyDamage.FailureReport.seed(failure))}")
 
     IO.puts(
       "Failure:  #{PropertyDamage.FailureReport.kind(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}"
@@ -255,12 +255,16 @@ defmodule Mix.Tasks.Pd.Replay do
 
     # The setup commands run before the first step, the teardown commands
     # after the last.
-    if failure.setup_commands != [] do
-      IO.puts("Setup:    #{Enum.map_join(failure.setup_commands, ", ", &short_name/1)}")
+    if PropertyDamage.FailureReport.setup_commands(failure) != [] do
+      IO.puts(
+        "Setup:    #{Enum.map_join(PropertyDamage.FailureReport.setup_commands(failure), ", ", &short_name/1)}"
+      )
     end
 
-    if failure.teardown_commands != [] do
-      IO.puts("Teardown: #{Enum.map_join(failure.teardown_commands, ", ", &short_name/1)}")
+    if PropertyDamage.FailureReport.teardown_commands(failure) != [] do
+      IO.puts(
+        "Teardown: #{Enum.map_join(PropertyDamage.FailureReport.teardown_commands(failure), ", ", &short_name/1)}"
+      )
     end
   end
 

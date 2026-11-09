@@ -427,7 +427,7 @@ defmodule PropertyDamage.Analysis do
     # executor failed_at_index, which diverges from it when a root ran as an
     # expansion's leaves).
     step = FailureReport.failure_step(report)
-    model = report.model
+    model = FailureReport.model(report)
     reference = FailureReport.reference_target(report)
 
     cond do
@@ -479,10 +479,10 @@ defmodule PropertyDamage.Analysis do
     run = %{
       model: model,
       target: target,
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       registry: sequence.registry,
-      setup_commands: report.setup_commands,
-      teardown_commands: report.teardown_commands
+      setup_commands: FailureReport.setup_commands(report),
+      teardown_commands: FailureReport.teardown_commands(report)
     }
 
     changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
@@ -513,9 +513,9 @@ defmodule PropertyDamage.Analysis do
           model: model,
           target: target,
           leaves: {sequence, variant},
-          seed: report.seed,
-          setup_commands: report.setup_commands,
-          teardown_commands: report.teardown_commands
+          seed: FailureReport.seed(report),
+          setup_commands: FailureReport.setup_commands(report),
+          teardown_commands: FailureReport.teardown_commands(report)
         }
 
         changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
@@ -763,19 +763,19 @@ defmodule PropertyDamage.Analysis do
       Reproduction test for #{check_name} failure.
 
       Generated from PropertyDamage failure report.
-      Original seed: #{report.seed}
+      Original seed: #{FailureReport.seed(report)}
       Shrunk from #{Sequence.command_count(report.original_sequence)} to #{length(commands)} commands.
       \"\"\"
 
       use ExUnit.Case
 
       @tag :reproduction
-      test "reproduces #{check_name} bug (seed: #{report.seed})" do
+      test "reproduces #{check_name} bug (seed: #{FailureReport.seed(report)})" do
         # Run the exact sequence that triggered the failure
         result = PropertyDamage.run(
-          model: #{inspect(report.model)},
+          model: #{inspect(FailureReport.model(report))},
           targets: #{FailureReport.targets_source(report)},
-          seed: #{report.seed},
+          seed: #{FailureReport.seed(report)},
           max_runs: 1
         )
 
@@ -803,14 +803,14 @@ defmodule PropertyDamage.Analysis do
 
     """
     # Reproduction script for #{failure_label(report)} failure
-    # Original seed: #{report.seed}
+    # Original seed: #{FailureReport.seed(report)}
     # Run with: mix run reproduction.exs
 
     # Option 1: Re-run with same seed
     result = PropertyDamage.run(
-      model: #{inspect(report.model)},
+      model: #{inspect(FailureReport.model(report))},
       targets: #{FailureReport.targets_source(report)},
-      seed: #{report.seed},
+      seed: #{FailureReport.seed(report)},
       max_runs: 1
     )
 
@@ -838,9 +838,9 @@ defmodule PropertyDamage.Analysis do
 
     ```elixir
     PropertyDamage.run(
-      model: #{inspect(report.model)},
+      model: #{inspect(FailureReport.model(report))},
       targets: #{FailureReport.targets_source(report)},
-      seed: #{report.seed},
+      seed: #{FailureReport.seed(report)},
       max_runs: 1
     )
     ```
