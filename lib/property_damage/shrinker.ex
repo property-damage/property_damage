@@ -319,7 +319,40 @@ defmodule PropertyDamage.Shrinker do
   # Linear Sequence Shrinking
   # ============================================================================
 
+  @options [
+    :failed_at_index,
+    :failure_reason,
+    :variant_index,
+    :model,
+    :targets,
+    :oracle,
+    :rng_seed,
+    :mint_epoch_counter,
+    :expansion,
+    :root_ids,
+    :external_markers,
+    :config
+  ]
+
+  # How a candidate runs is set on `PropertyDamage.Runner.Context`, which the
+  # oracle holds, so an option for it given here would be ignored silently.
+  defp validate_options!(opts) do
+    case Keyword.keys(opts) -- @options do
+      [] ->
+        :ok
+
+      unknown ->
+        raise ArgumentError,
+              "unknown option(s) #{inspect(Enum.uniq(unknown))} for `Shrinker.shrink/2`; " <>
+                "valid options: #{inspect(@options)}. Options for how a candidate runs " <>
+                "(`:concurrency`, `:compare`, `:check_mode`, `:keep_attempts`, " <>
+                "`:stutter_config`, `:run_nonce`) belong on the `PropertyDamage.Runner.Context` " <>
+                "that `PropertyDamage.Runner.shrink_oracle/2` takes"
+    end
+  end
+
   defp shrink_linear(sequence, opts) do
+    validate_options!(opts)
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
     commands = Sequence.to_list(sequence)
     started_at = System.system_time()

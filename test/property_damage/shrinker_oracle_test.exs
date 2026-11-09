@@ -436,4 +436,27 @@ defmodule PropertyDamage.ShrinkerOracleTest do
       _total -> nil
     end
   end
+
+  describe "options" do
+    test "an option for how a candidate runs is refused, not ignored" do
+      {oracle, log} = FakeOracle.start(fn _plan, _epoch -> :passed end, O.signature())
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Shrinker.shrink(O.sequence([deposit(:alice, 5)], [%O.Open{account: :alice}]),
+            failed_at_index: 0,
+            failure_reason: O.failure(),
+            model: O.Model,
+            targets: O.targets(),
+            oracle: oracle,
+            concurrency: :parallel
+          )
+        end
+
+      FakeOracle.stop(log)
+
+      assert error.message =~ ":concurrency"
+      assert error.message =~ "PropertyDamage.Runner.Context"
+    end
+  end
 end

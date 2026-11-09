@@ -1607,6 +1607,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Persistence.list/2` lists a directory that holds an unreadable file.** A
+  file that cannot be loaded, such as one of an older format version, used to
+  make the default `:newest` and the `:oldest` sort raise. It is now listed
+  after the readable entries, as `%{filename: name, error: :unreadable}`.
+- **`PropertyDamage.Runner.execute/2` refuses a context without an integer
+  `seed`.** A `Runner.Context` with no seed failed inside the engine with a
+  `FunctionClauseError`. It now raises an `ArgumentError` that names the seed.
+- **`Shrinker.shrink/2` raises on an option it does not know.** Options that
+  moved to `PropertyDamage.Runner.Context` (`:concurrency`, `:compare`,
+  `:check_mode`, `:keep_attempts`, `:stutter_config`, `:run_nonce`) were
+  ignored silently. The `ArgumentError` names them and points to the context.
+- **A shrink candidate whose adapter setup fails keeps its setup time.** The
+  `adapter_ms` of the `Shrinker.Outcome` now counts the time a failed
+  `setup/1` took, so the setup time in the shrink stop event includes it.
+
 - **Traces and trigger isolation run the boundary drain that a run runs.**
   `RunTrace.Capture.capture/1` and `Analysis.isolate_trigger/2` rerun their
   plan through `PropertyDamage.Runner`, as a run does. A trace's step events
