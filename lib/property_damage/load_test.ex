@@ -60,14 +60,25 @@ defmodule PropertyDamage.LoadTest do
 
   ## What a Worker Runs
 
-  Each worker generates a sequence from the model's `commands/0` and runs the
-  roots of that sequence. It does not run the model's
-  `setup_each/0` or `teardown_each/0` commands, and it does not apply the
-  model's `expansions/0`. A root is a command entry of the model's
-  `commands/0`, as `PropertyDamage.Model` uses the word. If the model needs fixtures, create them in the
-  adapter's `setup/1` or seed the system before the test starts. The generator
-  still draws the roots against the state the setup commands would leave, so a
-  root that uses a value a setup command creates fails in a load test.
+  A worker runs each sequence as `PropertyDamage.run/1` runs one, through the
+  same engine step: the `@check at: :startup` checks, the model's `setup_each/0`
+  commands, each root (placeholder resolution, the adapter call under its
+  timeout, settling, projections and step checks, then a drain of the events
+  that arrived meanwhile), finalization (the `@eventually` checks and the
+  `@check at: :teardown` checks) and the model's `teardown_each/0` commands.
+
+  A root is a command entry of the model's `commands/0`, as
+  `PropertyDamage.Model` uses the word. A worker runs each root as itself and
+  does not apply the model's `expansions/0`.
+
+  Checks run only when `:check_mode` is not `:disabled`, which is the default.
+  Setup and teardown commands count as phases, not requests: only roots add to
+  the request count and the latency figures. The latency of a root is the wall
+  time of its engine step, think time excluded.
+
+  The report counts the phases in `metrics.phase_counts`: setup commands,
+  teardown commands, `@eventually` checks and stutter retries. `:stutter` turns
+  idempotency retries on. See the Load Testing guide.
 
   ## Dynamic Worker Pool
 
@@ -91,7 +102,9 @@ defmodule PropertyDamage.LoadTest do
         def timeout(%CreateAuthorization{}), do: 120
       end
 
-  Commands that exceed their timeout raise `PropertyDamage.CommandTimeoutError`.
+  A command that exceeds its timeout is stopped with a
+  `PropertyDamage.CommandTimeoutError` as its adapter error and counts as an
+  error; the sequence goes on.
 
   ## Ramp Strategies
 

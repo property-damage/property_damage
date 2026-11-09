@@ -7,7 +7,7 @@ defmodule PropertyDamage.Runtime.Sink do
   **process-dictionary** channels. The sink is an `Agent` referenced by pid and
   handed to the per-command `inject` / `start_poller` closures, so those closures
   accumulate correctly even when the adapter runs `execute` in a *spawned* process
-  (e.g. a load-test worker's `Task`), where the process dictionary did not carry
+  (the child process `execute/3` runs in), where the process dictionary did not carry
   across the process boundary.
 
   ## Injection context

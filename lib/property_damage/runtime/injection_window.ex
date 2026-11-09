@@ -7,8 +7,7 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
   window: start a `PropertyDamage.Runtime.Sink`, seed it, build the `%Runtime{}`
   the adapter receives (its `inject`/`start_poller` closures accumulate into the
   sink), run the execution, then drain the accumulated context and pollers and
-  stop the sink. Before this module that boilerplate was copied into every path
-  (the executor's `execute_regular_command` and `LoadTest.Worker` among them),
+  stop the sink. Before this module that boilerplate was copied into every path,
   so a change to the sink mechanism had to be made in several places and drifted.
 
   What stays *caller-specific* is deliberately not captured here, because it
@@ -16,10 +15,10 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
 
     * the sink's initial context and how `inject` folds into it. The engine seeds
       a rich context (`:projections`, `:event_log`, ...) and folds projections in
-      real time; the load-test path seeds `%{events: []}` and just accumulates
+      real time; `run_accumulating/2` seeds `%{events: []}` and just accumulates
       the raw injected events.
-    * the `start_poller` policy. The engine starts real resource pollers; the
-      load-test path raises, having no poller support.
+    * the `start_poller` policy. The engine starts real resource pollers;
+      `run_accumulating/2` raises, having no poller support.
     * how the adapter is actually invoked (directly, via settle, or wrapped in a
       timeout task).
 
@@ -95,7 +94,7 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
 
   @doc """
   Open a window for a path that only *accumulates* injected events and has no
-  resource-poller support (the load-test path).
+  resource-poller support.
 
   Seeds the sink with `%{events: []}`, hands the adapter a runtime whose `inject`
   appends raw events and whose `start_poller` raises `ArgumentError` with

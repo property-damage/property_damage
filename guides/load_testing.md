@@ -101,11 +101,54 @@ concrete value and resolves it into the later commands in the same sequence,
 exactly as in `PropertyDamage.run/1`. Capture is per worker, so concurrent
 arrivals never share or clobber each other's ids.
 
-Load-test workers skip the model's `setup_each/0` and `teardown_each/0`
-commands. Each worker generates a sequence and runs only its prefix and suffix.
-If your model needs fixtures, create them in the adapter's `setup/1` or seed
-the system before the test starts. Workers run the roots of `commands/0` as
-themselves and do not apply the model's `expansions/0`.
+## What a Worker Runs
+
+A worker runs each sequence the way `PropertyDamage.run/1` runs one, through the
+same engine step, in this order:
+
+1. The `@check at: :startup` checks.
+2. The model's `setup_each/0` commands.
+3. The sequence's roots, one after another. Each root resolves its
+   placeholders, calls the adapter under the adapter's `timeout/1`, settles an
+   `:async` or `:probe` command, folds the events into the projections and runs
+   the step checks. After each root, the worker drains events that arrived while
+   it ran.
+4. Finalization: the `@eventually` checks the run started finish, and the
+   `@check at: :teardown` checks run.
+5. The model's `teardown_each/0` commands.
+
+A root is a command entry of the model's `commands/0`. A worker runs each root as
+itself and does not apply the model's `expansions/0`; expansions belong to
+differential and path-equivalence runs.
+
+Two rules decide what you see in the report:
+
+- **Checks follow `check_mode`.** The startup, step, `@eventually` and teardown
+  checks all run only when `check_mode` is not `:disabled`, and `:disabled` is the
+  default. Setup and teardown commands, settling and stutter do not depend on it.
+- **Only roots are requests.** Setup and teardown commands run against the SUT but
+  add nothing to `total_requests` or to the latency figures. A setup command that
+  fails counts one error and ends that sequence before its roots.
+
+A root that fails (the adapter returns an error or raises, a placeholder does not
+resolve, or the command runs past its timeout) counts one error and the sequence
+goes on with the next root.
+
+The setup and teardown commands run once per sequence, but the adapter's
+`setup/1` and `teardown/1` run once per worker (see
+[Invariants under sustained load](#invariants-under-sustained-load)). Create
+fixtures that must last the whole run in `setup/1`, or seed the system before the
+test starts.
+
+### Stutter
+
+`stutter:` turns on idempotency retries in a load run. It takes the keyword list
+`PropertyDamage.run/1` takes for `stutter:` (for example
+`stutter: [probability: 0.1, max_repeats: 1]`) and is off by default.
+
+A worker re-runs a stuttered command and compares the retry's events with the
+original's. A mismatch ends that sequence and counts one check failure. Retries
+add to the latency of the root they follow, because the root's step includes them.
 
 ## Invariants under sustained load
 
@@ -155,7 +198,8 @@ write.
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
 | `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
-| `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
+| `check_mode` | `:disabled`, `:record`, `:log`, or `:halt`; with `:disabled` no check runs, the startup, step, `@eventually` and teardown checks included | `:disabled` |
+| `stutter` | Idempotency retries, as for `PropertyDamage.run/1` (see [Stutter](#stutter)) | off |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
 | `seed` | Positive integer the workers derive their sequences from; the same `seed` and `run_nonce` send the same commands from each worker | drawn at random, recorded as `config.seed` in the report |
 
@@ -220,9 +264,10 @@ or custom reporting.
 
 | Field | Meaning |
 |-------|---------|
-| `total_requests` | Total commands executed (the report calls these "commands") |
+| `total_requests` | Total root commands executed (the report calls these "commands"); setup and teardown commands are not counted |
 | `requests_per_second` | Mean command throughput over the run |
-| `latency_min` / `latency_p50` / `latency_p95` / `latency_p99` / `latency_max` / `latency_mean` | Per-command latency stats in ms |
+| `latency_min` / `latency_p50` / `latency_p95` / `latency_p99` / `latency_max` / `latency_mean` | Per-root latency stats in ms (see [Latency Section](#latency-section)) |
+| `phase_counts` | `%{setup_commands, teardown_commands, eventual_checks, stutter_retries}` (see [Phase Counts](#phase-counts)) |
 | `total_errors` / `error_rate` | Execution error count and percentage of commands |
 | `errors_by_type` | `%{error_type => count}` |
 | `arrivals_spawned` / `arrivals_completed` / `arrivals_per_second` | Arrival (sequence) counts and rate |
@@ -289,6 +334,21 @@ A single arrival may execute multiple commands before the sequence terminates.
 If `Total Commands ≈ Arrivals Spawned`, each sequence runs ~1 command.
 If `Total Commands >> Arrivals Spawned`, sequences run multiple commands.
 
+### Phase Counts
+
+`report.metrics.phase_counts` totals what the sessions ran besides their roots:
+
+| Count | Meaning |
+|-------|---------|
+| `setup_commands` | Setup commands the adapter answered |
+| `teardown_commands` | Teardown commands the adapter answered |
+| `eventual_checks` | `@eventually` windows the runs opened |
+| `stutter_retries` | Stutter retries whose events the run kept; a retry that answered no events is not counted |
+
+`format/2` shows a "Phases" box (terminal) or section (markdown), and `summary/1`
+a `Phases:` line, when any count is above zero. `eventual_checks` stays zero
+while `check_mode` is `:disabled`.
+
 ### Worker Pool Section
 
 ```
@@ -319,6 +379,10 @@ average utilization (>70%) indicates sustained load on the pool.
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+Latency is the wall time of one root's engine step: placeholder resolution,
+the adapter call, settling, projection updates, step checks and stutter
+retries. Think time between roots is not part of it, and neither are the setup
+and teardown commands, the drain after the root and the finalization checks.
 Latency is measured per **command**, not per HTTP request. If a command
 internally makes multiple HTTP calls (e.g., polling), the latency includes
 all of them.
@@ -340,9 +404,9 @@ failed), their sequences errored out, or slow or hung commands are still in
 flight. The first two point at the adapter or the SUT refusing connections,
 not at a queue depth to raise. For the third, the adapter's `timeout/1`
 callback bounds each command (30 seconds unless you set `default_timeout:` in
-`use PropertyDamage.Adapter`). A command over its timeout raises
-`PropertyDamage.CommandTimeoutError`, so a hung command cannot grow the pool
-without bound. Watch `pool_utilization` and `peak_workers` in
+`use PropertyDamage.Adapter`). A command over its timeout is stopped with a
+`PropertyDamage.CommandTimeoutError` as its adapter error and counts as an
+error, so a hung command cannot grow the pool without bound. Watch `pool_utilization` and `peak_workers` in
 `LoadTest.status/1` to see how far the pool grew.
 
 ### 2. Lower Arrival Rate

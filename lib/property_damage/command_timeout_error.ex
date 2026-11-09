@@ -1,10 +1,11 @@
 defmodule PropertyDamage.CommandTimeoutError do
   @moduledoc """
-  Raised when a command execution times out.
+  The adapter error of a command whose execution times out.
 
-  This exception is raised by load test workers when a command takes longer
-  than the configured timeout. The timeout is determined by the adapter's
-  `timeout/1` callback.
+  The engine stops a command that takes longer than the adapter's `timeout/1`
+  and reports this exception as the command's error. A load test counts it as
+  an error and goes on with the sequence; a property run reports it as a
+  failure.
 
   ## Fields
 
@@ -26,12 +27,10 @@ defmodule PropertyDamage.CommandTimeoutError do
 
   ## Example
 
-      try do
-        Worker.execute_sequence(worker)
-      rescue
-        e in PropertyDamage.CommandTimeoutError ->
-          IO.puts("Command \#{inspect(e.command)} timed out after \#{e.timeout_ms}ms")
-      end
+  A load test counts the timed-out command as an error:
+
+      {:ok, report} = PropertyDamage.LoadTest.run(opts)
+      report.metrics.total_errors
   """
 
   defexception [:message, :command, :timeout_ms]
