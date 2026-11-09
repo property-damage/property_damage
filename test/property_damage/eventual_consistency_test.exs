@@ -8,7 +8,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     2. a poll predicate can observe events that arrive AFTER the last command
        (the drain-and-refresh finalization loop)
     3. a poll timeout produces a FailureReport instead of crashing
-       handle_failure with a KeyError (projections_before + nil index)
+       Reproduction.handle_failure with a KeyError (projections_before + nil index)
   """
   use ExUnit.Case, async: false
 
@@ -229,7 +229,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
   end
 
   test "the full run loop builds a FailureReport from a poll timeout" do
-    # This drove handle_failure, which used to crash with a KeyError on the
+    # This drove Reproduction.handle_failure, which used to crash with a KeyError on the
     # poll-timeout result shape before any report could be built.
     result =
       PropertyDamage.run(

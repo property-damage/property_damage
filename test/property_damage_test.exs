@@ -111,7 +111,7 @@ defmodule PropertyDamageTest do
   end
 
   # A command + always-failing check, so run 0 always finds a failure and
-  # `handle_failure` (with its reproduction re-execution) is reached.
+  # `Reproduction.handle_failure` (with its reproduction re-execution) is reached.
   defmodule AlwaysFailCmd do
     use PropertyDamage.Command
     defstruct []
@@ -142,7 +142,7 @@ defmodule PropertyDamageTest do
   end
 
   # Setup succeeds on the exploration run and fails on the second call, which is
-  # the reproduction re-execution inside `handle_failure`.
+  # the reproduction re-execution inside `Reproduction.handle_failure`.
   defmodule SecondSetupFailsAdapter do
     use PropertyDamage.Adapter
 

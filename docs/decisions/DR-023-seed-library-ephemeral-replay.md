@@ -44,11 +44,11 @@ durable test of a behavior. Two consequences follow and shape everything below:
 ### Replay lifecycle inside `run/1`
 
 When enabled and the library is non-empty, a **replay phase runs before random
-exploration**, as a sibling of the random run loop *inside the same `do_run`*:
+exploration**, as a sibling of the random run loop *inside the same run lifecycle* (the `Campaign` run loop, `lib/property_damage/campaign.ex`):
 
 1. It reuses the existing per-sequence machinery (`setup_each` → `Executor.run`
    → `teardown_each`, event queue, injectors) under the single `setup_once`/
-   teardown that `do_run` already owns. It does **not** call `PropertyDamage.run/1`
+   teardown that the campaign run already owns. It does **not** call `PropertyDamage.run/1`
    recursively. (The prior, dead library-replay path did exactly that and is
    removed; see Consequences.)
 2. Every library seed is replayed once. The verdict is **binary — pass or fail**;
@@ -154,7 +154,7 @@ path while still closing the fix-cycle loop for users who ask for it.
 
 - `PropertyDamage.run/1` gains a top-level `seed_library:` option
   (`{:or, [:boolean, :string]}`, default `false`) and a pre-exploration replay
-  phase in `do_run`, sharing the existing setup/execute/teardown machinery. The
+  phase in the `Campaign` run loop (`lib/property_damage/campaign.ex`), sharing the existing setup/execute/teardown machinery. The
   phase emits progress updates through the DR-022 reporter.
 - `PropertyDamage.SeedLibrary`:
   - `record_run/3` is rewritten to streak semantics and gains a prune step; the
@@ -184,7 +184,7 @@ path while still closing the fix-cycle loop for users who ask for it.
 ## Implementation notes
 
 - **No recursion.** The replay phase must drive `Executor.run` directly within the
-  existing `do_run` lifecycle, never `PropertyDamage.run/1`. One `setup_once`,
+  existing `Campaign` run lifecycle, never `PropertyDamage.run/1`. One `setup_once`,
   one teardown, one event-queue/injector lifecycle per replayed sequence as for a
   normal run.
 - **Halt-report fidelity.** A library entry stores only the seed, so a

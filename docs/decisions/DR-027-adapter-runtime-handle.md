@@ -66,7 +66,7 @@ fixes the `load_test`/`Differential` inject gaps for free.
 
 - `lib/property_damage/adapter.ex` (behaviour, `delegate_execution` forwards 3 args, doc/type
   fixes), `lib/property_damage/runtime.ex` (new), `lib/property_damage/executor.ex`
-  (per-command setup), `lib/property_damage.ex` (setup/teardown), and every adapter:
+  (per-command setup), `lib/property_damage/variant.ex` (setup/teardown), and every adapter:
   `differential.ex`, `load_test/worker.ex`, `mutation/mutating_adapter.ex`, `iex.ex`,
   `replay.ex`, all `test/support` adapters, the `benches/*` adapters, and the `pd.gen.adapter`
   / `pd.scaffold` templates.
