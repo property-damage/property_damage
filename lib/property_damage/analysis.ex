@@ -480,6 +480,7 @@ defmodule PropertyDamage.Analysis do
       model: model,
       target: target,
       seed: FailureReport.seed(report),
+      external_markers: report.external_markers,
       registry: sequence.registry,
       setup_commands: FailureReport.setup_commands(report),
       teardown_commands: FailureReport.teardown_commands(report)
@@ -625,7 +626,7 @@ defmodule PropertyDamage.Analysis do
       |> Sequence.with_registry(run.registry)
       |> Map.put(:setup, run.setup_commands)
 
-    if Validator.valid_sequence?(candidate, run.model) do
+    if Validator.valid_sequence?(candidate, run.model, external_markers: run.external_markers) do
       sequence = Sequence.with_registry(Sequence.linear(regenerate_keys(commands)), run.registry)
 
       passes?(
