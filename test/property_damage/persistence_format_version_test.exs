@@ -120,6 +120,22 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
     end
   end
 
+  describe "the previous format version" do
+    @format_19 Path.join([__DIR__, "..", "fixtures", "persistence", "format_19_report.pd"])
+
+    @tag :known_defect
+    test "is refused by load/1" do
+      assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
+               Persistence.load(@format_19)
+    end
+
+    @tag :known_defect
+    test "is refused by load_trace/1" do
+      assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
+               Persistence.load_trace(@format_19)
+    end
+  end
+
   describe "a saved report" do
     @tag :tmp_dir
     test "carries the current version in its header and payload, and loads back intact", %{
