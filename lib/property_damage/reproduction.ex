@@ -10,10 +10,12 @@ defmodule PropertyDamage.Reproduction do
   to the oracle `PropertyDamage.Runner.shrink_oracle/2` builds, and the
   reproduction runs through `PropertyDamage.Runner.execute/2`.
 
-  `handle_failure/2` and `report_failure/2` take the campaign context, the map
-  the facade holds for the run. `PropertyDamage.ReportBuilder` builds the
+  `handle_failure/2` and `report_failure/2` take the campaign context, the
+  `PropertyDamage.Campaign.Context` the run holds. `PropertyDamage.ReportBuilder` builds the
   report each of them returns.
   """
+
+  alias PropertyDamage.Campaign.Context
 
   alias PropertyDamage.{
     Expansion,
@@ -138,7 +140,7 @@ defmodule PropertyDamage.Reproduction do
         run_nonce: ctx.run_nonce,
         concurrency: ctx.concurrency,
         compare: ctx.compare,
-        stutter_config: ctx.stutter_config,
+        stutter_config: Context.stutter_config(ctx),
         keep_attempts: ctx.keep_attempts,
         check_mode: ctx.check_mode
       },
@@ -168,7 +170,7 @@ defmodule PropertyDamage.Reproduction do
       mint_epoch: epoch,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
-      stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
+      stutter_config: repro_stutter_config(found.failure.reason, Context.stutter_config(ctx)),
       keep_attempts: ctx.keep_attempts,
       check_mode: ctx.check_mode
     }
@@ -231,7 +233,7 @@ defmodule PropertyDamage.Reproduction do
   a directory, emits the terminal failure notification and calls the run's
   `on_failure` handler. A raising handler is logged and never costs the report.
   """
-  @spec report_failure(map(), FailureReport.t()) :: {:error, FailureReport.t()}
+  @spec report_failure(Context.t(), FailureReport.t()) :: {:error, FailureReport.t()}
   def report_failure(ctx, failure_report) do
     failure_report = with_replay(ctx, failure_report)
     write_html(ctx, failure_report)
@@ -445,7 +447,7 @@ defmodule PropertyDamage.Reproduction do
   defp do_shrink_further(report, targets, {sequence, variants}, opts) do
     strategy = Keyword.get(opts, :strategy, :thorough)
 
-    ctx = %{
+    ctx = %Context{
       model: report.model,
       targets: targets,
       target: hd(targets),
@@ -455,7 +457,6 @@ defmodule PropertyDamage.Reproduction do
       concurrency: Keyword.get(opts, :concurrency, report.concurrency),
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
-      stutter_config: Stutter.parse_config(report.stutter),
       keep_attempts: Options.keep_attempts!(opts),
       external_markers: further_markers(report, opts),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
@@ -532,7 +533,7 @@ defmodule PropertyDamage.Reproduction do
             elapsed
           )
 
-        {:ok, further_replay(report, further)}
+        {:ok, further_replay(ctx, report, further)}
 
       # A re-execution whose adapter setup fails cannot confirm a further
       # shrink; surface the setup failure.
@@ -548,11 +549,11 @@ defmodule PropertyDamage.Reproduction do
   # beside the one the report came with, replacing it (the same seed names
   # the same file); a report with no artifact file gets none, and keeps the
   # reason it had none.
-  defp further_replay(%FailureReport{replay_path: path}, further) when is_binary(path),
-    do: with_replay(%{replay_dir: Path.dirname(path), replay: nil}, further)
+  defp further_replay(ctx, %FailureReport{replay_path: path}, further) when is_binary(path),
+    do: with_replay(%{ctx | replay_dir: Path.dirname(path), replay: nil}, further)
 
-  defp further_replay(report, further) do
-    case with_replay(%{replay_dir: false, replay: nil}, further) do
+  defp further_replay(ctx, report, further) do
+    case with_replay(%{ctx | replay_dir: false, replay: nil}, further) do
       %{replay_status: :disabled} = replayed ->
         %{replayed | replay_status: report.replay_status || :disabled}
 

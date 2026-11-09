@@ -4,7 +4,7 @@ defmodule PropertyDamage.ReportBuilder do
 
   This is the only module in `lib/` that calls `PropertyDamage.FailureReport.new/1`
   to assemble a report. Each public function serves one path. It takes the
-  campaign context map the facade holds, plus what that path knows:
+  campaign context (`PropertyDamage.Campaign.Context`), plus what that path knows:
 
   - `latency_exceeded/4`: the latency budget was breached after every run passed
   - `from_found/3`: a run found a failure
@@ -15,6 +15,7 @@ defmodule PropertyDamage.ReportBuilder do
   the fields its path leaves unset.
   """
 
+  alias PropertyDamage.Campaign.Context
   alias PropertyDamage.{Expansion, FailureReport, RunTrace, Sequence}
 
   @doc """
@@ -32,7 +33,10 @@ defmodule PropertyDamage.ReportBuilder do
   `:original_failed_at_index`, `:last_root`, `:shrink_stop`, `:reference_result`,
   `:run_check_fires`, `:expansion` and `:expansion_counts`.
   """
-  @spec latency_exceeded(map(), map(), map() | nil, [{PropertyDamage.Target.t(), term()}, ...]) ::
+  @spec latency_exceeded(Context.t(), map(), map() | nil, [
+          {PropertyDamage.Target.t(), term()},
+          ...
+        ]) ::
           FailureReport.t()
   def latency_exceeded(ctx, acc, metrics, [{target, failure} | rest]) do
     last = acc.last_run
@@ -90,7 +94,11 @@ defmodule PropertyDamage.ReportBuilder do
 
   Leaves unset: `:campaign`.
   """
-  @spec from_found(map(), map(), :found | {:fallback, map()} | {:shrunk, term(), term(), map()}) ::
+  @spec from_found(
+          Context.t(),
+          map(),
+          :found | {:fallback, map()} | {:shrunk, term(), term(), map()}
+        ) ::
           FailureReport.t()
   def from_found(ctx, found, how) do
     {shrunk_sequence, plan_source, mint_epoch, shrink} =
@@ -159,8 +167,8 @@ defmodule PropertyDamage.ReportBuilder do
           found.expansion_counts,
           Expansion.counts(found.expansion, last_root)
         ),
-      latency: Map.get(ctx, :latency, false),
-      metrics: Map.get(ctx, :measured_metrics)
+      latency: ctx.latency,
+      metrics: ctx.measured_metrics
     )
   end
 
@@ -176,7 +184,7 @@ defmodule PropertyDamage.ReportBuilder do
 
   Leaves unset: `:campaign`, `:last_root`, `:latency` and `:metrics`.
   """
-  @spec further_shrink(map(), FailureReport.t(), map(), map(), non_neg_integer()) ::
+  @spec further_shrink(Context.t(), FailureReport.t(), map(), map(), non_neg_integer()) ::
           FailureReport.t()
   def further_shrink(ctx, report, reproduction, shrink_result, elapsed) do
     %{

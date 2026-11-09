@@ -186,6 +186,7 @@ defmodule PropertyDamage do
   `PropertyDamage.RunComparison` for details.
   """
 
+  alias PropertyDamage.Campaign.Context
   alias PropertyDamage.Log.{Cap, Filter}
 
   alias PropertyDamage.{
@@ -211,7 +212,6 @@ defmodule PropertyDamage do
     Scheduler,
     SeedLibrary,
     Sequence,
-    Stutter,
     Telemetry,
     Validation
   }
@@ -559,7 +559,7 @@ defmodule PropertyDamage do
         Telemetry.progress_consumer([:test_run])
       ])
 
-    ctx = %{
+    ctx = %Context{
       model: model,
       targets: executed_targets(targets),
       # Every target of `targets:`: each one's choices are computed on the
@@ -580,16 +580,13 @@ defmodule PropertyDamage do
       on_failure: Reproduction.on_failure_callback(opts),
       reporter: reporter,
       stutter: opts[:stutter],
-      stutter_config: Stutter.parse_config(opts[:stutter]),
       keep_attempts: keep_attempts(opts),
       log_filter: Filter.from_option(opts[:log]),
       setup_log: opts[:setup_log],
       check_mode: opts[:check_mode],
-      seed_library: seed_library,
       coverage: opts[:coverage],
       concurrency: opts[:concurrency],
       compare: opts[:compare],
-      measure_latency: opts[:latency] != false,
       latency: latency_given,
       latency_budget: opts[:latency],
       external_markers: opts[:external_markers] || []
@@ -640,7 +637,7 @@ defmodule PropertyDamage do
     Telemetry.run_start(telemetry_metadata)
 
     try do
-      result = do_run(ctx)
+      result = do_run(ctx, seed_library)
 
       # Auto-append a new exploration failure's seed to the working set
       # (DR-023); deduplicated by seed, so a replayed halt is a no-op.
@@ -670,7 +667,7 @@ defmodule PropertyDamage do
     end
   end
 
-  defp do_run(ctx) do
+  defp do_run(ctx, seed_library) do
     # Seed the process RNG (consumed by execution-time randomness such as
     # stutter decisions; sequence generation is seeded explicitly per run
     # via Generator.generate_value/2, NOT through the process RNG)
@@ -684,12 +681,12 @@ defmodule PropertyDamage do
     # Generate sequences and run
     generator_opts = [max_commands: ctx.max_commands, external_markers: ctx.external_markers]
 
-    ctx = Map.put(ctx, :generator, Generator.generate_sequence(ctx.model, generator_opts))
+    ctx = %{ctx | generator: Generator.generate_sequence(ctx.model, generator_opts)}
 
     # Seed-library replay phase (DR-023): replay previously-failing seeds before
     # random exploration, reusing the per-sequence machinery below. On a
     # still-failing replay the run halts here; otherwise exploration proceeds.
-    case replay_phase(ctx.seed_library, ctx) do
+    case replay_phase(seed_library, ctx) do
       {:halt, failure} ->
         {:error, failure}
 
@@ -1031,14 +1028,17 @@ defmodule PropertyDamage do
              last_run:
                run
                |> Map.take([:sequence, :run_seed, :run_number])
-               |> Map.put(:results, if(ctx.measure_latency, do: outcome.results, else: []))
+               |> Map.put(
+                 :results,
+                 if(Context.measure_latency?(ctx), do: outcome.results, else: [])
+               )
          }}
 
       _failure ->
         # The report carries the metrics measured up to this failed run, and
         # the entry counts of the runs before it (the report adds the counts
         # of the run it describes, up to that run's failing root).
-        ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
+        ctx = %{ctx | measured_metrics: campaign_metrics(ctx, acc.samples)}
 
         Reproduction.handle_failure(
           ctx,
@@ -1065,8 +1065,8 @@ defmodule PropertyDamage do
       mint_epoch: 0,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
-      measure_latency: ctx.measure_latency,
-      stutter_config: ctx.stutter_config,
+      measure_latency: Context.measure_latency?(ctx),
+      stutter_config: Context.stutter_config(ctx),
       keep_attempts: ctx.keep_attempts,
       check_mode: ctx.check_mode
     }
@@ -1098,7 +1098,8 @@ defmodule PropertyDamage do
   # Under `latency:`, each run at or after the warm-up contributes its
   # per-target timings to the metrics.
   defp record_sample(%{samples: samples} = acc, ctx, run, outcome) do
-    if ctx.measure_latency and run.run_number >= Keyword.fetch!(ctx.latency_budget, :warmup) do
+    if Context.measure_latency?(ctx) and
+         run.run_number >= Keyword.fetch!(ctx.latency_budget, :warmup) do
       sample =
         LatencyMetrics.sample(
           ctx.targets,
@@ -1113,8 +1114,9 @@ defmodule PropertyDamage do
   end
 
   # The metrics of the samples recorded so far, or `nil` when `latency:` is off.
-  defp campaign_metrics(%{measure_latency: false}, _samples), do: nil
-  defp campaign_metrics(ctx, samples), do: LatencyMetrics.calculate(ctx.targets, samples)
+  defp campaign_metrics(ctx, samples) do
+    if Context.measure_latency?(ctx), do: LatencyMetrics.calculate(ctx.targets, samples)
+  end
 
   # A replay that passed did not reproduce its artifact.
   defp put_replay(stats, %{replay: nil}), do: stats
