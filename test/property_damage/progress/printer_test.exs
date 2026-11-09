@@ -116,12 +116,15 @@ defmodule PropertyDamage.Progress.PrinterTest do
 
     test "RunResult{outcome: :error} prints the failure summary" do
       report = %FailureReport{
-        seed: 12_345,
-        run_number: 5,
         failed_at_index: 2,
-        failure_reason: Failure.check_failed(:test_check, "Test failed"),
         original_sequence: Sequence.linear([%TestCommand{id: 1}, %TestCommand{id: 2}]),
-        trace: PropertyDamage.RunTrace.new(plan: Sequence.linear([%TestCommand{id: 1}])),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: Sequence.linear([%TestCommand{id: 1}]),
+            seed: 12_345,
+            run_number: 5,
+            outcome: {:fail, Failure.check_failed(:test_check, "Test failed")}
+          ),
         shrink_iterations: 10,
         shrink_time_ms: 100
       }
@@ -144,12 +147,15 @@ defmodule PropertyDamage.Progress.PrinterTest do
       shrunk_sequence = Sequence.linear([%TestCommand{id: 1}])
 
       report = %FailureReport{
-        seed: 12_345,
-        run_number: 5,
         failed_at_index: 2,
-        failure_reason: Failure.check_failed(:test_check, "Test failed"),
         original_sequence: original_sequence,
-        trace: PropertyDamage.RunTrace.new(plan: shrunk_sequence),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: shrunk_sequence,
+            seed: 12_345,
+            run_number: 5,
+            outcome: {:fail, Failure.check_failed(:test_check, "Test failed")}
+          ),
         shrink_iterations: 10,
         shrink_time_ms: 100
       }

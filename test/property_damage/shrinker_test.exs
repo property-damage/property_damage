@@ -811,7 +811,7 @@ defmodule PropertyDamage.ShrinkerTest do
                  validate: false
                )
 
-      assert Failure.kind(report.failure_reason) == :check_failed
+      assert Failure.kind(PropertyDamage.FailureReport.failure_reason(report)) == :check_failed
 
       shrunk =
         report |> PropertyDamage.FailureReport.shrunk_sequence() |> Sequence.to_list()

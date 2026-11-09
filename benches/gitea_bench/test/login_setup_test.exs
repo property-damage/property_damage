@@ -127,9 +127,10 @@ defmodule LoginSetupTest do
     assert report.failed_at_index == nil
 
     assert %Failure{type: %Failure.Setup{cause: :command, setup_index: 0, command: %Login{}}} =
-             report.failure_reason
+             PropertyDamage.FailureReport.failure_reason(report)
 
-    assert {:login_failed, _reason} = Failure.detail(report.failure_reason)
+    assert {:login_failed, _reason} =
+             Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
 
     events = commands_started()
     assert count(events, "ui", :setup, Login) == 1

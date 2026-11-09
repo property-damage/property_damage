@@ -21,10 +21,12 @@ defmodule PropertyDamage.FailureReport.BundleStringCompiledTest do
 
   test "a model compiled from a string has no file, no source and no missing source" do
     report = RL.report(:diverged)
-    assert {:ok, %{file: "nofile", moduledoc: moduledoc}} = Docs.fetch(report.model)
+
+    assert {:ok, %{file: "nofile", moduledoc: moduledoc}} =
+             Docs.fetch(PropertyDamage.FailureReport.model(report))
 
     bundle = B.build(report)
-    entry = B.module_entry(bundle, report.model)
+    entry = B.module_entry(bundle, PropertyDamage.FailureReport.model(report))
 
     assert entry["file"] == nil
     assert entry["source"] == nil

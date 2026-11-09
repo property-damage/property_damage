@@ -342,7 +342,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   end
 
   defp signature(%FailureReport{} = report),
-    do: Failure.signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(FailureReport.failure_reason(report), report.variant.index)
 
   defp drain_probe(message \\ :unarmed_flip, count \\ 0) do
     receive do
@@ -354,7 +354,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   # A report's kind always agrees with its failure reason.
   defp assert_kind_agrees(%FailureReport{} = report) do
-    assert report.report_kind == Failure.report_kind(report.failure_reason)
+    assert report.report_kind == Failure.report_kind(FailureReport.failure_reason(report))
   end
 
   # A sequence whose first divergence under `:split` is a Flip after the only
@@ -391,7 +391,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
       assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
-      assert Failure.kind(report.failure_reason) == :diverged
+      assert Failure.kind(FailureReport.failure_reason(report)) == :diverged
       assert Sequence.to_list(report.original_sequence) == original
       assert length(original) >= 12
 
@@ -443,7 +443,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
         assert report.report_kind == :diverged
         assert report.variant.index == 1
-        assert Failure.kind(report.failure_reason) == :diverged
+        assert Failure.kind(FailureReport.failure_reason(report)) == :diverged
 
         shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
         assert Enum.map(shrunk, & &1.__struct__) == [Arm, Flip]
@@ -501,11 +501,11 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
       {:ok, rerun} =
         Scheduler.run(
-          model: report.model,
+          model: FailureReport.model(report),
           targets: targets,
           commands: Sequence.to_list(shrunk),
           placeholder_registry: shrunk.registry,
-          seed: report.seed,
+          seed: FailureReport.seed(report),
           run_number: 0,
           run_nonce: report.trace.run_nonce,
           mint_epoch: report.trace.mint_epoch + 1,
@@ -530,14 +530,14 @@ defmodule PropertyDamage.LockstepShrinkTest do
       assert {:error, report} = run(DivergeModel, targets(), seed: seed)
 
       assert_kind_agrees(report)
-      assert Failure.name(report.failure_reason) == {Answers, :flips}
+      assert Failure.name(FailureReport.failure_reason(report)) == {Answers, :flips}
 
       root_command =
         report |> FailureReport.shrunk_sequence() |> Sequence.to_list() |> List.last()
 
-      assert Failure.detail(report.failure_reason).command == root_command
+      assert Failure.detail(FailureReport.failure_reason(report)).command == root_command
 
-      assert FailureReport.classify_reason(report.failure_reason) ==
+      assert FailureReport.classify_reason(FailureReport.failure_reason(report)) ==
                {:diverged, {Answers, :flips}}
     end
 
@@ -558,10 +558,10 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
         shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
         assert Enum.map(shrunk, & &1.__struct__) == [Arm, Flip]
-        assert Failure.name(report.failure_reason) == {Answers, :flips}
+        assert Failure.name(FailureReport.failure_reason(report)) == {Answers, :flips}
         assert signature(report) == {:diverged, {Answers, :flips}, 1}
         assert length(shrunk) < length(original)
-        assert %Flip{} = Failure.detail(report.failure_reason).command
+        assert %Flip{} = Failure.detail(FailureReport.failure_reason(report)).command
 
         assert rejected >= 1,
                "expected at least one candidate to diverge at an unarmed Ping"
@@ -578,9 +578,9 @@ defmodule PropertyDamage.LockstepShrinkTest do
       assert {:ok, path} = PropertyDamage.Persistence.save(report, dir)
       assert {:ok, loaded} = PropertyDamage.Persistence.load(path)
 
-      assert %Flip{} = Failure.detail(loaded.failure_reason).command
-      assert Failure.name(loaded.failure_reason) == {Answers, :flips}
-      assert loaded.failure_reason == report.failure_reason
+      assert %Flip{} = Failure.detail(FailureReport.failure_reason(loaded)).command
+      assert Failure.name(FailureReport.failure_reason(loaded)) == {Answers, :flips}
+      assert FailureReport.failure_reason(loaded) == FailureReport.failure_reason(report)
     end
   end
 
@@ -606,7 +606,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
       assert {:error, %FailureReport{} = report} =
                run(DivergeModel, targets(), seed: exploration, seed_library: path)
 
-      assert report.seed == replayed
+      assert FailureReport.seed(report) == replayed
       assert report.report_kind == :diverged
       assert report.variant == %{index: 1, name: "cand"}
     end

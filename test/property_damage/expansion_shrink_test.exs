@@ -68,7 +68,7 @@ defmodule PropertyDamage.ExpansionShrinkTest do
   end
 
   defp signature(report),
-    do: Failure.signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(FailureReport.failure_reason(report), report.variant.index)
 
   # `%{tag => [command]}`: the commands each root ran in one execution.
   defp ran(segment), do: Map.new(X.by_root(segment))

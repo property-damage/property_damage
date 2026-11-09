@@ -192,7 +192,7 @@ defmodule PropertyDamage.OnlyOptionTest do
                  shrink: false
                )
 
-      assert report.seed == F.run_seed_for(@seed, 3)
+      assert PropertyDamage.FailureReport.seed(report) == F.run_seed_for(@seed, 3)
       assert F.report_run(report) == 3
 
       # The report's coordinates regenerate the failing run.

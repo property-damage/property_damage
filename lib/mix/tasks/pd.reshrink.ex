@@ -267,9 +267,9 @@ defmodule Mix.Tasks.Pd.Reshrink do
   defp command_count(sequence), do: length(Sequence.to_list(sequence))
 
   defp print_summary(failure, strategy, command_count) do
-    IO.puts("Model:    #{inspect(failure.model)}")
+    IO.puts("Model:    #{inspect(PropertyDamage.FailureReport.model(failure))}")
     IO.puts("Targets:  #{PropertyDamage.FailureReport.targets_source(failure)}")
-    IO.puts("Seed:     #{inspect(failure.seed)}")
+    IO.puts("Seed:     #{inspect(PropertyDamage.FailureReport.seed(failure))}")
 
     IO.puts(
       "Failure:  #{PropertyDamage.FailureReport.kind(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}"

@@ -685,7 +685,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
       {:error, %FailureReport{} = report} ->
         {:error,
          Formatter.format(report, :terminal, color: false) <>
-           "\n" <> inspect(report.failure_reason)}
+           "\n" <> inspect(FailureReport.failure_reason(report))}
 
       {:error, other} ->
         {:error, inspect(other)}

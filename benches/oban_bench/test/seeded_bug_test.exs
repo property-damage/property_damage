@@ -48,7 +48,7 @@ defmodule ObanBench.SeededBugTest do
 
     assert %PropertyDamage.Failure{
              type: %PropertyDamage.Failure.Check{kind: :poll_timeout, detail: info}
-           } = report.failure_reason
+           } = PropertyDamage.FailureReport.failure_reason(report)
 
     assert info.triggered_by.check_name == :counter_eventually_consistent
 

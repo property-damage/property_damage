@@ -84,10 +84,15 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
   # The real report with its failure swapped for an idempotency violation, a
   # fine kind that sorts into the `:check_failed` outcome, so the two levels
   # of name differ.
+  defp no_failure_report do
+    report = failing_report()
+    %{report | trace: %{report.trace | outcome: :pass}}
+  end
+
   defp idempotency_report do
     report = failing_report()
     failure = Failure.from_signature(:idempotency_violation, nil)
-    %{report | failure_reason: failure}
+    %{report | trace: %{report.trace | outcome: {:fail, failure}}}
   end
 
   defp header_version(path) do
@@ -139,7 +144,10 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
       assert {:ok, loaded} = Persistence.load(path)
       assert loaded == report
-      assert Map.get(loaded, :report_kind) == Failure.report_kind(loaded.failure_reason)
+
+      assert Map.get(loaded, :report_kind) ==
+               Failure.report_kind(FailureReport.failure_reason(loaded))
+
       assert Map.get(loaded, :report_kind) == :check_failed
     end
   end
@@ -238,12 +246,12 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(FailureReport, :kind, [report]) == :idempotency_violation
       assert Map.get(report, :report_kind) == :check_failed
-      assert Failure.kind(report.failure_reason) == :idempotency_violation
+      assert Failure.kind(FailureReport.failure_reason(report)) == :idempotency_violation
     end
 
     test "FailureReport.kind/1 is :unknown without a failure" do
       # credo:disable-for-next-line Credo.Check.Refactor.Apply
-      assert apply(FailureReport, :kind, [%{failing_report() | failure_reason: nil}]) == :unknown
+      assert apply(FailureReport, :kind, [no_failure_report()]) == :unknown
     end
 
     test "FailureReport.kind_summary/1 replaces failure_type_summary/1" do

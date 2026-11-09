@@ -115,7 +115,7 @@ defmodule PropertyDamage.EventuallyReturnTest do
              )
 
     assert %Failure{type: %Failure.Check{kind: :check_failed, name: :payment_confirmed}} =
-             report.failure_reason
+             PropertyDamage.FailureReport.failure_reason(report)
 
     assert report.failed_at_index == 0
   end

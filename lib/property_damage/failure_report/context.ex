@@ -58,7 +58,7 @@ defmodule PropertyDamage.FailureReport.Context do
 
     [meaning(kind)] ++
       model_items(report) ++
-      subject_items(kind, report, command) ++
+      subject_items(kind, FailureReport.failure_reason(report), report, command) ++
       path_items(report, targets) ++ last_command_items(kind, command)
   end
 
@@ -140,30 +140,30 @@ defmodule PropertyDamage.FailureReport.Context do
     |> Enum.join("\n")
   end
 
-  defp model_items(%FailureReport{model: model}) when is_atom(model) and not is_nil(model),
+  defp model_items(report), do: report |> FailureReport.model() |> model_item()
+
+  defp model_item(model) when is_atom(model) and not is_nil(model),
     do: [module_item("Model", model, :paragraph)]
 
-  defp model_items(_report), do: []
+  defp model_item(_model), do: []
 
   # ==========================================================================
   # Subject items, by kind
   # ==========================================================================
 
-  defp subject_items(
-         kind,
-         %FailureReport{failure_reason: %Failure{type: type}} = report,
-         _command
-       )
+  defp subject_items(kind, %Failure{type: type}, report, _command)
        when kind in [:check_failed, :poll_timeout] do
     check_items(type) ++ property_items(report)
   end
 
-  defp subject_items(kind, report, _command) when kind in [:check_failed, :poll_timeout],
-    do: property_items(report)
+  defp subject_items(kind, _failure, report, _command)
+       when kind in [:check_failed, :poll_timeout],
+       do: property_items(report)
 
   defp subject_items(
          :projection_violation,
-         %FailureReport{failure_reason: %Failure{type: %Failure.Check{name: projection}}},
+         %Failure{type: %Failure.Check{name: projection}},
+         _report,
          _command
        )
        when is_atom(projection) and not is_nil(projection),
@@ -171,7 +171,8 @@ defmodule PropertyDamage.FailureReport.Context do
 
   defp subject_items(
          kind,
-         %FailureReport{failure_reason: %Failure{type: %{key: {projection, fun}} = type}},
+         %Failure{type: %{key: {projection, fun}} = type},
+         _report,
          _command
        )
        when kind in [:diverged, :did_not_converge] and is_atom(projection) and is_atom(fun) do
@@ -182,7 +183,8 @@ defmodule PropertyDamage.FailureReport.Context do
 
   defp subject_items(
          :setup_failed,
-         %FailureReport{failure_reason: %Failure{type: %Failure.Setup{} = setup}},
+         %Failure{type: %Failure.Setup{} = setup},
+         _report,
          command
        ) do
     case setup do
@@ -192,10 +194,10 @@ defmodule PropertyDamage.FailureReport.Context do
     end
   end
 
-  defp subject_items(kind, _report, command) when kind in @execution_kinds,
+  defp subject_items(kind, _failure, _report, command) when kind in @execution_kinds,
     do: command_subject(command)
 
-  defp subject_items(_kind, _report, _command), do: []
+  defp subject_items(_kind, _failure, _report, _command), do: []
 
   defp command_subject(nil), do: []
   defp command_subject(module), do: [module_item("Command", module, :full)]
@@ -349,7 +351,7 @@ defmodule PropertyDamage.FailureReport.Context do
       end
 
     ~s[(no description: add doc: "..." to the #{ordinal((choice.index || 0) + 1)} entry that ] <>
-      "#{inspect(report.model)}.#{function} returns for #{root})"
+      "#{inspect(FailureReport.model(report))}.#{function} returns for #{root})"
   end
 
   defp ordinal(n) when n in 1..10, do: Enum.at(@ordinals, n - 1)

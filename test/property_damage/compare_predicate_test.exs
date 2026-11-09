@@ -167,8 +167,8 @@ defmodule PropertyDamage.ComparePredicateTest do
              Compare.run(model!(ctx, name), targets(delta), compare: [converge_within: 30])
 
     assert report.report_kind == :diverged
-    assert Failure.name(report.failure_reason) == key(ctx, name)
-    divergence = report.failure_reason.type
+    assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) == key(ctx, name)
+    divergence = PropertyDamage.FailureReport.failure_reason(report).type
 
     {Map.fetch!(divergence, :reference_value), Map.fetch!(divergence, :variant_value),
      Map.fetch!(divergence, :mismatch)}
@@ -402,10 +402,12 @@ defmodule PropertyDamage.ComparePredicateTest do
       assert elapsed < 2_000
       assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert Failure.name(report.failure_reason) == key(ctx, :raising_observation)
+
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :raising_observation)
 
       assert %RuntimeError{message: "observation exploded"} =
-               Failure.detail(report.failure_reason)
+               Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
     end
 
     test "a predicate that raises is a check failure in the non-reference variant", ctx do
@@ -416,8 +418,12 @@ defmodule PropertyDamage.ComparePredicateTest do
       assert elapsed < 2_000
       assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert Failure.name(report.failure_reason) == key(ctx, :raising_predicate)
-      assert %ArgumentError{message: "predicate exploded"} = Failure.detail(report.failure_reason)
+
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :raising_predicate)
+
+      assert %ArgumentError{message: "predicate exploded"} =
+               Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
     end
   end
 end

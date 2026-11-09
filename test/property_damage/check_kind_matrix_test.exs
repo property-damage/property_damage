@@ -370,7 +370,11 @@ defmodule PropertyDamage.CheckKindMatrixTest do
     test "locates the check function for a failure that names each fixture check" do
       for check <- @checks.__checks__() do
         failure = PropertyDamage.Failure.check_failed(check.name, "boom", @checks)
-        report = %FailureReport{failure_reason: failure, report_kind: :check_failed}
+
+        report = %FailureReport{
+          trace: %PropertyDamage.RunTrace{outcome: {:fail, failure}},
+          report_kind: :check_failed
+        }
 
         assert %{name: name} =
                  report |> Layout.context_items() |> Enum.find(&(&1.label == "Check")),

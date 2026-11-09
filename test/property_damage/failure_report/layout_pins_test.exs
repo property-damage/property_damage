@@ -175,7 +175,7 @@ defmodule PropertyDamage.FailureReport.LayoutPinsTest do
 
   describe "an Other failure that is a failure to converge" do
     test "prints its kind, name, target and root, then the pending value" do
-      failure = L.report(:did_not_converge).failure_reason
+      failure = PropertyDamage.FailureReport.failure_reason(L.report(:did_not_converge))
 
       assert PropertyDamage.Failure.kind(failure) == :did_not_converge,
              "control: it did not converge"

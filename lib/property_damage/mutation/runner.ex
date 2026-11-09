@@ -306,7 +306,7 @@ defmodule PropertyDamage.Mutation.Runner do
   # A failed run returns a failure report; its message names the failing check.
   # Anything else gets a readable rendering so the update is never blank.
   defp failure_message(%FailureReport{} = report) do
-    FailureReport.failure_message(report) || inspect(report.failure_reason)
+    FailureReport.failure_message(report) || inspect(FailureReport.failure_reason(report))
   end
 
   defp failure_message(other), do: inspect(other)

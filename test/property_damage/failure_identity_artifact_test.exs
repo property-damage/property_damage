@@ -54,8 +54,9 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
       report = failing()
       assert report.variant.index == 1
 
-      assert signature(report.failure_reason, report.variant.index) ==
-               {Failure.kind(report.failure_reason), Failure.name(report.failure_reason), 1}
+      assert signature(FailureReport.failure_reason(report), report.variant.index) ==
+               {Failure.kind(FailureReport.failure_reason(report)),
+                Failure.name(FailureReport.failure_reason(report)), 1}
     end
 
     test "lives next to from_signature, and the shrinker no longer exports it" do
@@ -87,7 +88,7 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
       assert term.format == 3
 
       assert term.failure == %{
-               signature: signature(report.failure_reason, report.variant.index),
+               signature: signature(FailureReport.failure_reason(report), report.variant.index),
                root_index: report.failed_at_index
              }
     end

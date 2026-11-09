@@ -25,13 +25,13 @@ defmodule PropertyDamage.Export.Common do
   @spec extract_metadata(FailureReport.t()) :: map()
   def extract_metadata(%FailureReport{} = report) do
     %{
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       kind: FailureReport.kind(report),
       failure_message: FailureReport.failure_message(report),
       check_name: FailureReport.check_name(report),
       failed_at_index: report.failed_at_index,
-      timestamp: report.timestamp,
-      model: report.model,
+      timestamp: FailureReport.timestamp(report),
+      model: FailureReport.model(report),
       target: FailureReport.reference_target(report)
     }
   end
@@ -49,7 +49,8 @@ defmodule PropertyDamage.Export.Common do
   for a model without `expansions/0`, whose steps are the roots.
   """
   @spec steps_note(FailureReport.t()) :: String.t() | nil
-  def steps_note(%FailureReport{model: model} = report) do
+  def steps_note(%FailureReport{} = report) do
+    model = FailureReport.model(report)
     reference = FailureReport.reference_target(report)
 
     if reference && PropertyDamage.Expansion.defines?(model) do
@@ -163,7 +164,8 @@ defmodule PropertyDamage.Export.Common do
   in plain `.exs`, which `mix test` skips.
   """
   @spec generate_filename(FailureReport.t(), atom()) :: String.t()
-  def generate_filename(%FailureReport{seed: seed} = report, format) do
+  def generate_filename(%FailureReport{} = report, format) do
+    seed = FailureReport.seed(report)
     ext = extension_for_format(format)
     "reproduce_#{seed}_#{content_digest(report)}#{ext}"
   end
@@ -173,8 +175,8 @@ defmodule PropertyDamage.Export.Common do
   # overwrite each other, while an identical failure maps to the same file. The
   # failure's identity (kind, check name, failing target) leads.
   defp content_digest(%FailureReport{} = report) do
-    {Failure.signature(report.failure_reason, variant_index(report)), report.failure_reason,
-     FailureReport.shrunk_sequence(report)}
+    {Failure.signature(FailureReport.failure_reason(report), variant_index(report)),
+     FailureReport.failure_reason(report), FailureReport.shrunk_sequence(report)}
     |> :erlang.phash2()
     |> Integer.to_string(16)
     |> String.downcase()

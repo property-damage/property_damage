@@ -70,7 +70,6 @@ defmodule PropertyDamage.FailureReportOverlayTest do
   end
 
   describe "a saved report" do
-    @tag :known_defect
     @tag :tmp_dir
     test "loads with the eight values its trace holds, read through the accessors", %{
       tmp_dir: dir

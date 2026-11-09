@@ -242,7 +242,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert report.report_kind == :diverged
-      divergence = Failure.detail(report.failure_reason)
+      divergence = Failure.detail(FailureReport.failure_reason(report))
 
       assert divergence |> Map.keys() |> Enum.sort() ==
                [
@@ -271,8 +271,8 @@ defmodule PropertyDamage.LockstepRunTest do
       assert divergence.command ==
                Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
 
-      assert report.seed == @seed
-      assert report.run_number == 0
+      assert FailureReport.seed(report) == @seed
+      assert FailureReport.run_number(report) == 0
       assert divergence.root == 0
       assert report.failed_at_index == 0
       assert report.variant == %{index: 1, name: "b"}
@@ -286,7 +286,7 @@ defmodule PropertyDamage.LockstepRunTest do
     test "a divergence after root 0 names that root and its command" do
       report = failure!([step("a"), step("b", %{bad_at: 1})], max_commands: 3)
 
-      divergence = Failure.detail(report.failure_reason)
+      divergence = Failure.detail(FailureReport.failure_reason(report))
       assert divergence.root == 1
 
       assert Enum.at(Sequence.to_list(report.original_sequence), 1) ==
@@ -301,8 +301,8 @@ defmodule PropertyDamage.LockstepRunTest do
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 0
-      assert Failure.kind(report.failure_reason) == :adapter_error
-      assert Failure.detail(report.failure_reason) == :refused
+      assert Failure.kind(FailureReport.failure_reason(report)) == :adapter_error
+      assert Failure.detail(FailureReport.failure_reason(report)) == :refused
 
       # The report's state is the failing target's: nothing it answered was folded.
       assert report.state_at_failure[PropertyDamage.Test.Lockstep.Answers].stepped == []
@@ -336,7 +336,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert report.report_kind == :diverged
-      assert report.run_number == 0
+      assert FailureReport.run_number(report) == 0
       assert report.failed_at_index == 0
       # Run 0 stepped root 0 and stopped; the second 0 is the failure's
       # reproduction, a re-execution of run 0. No later run started.
@@ -362,7 +362,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       # The comparison re-read the probe root while it waited, so each side
       # folded its settled value more than once; the latest read leads.
-      divergence = Failure.detail(shifted.failure_reason)
+      divergence = Failure.detail(FailureReport.failure_reason(shifted))
       assert [value | _] = divergence.reference_value.probed
       assert [shifted_value | _] = divergence.variant_value.probed
       assert shifted_value == value + 1
@@ -375,7 +375,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert report.run_number == 0
+      assert FailureReport.run_number(report) == 0
       assert report.failed_at_index == 0
 
       assert %Failure{
@@ -383,7 +383,7 @@ defmodule PropertyDamage.LockstepRunTest do
                  kind: :adapter_error,
                  detail: %RuntimeError{message: "candidate exploded"}
                }
-             } = report.failure_reason
+             } = FailureReport.failure_reason(report)
     end
 
     test "a check failure in the non-reference variant is a failure, and later variants of that root do not run" do
@@ -400,13 +400,13 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
-               report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}} = report
+      assert FailureReport.run_number(report) == 0
 
       assert report.failed_at_index == 1
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
       # The run, then the failure's reproduction, each stopping at root 1.
       assert entered(recorder, "a") == [0, 1, 0, 1]
@@ -439,13 +439,13 @@ defmodule PropertyDamage.LockstepRunTest do
     test "a :startup check that fails in one variant names it, with no root" do
       report = failure!([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
 
-      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
-               report
+      assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}} = report
+      assert FailureReport.run_number(report) == 0
 
       assert report.failed_at_index == nil
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :ready}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
     end
 
     test "a failure ends the campaign: no run after the failing one starts" do
@@ -461,7 +461,8 @@ defmodule PropertyDamage.LockstepRunTest do
           shrink: false
         )
 
-      assert %{report_kind: :execution_failed, run_number: 2, variant: %{index: 1}} = report
+      assert %{report_kind: :execution_failed, variant: %{index: 1}} = report
+      assert FailureReport.run_number(report) == 2
 
       # Runs 0 to 2, then the reproduction of run 2 (which does not raise, so
       # the report keeps the original run). No run after the failing one was
@@ -528,7 +529,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "broken"}
-      assert report.run_number == 0
+      assert FailureReport.run_number(report) == 0
     end
   end
 
@@ -597,11 +598,11 @@ defmodule PropertyDamage.LockstepRunTest do
           max_runs: 3
         )
 
-      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}, run_number: 0} =
-               report
+      assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert FailureReport.run_number(report) == 0
 
       assert report.failed_at_index == nil
-      assert Failure.detail(report.failure_reason) == :no_backend
+      assert Failure.detail(FailureReport.failure_reason(report)) == :no_backend
 
       assert [{:setup, "a", setup_a}] = take_messages(:setup)
       assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
@@ -612,7 +613,9 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
       assert report.failed_at_index == nil
-      assert %RuntimeError{message: "setup exploded"} = Failure.detail(report.failure_reason)
+
+      assert %RuntimeError{message: "setup exploded"} =
+               Failure.detail(FailureReport.failure_reason(report))
 
       assert [{:setup, "a", setup_a}] = take_messages(:setup)
       assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
@@ -652,7 +655,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
       assert report.failed_at_index == nil
-      assert Failure.detail(report.failure_reason) == :no_listener
+      assert Failure.detail(FailureReport.failure_reason(report)) == :no_listener
 
       assert [{:injector_setup, _config, context}] = take_messages(:injector_setup)
       assert [{:injector_teardown, ^context}] = take_messages(:injector_teardown)
@@ -669,7 +672,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
 
-      assert Failure.detail(report.failure_reason) ==
+      assert Failure.detail(FailureReport.failure_reason(report)) ==
                {:invalid_injector_setup_return, RefusingInjector, :ok}
     end
 

@@ -76,10 +76,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   # The projection that defines the failed check; the key is absent unless the
   # failure is a check failure.
-  defp projection_entry(%FailureReport{failure_reason: %Failure{type: %Failure.Check{} = check}}),
+  defp projection_entry(report), do: report |> FailureReport.failure_reason() |> projection_of()
+
+  defp projection_of(%Failure{type: %Failure.Check{} = check}),
     do: %{"projection" => check.projection && inspect(check.projection)}
 
-  defp projection_entry(_report), do: %{}
+  defp projection_of(_failure), do: %{}
 
   defp format_json(report, opts) do
     indent = Keyword.get(opts, :indent, 2)
@@ -87,11 +89,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
     data = %{
       "type" => "property_damage_failure_report",
       "version" => "2.0",
-      "timestamp" => DateTime.to_iso8601(report.timestamp),
+      "timestamp" => DateTime.to_iso8601(FailureReport.timestamp(report)),
       "location" => %{
-        "run_number" => report.run_number,
+        "run_number" => FailureReport.run_number(report),
         "failed_at_index" => report.failed_at_index,
-        "seed" => report.seed
+        "seed" => FailureReport.seed(report)
       },
       "failure" =>
         Map.merge(
@@ -122,7 +124,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "stop" => report.shrink_stop && to_string(report.shrink_stop)
       },
       "sequence" =>
-        serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
+        serialize_sequence(
+          FailureReport.shrunk_sequence(report),
+          FailureReport.command_labels(report)
+        ),
       "reproduction" => FailureReport.reproduction_command(report),
       "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1),
       "compare_counts" =>
@@ -255,7 +260,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "plan_source" => trace.plan_source && to_string(trace.plan_source),
       "plan_fingerprint" => trace.plan_fingerprint,
       "sequence" =>
-        serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
+        serialize_sequence(
+          FailureReport.shrunk_sequence(report),
+          FailureReport.command_labels(report)
+        ),
       "event_log" => serialize_event_log(FailureReport.reference_event_log(report))
     }
   end
@@ -355,8 +363,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
         _ -> "[FAIL]"
       end
 
-    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{FailureReport.failure_index(report)} " <>
-      "shrunk=#{cmd_count} seed=#{report.seed}"
+    "#{origin_tag} #{type} | run=#{FailureReport.run_number(report) + 1} cmd=#{FailureReport.failure_index(report)} " <>
+      "shrunk=#{cmd_count} seed=#{FailureReport.seed(report)}"
   end
 
   # ============================================================================

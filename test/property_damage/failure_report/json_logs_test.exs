@@ -14,8 +14,9 @@ defmodule PropertyDamage.FailureReport.JsonLogsTest do
   end
 
   defp with_key(report, key) do
-    type = %{report.failure_reason.type | key: key}
-    %{report | failure_reason: %{report.failure_reason | type: type}}
+    type = %{PropertyDamage.FailureReport.failure_reason(report).type | key: key}
+    failure = %{PropertyDamage.FailureReport.failure_reason(report) | type: type}
+    %{report | trace: %{report.trace | outcome: {:fail, failure}}}
   end
 
   defp logs_of(report),

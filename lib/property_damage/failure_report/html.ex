@@ -132,10 +132,10 @@ defmodule PropertyDamage.FailureReport.HTML do
   # The banner's facts, for the browser tab and the index.
   defp title(%FailureReport{} = report) do
     [
-      report.model && inspect(report.model),
+      FailureReport.model(report) && inspect(FailureReport.model(report)),
       target(report),
       kind_label(report),
-      report.seed && "seed #{report.seed}"
+      FailureReport.seed(report) && "seed #{FailureReport.seed(report)}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
@@ -164,10 +164,10 @@ defmodule PropertyDamage.FailureReport.HTML do
   defp file_name(%FailureReport{} = report) do
     stem =
       [
-        report.model && inspect(report.model),
+        FailureReport.model(report) && inspect(FailureReport.model(report)),
         target(report),
         kind_label(report),
-        report.seed && "seed#{report.seed}"
+        FailureReport.seed(report) && "seed#{FailureReport.seed(report)}"
       ]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("-")

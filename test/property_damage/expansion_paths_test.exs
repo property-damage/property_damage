@@ -69,7 +69,7 @@ defmodule PropertyDamage.ExpansionPathsTest do
   defp shrunk(report), do: report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
 
   defp signature(report),
-    do: Failure.signature(report.failure_reason, report.variant.index)
+    do: Failure.signature(FailureReport.failure_reason(report), report.variant.index)
 
   describe "PropertyDamage.shrink_further/2" do
     test "shrinks with each target's entries carried, never picked again" do

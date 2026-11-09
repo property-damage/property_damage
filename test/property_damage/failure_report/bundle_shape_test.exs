@@ -293,9 +293,9 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
         assert roles ==
                  Enum.sort_by(roles, fn role -> Enum.find_index(@role_order, &(&1 == role)) end)
 
-        if report.model do
+        if FailureReport.model(report) do
           assert [%{"module" => model, "role" => "model"} | _] = modules
-          assert model == inspect(report.model)
+          assert model == inspect(FailureReport.model(report))
         end
       end
     end
@@ -305,7 +305,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       modules = B.build(report)["modules"]
       by_role = fn role -> for m <- modules, m["role"] == role, do: m["module"] end
 
-      assert by_role.("model") == [inspect(report.model)]
+      assert by_role.("model") == [inspect(FailureReport.model(report))]
 
       projection = fn module -> inspect(module) end
 
@@ -454,7 +454,7 @@ defmodule PropertyDamage.FailureReport.BundleShapeTest do
       on_exit(fn -> ContextSection.purge(system) end)
       report = ContextSection.poll_error(system)
 
-      assert %Failure{} = report.failure_reason
+      assert %Failure{} = FailureReport.failure_reason(report)
       assert B.build(report)["failure"]["kind"] in ["poll_error", "poll error"]
     end
   end

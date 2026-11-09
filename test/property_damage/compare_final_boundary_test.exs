@@ -117,8 +117,11 @@ defmodule PropertyDamage.CompareFinalBoundaryTest do
     assert report.report_kind == :did_not_converge
     assert report.variant == %{index: 1, name: "b"}
     assert report.failed_at_index == 1
-    assert Failure.name(report.failure_reason) == {Balances, :balance}
-    assert Map.fetch!(report.failure_reason.type, :waited_ms) >= 150
+
+    assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+             {Balances, :balance}
+
+    assert Map.fetch!(PropertyDamage.FailureReport.failure_reason(report).type, :waited_ms) >= 150
     assert elapsed >= 150
   end
 end

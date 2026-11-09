@@ -862,7 +862,7 @@ the [differential testing guide](differential_testing.md#when-the-model-has-expa
 The `:random` pick is keyed on the run seed, the target's **name** and the root.
 Reordering `targets:` therefore changes only which target is the reference.
 Renaming a target picks again, so a name is a generation input as a seed is for a
-fixed model. A report's `seed` replays its picks: `seed: report.seed, max_runs: 1`
+fixed model. A report's `seed` replays its picks: `seed: PropertyDamage.FailureReport.seed(report), max_runs: 1`
 with the same target names runs the same entries.
 
 ### Root Placeholders

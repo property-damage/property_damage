@@ -76,13 +76,17 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     message = Keyword.get(opts, :message, "Balance -100 is negative")
 
     %FailureReport{
-      seed: Keyword.get(opts, :seed, 12_345),
-      run_number: 0,
-      failure_reason: fi_failure_reason(kind, check_name, message),
-      trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
+      trace:
+        PropertyDamage.RunTrace.new(
+          plan: sequence,
+          event_log: event_log,
+          seed: Keyword.get(opts, :seed, 12_345),
+          run_number: 0,
+          outcome: {:fail, fi_failure_reason(kind, check_name, message)},
+          model: Keyword.get(opts, :model, nil)
+        ),
       failed_at_index: failed_at,
       state_at_failure: Keyword.get(opts, :state, %{accounts: %{"acc_1" => %{balance: -100}}}),
-      model: Keyword.get(opts, :model, nil),
       targets: for(adapter <- List.wrap(Keyword.get(opts, :adapter, nil)), do: {adapter, []})
     }
   end
@@ -907,9 +911,13 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
   defp fi_report(seed) do
     %FailureReport{
-      seed: seed,
-      run_number: 0,
-      failure_reason: Failure.check_failed(:balance_non_negative, "Balance -100 is negative")
+      trace:
+        PropertyDamage.RunTrace.new(
+          seed: seed,
+          run_number: 0,
+          outcome:
+            {:fail, Failure.check_failed(:balance_non_negative, "Balance -100 is negative")}
+        )
     }
   end
 
@@ -967,7 +975,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert length(result.failures) == 4
 
       assert Enum.all?(result.failures, fn %{seed: seed, report: report} ->
-               match?(%FailureReport{seed: ^seed}, report)
+               match?(%FailureReport{}, report) and FailureReport.seed(report) == seed
              end)
     end
 

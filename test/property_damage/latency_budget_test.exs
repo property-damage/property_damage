@@ -254,11 +254,11 @@ defmodule PropertyDamage.LatencyBudgetTest do
                shrink_time_ms: 0
              } = report
 
-      assert Failure.name(report.failure_reason) == :p95
-      assert Failure.kind(report.failure_reason) == :latency_exceeded
-      assert Failure.class(report.failure_reason) == :latency
+      assert Failure.name(FailureReport.failure_reason(report)) == :p95
+      assert Failure.kind(FailureReport.failure_reason(report)) == :latency_exceeded
+      assert Failure.class(FailureReport.failure_reason(report)) == :latency
 
-      detail = Failure.detail(report.failure_reason)
+      detail = Failure.detail(FailureReport.failure_reason(report))
       assert detail.statistic == :p95
       assert detail.bound == :max_ratio
       assert detail.limit == @tiny
@@ -281,8 +281,8 @@ defmodule PropertyDamage.LatencyBudgetTest do
     test "max compares with the duration converted to microseconds" do
       report = breach!([timed("solo", %{sleep_ms: 5})], p99: [max: {1, :milliseconds}])
 
-      detail = Failure.detail(report.failure_reason)
-      assert Failure.name(report.failure_reason) == :p99
+      detail = Failure.detail(FailureReport.failure_reason(report))
+      assert Failure.name(FailureReport.failure_reason(report)) == :p99
       assert detail.bound == :max
       assert detail.limit == 1_000
       assert detail.value >= 5_000
@@ -316,7 +316,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
     test "several breaches report the first in statistic order and list the rest" do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny], p50: [max_ratio: @tiny])
 
-      assert Failure.name(report.failure_reason) == :p50
+      assert Failure.name(FailureReport.failure_reason(report)) == :p50
 
       assert [%{variant: %{index: 1}, failure: other}] = report.other_failures
       assert Failure.name(other) == :p95
@@ -329,7 +329,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       report = breach!(targets, p50: [max_ratio: @tiny, max: {50, :milliseconds}])
 
       assert report.variant.index == 1
-      assert Failure.detail(report.failure_reason).bound == :max
+      assert Failure.detail(FailureReport.failure_reason(report)).bound == :max
       assert [%{failure: other}] = report.other_failures
       assert Failure.detail(other).bound == :max_ratio
     end
@@ -387,7 +387,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       assert loaded.report_kind == :latency_exceeded
       assert loaded.metrics == report.metrics
       assert loaded.latency == report.latency
-      assert loaded.failure_reason == report.failure_reason
+      assert FailureReport.failure_reason(loaded) == FailureReport.failure_reason(report)
 
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
@@ -414,7 +414,8 @@ defmodule PropertyDamage.LatencyBudgetTest do
         assert text =~ "p95 max_ratio:"
       end
 
-      assert PropertyDamage.Error.format(report.failure_reason, %{}) =~ "p95 max_ratio:"
+      assert PropertyDamage.Error.format(FailureReport.failure_reason(report), %{}) =~
+               "p95 max_ratio:"
     end
   end
 

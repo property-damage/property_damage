@@ -52,7 +52,7 @@ defmodule PropertyDamage.PersistenceTest do
       assert File.exists?(path)
       {:ok, loaded} = Persistence.load(path)
 
-      assert loaded.seed == report.seed
+      assert FailureReport.seed(loaded) == FailureReport.seed(report)
       assert FailureReport.kind(loaded) == FailureReport.kind(report)
       assert FailureReport.check_name(loaded) == FailureReport.check_name(report)
     end
@@ -115,7 +115,7 @@ defmodule PropertyDamage.PersistenceTest do
       {:ok, path} = Persistence.save(report, dir)
 
       loaded = Persistence.load!(path)
-      assert loaded.seed == report.seed
+      assert FailureReport.seed(loaded) == FailureReport.seed(report)
     end
 
     @tag :tmp_dir
@@ -220,18 +220,18 @@ defmodule PropertyDamage.PersistenceTest do
     @tag :tmp_dir
     test "a report round-trips its setup and teardown commands", %{tmp_dir: dir} do
       report = report_with_fixtures()
-      assert report.setup_commands == [%TestCommand{id: "setup", amount: 0}]
-      assert report.teardown_commands == [%TestCommand{id: "teardown", amount: 2}]
+      assert FailureReport.setup_commands(report) == [%TestCommand{id: "setup", amount: 0}]
+      assert FailureReport.teardown_commands(report) == [%TestCommand{id: "teardown", amount: 2}]
 
       {:ok, path} = Persistence.save(report, dir)
       {:ok, <<"PD", @version::8, _checksum::32, _rest::binary>>} = File.read(path)
       {:ok, loaded} = Persistence.load(path)
 
-      assert loaded.setup_commands == report.setup_commands
-      assert loaded.teardown_commands == report.teardown_commands
+      assert FailureReport.setup_commands(loaded) == FailureReport.setup_commands(report)
+      assert FailureReport.teardown_commands(loaded) == FailureReport.teardown_commands(report)
 
       assert Sequence.setup_commands(FailureReport.shrunk_sequence(loaded)) ==
-               report.setup_commands
+               FailureReport.setup_commands(report)
 
       json = Jason.decode!(Persistence.export_json(report))
       assert length(json["setup_commands"]) == 1

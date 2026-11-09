@@ -58,20 +58,20 @@ defmodule PropertyDamage.RegressionTest do
       end)
 
     %FailureReport{
-      seed: seed,
-      failure_reason: failure_reason,
       failed_at_index: 1,
       original_sequence: Sequence.linear([%TestCommand.Create{id: "1"}]),
       trace:
         PropertyDamage.RunTrace.new(
           plan: Sequence.linear([%TestCommand.Create{id: "1"}]),
-          event_log: []
+          event_log: [],
+          seed: seed,
+          outcome: {:fail, failure_reason},
+          model: TestModel,
+          timestamp: DateTime.utc_now()
         ),
       state_before_failure: %{TestProjection => %{}},
       state_at_failure: %{TestProjection => %{}},
-      model: TestModel,
-      targets: [],
-      timestamp: DateTime.utc_now()
+      targets: []
     }
   end
 

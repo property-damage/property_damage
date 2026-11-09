@@ -367,7 +367,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
           do: module
 
     listed =
-      [{report.model, :model}] ++
+      [{FailureReport.model(report), :model}] ++
         Enum.map(projections(report), &{&1, :projection}) ++
         for(step <- steps, command = struct_module(step.command), do: {command, :command}) ++
         for(
@@ -423,7 +423,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   defp struct_module(%module{}), do: module
   defp struct_module(_other), do: nil
 
-  defp projections(%FailureReport{model: model, failure_reason: reason}) do
+  defp projections(%FailureReport{} = report) do
+    model = FailureReport.model(report)
+    reason = FailureReport.failure_reason(report)
+
     checks =
       case exported(model, :check_projections) do
         modules when is_list(modules) -> modules

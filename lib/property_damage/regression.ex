@@ -47,7 +47,7 @@ defmodule PropertyDamage.Regression do
         on_failure: PropertyDamage.Regression.compose([
           PropertyDamage.Regression.save_failure("failures/"),
           PropertyDamage.Regression.add_to_library("seeds.json"),
-          fn report -> Logger.warning("Failure: \#{report.seed}") end
+          fn report -> Logger.warning("Failure: \#{FailureReport.seed(report)}") end
         ])
       )
 
@@ -167,7 +167,7 @@ defmodule PropertyDamage.Regression do
 
     if should_skip do
       if verbose do
-        IO.puts("[Regression] Skipping duplicate failure (seed: #{failure.seed})")
+        IO.puts("[Regression] Skipping duplicate failure (seed: #{FailureReport.seed(failure)})")
       end
 
       %{
@@ -293,7 +293,7 @@ defmodule PropertyDamage.Regression do
         on_failure: PropertyDamage.Regression.compose([
           PropertyDamage.Regression.save_failure("failures/"),
           PropertyDamage.Regression.add_to_library("seeds.json"),
-          fn report -> IO.puts("Found: \#{report.seed}") end
+          fn report -> IO.puts("Found: \#{FailureReport.seed(report)}") end
         ])
       )
   """
@@ -336,7 +336,7 @@ defmodule PropertyDamage.Regression do
         {false, nil}
 
       {similar_failure, score} ->
-        {true, {:similar_to, similar_failure.seed, score}}
+        {true, {:similar_to, FailureReport.seed(similar_failure), score}}
     end
   end
 
@@ -389,7 +389,7 @@ defmodule PropertyDamage.Regression do
 
         if is_dup do
           result = %{
-            seed: failure.seed,
+            seed: FailureReport.seed(failure),
             saved_failure: nil,
             added_to_library: nil,
             generated_test: nil,
@@ -405,7 +405,7 @@ defmodule PropertyDamage.Regression do
               opts |> PropertyDamage.Options.with_target_entries() |> Keyword.put(:dedup, false)
             )
 
-          result = Map.put(result, :seed, failure.seed)
+          result = Map.put(result, :seed, FailureReport.seed(failure))
           {[result | results], [failure | seen]}
         end
       end)
@@ -496,7 +496,7 @@ defmodule PropertyDamage.Regression do
         if verbose do
           case result do
             {:ok, _} ->
-              IO.puts("[Regression] Added seed #{failure.seed} to: #{path}")
+              IO.puts("[Regression] Added seed #{FailureReport.seed(failure)} to: #{path}")
 
             {:error, reason} ->
               IO.puts("[Regression] Failed to add to library: #{inspect(reason)}")
@@ -608,7 +608,7 @@ defmodule PropertyDamage.Regression do
 
   defp print_summary(results, failure) do
     IO.puts("")
-    IO.puts("[Regression] Processed failure (seed: #{failure.seed})")
+    IO.puts("[Regression] Processed failure (seed: #{FailureReport.seed(failure)})")
 
     actions =
       [

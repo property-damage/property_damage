@@ -193,9 +193,9 @@ defmodule PropertyDamage.CompareScheduleTest do
                )
 
       assert report.report_kind == :diverged
-      assert Failure.name(report.failure_reason) == {roots, :at_root}
+      assert Failure.name(FailureReport.failure_reason(report)) == {roots, :at_root}
 
-      divergence = report.failure_reason.type
+      divergence = FailureReport.failure_reason(report).type
       reference = Map.fetch!(divergence, :reference_value)
       variant = Map.fetch!(divergence, :variant_value)
 
@@ -221,9 +221,9 @@ defmodule PropertyDamage.CompareScheduleTest do
                )
 
       assert report.report_kind == :diverged
-      assert Failure.name(report.failure_reason) == {end_only, :totals}
+      assert Failure.name(FailureReport.failure_reason(report)) == {end_only, :totals}
 
-      assert Failure.signature(report.failure_reason, report.variant.index) ==
+      assert Failure.signature(FailureReport.failure_reason(report), report.variant.index) ==
                {:diverged, {end_only, :totals}, 1}
 
       shrunk = Sequence.to_list(FailureReport.shrunk_sequence(report))

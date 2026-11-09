@@ -36,7 +36,9 @@ defmodule PropertyDamage.FinalizeOrderingTest do
 
     assert report.report_kind == :execution_failed
     assert report.failed_at_index == 1
-    assert {S.Mock, :on_event, %RuntimeError{}} = report.failure_reason.type.detail
+
+    assert {S.Mock, :on_event, %RuntimeError{}} =
+             PropertyDamage.FailureReport.failure_reason(report).type.detail
 
     # A failed run is reproduced once; only the first pass is pinned.
     records = S.Recorder.records()

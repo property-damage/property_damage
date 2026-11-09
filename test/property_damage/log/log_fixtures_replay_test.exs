@@ -23,6 +23,6 @@ defmodule PropertyDamage.Log.LogFixturesReplayTest do
     assert {:error, %FailureReport{} = replayed} =
              F.run(F.Model, targets, only: [replay: artifact.replay_path])
 
-    assert replayed.seed == artifact.seed
+    assert FailureReport.seed(replayed) == FailureReport.seed(artifact)
   end
 end

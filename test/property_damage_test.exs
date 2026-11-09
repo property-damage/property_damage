@@ -167,7 +167,7 @@ defmodule PropertyDamageTest do
                )
 
       assert %RuntimeError{message: "injector setup boom"} =
-               PropertyDamage.Failure.detail(report.failure_reason)
+               PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
 
       assert_received {:leaked_event_queue, event_queue}
       ref = Process.monitor(event_queue)
@@ -212,7 +212,7 @@ defmodule PropertyDamageTest do
                )
 
       assert %RuntimeError{message: "mock setup boom"} =
-               PropertyDamage.Failure.detail(report.failure_reason)
+               PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
 
       assert_received {:injector_setup, _config, context}
       assert_received {:injector_teardown, ^context}
@@ -252,7 +252,9 @@ defmodule PropertyDamageTest do
                  validate: false
                )
 
-      assert PropertyDamage.Failure.detail(report.failure_reason) == :no_listener
+      assert PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report)) ==
+               :no_listener
+
       assert report.failed_at_index == nil
     end
 
@@ -267,7 +269,10 @@ defmodule PropertyDamageTest do
         )
 
       assert {:error, %PropertyDamage.FailureReport{report_kind: :setup_failed} = report} = result
-      assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
+
+      assert PropertyDamage.Failure.detail(PropertyDamage.FailureReport.failure_reason(report)) ==
+               :setup_failed
+
       assert report.failed_at_index == nil
       assert report.shrink_iterations == 0
     end
@@ -287,7 +292,7 @@ defmodule PropertyDamageTest do
         )
 
       assert {:error, %PropertyDamage.FailureReport{} = report} = result
-      assert report.failure_reason != nil
+      assert PropertyDamage.FailureReport.failure_reason(report) != nil
     end
   end
 

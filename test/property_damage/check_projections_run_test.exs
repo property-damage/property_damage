@@ -73,6 +73,6 @@ defmodule PropertyDamage.CheckProjectionsRunTest do
       )
 
     assert {:error, report} = result
-    assert inspect(report.failure_reason) =~ "check ran"
+    assert inspect(PropertyDamage.FailureReport.failure_reason(report)) =~ "check ran"
   end
 end

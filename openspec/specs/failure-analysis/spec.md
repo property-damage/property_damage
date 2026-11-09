@@ -29,7 +29,7 @@ and `partial_events/1` accessors.
 #### Scenario: Report views derive from the failure reason
 
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
-- **THEN** `FailureReport.kind/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
+- **THEN** `FailureReport.kind/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `PropertyDamage.FailureReport.failure_reason(report)` rather than stored as denormalized fields
 
 ### Requirement: A Failed Check Records Its Projection (DR-058)
 
@@ -417,7 +417,7 @@ Each item SHALL print its label at column 2 and its name (a module, `Module.func
 
 ### Requirement: Regenerating a Target's Sequence (DR-050)
 
-`PropertyDamage.Expansion.for(model, seed, run, name, opts \\ [])` SHALL return `{:ok, %{prefix: [struct], roots: [struct], choices: [choice], sequence: [struct]}}` for the target `name`, or `{:error, message}` naming the model, the run, the name or the option at fault. It SHALL run no target and no adapter. `run` SHALL count from 1, and run n SHALL generate from `PropertyDamage.Generator.run_seed(seed, n - 1)`, so `for(model, report.seed, 1, name)` regenerates a failing run as it ran before shrinking. `sequence` SHALL equal the commands the named target executed (the setup prefix, then every root's commands in order, without the teardown), and the result SHALL be the same in every OS process. `opts` SHALL accept `:targets` (the run's `targets:`, from which the name's `expansion:` mode and the reference are read; without it, the name is a `:random` target) and `:max_commands`.
+`PropertyDamage.Expansion.for(model, seed, run, name, opts \\ [])` SHALL return `{:ok, %{prefix: [struct], roots: [struct], choices: [choice], sequence: [struct]}}` for the target `name`, or `{:error, message}` naming the model, the run, the name or the option at fault. It SHALL run no target and no adapter. `run` SHALL count from 1, and run n SHALL generate from `PropertyDamage.Generator.run_seed(seed, n - 1)`, so `for(model, PropertyDamage.FailureReport.seed(report), 1, name)` regenerates a failing run as it ran before shrinking. `sequence` SHALL equal the commands the named target executed (the setup prefix, then every root's commands in order, without the teardown), and the result SHALL be the same in every OS process. `opts` SHALL accept `:targets` (the run's `targets:`, from which the name's `expansion:` mode and the reference are read; without it, the name is a `:random` target) and `:max_commands`.
 
 #### Scenario: The result equals what the target ran
 - **GIVEN** a run recorded with a recording adapter

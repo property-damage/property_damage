@@ -118,7 +118,7 @@ defmodule PropertyDamage.ReplayArtifactFreshVmTest do
           replay_dir: false
         )
 
-      IO.puts("REPLAYED kind=\#{report.report_kind} name=\#{report.failure_reason.type.name}")
+      IO.puts("REPLAYED kind=\#{report.report_kind} name=\#{PropertyDamage.FailureReport.failure_reason(report).type.name}")
     rescue
       e in ArgumentError -> IO.puts("RAISED " <> Exception.message(e))
     end

@@ -124,7 +124,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   # ============================================================================
 
   defp failed(signature, %FailureReport{} = failure) do
-    case Failure.signature(failure.failure_reason, variant_index(failure)) do
+    case Failure.signature(FailureReport.failure_reason(failure), variant_index(failure)) do
       ^signature ->
         %{
           status: :still_failing,

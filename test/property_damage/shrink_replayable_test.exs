@@ -97,8 +97,8 @@ defmodule PropertyDamage.ShrinkReplayableTest do
 
   defp identity(report),
     do:
-      {report.report_kind, Failure.name(report.failure_reason), report.variant.name,
-       report.failed_at_index}
+      {report.report_kind, Failure.name(PropertyDamage.FailureReport.failure_reason(report)),
+       report.variant.name, report.failed_at_index}
 
   defp failing do
     dir = R.tmp_dir!()

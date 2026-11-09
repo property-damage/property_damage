@@ -332,7 +332,9 @@ defmodule PropertyDamage.ExternalMarkersPathsTest do
                  only: [replay: report.replay_path]
                )
 
-      assert Failure.name(replayed.failure_reason) == Failure.name(report.failure_reason)
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(replayed)) ==
+               Failure.name(PropertyDamage.FailureReport.failure_reason(report))
+
       assert_resolved(log, :shipped)
     end
 
@@ -349,7 +351,9 @@ defmodule PropertyDamage.ExternalMarkersPathsTest do
                  only: [replay: report.replay_path]
                )
 
-      assert Failure.name(replayed.failure_reason) == Failure.name(report.failure_reason)
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(replayed)) ==
+               Failure.name(PropertyDamage.FailureReport.failure_reason(report))
+
       assert_resolved(log, :tracked)
     end
   end

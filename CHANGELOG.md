@@ -752,6 +752,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure found again at finalize time is dropped as a duplicate only when
   its `Failure.signature/2` and root both match.
 
+- **Breaking: failure files are written at format 20, and a report derives
+  eight fields from its trace.** `.pd` and `.pdtrace` files of format 19 and
+  older are refused with `{:error, {:unsupported_format_version, version, 20}}`.
+  `FailureReport` no longer has the fields `seed`, `run_number`, `model`,
+  `timestamp`, `command_labels`, `failure_reason`, `setup_commands` and
+  `teardown_commands`; read them with the functions of the same names, such as
+  `FailureReport.seed/1`. `FailureReport.from_legacy/2` and `to_legacy/1` are
+  removed. Capture the failure again.
+
 - **Breaking: failure files are written at format 19.** `.pd` and `.pdtrace`
   files of format 18 and older are refused with
   `{:error, {:unsupported_format_version, version, 19}}`, because a report's

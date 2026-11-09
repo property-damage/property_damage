@@ -90,7 +90,7 @@ defmodule PropertyDamage.CompareProbeRereadTest do
 
     assert report.report_kind == :diverged
     assert report.variant == %{index: 1, name: "b"}
-    assert {_projection, :totals} = Failure.name(report.failure_reason)
+    assert {_projection, :totals} = Failure.name(FailureReport.failure_reason(report))
 
     balances =
       for %{command_index: 0, event: %Balance{} = event} <- FailureReport.event_log(report),

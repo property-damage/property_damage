@@ -75,7 +75,9 @@ defmodule PropertyDamage.FailureReport.LayoutLabelsTest do
       # The check failure's listing runs setup, roots, teardown, in that order.
       report = L.report(:setup_check)
       roots = L.facts(report).roots
-      assert {length(report.setup_commands), length(report.teardown_commands)} == {2, 1}
+
+      assert {length(FailureReport.setup_commands(report)),
+              length(FailureReport.teardown_commands(report))} == {2, 1}
 
       assert [labels] = listing_labels(L.plain(report))
 

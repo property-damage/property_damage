@@ -120,7 +120,10 @@ defmodule PropertyDamage.SetupFaultReportTest do
     report = run(ExitModel)
 
     assert report.report_kind == :check_failed
-    assert %Failure{type: %Failure.Check{name: :startup_probe}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Check{name: :startup_probe}} =
+             FailureReport.failure_reason(report)
+
     message = FailureReport.failure_message(report)
     assert message =~ "boom_exit"
     refute message =~ "Adapter setup failed"
@@ -130,7 +133,10 @@ defmodule PropertyDamage.SetupFaultReportTest do
     report = run(ThrowModel)
 
     assert report.report_kind == :check_failed
-    assert %Failure{type: %Failure.Check{name: :startup_probe}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Check{name: :startup_probe}} =
+             FailureReport.failure_reason(report)
+
     message = FailureReport.failure_message(report)
     assert message =~ "boom_throw"
     refute message =~ "Adapter setup failed"
@@ -140,14 +146,17 @@ defmodule PropertyDamage.SetupFaultReportTest do
     report = run(DuringRunModel)
 
     assert report.report_kind == :check_failed
-    assert %Failure{type: %Failure.Check{name: :after_each}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Check{name: :after_each}} =
+             FailureReport.failure_reason(report)
+
     assert FailureReport.failure_message(report) =~ "boom_during_run"
   end
 
   test "a malformed __checks__/0 entry is reported against the projection, not the adapter" do
     report = run(OldShapeModel)
 
-    assert %Failure{type: %Failure.Setup{cause: cause}} = report.failure_reason
+    assert %Failure{type: %Failure.Setup{cause: cause}} = FailureReport.failure_reason(report)
     assert cause == :model
     message = FailureReport.failure_message(report)
     assert message =~ inspect(OldShapeProj)
@@ -159,7 +168,10 @@ defmodule PropertyDamage.SetupFaultReportTest do
     report = run(ExitModel, DownAdapter)
 
     assert report.report_kind == :setup_failed
-    assert %Failure{type: %Failure.Setup{cause: :adapter_setup}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Setup{cause: :adapter_setup}} =
+             FailureReport.failure_reason(report)
+
     assert FailureReport.failure_message(report) =~ "Adapter setup failed"
   end
 
@@ -173,7 +185,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
                shrink: false
              )
 
-    assert %Failure{type: %Failure.Setup{cause: :model}} = report.failure_reason
+    assert %Failure{type: %Failure.Setup{cause: :model}} = FailureReport.failure_reason(report)
     assert_received :adapter_torn_down
   end
 
@@ -181,7 +193,7 @@ defmodule PropertyDamage.SetupFaultReportTest do
     report = run(KillModel)
 
     assert report.report_kind == :setup_failed
-    assert %Failure{type: %Failure.Setup{cause: :variant}} = report.failure_reason
+    assert %Failure{type: %Failure.Setup{cause: :variant}} = FailureReport.failure_reason(report)
     message = FailureReport.failure_message(report)
     assert message =~ "variant"
     refute message =~ "Adapter setup failed"

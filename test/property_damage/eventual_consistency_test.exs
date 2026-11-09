@@ -243,7 +243,9 @@ defmodule PropertyDamage.EventualConsistencyTest do
       )
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
-    assert %Failure{type: %Failure.Check{kind: :poll_timeout}} = report.failure_reason
+
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout}} =
+             PropertyDamage.FailureReport.failure_reason(report)
 
     # DR-030: a @eventually liveness timeout is now attributed to the command
     # whose event opened the poll window (InitiatePayment at index 0), so the

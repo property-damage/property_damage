@@ -439,8 +439,8 @@ defmodule PropertyDamage.ComparisonTest do
 
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "broken"}
-      assert Failure.kind(report.failure_reason) == :adapter_error
-      assert Failure.detail(report.failure_reason) == :simulated_error
+      assert Failure.kind(FailureReport.failure_reason(report)) == :adapter_error
+      assert Failure.detail(FailureReport.failure_reason(report)) == :simulated_error
     end
 
     test "reports exactly the timing keys for targets that answer every command" do

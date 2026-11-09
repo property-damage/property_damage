@@ -108,7 +108,7 @@ defmodule PropertyDamage.Diagram do
 
     title =
       Keyword.get(opts, :title) ||
-        "Failure: #{FailureReport.kind_summary(report)} (seed: #{report.seed})"
+        "Failure: #{FailureReport.kind_summary(report)} (seed: #{FailureReport.seed(report)})"
 
     opts = Keyword.put(opts, :title, title)
 

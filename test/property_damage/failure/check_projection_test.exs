@@ -180,16 +180,18 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
       report = L.report(:check_failed)
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :settled_amount}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
-      assert projection(report.failure_reason) == Compare.Plain
+      assert projection(FailureReport.failure_reason(report)) == Compare.Plain
     end
 
     test "an @eventually that times out names its projection" do
       report = L.report(:poll_timeout)
 
-      assert %Failure{type: %Failure.Check{kind: :poll_timeout}} = report.failure_reason
-      assert projection(report.failure_reason) == L.Eventual.Status
+      assert %Failure{type: %Failure.Check{kind: :poll_timeout}} =
+               FailureReport.failure_reason(report)
+
+      assert projection(FailureReport.failure_reason(report)) == L.Eventual.Status
     end
 
     test "an @eventually that answers never names its projection" do
@@ -240,9 +242,9 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
       assert report.check_mode == :record
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :settled_amount}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
-      assert projection(report.failure_reason) == Compare.Plain
+      assert projection(FailureReport.failure_reason(report)) == Compare.Plain
     end
   end
 
@@ -251,9 +253,9 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
       assert {:error, %FailureReport{} = report} = run(SharedNameModel)
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :balance_is_sane}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
-      assert projection(report.failure_reason) == FailsSecond
+      assert projection(FailureReport.failure_reason(report)) == FailsSecond
     end
 
     test "the report names the second projection and not the first" do
@@ -308,14 +310,14 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
 
     test "round-trips the projection of a failure saved now" do
       report = L.report(:check_failed)
-      saved = projection(report.failure_reason)
+      saved = projection(FailureReport.failure_reason(report))
       assert saved == Compare.Plain
 
       dir = TmpPath.unique("pd_check_projection")
       on_exit(fn -> File.rm_rf(dir) end)
       assert {:ok, path} = Persistence.save(report, dir)
 
-      assert projection(load(path).failure_reason) == saved
+      assert projection(PropertyDamage.FailureReport.failure_reason(load(path))) == saved
     end
   end
 end

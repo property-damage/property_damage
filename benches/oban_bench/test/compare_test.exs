@@ -97,7 +97,7 @@ defmodule ObanBench.CompareTest do
     assert report.report_kind == :diverged
     assert report.variant == %{index: 1, name: "double"}
 
-    divergence = Failure.detail(report.failure_reason)
+    divergence = Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
     assert divergence.key == @counters_key
     assert divergence.root == 0
     assert [{counter, 1}] = Map.to_list(divergence.reference_value)
@@ -129,7 +129,7 @@ defmodule ObanBench.CompareTest do
     assert report.report_kind == :did_not_converge
     assert report.variant == %{index: 1, name: "noop"}
 
-    convergence = Failure.detail(report.failure_reason)
+    convergence = Failure.detail(PropertyDamage.FailureReport.failure_reason(report))
     assert convergence.key == @counters_key
     assert convergence.root == 0
     assert {:unapplied, [_counter]} = convergence.reason

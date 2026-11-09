@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.ExUnit do
   ## Options
 
   - `:module_name` - Module name for the test (optional, auto-generated)
-  - `:model` - Model module to use (falls back to report.model)
+  - `:model` - Model module to use (falls back to FailureReport.model(report))
   - `:targets` - Validated single-entry target list the generated test runs
     against (falls back to the report's reference target; a report with a
     replay artifact replays it on all the report's targets)
@@ -85,7 +85,7 @@ defmodule PropertyDamage.Export.ExUnit do
   defp normalize_module_name(name), do: name
 
   defp generate_test(report, test_name, target, expect_fixed) do
-    seed = report.seed
+    seed = FailureReport.seed(report)
     commands_code = generate_commands_code(report)
     {run_comment, run_opts} = generate_run_opts(report, target)
 
@@ -137,7 +137,7 @@ defmodule PropertyDamage.Export.ExUnit do
     # fail `--warnings-as-errors` (unused variable). The setup commands are
     # listed as a comment for the reader.
     """
-    #{setup_comment(report.setup_commands)}    _commands = [
+    #{setup_comment(FailureReport.setup_commands(report))}    _commands = [
     #{command_strs}
         ]
     """
@@ -238,7 +238,7 @@ defmodule PropertyDamage.Export.ExUnit do
     opts = [
       "model: Model",
       "targets: [#{target_entry_source(target)}]",
-      "seed: #{report.seed}",
+      "seed: #{FailureReport.seed(report)}",
       "max_runs: 1"
     ]
 
@@ -298,7 +298,7 @@ defmodule PropertyDamage.Export.ExUnit do
             Expected the bug to be fixed, but PropertyDamage found a failure:
             \#{PropertyDamage.FailureReport.failure_message(failure)}
 
-            Seed: \#{failure.seed}
+            Seed: \#{FailureReport.seed(failure)}
             \"\"\")
         end
     """

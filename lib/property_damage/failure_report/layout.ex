@@ -113,7 +113,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
     layout = %__MODULE__{
       banner: banner(report),
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       sections: sections,
       logs: logs_of(listing)
     }
@@ -224,9 +224,9 @@ defmodule PropertyDamage.FailureReport.Layout do
     logs = (trace && Map.get(trace, :logs)) || %{}
 
     items =
-      phase_items(:setup, report.setup_commands, log, logs) ++
+      phase_items(:setup, FailureReport.setup_commands(report), log, logs) ++
         root_items(plan, steps, choices(trace, name)) ++
-        phase_items(:teardown, report.teardown_commands, log, logs)
+        phase_items(:teardown, FailureReport.teardown_commands(report), log, logs)
 
     timestamps =
       Enum.map(log, & &1.timestamp) ++
@@ -379,7 +379,10 @@ defmodule PropertyDamage.FailureReport.Layout do
     found(items, match) || %{label: "[#{root}]", command: compared_command(report), match: match}
   end
 
-  defp focus(%FailureReport{failure_reason: %Failure{type: %Failure.Setup{} = setup}}, items)
+  defp focus(%FailureReport{} = report, items),
+    do: focus_failure(FailureReport.failure_reason(report), items)
+
+  defp focus_failure(%Failure{type: %Failure.Setup{} = setup}, items)
        when setup.cause != :adapter_setup and is_integer(setup.setup_index) do
     match = &(&1.kind == :setup and &1.position.offset == setup.setup_index)
 
@@ -391,7 +394,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       }
   end
 
-  defp focus(_report, items), do: found(items, & &1.failed?)
+  defp focus_failure(_failure, items), do: found(items, & &1.failed?)
 
   defp found(items, match) do
     case Enum.find(items, match) do
@@ -400,10 +403,10 @@ defmodule PropertyDamage.FailureReport.Layout do
     end
   end
 
-  defp compared_command(%FailureReport{failure_reason: %Failure{type: %{command: command}}}),
-    do: command
+  defp compared_command(report), do: report |> FailureReport.failure_reason() |> command_of()
 
-  defp compared_command(_report), do: nil
+  defp command_of(%Failure{type: %{command: command}}), do: command
+  defp command_of(_failure), do: nil
 
   defp outcome(:diverged), do: "diverged"
   defp outcome(:did_not_converge), do: "did not converge"
@@ -415,7 +418,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp failure_section(report, focus, filter, unknown) do
     fields =
-      [{"Failure", [kind_text(report.failure_reason)]}] ++
+      [{"Failure", [kind_text(FailureReport.failure_reason(report))]}] ++
         name_fields(report) ++
         target_fields(report) ++
         at_fields(focus) ++
@@ -458,15 +461,17 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp kind_text(_failure_reason), do: "unknown"
 
-  defp name_fields(%FailureReport{failure_reason: %Failure{type: %type{key: key}}})
+  # The invariant the failing check validates (DR-026), when its name says
+  # more than the check's, then the check.
+  defp name_fields(report), do: name_fields(FailureReport.failure_reason(report), report)
+
+  defp name_fields(%Failure{type: %type{key: key}}, _report)
        when type in [Failure.Divergence, Failure.Convergence],
        do: [{"Observation", [Naming.format_name(key)]}]
 
-  defp name_fields(%FailureReport{failure_reason: %Failure{type: %Failure.Latency{}}}), do: []
+  defp name_fields(%Failure{type: %Failure.Latency{}}, _report), do: []
 
-  # The invariant the failing check validates (DR-026), when its name says
-  # more than the check's, then the check.
-  defp name_fields(report) do
+  defp name_fields(_failure, report) do
     check = report |> FailureReport.check_name() |> check_text()
 
     invariant =
@@ -484,15 +489,13 @@ defmodule PropertyDamage.FailureReport.Layout do
   end
 
   # The projection whose check failed, for a failed check or a timed-out poll.
-  defp projection_field(%FailureReport{
-         failure_reason: %Failure{
-           type: %Failure.Check{kind: kind, projection: projection}
-         }
-       })
+  defp projection_field(report), do: report |> FailureReport.failure_reason() |> projection_of()
+
+  defp projection_of(%Failure{type: %Failure.Check{kind: kind, projection: projection}})
        when kind in [:check_failed, :poll_timeout] and not is_nil(projection),
        do: [{"Projection", [inspect(projection)]}]
 
-  defp projection_field(_report), do: []
+  defp projection_of(_failure), do: []
 
   defp check_text(nil), do: nil
   defp check_text(name), do: Naming.format_name(name)
@@ -521,7 +524,9 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp at_fields(%{label: label, command: command}),
     do: [{"At", [label, " ", {:value, command}]}]
 
-  defp detail_fields(%FailureReport{failure_reason: %Failure{type: type} = failure} = report) do
+  defp detail_fields(report), do: detail_fields(FailureReport.failure_reason(report), report)
+
+  defp detail_fields(%Failure{type: type} = failure, report) do
     case type do
       %Failure.Divergence{} -> divergence_fields(report, type)
       %Failure.Convergence{} -> convergence_fields(report, type)
@@ -533,7 +538,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     end
   end
 
-  defp detail_fields(%FailureReport{failure_reason: reason}),
+  defp detail_fields(reason, _report),
     do: [{"Message", [{:value, reason}]}]
 
   defp message_fields(report, failure) do
@@ -687,14 +692,15 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp hint_fields(_evidence), do: []
 
   # Every further observation that disagreed at the same boundary.
-  defp also_differed_fields(
-         %FailureReport{failure_reason: %Failure{type: %{other_keys: others}}} = report
-       )
+  defp also_differed_fields(report),
+    do: also_differed_fields(FailureReport.failure_reason(report), report)
+
+  defp also_differed_fields(%Failure{type: %{other_keys: others}}, report)
        when is_list(others) do
     for other <- others, do: {"Also differed", other_key_parts(report, other)}
   end
 
-  defp also_differed_fields(_report), do: []
+  defp also_differed_fields(_failure, _report), do: []
 
   defp other_key_parts(report, %{variant: variant, failure: %Failure{type: type}}) do
     name = Naming.format_name(Map.get(type, :key))
@@ -1396,7 +1402,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   # The setup commands of the run, as the listing labels them.
   defp setup_command_data(report) do
-    for {command, offset} <- Enum.with_index(report.setup_commands) do
+    for {command, offset} <- Enum.with_index(FailureReport.setup_commands(report)) do
       %{label: Position.label(Position.setup(offset)), command: command}
     end
   end
@@ -1440,7 +1446,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
     %{
       roots: roots,
-      seed: report.seed,
+      seed: FailureReport.seed(report),
       command: bind(FailureReport.reproduction_command(report), report)
     }
   end

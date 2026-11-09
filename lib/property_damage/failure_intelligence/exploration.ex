@@ -28,7 +28,7 @@ defmodule PropertyDamage.FailureIntelligence.Exploration do
   @default_seed_range 1000
 
   @doc """
-  Runs plans drawn from seeds near `report.seed` and returns the ones that
+  Runs plans drawn from seeds near `FailureReport.seed(report)` and returns the ones that
   fail.
 
   The seeds are a sample, not the plans of the original run, and the result
@@ -54,7 +54,7 @@ defmodule PropertyDamage.FailureIntelligence.Exploration do
     max_seeds = Keyword.get(opts, :max_seeds, @default_max_seeds)
     seed_range = Keyword.get(opts, :seed_range, @default_seed_range)
 
-    seeds = neighbouring_seeds(report.seed, max_seeds, seed_range)
+    seeds = neighbouring_seeds(FailureReport.seed(report), max_seeds, seed_range)
     outcomes = Enum.map(seeds, fn seed -> {seed, run_seed(seed, model, target)} end)
 
     failures =
@@ -62,7 +62,7 @@ defmodule PropertyDamage.FailureIntelligence.Exploration do
           do: %{seed: seed, report: failed}
 
     %{
-      original_seed: report.seed,
+      original_seed: FailureReport.seed(report),
       seeds_run: length(seeds),
       passed: Enum.count(outcomes, &match?({_seed, {:ok, _stats}}, &1)),
       failures: failures

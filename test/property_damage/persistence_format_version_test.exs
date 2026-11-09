@@ -123,13 +123,11 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
   describe "the previous format version" do
     @format_19 Path.join([__DIR__, "..", "fixtures", "persistence", "format_19_report.pd"])
 
-    @tag :known_defect
     test "is refused by load/1" do
       assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
                Persistence.load(@format_19)
     end
 
-    @tag :known_defect
     test "is refused by load_trace/1" do
       assert {:error, {:unsupported_format_version, 19, Persistence.version()}} ==
                Persistence.load_trace(@format_19)
@@ -151,8 +149,8 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
       assert %{format_version: @version} = :erlang.binary_to_term(bin)
 
       assert {:ok, loaded} = Persistence.load(path)
-      assert loaded.failure_reason == report.failure_reason
-      assert loaded.seed == report.seed
+      assert FailureReport.failure_reason(loaded) == FailureReport.failure_reason(report)
+      assert FailureReport.seed(loaded) == FailureReport.seed(report)
       assert FailureReport.shrunk_sequence(loaded) == FailureReport.shrunk_sequence(report)
       assert FailureReport.event_log(loaded) == FailureReport.event_log(report)
       assert FailureReport.event_log(loaded) != []

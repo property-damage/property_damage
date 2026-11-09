@@ -32,9 +32,11 @@ defmodule PropertyDamage.Persistence do
 
   A file of an older format version is refused with
   `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
-  failure under the current version. Format 19 renamed the report's `kind`
-  field to `report_kind`, so a format 18 file no longer decodes into the
-  current report.
+  failure under the current version. Format 20 dropped the eight fields a
+  report copied from its trace (`seed`, `run_number`, `model`, `timestamp`,
+  `command_labels`, `failure_reason`, `setup_commands`, `teardown_commands`),
+  which the report now reads from the trace, so a format 19 file no longer
+  decodes into the current report.
 
   ## Naming Convention
 
@@ -64,7 +66,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
-  @version 19
+  @version 20
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -363,16 +365,16 @@ defmodule PropertyDamage.Persistence do
 
     %{
       version: @version,
-      seed: report.seed,
-      run_number: report.run_number,
+      seed: FailureReport.seed(report),
+      run_number: FailureReport.run_number(report),
       failed_at_index: report.failed_at_index,
       kind: FailureReport.kind(report),
       check_name: name_string(FailureReport.check_name(report)),
       failure_message: FailureReport.failure_message(report),
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms,
-      timestamp: DateTime.to_iso8601(report.timestamp),
-      model: report.model && inspect(report.model),
+      timestamp: DateTime.to_iso8601(FailureReport.timestamp(report)),
+      model: FailureReport.model(report) && inspect(FailureReport.model(report)),
       report_kind: report.report_kind,
       variant: report.variant,
       targets: Enum.map(report.targets, &export_target/1),
@@ -383,8 +385,8 @@ defmodule PropertyDamage.Persistence do
       stutter: report.stutter && inspect(report.stutter),
       max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
-      setup_commands: Enum.map(report.setup_commands, &inspect/1),
-      teardown_commands: Enum.map(report.teardown_commands, &inspect/1),
+      setup_commands: Enum.map(FailureReport.setup_commands(report), &inspect/1),
+      teardown_commands: Enum.map(FailureReport.teardown_commands(report), &inspect/1),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reference_trace: reference.trace,
       reference_state_at_failure: reference.projections,
@@ -506,6 +508,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V20 format: a report no longer stores `seed`, `run_number`, `model`,
+  # `timestamp`, `command_labels`, `failure_reason`, `setup_commands` and
+  # `teardown_commands`; it reads them from its trace.
   # V19 format: a report's outcome field is `report_kind` (it was `kind`), so
   # `kind` names only the fine kind of a failure in a report, a saved file and
   # the JSON export.
@@ -573,7 +578,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-18 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-19 are refused (DR-041, following DR-039/DR-040).
+  # A v19 report stores the eight fields v20 dropped, so it no longer decodes
+  # into the current report.
   # A v18 report stores its outcome in a `kind` field that v19 renamed
   # `report_kind`.
   # A v17 sequence, trace or event-log entry may carry the parallel-branch
@@ -886,13 +893,13 @@ defmodule PropertyDamage.Persistence do
 
   defp generate_filename(%FailureReport{} = report) do
     timestamp =
-      report.timestamp
+      FailureReport.timestamp(report)
       |> DateTime.to_iso8601(:basic)
       |> String.slice(0, 15)
 
     type = FailureReport.kind(report) || "unknown"
     check = name_string(FailureReport.check_name(report)) || "none"
-    seed = report.seed
+    seed = FailureReport.seed(report)
 
     "#{timestamp}-#{type}-#{check}-seed#{seed}#{@extension}"
   end
@@ -928,19 +935,19 @@ defmodule PropertyDamage.Persistence do
         case load(path) do
           {:ok, report} ->
             %{
-              seed: report.seed,
+              seed: FailureReport.seed(report),
               kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
-              timestamp: report.timestamp,
+              timestamp: FailureReport.timestamp(report),
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 
           {:ok, report, _warnings} ->
             %{
-              seed: report.seed,
+              seed: FailureReport.seed(report),
               kind: FailureReport.kind(report),
               check_name: FailureReport.check_name(report),
-              timestamp: report.timestamp,
+              timestamp: FailureReport.timestamp(report),
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 

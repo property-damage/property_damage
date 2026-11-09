@@ -178,7 +178,7 @@ true = stats.compare_counts[{Bank.Projections.Ledger, :balance}].compared_at > 0
 
 :diverged = report.report_kind
 "candidate" = report.variant.name
-{Bank.Projections.Ledger, :balance} = PropertyDamage.Failure.name(report.failure_reason)
+{Bank.Projections.Ledger, :balance} = PropertyDamage.Failure.name(PropertyDamage.FailureReport.failure_reason(report))
 ```
 
 The first target in the `targets:` list is the reference: its values are
@@ -598,7 +598,7 @@ with `report_kind: :did_not_converge`. Both carry:
 case PropertyDamage.run(model: MyModel, targets: [Reference, Candidate]) do
   {:error, %PropertyDamage.FailureReport{report_kind: :diverged} = report} ->
     %PropertyDamage.Failure.Divergence{key: {projection, function}, mismatch: mismatch} =
-      report.failure_reason.type
+      PropertyDamage.FailureReport.failure_reason(report).type
 
     IO.puts("#{report.variant.name} diverged on #{inspect(projection)}.#{function}")
     IO.puts(Exception.message(mismatch))

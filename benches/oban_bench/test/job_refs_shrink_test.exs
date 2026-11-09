@@ -70,7 +70,7 @@ defmodule ObanBench.JobRefsShrinkTest do
                name: name,
                detail: %PropertyDamage.CheckFailed{} = failure
              }
-           } = report.failure_reason
+           } = PropertyDamage.FailureReport.failure_reason(report)
 
     assert name == :cancelled_jobs_not_runnable
     assert failure.data.state in JobRefs.runnable_states()

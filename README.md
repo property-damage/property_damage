@@ -393,8 +393,8 @@ diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
 
 # Compare full traces of the same plan to localize where the runs diverge
-before = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
-after_ = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
+before = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: PropertyDamage.FailureReport.seed(failure))
+after_ = PropertyDamage.RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: PropertyDamage.FailureReport.seed(failure))
 comparison = PropertyDamage.RunComparison.compare([before, after_])
 IO.inspect(comparison.ranking)  # most discriminating field first
 ```
@@ -973,7 +973,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 # Generate ExUnit regression test
 test_code = PropertyDamage.Export.to_exunit(failure)
 File.mkdir_p!("test/regressions")
-File.write!("test/regressions/seed_#{failure.seed}_test.exs", test_code)
+File.write!("test/regressions/seed_#{PropertyDamage.FailureReport.seed(failure)}_test.exs", test_code)
 
 # Generate standalone scripts
 elixir_script = PropertyDamage.Export.to_script(failure, :elixir,
@@ -1210,7 +1210,7 @@ PropertyDamage.run(
   on_failure: Regression.compose([
     Regression.save_failure("failures/"),
     Regression.add_to_library("seeds.json", tags: [:critical]),
-    fn report -> Logger.warning("Failure found: #{report.seed}") end
+    fn report -> Logger.warning("Failure found: #{PropertyDamage.FailureReport.seed(report)}") end
   ])
 )
 # The handler module needs `require Logger`; a handler that raises is rescued

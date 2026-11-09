@@ -291,7 +291,7 @@ shrunk = PropertyDamage.FailureReport.shrunk_sequence(report)
 assert %CreateLabel{} = Enum.at(PropertyDamage.Sequence.to_list(shrunk), report.failed_at_index)
 
 %PropertyDamage.Failure.Divergence{key: key, reference_value: ref, variant_value: ui, mismatch: mismatch} =
-  report.failure_reason.type
+  PropertyDamage.FailureReport.failure_reason(report).type
 
 assert key == {GiteaBench.LabelColors, :label_colors}
 assert Map.keys(ref) == Map.keys(ui)    # the same labels exist in both

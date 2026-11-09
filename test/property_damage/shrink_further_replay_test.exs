@@ -75,6 +75,6 @@ defmodule PropertyDamage.ShrinkFurtherReplayTest do
 
     assert exunit =~ "targets: #{FailureReport.targets_source(report)}"
     assert exunit =~ "only: [replay: #{inspect(report.replay_path)}]"
-    refute exunit =~ "seed: #{report.seed},"
+    refute exunit =~ "seed: #{FailureReport.seed(report)},"
   end
 end

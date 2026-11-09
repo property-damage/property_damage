@@ -223,7 +223,7 @@ defmodule PropertyDamage.Replay do
   @spec start(FailureReport.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def start(%FailureReport{} = failure, opts \\ []) do
     opts = Options.validate_replay!(opts)
-    model = failure.model
+    model = FailureReport.model(failure)
     target = replay_target(opts, FailureReport.reference_target(failure))
 
     Options.reject_unsupported_target_keys!(
@@ -302,7 +302,11 @@ defmodule PropertyDamage.Replay do
         # The setup commands run before the first root, as on every path that
         # executes the run. A setup failure ends the session at once: its
         # teardown commands run and everything is torn down.
-        case Phases.run_setup(failure.setup_commands, exec_state, step_context(session)) do
+        case Phases.run_setup(
+               FailureReport.setup_commands(failure),
+               exec_state,
+               step_context(session)
+             ) do
           {:ok, exec_state} ->
             {:ok, %{session | exec_state: exec_state}}
 
@@ -483,7 +487,7 @@ defmodule PropertyDamage.Replay do
   defp tear_down(session) do
     if session.exec_state && session.adapter_context do
       Phases.run_teardown(
-        session.failure.teardown_commands,
+        FailureReport.teardown_commands(session.failure),
         session.exec_state,
         step_context(session)
       )

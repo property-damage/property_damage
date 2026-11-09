@@ -335,7 +335,7 @@ defmodule PropertyDamage.Expansion do
   `run` counts from 1: run n of a `max_runs: n` campaign generates its
   sequence from `PropertyDamage.Generator.run_seed(seed, n - 1)`. A failure
   report's `seed` is the seed its failing run generated from, so
-  `for(model, report.seed, 1, name)` regenerates the failing run as it ran
+  `for(model, FailureReport.seed(report), 1, name)` regenerates the failing run as it ran
   before shrinking.
 
   The sequence is generated as `PropertyDamage.run/1` generates it, and the

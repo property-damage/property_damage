@@ -248,7 +248,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
       # Failure, Observation, At, Reference, Variant, Compared; no Mismatch for a plain ==.
       report = L.report(:diverged)
       text = L.plain(report)
-      divergence = report.failure_reason.type
+      divergence = FailureReport.failure_reason(report).type
 
       assert value(text, "Failure") =~ "diverged"
       assert value(text, "Observation") =~ Naming.format_name(divergence.key)
@@ -294,7 +294,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
       # Two further observations, two lines, each with its name and both values.
       report = L.report(:also_differed)
       text = L.plain(report)
-      others = report.failure_reason.type.other_keys
+      others = FailureReport.failure_reason(report).type.other_keys
       assert length(others) == 2, "control: two further observations differed"
       also = L.fields_labeled(text, "Also differed")
       assert length(also) == 2
@@ -326,7 +326,7 @@ defmodule PropertyDamage.FailureReport.LayoutTest do
     test "a latency budget names its statistic and its bound" do
       # The Failure section carries the statistic, the bound and its limit.
       report = L.report(:latency_exceeded)
-      latency = report.failure_reason.type
+      latency = FailureReport.failure_reason(report).type
       failure = report |> L.plain() |> L.section("Failure") |> Enum.join("\n")
       assert failure =~ ~r/latency/i
       assert failure =~ to_string(latency.statistic)

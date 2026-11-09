@@ -147,16 +147,17 @@ defmodule PropertyDamage.ReplayArtifact do
 
       %{
         format: @format,
-        model: report.model,
-        seed: report.seed,
+        model: FailureReport.model(report),
+        seed: FailureReport.seed(report),
         run: 1,
         external_markers: report.external_markers,
         targets: targets,
         failure: %{
-          signature: Failure.signature(report.failure_reason, variant_index(report)),
+          signature:
+            Failure.signature(FailureReport.failure_reason(report), variant_index(report)),
           root_index: report.failed_at_index
         },
-        prefix: report.setup_commands,
+        prefix: FailureReport.setup_commands(report),
         roots: Enum.zip_with(ids, roots, &%{root_id: &1, command: &2}),
         choices:
           Map.new(targets, fn %{name: name} ->
@@ -1017,7 +1018,8 @@ defmodule PropertyDamage.ReplayArtifact do
   # default: the report's `external_markers`.
   @spec reexecution(FailureReport.t(), [String.t()], String.t(), keyword()) ::
           {Sequence.t(), %{String.t() => map()} | nil}
-  def reexecution(%FailureReport{model: model} = report, names, path, opts \\ []) do
+  def reexecution(%FailureReport{} = report, names, path, opts \\ []) do
+    model = FailureReport.model(report)
     opts = recorded_markers(opts, report.external_markers)
 
     cond do
@@ -1056,12 +1058,25 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   defp from_trace(report, names, path, opts) do
-    traced = Expansion.traced!(report.model, report.trace && report.trace.expansion, names, path)
+    traced =
+      Expansion.traced!(
+        FailureReport.model(report),
+        report.trace && report.trace.expansion,
+        names,
+        path
+      )
+
     sequence = FailureReport.shrunk_sequence(report)
 
     {sequence,
      Map.new(names, fn name ->
-       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name), markers(opts))}
+       {name,
+        Expansion.carried(
+          FailureReport.model(report),
+          sequence,
+          Map.fetch!(traced, name),
+          markers(opts)
+        )}
      end)}
   end
 
@@ -1073,7 +1088,8 @@ defmodule PropertyDamage.ReplayArtifact do
     {_kind, _name, recorded_index} = term.failure.signature
     recorded_name = term.targets |> Enum.at(recorded_index, %{}) |> Map.get(:name)
 
-    Failure.signature(report.failure_reason, variant_index(report)) == term.failure.signature and
+    Failure.signature(FailureReport.failure_reason(report), variant_index(report)) ==
+      term.failure.signature and
       (report.variant && report.variant.name) == recorded_name and
       report.failed_at_index == term.failure.root_index
   end

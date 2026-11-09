@@ -58,7 +58,9 @@ defmodule CachexBench.ReplayTest do
   end
 
   defp identity(report),
-    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
+    do:
+      {report.report_kind, Failure.name(PropertyDamage.FailureReport.failure_reason(report)),
+       report.variant.index}
 
   defp ran(report, name),
     do: report.trace.expansion |> Map.fetch!(name) |> Enum.at(report.failed_at_index)
@@ -180,7 +182,13 @@ defmodule CachexBench.ReplayTest do
     executed = executed("second")
 
     assert {:ok, result} =
-             Expansion.for(CachexBench.Model, report.seed, 1, "second", max_commands: 30)
+             Expansion.for(
+               CachexBench.Model,
+               PropertyDamage.FailureReport.seed(report),
+               1,
+               "second",
+               max_commands: 30
+             )
 
     # The run stopped at the failing root: it executed the commands of every
     # root up to it.

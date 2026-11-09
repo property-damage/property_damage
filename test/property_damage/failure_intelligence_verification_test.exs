@@ -37,7 +37,7 @@ defmodule PropertyDamage.FailureIntelligenceVerificationTest do
              PropertyDamage.run(
                model: SwitchModel,
                targets: [{SwitchAdapter, config: config}],
-               seed: report.seed,
+               seed: FailureReport.seed(report),
                max_runs: 1,
                replay_dir: false,
                verbose: false

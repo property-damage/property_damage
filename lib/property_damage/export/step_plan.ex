@@ -108,7 +108,8 @@ defmodule PropertyDamage.Export.StepPlan do
     root_steps = reference_steps(report, choices)
 
     commands =
-      report.setup_commands ++ Enum.map(root_steps, & &1.command) ++ report.teardown_commands
+      FailureReport.setup_commands(report) ++
+        Enum.map(root_steps, & &1.command) ++ FailureReport.teardown_commands(report)
 
     var_map = placeholder_var_map(commands)
     extractions = producer_extractions(commands, producers(report, choices))
@@ -116,7 +117,7 @@ defmodule PropertyDamage.Export.StepPlan do
     resolve = &resolved(&1, adapter, var_map, extractions, root_ids)
 
     setup =
-      report.setup_commands
+      FailureReport.setup_commands(report)
       |> Enum.with_index()
       |> Enum.map(fn {command, offset} ->
         resolve.(%Step{
@@ -144,7 +145,7 @@ defmodule PropertyDamage.Export.StepPlan do
       end)
 
     teardown =
-      report.teardown_commands
+      FailureReport.teardown_commands(report)
       |> Enum.with_index()
       |> Enum.map(fn {command, offset} ->
         resolve.(%Step{
@@ -223,7 +224,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp failed_setup_step?(report, offset) do
     match?(
       %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{setup_index: ^offset}},
-      report.failure_reason
+      FailureReport.failure_reason(report)
     ) and report.report_kind == :setup_failed
   end
 

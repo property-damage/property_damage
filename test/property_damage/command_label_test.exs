@@ -109,14 +109,18 @@ defmodule PropertyDamage.CommandLabelTest do
       report = report_for(seq, failed_at_index: 1)
 
       # Only the divide-by-zero command (flat index 1) is labeled.
-      assert report.command_labels == %{1 => "divide by zero"}
+      assert FailureReport.command_labels(report) == %{1 => "divide by zero"}
     end
 
     test "computes each label against the projection pre-state (fold, not constant)" do
       seq = Sequence.linear([%Tick{}, %Tick{}, %Tick{}])
       report = report_for(seq)
 
-      assert report.command_labels == %{0 => "tick 0", 1 => "tick 1", 2 => "tick 2"}
+      assert FailureReport.command_labels(report) == %{
+               0 => "tick 0",
+               1 => "tick 1",
+               2 => "tick 2"
+             }
     end
   end
 

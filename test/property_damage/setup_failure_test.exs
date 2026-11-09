@@ -71,7 +71,7 @@ defmodule PropertyDamage.SetupFailureTest do
       assert report.shrink_iterations == 0
 
       assert %Failure{type: %Failure.Setup{cause: :adapter_setup, detail: :no_backend}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
       entries = recorded(recorder)
       assert torn_down?(entries, "a")
@@ -100,7 +100,7 @@ defmodule PropertyDamage.SetupFailureTest do
                  command: %Login{},
                  detail: {:refused, Login}
                }
-             } = report.failure_reason
+             } = FailureReport.failure_reason(report)
 
       assert FailureReport.failure_message(report) =~ "Login"
 
@@ -124,7 +124,7 @@ defmodule PropertyDamage.SetupFailureTest do
       assert report.variant == %{index: 0, name: "a"}
 
       assert %Failure{type: %Failure.Setup{cause: :command, setup_index: 0}} =
-               report.failure_reason
+               FailureReport.failure_reason(report)
 
       entries = recorded(recorder)
       assert torn_down?(entries, "a")

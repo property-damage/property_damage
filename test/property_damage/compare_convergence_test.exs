@@ -206,10 +206,12 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert report.report_kind == :did_not_converge
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
-      assert Failure.name(report.failure_reason) == key
-      assert Failure.signature(report.failure_reason, 1) == {:did_not_converge, key, 1}
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) == key
 
-      failure = report.failure_reason.type
+      assert Failure.signature(PropertyDamage.FailureReport.failure_reason(report), 1) ==
+               {:did_not_converge, key, 1}
+
+      failure = PropertyDamage.FailureReport.failure_reason(report).type
       assert Map.fetch!(failure, :key) == key
       assert Map.fetch!(failure, :root) == 1
       # The reason is whatever the observation returned with :pending.
@@ -242,7 +244,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == 1
 
-      divergence = report.failure_reason.type
+      divergence = PropertyDamage.FailureReport.failure_reason(report).type
       assert Map.fetch!(divergence, :key) == key(ctx, :ledger, :totals)
       assert Map.fetch!(divergence, :root) == 1
       assert %Pay{n: 1} = Map.fetch!(divergence, :command)
@@ -264,7 +266,9 @@ defmodule PropertyDamage.CompareConvergenceTest do
                Compare.run(model!(ctx, :ledger), targets, compare: [converge_within: 100])
 
       assert report.report_kind == :did_not_converge
-      assert Failure.name(report.failure_reason) == key(ctx, :ledger, :totals)
+
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :ledger, :totals)
     end
 
     test "a side that returns a stale value reports diverged (same system as the previous test)",
@@ -275,7 +279,9 @@ defmodule PropertyDamage.CompareConvergenceTest do
                Compare.run(model!(ctx, :stale), targets, compare: [converge_within: 100])
 
       assert report.report_kind == :diverged
-      assert Failure.name(report.failure_reason) == key(ctx, :stale, :totals)
+
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :stale, :totals)
     end
 
     test "every further key that disagrees or is pending at the bound is listed, in key order",
@@ -287,11 +293,13 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       # The first disagreeing key in key order names the failure.
       assert report.report_kind == :diverged
-      assert Failure.name(report.failure_reason) == key(ctx, :keyed, :settled)
+
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) ==
+               key(ctx, :keyed, :settled)
 
       # The agreeing key is not listed; the pending one is, with its target.
       assert [%{variant: %{index: 1, name: "b"}, root: 1, failure: pending}] =
-               Map.fetch!(report.failure_reason.type, :other_keys)
+               Map.fetch!(PropertyDamage.FailureReport.failure_reason(report).type, :other_keys)
 
       assert Failure.kind(pending) == :did_not_converge
       assert Failure.name(pending) == key(ctx, :keyed, :totals)
@@ -344,7 +352,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert elapsed < 2_000
       assert report.report_kind == :check_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert Failure.name(report.failure_reason) == :settled_nonneg
+      assert Failure.name(PropertyDamage.FailureReport.failure_reason(report)) == :settled_nonneg
     end
   end
 end

@@ -197,8 +197,8 @@ defmodule PropertyDamage.ReportBuilder do
     } = reproduction
 
     FailureReport.new(
-      seed: report.seed,
-      run_number: report.run_number,
+      seed: FailureReport.seed(report),
+      run_number: FailureReport.run_number(report),
       original_sequence: report.original_sequence,
       shrunk_sequence: shrink_result.sequence,
       failed_at_index: failure.root,
@@ -221,7 +221,7 @@ defmodule PropertyDamage.ReportBuilder do
       projections: Map.get(result, :projections, %{}),
       projections_before: Map.get(result, :projections_before),
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      model: report.model,
+      model: FailureReport.model(report),
       targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
       concurrency: ctx.concurrency,
       compare: ctx.compare,

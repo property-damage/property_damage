@@ -204,7 +204,10 @@ defmodule PropertyDamage.Log.LogFilterEnvTest do
       {set, set_files} = observed(Path.join(dir, "with"), "only:headers except:seed")
 
       assert plain.report_kind == set.report_kind
-      assert plain.failure_reason == set.failure_reason
+
+      assert PropertyDamage.FailureReport.failure_reason(plain) ==
+               PropertyDamage.FailureReport.failure_reason(set)
+
       assert plain.failed_at_index == set.failed_at_index
       assert plain.shrink_iterations == set.shrink_iterations
       assert plain.trace.plan == set.trace.plan

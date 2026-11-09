@@ -50,7 +50,7 @@ defmodule PropertyDamage.ReplayOptionTest do
   end
 
   defp identity(report) do
-    {report.report_kind, Failure.name(report.failure_reason), report.variant.name}
+    {report.report_kind, Failure.name(FailureReport.failure_reason(report)), report.variant.name}
   end
 
   # The message of the option error a replay with `targets` raises. Fails

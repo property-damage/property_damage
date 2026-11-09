@@ -50,7 +50,9 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
   end
 
   defp identity(report),
-    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
+    do:
+      {report.report_kind, Failure.name(FailureReport.failure_reason(report)),
+       report.variant.index}
 
   defp roots(report), do: report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
 
@@ -90,8 +92,10 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     {:error, report} = run(A.StateModel, parts_bug(), opts)
     F.drain()
 
-    assert {report.report_kind, Failure.name(report.failure_reason), report.variant.name} ==
-             {unshrunk.report_kind, Failure.name(unshrunk.failure_reason), "second"}
+    assert {report.report_kind, Failure.name(FailureReport.failure_reason(report)),
+            report.variant.name} ==
+             {unshrunk.report_kind, Failure.name(FailureReport.failure_reason(unshrunk)),
+              "second"}
 
     assert length(roots(report)) == 1
     assert report.failed_at_index == 0
@@ -142,7 +146,9 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     assert first.account == root.account and last.account == root.account
 
     # The run drew them above the least value.
-    {:ok, drawn} = Expansion.for(A.AccountModel, report.seed, 1, "second", max_commands: 8)
+    {:ok, drawn} =
+      Expansion.for(A.AccountModel, FailureReport.seed(report), 1, "second", max_commands: 8)
+
     memos = for %{leaves?: true, commands: leaves} <- drawn.choices, leaf <- leaves, do: leaf.memo
     assert Enum.any?(memos, &(&1 > 0))
   end
@@ -197,7 +203,7 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
 
     # The reference collapsed to the listed identity at the failing root.
     assert %{entry: "Refund[0]", leaves?: false} = ran(report, "ref", report.failed_at_index)
-    assert report.setup_commands == generated.prefix
+    assert FailureReport.setup_commands(report) == generated.prefix
 
     for name <- ["ref", "second"], executed <- F.segments(messages, name) do
       assert Enum.take(executed, length(generated.prefix)) == generated.prefix
@@ -214,22 +220,24 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     sequence =
       F.Model
       |> Generator.generate_sequence(max_commands: 8)
-      |> Generator.generate_value(found.seed)
+      |> Generator.generate_value(PropertyDamage.FailureReport.seed(found))
 
     config = Config.new()
 
     opts = [
       failed_at_index: found.failed_at_index,
-      failure_reason: found.failure_reason,
+      failure_reason: PropertyDamage.FailureReport.failure_reason(found),
       variant_index: found.variant.index,
       model: F.Model,
       targets: targets,
       compare: [converge_within: 1],
-      rng_seed: found.seed,
+      rng_seed: PropertyDamage.FailureReport.seed(found),
       config: config
     ]
 
-    expansion = Expansion.expand(F.Model, sequence, targets, found.seed)
+    expansion =
+      Expansion.expand(F.Model, sequence, targets, PropertyDamage.FailureReport.seed(found))
+
     result = ShrinkSupport.shrink(sequence, opts ++ [expansion: expansion])
     F.drain()
 

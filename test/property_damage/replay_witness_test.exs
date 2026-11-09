@@ -22,7 +22,9 @@ defmodule PropertyDamage.ReplayWitnessTest do
   end
 
   defp identity(report),
-    do: {report.report_kind, Failure.name(report.failure_reason), report.variant.index}
+    do:
+      {report.report_kind, Failure.name(FailureReport.failure_reason(report)),
+       report.variant.index}
 
   test "a failure shrinks, writes its artifact, replays, and regenerates its sequence" do
     targets = [F.target("ref"), F.target("second", :random, %{bug: :credit})]
