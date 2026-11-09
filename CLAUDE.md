@@ -55,7 +55,7 @@ All user-facing contracts are defined as behaviours:
 
 - **Command** (`lib/property_damage/command.ex`) — Pure generator interface. Defines `generator/1` returning `StreamData.t(map())`. Commands are stateless semantic definitions; state-dependent logic (preconditions, overrides) belongs in the Model.
 - **Model** (`lib/property_damage/model.ex`) — Orchestrates which commands run and when. Required: `commands/0` (list of command specs with optional `weight:`, `when:`, `overrides:` options) and `command_sequence_projection/0`. Optional: `check_projections/0`, `simulator/0`, lifecycle hooks.
-- **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@check` attributes (`every: N`, `every: CommandModule`) for sync checks and `@eventually` for eventual consistency checks.
+- **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@check` attributes for sync checks: `every: N` or `every: CommandModule` samples the state during the command loop, and `at: :startup` or `at: :teardown` runs once at a lifecycle boundary. `@eventually` covers eventual consistency checks.
 - **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/3` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
 
 A **Target** (`lib/property_damage/target.ex`) is one system a run executes against: an adapter plus its configuration.
@@ -68,7 +68,7 @@ A **Target** (`lib/property_damage/target.ex`) is one system a run executes agai
 
 ### Key subsystems
 
-- **Scheduler / Variant** (`lib/property_damage/scheduler.ex`, `lib/property_damage/variant.ex`): Runs one sequence on every target in lockstep, one Variant process per target, and compares observations at each boundary.
+- **Scheduler / Variant** (`lib/property_damage/scheduler.ex`, `lib/property_damage/variant.ex`): Runs one sequence on every target in lockstep (one step at a time, all targets together), one Variant process per target (it runs that target's copy of the sequence), and compares observations at each boundary.
 - **Executor** (`lib/property_damage/executor.ex`, `lib/property_damage/executor/stepping.ex`, `lib/property_damage/executor/step.ex`): Runs one command, with placeholder resolution, settle, projection updates and checks. `Executor.Stepping` is the public one-command-at-a-time seam that Variant and Replay use; it composes the step primitives of `Executor.Step`, the leaf module the other executor modules call and that calls none of them back.
 - **Shrinker** (`lib/property_damage/shrinker.ex`): Hierarchical and linear shrinking strategies, judged by an oracle that runs each candidate. Deterministic given seed.
 - **External / Placeholder** (`lib/property_damage/external.ex`, `lib/property_damage/placeholder.ex`) — Symbolic value system for server-generated data. `external()` (public) marks an event field the SUT mints; each such field becomes a `PropertyDamage.Placeholder` that is created during simulation, resolved from real SUT events, and threaded into later commands. The placeholder is a public opaque type: user code reads it through `Placeholder.path/1`, `resolved?/1`, `value/1` and the other accessors, never by struct fields, and an answer of `nil` resolves it to `nil` (DR-067).
@@ -86,10 +86,10 @@ Test support modules live in `test/support/` and are compiled during test via `e
 
 ## Verification gauntlet
 
-Run before declaring any change done, and again before any merge:
+Run these checks, the verification gauntlet, before declaring any change done, and again before any merge:
 
 1. `mix test`
-2. `mix format --check-formatted` — root AND each touched bench under `benches/*`
+2. `mix format --check-formatted` — root AND each touched bench under `benches/*` (a bench is a separate Mix project that runs the framework against a real system)
    (the root formatter does not cover bench projects)
 3. `mix credo --strict` (CI gates on it)
 
@@ -98,7 +98,7 @@ Redirect long output to a file instead. Judge `gh pr checks` by its own exit cod
 
 ## Evidence standards
 
-- A defect fix or behavior-change claim ships with a test proven RED against the
+- A defect fix or behavior-change claim ships with a test proven RED (failing before the fix) against the
   pre-change code.
 - Detection-shaped features (assertions, coverage, mutation, forensics) need a
   control proving the test can fail: a seeded bug, a removed invariant, or a
@@ -117,7 +117,7 @@ Redirect long output to a file instead. Judge `gh pr checks` by its own exit cod
 
 ## Specs and documentation
 
-- **OpenSpec** (`openspec/`) — Behavioral specifications across 13 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records in `docs/decisions/`. Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
+- **OpenSpec** (`openspec/`, a tool that keeps behavior specs as Markdown files) — Behavioral specifications across 13 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records in `docs/decisions/`. Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
 - **Guides** (`guides/`) — User-facing guides wired into ex_doc via the `extras` in mix.exs. New features or behavior changes often need a corresponding guide update.
 
 ## Dependencies
