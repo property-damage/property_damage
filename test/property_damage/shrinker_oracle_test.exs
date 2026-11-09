@@ -203,6 +203,85 @@ defmodule PropertyDamage.ShrinkerOracleTest do
     end
   end
 
+  describe "hierarchical removal with carried expansions" do
+    alias PropertyDamage.{Expansion, Generator, Options}
+    alias PropertyDamage.Test.ShrinkAxis, as: A
+
+    # What a target runs at a root: the root itself, or leaves that add up to
+    # the root's amount.
+    defp runs_root?(%A.Open{}, [{%A.Open{}, _at}]), do: true
+
+    defp runs_root?(%A.Add{amount: amount}, leaves),
+      do: amount == leaves |> Enum.map(fn {leaf, _at} -> leaf.amount end) |> Enum.sum()
+
+    defp runs_root?(_command, _leaves), do: false
+
+    # Fails at the last Open once two are present, whatever else the plan holds.
+    defp fails_with_two_opens(plan, _epoch) do
+      case for({%A.Open{}, index} <- Enum.with_index(plan.commands), do: index) do
+        [_, _ | _] = opens -> {:failed, List.last(opens)}
+        _fewer -> :passed
+      end
+    end
+
+    test "each candidate carries every target's choice at the roots that survive" do
+      {:ok, targets} =
+        Options.validate_targets([A.target("ref"), A.target("second", :random)])
+
+      # Seed 4 draws Open, Add, Add, Open, Open, Open, Add, Add: every Add
+      # credits an Open, so the dependency graph has two levels.
+      sequence =
+        A.AccountModel
+        |> Generator.generate_sequence(max_commands: 8)
+        |> Generator.generate_value(4)
+
+      assert [%A.Open{}, %A.Add{}, %A.Add{}, %A.Open{}, %A.Open{}, %A.Open{}, %A.Add{}, %A.Add{}] =
+               Sequence.to_list(sequence)
+
+      expansion = Expansion.expand(A.AccountModel, sequence, targets, 1)
+      {oracle, log} = FakeOracle.start(&fails_with_two_opens/2, O.signature())
+
+      result =
+        Shrinker.shrink(sequence,
+          failed_at_index: 5,
+          failure_reason: O.failure(),
+          variant_index: 0,
+          model: A.AccountModel,
+          targets: targets,
+          rng_seed: 1,
+          expansion: expansion,
+          oracle: oracle,
+          config: Config.new(granularity_threshold: 2, shrink_arguments: false)
+        )
+
+      calls = FakeOracle.calls(log)
+      FakeOracle.stop(log)
+
+      assert [%A.Open{}, %A.Open{}] = Sequence.to_list(result.sequence)
+      assert result.stop == :done
+
+      # The hierarchical sweep runs first: after the truncation at the failing
+      # root, it drops the level of Adds in one candidate, which still fails.
+      assert calls |> Enum.map(&length(&1.plan.commands)) |> Enum.take(2) == [6, 4]
+      assert Enum.at(calls, 1).answer == {:failed, 3}
+
+      # Every candidate runs each target's own choice at each root it keeps.
+      for %{plan: plan} <- calls, variant <- plan.variants do
+        assert length(variant.roots) == length(plan.commands)
+
+        for {command, leaves} <- Enum.zip(plan.commands, variant.roots) do
+          assert runs_root?(command, leaves)
+        end
+      end
+
+      # The shrunk run records, per target, the choice at each root left,
+      # still keyed by that root's id in the original sequence.
+      for name <- ["ref", "second"] do
+        assert [%{root_id: 4}, %{root_id: 5}] = result.expansion.variants[name].choices
+      end
+    end
+  end
+
   describe "argument simplification" do
     test "an integer argument shrinks to the smallest value that still fails" do
       # The withdrawal fails from 5 up. Halving walks 40, 20, 10, 5, then 2,
