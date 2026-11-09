@@ -3,10 +3,10 @@ defmodule PropertyDamage.Reproduction do
   The failure path of a run: shrink the failing sequence, reproduce the shrunk
   sequence once, build the report, place its replay artifact and announce it.
 
-  `PropertyDamage.run/1` calls `handle_failure/2` for each failure a run finds,
-  and `report_failure/2` for a failure that has nothing to shrink.
-  `PropertyDamage.shrink_further/2` runs the same shrink and reproduction on an
-  existing report through `shrink_further/2`. The shrinker hands every candidate
+  The campaign loop (`PropertyDamage.Campaign`) calls `handle_failure/2` for each
+  failure a run finds, and `report_failure/2` for a failure that has nothing to
+  shrink. The facade's `shrink_further/2` runs the same shrink and reproduction
+  on an existing report through `shrink_further/3`. The shrinker hands every candidate
   to the oracle `PropertyDamage.Runner.shrink_oracle/2` builds, and the
   reproduction runs through `PropertyDamage.Runner.execute/2`.
 
@@ -361,49 +361,15 @@ defmodule PropertyDamage.Reproduction do
   defp repro_stutter_config(_failure_reason, _config), do: nil
 
   @doc """
-  Builds the `on_failure` callback of a run from its `:on_failure` and
-  `:regression` options, composing both when both are given.
-
-  Returns `nil` when neither option is set.
-  """
-  @spec on_failure_callback(keyword()) :: (FailureReport.t() -> term()) | nil
-  def on_failure_callback(opts) do
-    on_failure = Keyword.get(opts, :on_failure)
-    regression = Keyword.get(opts, :regression)
-
-    cond do
-      # Both options specified - compose them
-      on_failure != nil and regression != nil ->
-        regression_handler =
-          PropertyDamage.Regression.handler(Options.with_target_entries(regression))
-
-        fn failure_report ->
-          on_failure.(failure_report)
-          regression_handler.(failure_report)
-        end
-
-      # Only on_failure specified
-      on_failure != nil ->
-        on_failure
-
-      # Only regression specified
-      regression != nil ->
-        PropertyDamage.Regression.handler(Options.with_target_entries(regression))
-
-      # Neither specified
-      true ->
-        nil
-    end
-  end
-
-  @doc """
   Attempts further shrinking on an existing failure report.
 
-  `PropertyDamage.shrink_further/2` documents the options and the result.
+  The facade's `shrink_further/2` documents the options and the result. `caller`
+  names that public function in the error a report with no recorded choices
+  raises.
   """
-  @spec shrink_further(FailureReport.t(), keyword()) ::
+  @spec shrink_further(FailureReport.t(), keyword(), String.t()) ::
           {:ok, FailureReport.t()} | {:error, term()}
-  def shrink_further(%FailureReport{} = report, opts \\ []) do
+  def shrink_further(%FailureReport{} = report, opts, caller) do
     cond do
       is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
         {:error, :missing_model_or_target}
@@ -422,7 +388,7 @@ defmodule PropertyDamage.Reproduction do
           ReplayArtifact.reexecution(
             report,
             Enum.map(targets, & &1.name),
-            "PropertyDamage.shrink_further/2",
+            caller,
             external_markers: further_markers(report, opts)
           )
 

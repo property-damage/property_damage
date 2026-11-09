@@ -19,8 +19,8 @@ defmodule PropertyDamage.Campaign.Context do
       reference. A `:reference` target that runs alone executes as `:random`.
     * `all_targets` - every target of `targets:`, whichever of them `only:`
       runs. Each target's choices are computed on this list.
-    * `target_entries` - the entries (`PropertyDamage.Target.to_entry/1`) of the
-      targets that run, as a report records them.
+    * `target_entries` - the entries of the targets that run, as a report
+      records them.
     * `target` - the reference target.
 
   ## How far and from which seed
@@ -50,7 +50,7 @@ defmodule PropertyDamage.Campaign.Context do
 
   ## Run options
 
-  Each of these is the option of the same name on `PropertyDamage.run/1`, as
+  Each of these is the option of the same name on the public `run/1`, as
   validated, unless noted.
 
     * `concurrency`, `compare`, `check_mode`, `external_markers`.
@@ -68,8 +68,9 @@ defmodule PropertyDamage.Campaign.Context do
 
   ## Progress and seams
 
-    * `reporter` - the `PropertyDamage.Progress.Reporter` every progress update
-      goes to.
+    * `reporter` - the progress reporter that every progress update
+      goes to. The campaign loop needs one; a reporter built with no
+      consumers reports nothing.
     * `run_once` - the step of one run, `(ctx, run_number, acc -> {:pass, acc}
       | {:error, found})`. `nil` means the campaign's own, which generates the
       sequence and runs it on every target. A test sets it to drive the loop
@@ -134,7 +135,7 @@ defmodule PropertyDamage.Campaign.Context do
           measured_metrics: map() | nil,
           stutter: keyword() | nil,
           log_filter: PropertyDamage.Log.Filter.t() | nil,
-          reporter: PropertyDamage.Progress.Reporter.t() | nil,
+          reporter: struct() | nil,
           run_once: (t(), non_neg_integer(), map() -> {:pass, map()} | {:error, term()}) | nil,
           first_run: non_neg_integer(),
           concurrency: :serial | :parallel,
