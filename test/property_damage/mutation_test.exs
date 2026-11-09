@@ -490,7 +490,7 @@ defmodule PropertyDamage.MutationTest do
   # ============================================================================
 
   describe "MutatingAdapter" do
-    test "success_to_error status mutation flows through as an error response (E2)" do
+    test "success_to_error status mutation flows through as an error response" do
       mutation = %{
         type: :success_to_error,
         target: :response,
@@ -514,7 +514,7 @@ defmodule PropertyDamage.MutationTest do
       assert MutatingAdapter.execute(%FakeCommand{}, ctx, nil) == {:error, :internal_error}
     end
 
-    test "apply_once applies a mutation at most once across commands (E3)" do
+    test "apply_once applies a mutation at most once across commands" do
       test_pid = self()
 
       adapter =

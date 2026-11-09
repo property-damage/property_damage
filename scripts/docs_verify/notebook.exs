@@ -1,6 +1,6 @@
-# Livebook notebook evaluation (Decision 2), folded into the same gate.
+# Livebook notebook evaluation, folded into the same gate.
 #
-# Mechanizes the W7 manual technique: extract the notebook's elixir cells in
+# Automates the manual check: extract the notebook's elixir cells in
 # order, drop the `Mix.install` cell (the worker already has PropertyDamage and
 # its deps on the code path via the consumer template's ebins), stub the Kino API
 # surface the notebook actually uses with no-op stand-ins, and evaluate the cells

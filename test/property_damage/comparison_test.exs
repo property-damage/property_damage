@@ -125,7 +125,7 @@ defmodule PropertyDamage.ComparisonTest do
     def execute(_cmd, _ctx, _runtime), do: {:error, :simulated_error}
   end
 
-  # Characterization support (F2 sink-window refactor): an adapter that injects
+  # Characterization support: an adapter that injects
   # one event mid-execution and then returns another. The framework must fold the
   # injected event into the target's result AHEAD of the returned event
   # (injected ++ returned), so divergence sees one uniform stream.

@@ -63,10 +63,11 @@ defmodule PropertyDamage.Sequence.Position do
   def teardown(offset), do: %__MODULE__{section: :teardown, offset: offset}
 
   @doc """
-  The position of leaf `leaf_index` of the expansion the root at `root` ran.
+  The position of leaf `leaf_index` of the expansion that the root at `root`
+  ran.
 
-  `root` identifies the root: its index in the sequence as generated, kept
-  when a shrink candidate moves the root.
+  `root` is the root's index in the sequence as generated. A shrink candidate
+  that moves the root keeps that index.
   """
   @spec leaf(non_neg_integer(), non_neg_integer()) :: t()
   def leaf(root, leaf_index), do: %__MODULE__{section: {:leaf, root}, offset: leaf_index}

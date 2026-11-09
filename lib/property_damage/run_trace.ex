@@ -200,8 +200,9 @@ defmodule PropertyDamage.RunTrace do
       (defaults to `%{}`, i.e. `executed_command` is `nil` on every step).
     * `:logs` - the run's log lines by key (`RunTrace.logs`); each step takes
       the lines kept under its position (defaults to `%{}`, no lines).
-    * `:choices` - what the traced target ran at each root of the sequence, as the run's expansion choices record it (defaults to `nil`,
-      every root ran as itself). A root the target ran as an expansion's
+    * `:choices` - what the traced target ran at each root of the sequence, as
+      the run's expansion choices record it (defaults to `nil`, every root ran as
+      itself). A root the target ran as an expansion's
       leaves is one step per leaf, at its `Position.leaf/2` position, with the
       entries that leaf produced; the flattened indices then count every step.
       When such a root failed, its failing step is the last leaf it executed.

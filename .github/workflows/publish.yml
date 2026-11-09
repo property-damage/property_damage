@@ -1,4 +1,4 @@
-# Pre-publish gate + hex publish (W9 Decision 4).
+# Pre-publish gate + hex publish.
 #
 # Publishing happens ONLY through this manually dispatched job, so the
 # documentation-verification gate cannot be bypassed by a local

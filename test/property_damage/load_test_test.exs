@@ -306,10 +306,10 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   # ============================================================================
-  # Duration Unit Tests (D6a)
+  # Duration Unit Tests
   # ============================================================================
 
-  describe "duration_to_ms unit handling (D6a)" do
+  describe "duration_to_ms unit handling" do
     test "accepts singular time units (matching the framework's plural forms)" do
       # The load-test duration helper only knew plural unit atoms, so a singular
       # unit raised FunctionClauseError. Singular and plural must both convert,
@@ -495,7 +495,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
-  # Characterization support (F2 sink-window refactor): an adapter that injects
+  # Characterization support: an adapter that injects
   # mid-execution. The worker's inject closure captures the per-command sink pid
   # so it accumulates from inside the spawned timeout Task (DR-027); a regression
   # that breaks the sink boundary makes inject raise "outside adapter execution
@@ -516,10 +516,10 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
-  # D2 fixture: an adapter whose execute/3 raises. On the unfixed worker the raise
-  # crashes the adapter Task, which is linked to the worker, so the worker (and its
-  # GenServer.call caller) go down. The fix captures the raise inside the task and
-  # reports it as a command error.
+  # Fixture: an adapter whose execute/3 raises. The raise happens inside the
+  # adapter Task, which is linked to the worker. The task captures the raise and
+  # reports it as a command error, so the worker and its GenServer.call caller
+  # stay up.
   defmodule WorkerRaisingAdapter do
     use PropertyDamage.Adapter, default_timeout: 30
 
@@ -530,7 +530,7 @@ defmodule PropertyDamage.LoadTestTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(_cmd, _ctx, _runtime), do: raise("adapter boom (D2)")
+    def execute(_cmd, _ctx, _runtime), do: raise("adapter boom")
   end
 
   # Ordering-regression fixtures: a command whose event sets state the command's
@@ -637,7 +637,7 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
-    test "a raising adapter is captured as a command error, not a worker crash (D2)" do
+    test "a raising adapter is captured as a command error, not a worker crash" do
       # The worker is linked to us via start_link; trap exits so a (buggy) cascade
       # surfaces as a caught exit here rather than taking the test process down.
       Process.flag(:trap_exit, true)
@@ -858,7 +858,7 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
-    test "a crashing worker does not take the pool down; :DOWN cleanup runs (D3)" do
+    test "a crashing worker does not take the pool down; :DOWN cleanup runs" do
       # start_link links the pool to us; trap exits so a pool crash surfaces as a
       # message here rather than killing the test process.
       Process.flag(:trap_exit, true)
@@ -995,8 +995,8 @@ defmodule PropertyDamage.LoadTestTest do
       end
     end
 
-    # D1 fixture: timeout/1 raises, which crashes the worker *inside its
-    # GenServer.call* (before the adapter execution task, so D2's rescue does not
+    # Fixture: timeout/1 raises, which crashes the worker *inside its
+    # GenServer.call* (before the adapter execution task, so the task's rescue does not
     # cover it). The arrival task's call therefore exits, crashing the arrival.
     defmodule CrashingArrivalAdapter do
       use PropertyDamage.Adapter, default_timeout: 30
@@ -1015,7 +1015,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     @tag :integration
-    test "a crashing arrival does not wedge the drain loop (D1)" do
+    test "a crashing arrival does not wedge the drain loop" do
       capture_log(fn ->
         # Bound the run: on the unfixed runner, arrivals crash without reaping
         # their in_flight refs, so the drain loop (await :infinity) never returns.

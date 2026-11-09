@@ -283,7 +283,7 @@ defmodule PropertyDamage.DiagramTest do
   # Characterization Goldens
   # ============================================================================
   #
-  # Byte-for-byte guard for the shared step-builder migration (F3): diagram
+  # Byte-for-byte guard for the shared step-builder migration: diagram
   # output must not drift for the report-less generate/4 path or the
   # report-driven from_failure_report/3 path. Re-baseline deliberately with
   # CAPTURE_GOLDENS=1.

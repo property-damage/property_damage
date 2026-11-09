@@ -39,8 +39,8 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
 
   describe "faithful timeline (linear)" do
     test "folds commands and events in recorded fold order, injected before command" do
-      # Fold order for C0: an injected event (ordinal 0), then the command fold
-      # (ordinal 1), then the command's own event (ordinal 2); then C1 (3) + its
+      # Fold order for command 0: an injected event (ordinal 0), then the command fold
+      # (ordinal 1), then the command's own event (ordinal 2); then command 1 (3) + its
       # event (4). This mirrors the executor: injected events fold before their
       # command.
       trace =

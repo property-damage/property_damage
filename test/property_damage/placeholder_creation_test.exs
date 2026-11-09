@@ -1,8 +1,8 @@
 defmodule PropertyDamage.PlaceholderCreationTest do
   @moduledoc """
-  R3 cluster A: placeholders are created during simulation (DR-021).
+  Placeholders are created during simulation (DR-021).
 
-  Before R3, nothing instantiated placeholders: the generator applied raw
+  Before this was wired up, nothing instantiated placeholders: the generator applied raw
   simulated events (carrying `%External{}` sentinels) straight into projection
   state, and `Sequence` had no registry to transport. These tests pin that the
   generator now mints a `%Placeholder{}` per external field, records it by

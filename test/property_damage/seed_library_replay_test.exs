@@ -117,7 +117,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   # An injector whose setup/1 raises. It runs in the target's process during
   # replay, so it reports the target's EventQueue pid to that process and its
   # ancestors (the test process among them) before blowing up, letting the test
-  # check whether the queue leaked (A6).
+  # check whether the queue leaked.
   defmodule LeakProbeInjector do
     use PropertyDamage.Adapter.Injector
 
@@ -295,7 +295,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   describe "replay error boundaries" do
     @tag :capture_log
-    test "adapter setup failure during replay surfaces as an error, not a MatchError (A4)" do
+    test "adapter setup failure during replay surfaces as an error, not a MatchError" do
       path = tmp_path("replay_setup_fail")
       preseed(path, 4242, model: "M")
 
@@ -318,7 +318,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     end
 
     @tag :capture_log
-    test "an injector whose setup raises during replay is a setup failure and does not leak the EventQueue (A6)" do
+    test "an injector whose setup raises during replay is a setup failure and does not leak the EventQueue" do
       path = tmp_path("replay_leak")
       preseed(path, 4242, model: "M")
 

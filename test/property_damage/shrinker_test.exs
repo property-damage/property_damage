@@ -49,7 +49,7 @@ defmodule PropertyDamage.ShrinkerTest do
     end
 
     test "a poll_timeout and a check failure of the SAME name are NOT equivalent" do
-      # Load-bearing (DR-041 D4): both name themselves :ledger_settles, but they
+      # Load-bearing (DR-041): both name themselves :ledger_settles, but they
       # are different bugs. Keying the signature on the globally-unique KIND (not
       # the coarser class) keeps them distinct; a class-based signature
       # ({:check, :ledger_settles} for both) would merge them and let the

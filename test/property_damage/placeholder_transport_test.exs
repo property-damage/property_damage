@@ -1,6 +1,6 @@
 defmodule PropertyDamage.PlaceholderTransportTest do
   @moduledoc """
-  R3 cluster B: the executor seeds its placeholder registry from the generated
+  The executor seeds its placeholder registry from the generated
   sequence (DR-021), so placeholders embedded in commands resolve by id at
   execution time.
 

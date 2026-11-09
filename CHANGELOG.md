@@ -420,8 +420,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gains a note on writing invariants that stay valid under a shared, never-reset
   SUT.
 
-- **Mock third-party services are now reachable through `PropertyDamage.run/1`
-  (WP-C5).** A new `:mock_services` run option (later removed in favor of
+- **Mock third-party services are now reachable through `PropertyDamage.run/1`.** A new `:mock_services` run option (later removed in favor of
   `mocks:` on a `targets:` entry; see below) accepts a list of
   `PropertyDamage.MockServiceAdapter` modules (or `{module, config}` tuples). Per
   run the framework starts a `PropertyDamage.MockServiceRegistry`, registers and
