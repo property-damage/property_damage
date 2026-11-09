@@ -25,7 +25,8 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence}
+  alias PropertyDamage.{EventQueue, Failure, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   # --- events -----------------------------------------------------------------
   defmodule Bumped, do: defstruct([])
@@ -43,7 +44,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     {:ok, queue} = EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue)
+      StepRun.run(seq, model, adapter, event_queue: queue)
     after
       EventQueue.stop(queue)
     end
@@ -381,7 +382,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
         result =
           try do
-            Executor.run(
+            StepRun.run(
               Sequence.linear([%Trigger{}]),
               ResourceVsTeardownModel,
               ThrowingPollerAdapter,

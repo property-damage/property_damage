@@ -7,7 +7,8 @@ defmodule PropertyDamage.Test.VariantSupport do
   # modules exist; a missing module surfaces as an `UndefinedFunctionError` in
   # the test that calls it.
 
-  alias PropertyDamage.{Executor, Options, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{Options, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   # ==========================================================================
   # Variant and Scheduler entry points
@@ -65,7 +66,7 @@ defmodule PropertyDamage.Test.VariantSupport do
   # Run `commands` through the linear engine with the per-run options a
   # one-variant run uses.
   def executor_run(commands, model, adapter, opts) do
-    {:ok, result} = Executor.run(Sequence.linear(commands), model, adapter, opts)
+    {:ok, result} = StepRun.run(Sequence.linear(commands), model, adapter, opts)
     result
   end
 

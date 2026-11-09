@@ -7,10 +7,10 @@ defmodule PropertyDamage.ExecutorExecutedCaptureTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, RunTrace, Sequence}
+  alias PropertyDamage.{RunTrace, Sequence}
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Test.Commands.CreateItem
-  alias PropertyDamage.Test.{ExecutorModel, SimpleAdapter}
+  alias PropertyDamage.Test.{ExecutorModel, SimpleAdapter, StepRun}
 
   describe "executed capture (DR-033)" do
     test "linear run keys each executed command by its prefix position" do
@@ -20,7 +20,7 @@ defmodule PropertyDamage.ExecutorExecutedCaptureTest do
         %CreateItem{name: "C", quantity: 3}
       ]
 
-      {:ok, result} = Executor.run(commands, ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, ExecutorModel, SimpleAdapter)
 
       assert result.executed == %{
                %Position{section: :prefix, offset: 0} => %CreateItem{name: "A", quantity: 1},
@@ -31,7 +31,7 @@ defmodule PropertyDamage.ExecutorExecutedCaptureTest do
 
     test "executed flows into RunTrace.Step.executed_command" do
       commands = [%CreateItem{name: "A", quantity: 1}, %CreateItem{name: "B", quantity: 2}]
-      {:ok, result} = Executor.run(commands, ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, ExecutorModel, SimpleAdapter)
 
       trace =
         RunTrace.new(

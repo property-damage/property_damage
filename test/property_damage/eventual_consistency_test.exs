@@ -1,7 +1,7 @@
 defmodule PropertyDamage.EventualConsistencyTest do
   @moduledoc """
   End-to-end tests for the @eventually eventual-consistency pipeline through
-  Executor.run. These exercise the R4 fixes:
+  StepRun.run. These exercise the R4 fixes:
 
     1. @eventually checks no longer crash the run on the first command
        (the run_projection_checks type filter)
@@ -12,8 +12,8 @@ defmodule PropertyDamage.EventualConsistencyTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.Executor
   alias PropertyDamage.Failure
+  alias PropertyDamage.Test.StepRun
 
   defmodule Events do
     defmodule PaymentInitiated, do: defstruct([:id])
@@ -119,7 +119,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
 
     try do
-      Executor.run(seq, PaymentModel, adapter, event_queue: queue)
+      StepRun.run(seq, PaymentModel, adapter, event_queue: queue)
     after
       PropertyDamage.EventQueue.stop(queue)
     end
@@ -218,7 +218,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     seq = PropertyDamage.Sequence.linear([%ProbeCheck{}])
 
     {:ok, result} =
-      Executor.run(seq, ProbeModel, RetryThenSucceedAdapter,
+      StepRun.run(seq, ProbeModel, RetryThenSucceedAdapter,
         config: %{},
         # short interval so the two retries resolve quickly
         event_queue: nil

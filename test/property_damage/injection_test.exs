@@ -2,7 +2,7 @@ defmodule PropertyDamage.InjectionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor
+  alias PropertyDamage.Test.StepRun
 
   # Test events
   defmodule ResourceCreated do
@@ -149,7 +149,7 @@ defmodule PropertyDamage.InjectionTest do
     test "injected events update projections immediately" do
       command = %CreateResource{name: "test"}
 
-      {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
+      {:ok, result} = StepRun.run([command], TestModel, InjectingAdapter)
 
       assert result.success
 
@@ -168,7 +168,7 @@ defmodule PropertyDamage.InjectionTest do
     test "injected events are recorded with source :injected" do
       command = %CreateResource{name: "test"}
 
-      {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
+      {:ok, result} = StepRun.run([command], TestModel, InjectingAdapter)
 
       # Should have 2 events: 1 injected + 1 returned
       assert length(result.event_log) == 2
@@ -194,7 +194,7 @@ defmodule PropertyDamage.InjectionTest do
     test "multiple injections work correctly" do
       command = %CreateResource{name: "test"}
 
-      {:ok, result} = Executor.run([command], TestModel, MultiInjectAdapter)
+      {:ok, result} = StepRun.run([command], TestModel, MultiInjectAdapter)
 
       # Should have 3 events: 2 injected + 1 returned
       assert length(result.event_log) == 3
@@ -209,7 +209,7 @@ defmodule PropertyDamage.InjectionTest do
     test "backward compatibility - adapters not using inject work unchanged" do
       command = %CreateResource{name: "test"}
 
-      {:ok, result} = Executor.run([command], TestModel, NonInjectingAdapter)
+      {:ok, result} = StepRun.run([command], TestModel, NonInjectingAdapter)
 
       assert result.success
 
@@ -226,7 +226,7 @@ defmodule PropertyDamage.InjectionTest do
     test "injected events appear before returned events in log" do
       command = %CreateResource{name: "test"}
 
-      {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
+      {:ok, result} = StepRun.run([command], TestModel, InjectingAdapter)
 
       # Event log is already reversed, so check order
       # First entry should be the returned event (last to be added)

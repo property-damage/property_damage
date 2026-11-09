@@ -1,7 +1,7 @@
 defmodule PropertyDamage.LifecycleChecksTest do
   @moduledoc """
   End-to-end tests for `@check at:` lifecycle-boundary checks (DR-024)
-  through `Executor.run`.
+  through `StepRun.run`.
 
   Covers the engine call sites: the `:startup` gate (on the initial `init/0`
   state, before command 1) and the `:teardown` checkpoint (on the fully-settled
@@ -11,7 +11,8 @@ defmodule PropertyDamage.LifecycleChecksTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Failure, Sequence}
+  alias PropertyDamage.{Failure, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Bumped, do: defstruct([])
 
@@ -59,7 +60,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue)
+      StepRun.run(seq, model, adapter, event_queue: queue)
     after
       PropertyDamage.EventQueue.stop(queue)
     end
@@ -378,12 +379,12 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     result =
       try do
-        Executor.execute_sequence(
+        StepRun.run_in_context(
           Sequence.linear([%Bump{}]),
           FailingStartupModel,
           RecordingAdapter,
           ctx,
-          queue
+          event_queue: queue
         )
       after
         PropertyDamage.EventQueue.stop(queue)
@@ -431,7 +432,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue, check_mode: mode)
+      StepRun.run(seq, model, adapter, event_queue: queue, check_mode: mode)
     after
       PropertyDamage.EventQueue.stop(queue)
     end

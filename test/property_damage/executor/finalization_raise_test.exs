@@ -6,7 +6,8 @@ defmodule PropertyDamage.Executor.FinalizationRaiseTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{EventQueue, Executor, ProjectionError, Sequence}
+  alias PropertyDamage.{EventQueue, ProjectionError, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Late, do: defstruct([])
 
@@ -87,7 +88,7 @@ defmodule PropertyDamage.Executor.FinalizationRaiseTest do
     {:ok, queue} = EventQueue.start_link()
 
     assert_raise ProjectionError, fn ->
-      Executor.run(Sequence.linear([%Start{}]), Model, Adapter,
+      StepRun.run(Sequence.linear([%Start{}]), Model, Adapter,
         config: %{test_pid: self()},
         event_queue: queue,
         teardown_commands: [%Release{}]

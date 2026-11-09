@@ -7,9 +7,9 @@ defmodule PropertyDamage.MockEventsBoundaryTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, MockServiceRegistry, Sequence, Variant}
+  alias PropertyDamage.{MockServiceRegistry, Sequence, Variant}
   alias PropertyDamage.Test.Lockstep.{Ledger, Noted, Stepped}
-  alias PropertyDamage.Test.VariantSupport
+  alias PropertyDamage.Test.{StepRun, VariantSupport}
 
   defmodule Mock do
     use PropertyDamage.MockServiceAdapter
@@ -120,7 +120,7 @@ defmodule PropertyDamage.MockEventsBoundaryTest do
     :ok = MockServiceRegistry.register(registry, Mock)
 
     {:ok, result} =
-      Executor.run(Sequence.linear([%Cmd{coord: coord, value: 1}]), Model, Adapter,
+      StepRun.run(Sequence.linear([%Cmd{coord: coord, value: 1}]), Model, Adapter,
         step_observer: MockServiceRegistry.observer(registry)
       )
 

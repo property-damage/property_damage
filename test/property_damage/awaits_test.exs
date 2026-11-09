@@ -17,7 +17,8 @@ defmodule PropertyDamage.AwaitsTest do
 
   import ExUnit.CaptureLog
 
-  alias PropertyDamage.{Await, EventQueue, Executor, Failure, Sequence}
+  alias PropertyDamage.{Await, EventQueue, Failure, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   # --- Events -----------------------------------------------------------------
 
@@ -149,7 +150,7 @@ defmodule PropertyDamage.AwaitsTest do
 
     try do
       {:ok, result} =
-        Executor.run(
+        StepRun.run(
           Sequence.linear(seq),
           IssueModel,
           ApiAdapter,
@@ -289,7 +290,7 @@ defmodule PropertyDamage.AwaitsTest do
       seq = Sequence.linear([%CloseIssue{issue_id: "i1"}, %DeliverWebhooks{}])
 
       {:ok, result} =
-        Executor.run(seq, LaterDeliveryModel, LaterDeliveryAdapter,
+        StepRun.run(seq, LaterDeliveryModel, LaterDeliveryAdapter,
           event_queue: queue,
           config: %{event_queue: queue}
         )
@@ -363,7 +364,7 @@ defmodule PropertyDamage.AwaitsTest do
       {result, log} =
         with_log(fn ->
           {:ok, r} =
-            Executor.run(seq, OverlapModel, OverlapAdapter,
+            StepRun.run(seq, OverlapModel, OverlapAdapter,
               event_queue: queue,
               config: %{event_queue: queue}
             )
