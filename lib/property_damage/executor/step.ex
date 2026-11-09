@@ -40,7 +40,6 @@ defmodule PropertyDamage.Executor.Step do
   alias PropertyDamage.{
     Failure,
     Mint,
-    MockServiceRegistry,
     Placeholder,
     PlaceholderRegistry,
     ResourcePoller,
@@ -50,7 +49,7 @@ defmodule PropertyDamage.Executor.Step do
   }
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor.{Events, Settle, State}
+  alias PropertyDamage.Executor.{Events, Settle, State, StepObserver}
   alias PropertyDamage.Log.Cap
   alias PropertyDamage.Model.Projection
   alias PropertyDamage.Model.Projection.Checks
@@ -70,7 +69,8 @@ defmodule PropertyDamage.Executor.Step do
 
     * `:event_queue` - the async/injected event queue (default `nil`)
     * `:stutter_config` - stutter/idempotency configuration (default `nil`)
-    * `:mock_registry` - mock service registry (default `nil`)
+    * `:step_observer` - the step observer, `{module, observer}`
+      (`PropertyDamage.Executor.StepObserver`); default `nil`, none
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:external_markers` - external value markers (default `[]`)
     * `:placeholder_registry` - registry seeded from the generated sequence
@@ -109,7 +109,7 @@ defmodule PropertyDamage.Executor.Step do
       check_failures: [],
       check_mode: Keyword.get(opts, :check_mode, :halt),
       stutter_config: Keyword.get(opts, :stutter_config),
-      mock_registry: Keyword.get(opts, :mock_registry),
+      step_observer: Keyword.get(opts, :step_observer),
       active_pollers: [],
       active_resource_pollers: [],
       model: model,
@@ -158,25 +158,26 @@ defmodule PropertyDamage.Executor.Step do
     # Only a command that reaches the adapter's execute/3 records a time.
     state = %{state | last_execute_us: nil, last_command_index: index}
 
-    # A mock's on_command/2 that raised fails the step before the adapter is
-    # called, as an adapter error whose detail names the mock and the
+    # An observer that refused the command (a mock's on_command/2 that
+    # raised) fails the step before the adapter is called, as an adapter error whose detail names the mock and the
     # callback, the shape a raising execute/3 gets.
-    case notify_mocks(state, command) do
+    case notify_observer(state, command) do
       {:ok, state} -> execute_notified(command, index, state, ctx)
       {:error, reason, state} -> {:error, Failure.adapter_error(reason), state, :not_called}
     end
   end
 
-  # The mocks' on_command/2 runs under a scope of its own; its lines go under
-  # the command's step (DR-054). A callback that raised, exited or threw comes
-  # back as the registry's `{:error, {module, :on_command, reason}}`.
-  defp notify_mocks(%{mock_registry: nil} = state, _command), do: {:ok, state}
+  # The step observer hears of the command under a scope of its own; its lines
+  # go under the command's step (DR-054). For the mocks, a callback that
+  # raised, exited or threw comes back as the registry's
+  # `{:error, {module, :on_command, reason}}`.
+  defp notify_observer(%{step_observer: nil} = state, _command), do: {:ok, state}
 
-  defp notify_mocks(state, command) do
+  defp notify_observer(state, command) do
     {notified, lines} =
       PropertyDamage.Log.collect(fn sink ->
-        MockServiceRegistry.notify_command(
-          state.mock_registry,
+        StepObserver.before_command(
+          state.step_observer,
           command,
           PropertyDamage.Log.writer(sink, 1)
         )
@@ -356,7 +357,7 @@ defmodule PropertyDamage.Executor.Step do
     poller_owner = self()
     poller_started = state.on_resource_poller_start
     event_queue = ctx.event_queue
-    mock_registry = state.mock_registry
+    observer = state.step_observer
 
     fn sink ->
       start_poller_fn = fn opts ->
@@ -374,16 +375,15 @@ defmodule PropertyDamage.Executor.Step do
         poller
       end
 
-      %Runtime{
+      # The step observer may hand the adapter what it needs to reach it:
+      # the mocks put their registry on the handle, so an adapter can drive a
+      # mocked third party's handle_request/2 during execute/3.
+      StepObserver.runtime(observer, %Runtime{
         inject: fn event -> inject_event(sink, event) end,
         start_poller: start_poller_fn,
-        # The per-run mock registry (or nil) travels on the runtime handle so
-        # an adapter can reach a mocked third party's handle_request/2 during
-        # execute/3; the step folds what the mock pushes after the command.
-        mock_registry: mock_registry,
         # DR-054: the first attempt's log lines go into the same sink.
         log: PropertyDamage.Log.writer(sink, 1)
-      }
+      })
     end
   end
 
@@ -486,10 +486,10 @@ defmodule PropertyDamage.Executor.Step do
         state.await_matchers
       )
 
-    # Flush and fold mock-injected events; the mocks' on_event/2 lines go
-    # under this command's step (DR-054).
+    # Fold the events the step observer holds (the mocks' pushed events); the
+    # lines its on_event/3 writes go under this command's step (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
-      state.mock_registry
+      state.step_observer
       |> Events.process_mock_events(index, event_log, projections, fold_counter)
       |> Events.folded_or_raise!()
 
@@ -498,10 +498,7 @@ defmodule PropertyDamage.Executor.Step do
       | logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
     }
 
-    # Share the new projections with the mocks.
-    if state.mock_registry do
-      MockServiceRegistry.update_projections(state.mock_registry, projections)
-    end
+    :ok = StepObserver.after_fold(state.step_observer, projections, :step)
 
     # Every outcome path writes the same post-events fields; only the check
     # counters, and whether check_failures is set, differ. put_state/2 is

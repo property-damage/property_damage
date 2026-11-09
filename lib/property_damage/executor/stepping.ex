@@ -83,11 +83,10 @@ defmodule PropertyDamage.Executor.Stepping do
   require Logger
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor.{Events, Finalization, Settle, Step, Stutter}
+  alias PropertyDamage.Executor.{Events, Finalization, Settle, Step, StepObserver, Stutter}
   alias PropertyDamage.Executor.Stepping.Context
   alias PropertyDamage.Failure
   alias PropertyDamage.Log.Cap
-  alias PropertyDamage.MockServiceRegistry
   alias PropertyDamage.{Placeholder, PlaceholderRegistry}
   alias PropertyDamage.ResourcePoller
   alias PropertyDamage.Sequence.Position
@@ -100,7 +99,8 @@ defmodule PropertyDamage.Executor.Stepping do
 
     * `:event_queue` - the async/injected event queue (default `nil`)
     * `:stutter_config` - stutter/idempotency configuration (default `nil`)
-    * `:mock_registry` - mock service registry (default `nil`)
+    * `:step_observer` - the step observer, `{module, observer}`
+      (`PropertyDamage.Executor.StepObserver`); default `nil`, none
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:external_markers` - external value markers (default `[]`)
     * `:placeholder_registry` - registry seeded from the generated sequence (DR-021)
@@ -466,7 +466,7 @@ defmodule PropertyDamage.Executor.Stepping do
     # and so do the lines the mocks' on_event/2 writes (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
       Events.process_mock_events(
-        state.mock_registry,
+        state.step_observer,
         state.last_command_index,
         event_log,
         projections,
@@ -474,9 +474,7 @@ defmodule PropertyDamage.Executor.Stepping do
       )
       |> Events.folded_or_raise!()
 
-    if state.mock_registry do
-      MockServiceRegistry.update_projections(state.mock_registry, projections)
-    end
+    :ok = StepObserver.after_fold(state.step_observer, projections, :drain)
 
     drained = %{
       state

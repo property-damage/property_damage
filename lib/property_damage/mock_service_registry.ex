@@ -48,6 +48,8 @@ defmodule PropertyDamage.MockServiceRegistry do
 
   use GenServer
 
+  @behaviour PropertyDamage.Executor.StepObserver
+
   @type t :: pid()
 
   @doc """
@@ -192,6 +194,40 @@ defmodule PropertyDamage.MockServiceRegistry do
   def get_handler_state(registry, adapter_module) do
     GenServer.call(registry, {:get_handler_state, adapter_module})
   end
+
+  # ==========================================================================
+  # Step observer
+  # ==========================================================================
+
+  @doc """
+  The step observer (`PropertyDamage.Executor.StepObserver`) that connects
+  `registry` to a run, or `nil` for a run without mocks.
+
+  Registered on the executor state, it tells the mocks of every command and
+  event, folds the events the mocks pushed, shares the projections with the
+  mocks after each step and each drain, and hands the adapter the registry
+  as `runtime.mock_registry`. At finalization the mocks keep the projections
+  of the last step or drain.
+  """
+  @spec observer(t() | nil) :: PropertyDamage.Executor.StepObserver.t()
+  def observer(nil), do: nil
+  def observer(registry), do: {__MODULE__, registry}
+
+  @impl PropertyDamage.Executor.StepObserver
+  def before_command(registry, command, log), do: notify_command(registry, command, log)
+
+  @impl PropertyDamage.Executor.StepObserver
+  def take_events(registry), do: flush_events(registry)
+
+  @impl PropertyDamage.Executor.StepObserver
+  def on_event(registry, event, log), do: notify_event(registry, event, log)
+
+  @impl PropertyDamage.Executor.StepObserver
+  def after_fold(_registry, _projections, :finalize), do: :ok
+  def after_fold(registry, projections, _point), do: update_projections(registry, projections)
+
+  @impl PropertyDamage.Executor.StepObserver
+  def runtime(registry, runtime), do: %{runtime | mock_registry: registry}
 
   # ==========================================================================
   # GenServer Implementation

@@ -6,13 +6,14 @@ defmodule PropertyDamage.Executor.Events do
   # it in the event log": `update_projections/2` (the projection reducer, which
   # turns a raising `apply/2` into a tagged `ProjectionError`) plus the four
   # source-specific drains that build the right `EventLog.Entry` and call it:
-  # command-own events, injector/resource-poller queue events, and mock-service
-  # events. This is a leaf module: it depends only on the event/queue/registry
-  # types, not back on Executor.
+  # command-own events, injector/resource-poller queue events, and the events a
+  # step observer holds (the mocks'). This is a leaf module: it depends only on
+  # the event and queue types and the step observer behaviour, not back on
+  # Executor.
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.EventQueue
-  alias PropertyDamage.MockServiceRegistry
+  alias PropertyDamage.Executor.StepObserver
 
   # Update all projections with a command or event.
   # apply/2 can raise to signal transition invariant violations.
@@ -173,28 +174,28 @@ defmodule PropertyDamage.Executor.Events do
     _ -> false
   end
 
-  # Flush and process events from mock service adapters. Each mock's
-  # on_event/2 runs under a scope of its own, and the lines it wrote come
-  # back fourth, for the caller to keep under the command the events belong
-  # to (DR-054).
+  # Take and fold the events the step observer holds (the events mock service
+  # adapters pushed). The observer's on_event/3 runs under a scope of its
+  # own, and the lines it wrote come back fourth, for the caller to keep
+  # under the command the events belong to (DR-054).
   #
-  # When a mock's on_event/2 raises, exits or throws (the registry answers
-  # `{:error, {module, :on_event, reason}}`), or a projection rejects a mock
-  # event, folding stops and the result is `{:error, error, lines}`:
-  # `{:mock_callback, reason}` or `{:projection, %ProjectionError{},
-  # stacktrace}`, with the lines written up to then, so the caller can fail
-  # the step and keep them.
+  # When the observer refuses an event (a mock's on_event/2 that raised,
+  # exited or threw: the registry answers `{:error, {module, :on_event,
+  # reason}}`), or a projection rejects the event, folding stops and the
+  # result is `{:error, error, lines}`: `{:mock_callback, reason}` or
+  # `{:projection, %ProjectionError{}, stacktrace}`, with the lines written up
+  # to then, so the caller can fail the step and keep them.
   def process_mock_events(nil, _command_index, event_log, projections, fold_counter),
     do: {projections, event_log, fold_counter, []}
 
   def process_mock_events(
-        mock_registry,
+        observer,
         command_index,
         event_log,
         projections,
         fold_counter
       ) do
-    case MockServiceRegistry.flush_events(mock_registry) do
+    case StepObserver.take_events(observer) do
       [] ->
         {projections, event_log, fold_counter, []}
 
@@ -203,7 +204,7 @@ defmodule PropertyDamage.Executor.Events do
           PropertyDamage.Log.collect(fn sink ->
             fold_mock_events(
               events,
-              {mock_registry, PropertyDamage.Log.writer(sink, 1)},
+              {observer, PropertyDamage.Log.writer(sink, 1)},
               command_index,
               {projections, event_log, fold_counter}
             )
@@ -227,7 +228,7 @@ defmodule PropertyDamage.Executor.Events do
 
   def folded_or_raise!(folded), do: folded
 
-  defp fold_mock_events(events, {mock_registry, log}, command_index, folded) do
+  defp fold_mock_events(events, {observer, log}, command_index, folded) do
     Enum.reduce_while(events, {:ok, folded}, fn event, {:ok, {projs, log_entries, fc}} ->
       entry =
         Entry.attribute(
@@ -241,8 +242,8 @@ defmodule PropertyDamage.Executor.Events do
           command_index
         )
 
-      # Notify mock registry of the event so mocks can react
-      case MockServiceRegistry.notify_event(mock_registry, event, log) do
+      # Tell the observer of the event so the mocks can react.
+      case StepObserver.on_event(observer, event, log) do
         :ok ->
           new_projs = update_projections(projs, event)
           {:cont, {:ok, {new_projs, [entry | log_entries], fc + 1}}}

@@ -25,7 +25,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # module owns only the finalize-exclusive logic.
 
   alias PropertyDamage.{Executor, Failure, ResourcePoller, StatePoller}
-  alias PropertyDamage.Executor.Step
+  alias PropertyDamage.Executor.{Step, StepObserver}
 
   # ============================================================================
   # Result Finalization
@@ -391,7 +391,7 @@ defmodule PropertyDamage.Executor.Finalization do
     # and so do the lines the mocks' on_event/2 writes (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
       Executor.Events.process_mock_events(
-        Map.get(state, :mock_registry),
+        Map.get(state, :step_observer),
         Map.get(state, :last_command_index),
         event_log,
         projections,
@@ -413,6 +413,8 @@ defmodule PropertyDamage.Executor.Finalization do
         fold_counter: fold_counter,
         logs: logs
       })
+
+    :ok = StepObserver.after_fold(Map.get(state, :step_observer), projections, :finalize)
 
     case Step.check_async(state, since: {projs_before, log_before}, failures: failures) do
       {:ok, counters, failures} ->

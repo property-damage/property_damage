@@ -117,7 +117,9 @@ defmodule PropertyDamage.Executor do
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:keep_attempts` - How many of a step's last settle or stutter attempts keep
     their log lines, besides the first attempt's (default 3, DR-054)
-  - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
+  - `:step_observer` - the step observer, `{module, observer}`, told of every
+    step (`PropertyDamage.Executor.StepObserver`); for mocks,
+    `PropertyDamage.MockServiceRegistry.observer/1` (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
   - `:telemetry` - The context command and check telemetry is emitted with
     (`PropertyDamage.Telemetry`); default `nil`, which emits none
@@ -184,7 +186,7 @@ defmodule PropertyDamage.Executor do
   defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
-    mock_registry = Keyword.get(opts, :mock_registry)
+    step_observer = Keyword.get(opts, :step_observer)
     check_mode = Keyword.get(opts, :check_mode, :halt)
     external_markers = Keyword.get(opts, :external_markers, [])
     rng_seed = Keyword.get(opts, :rng_seed)
@@ -202,7 +204,7 @@ defmodule PropertyDamage.Executor do
           adapter_context: adapter_context,
           event_queue: event_queue,
           stutter_config: stutter_config,
-          mock_registry: mock_registry,
+          step_observer: step_observer,
           check_mode: check_mode,
           external_markers: external_markers,
           rng_seed: rng_seed,
@@ -241,7 +243,7 @@ defmodule PropertyDamage.Executor do
   - `adapter_context` - Pre-established adapter context
   - `event_queue` - EventQueue pid (optional)
   - `stutter_config` - Stutter.Config for idempotency testing (optional)
-  - `mock_registry` - MockServiceRegistry pid (optional)
+  - `step_observer` - the step observer, `{module, observer}` (optional)
   - `check_mode` - How to handle check failures (optional, default: `:halt`)
 
   ## Returns
@@ -270,7 +272,7 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue \\ nil,
         stutter_config \\ nil,
-        mock_registry \\ nil,
+        step_observer \\ nil,
         check_mode \\ :halt,
         external_markers \\ [],
         rng_seed \\ nil,
@@ -285,7 +287,7 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue,
         stutter_config,
-        mock_registry,
+        step_observer,
         check_mode,
         external_markers,
         rng_seed,
@@ -303,7 +305,7 @@ defmodule PropertyDamage.Executor do
       adapter_context: adapter_context,
       event_queue: event_queue,
       stutter_config: stutter_config,
-      mock_registry: mock_registry,
+      step_observer: step_observer,
       check_mode: check_mode,
       external_markers: external_markers,
       rng_seed: rng_seed,
@@ -328,7 +330,7 @@ defmodule PropertyDamage.Executor do
       Step.new_state(env.model,
         event_queue: env.event_queue,
         stutter_config: env.stutter_config,
-        mock_registry: env.mock_registry,
+        step_observer: env.step_observer,
         check_mode: env.check_mode,
         external_markers: env.external_markers,
         placeholder_registry: sequence.registry,

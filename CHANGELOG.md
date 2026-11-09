@@ -654,6 +654,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules called back into it. Each primitive takes the command or index, the
   executor state, the `Stepping.Context` and one keyword of options.
   `Stepping.Context` moved to a file of its own; its name is unchanged.
+- **Breaking: the executor tells a step observer of each step instead of
+  the mock registry.** The registry pid was threaded through the executor
+  state, the step primitives, the drains and finalization. A
+  `PropertyDamage.Executor.StepObserver` behaviour now names the four points
+  of a run the executor reports (before the adapter call, after a step's
+  events, at a drain, at finalization), and `PropertyDamage.MockServiceRegistry`
+  is its first implementation. The `:mock_registry` option of
+  `PropertyDamage.Executor.run/4` and of `Executor.Stepping.init_state/2` is
+  removed: pass `step_observer: MockServiceRegistry.observer(registry)`. The
+  `mock_registry` argument of `Executor.execute_sequence/12` is
+  `step_observer`, and the executor state's `mock_registry` field is
+  `step_observer`. An adapter still reaches the mocks through
+  `runtime.mock_registry`.
 - **Breaking: `Shrinker.shrink/2` takes an oracle and runs no candidate
   itself.** A test of the shrinker needed a whole system to run, because the
   shrinker ran each candidate through the scheduler. Now it hands each

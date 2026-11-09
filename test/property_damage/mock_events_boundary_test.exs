@@ -101,7 +101,8 @@ defmodule PropertyDamage.MockEventsBoundaryTest do
     boundary = Variant.snapshot(pid)
     assert mock_entries(boundary.event_log) == [{0, {:late_mock, 1}}]
     assert boundary.projections[Ledger].noted == [{:late_mock, 1}]
-    assert MockServiceRegistry.flush_events(boundary.mock_registry) == []
+    {MockServiceRegistry, registry} = boundary.step_observer
+    assert MockServiceRegistry.flush_events(registry) == []
 
     assert {:ok, [{1, _}]} = Variant.advance_to(pid, 1)
     result = Variant.finish(pid)
@@ -120,7 +121,7 @@ defmodule PropertyDamage.MockEventsBoundaryTest do
 
     {:ok, result} =
       Executor.run(Sequence.linear([%Cmd{coord: coord, value: 1}]), Model, Adapter,
-        mock_registry: registry
+        step_observer: MockServiceRegistry.observer(registry)
       )
 
     assert mock_entries(result.event_log) == [{0, {:late_mock, 1}}]

@@ -23,7 +23,8 @@ defmodule PropertyDamage.Executor.State do
     * `:event_queue` - `EventQueue` pid for injector/poller events (or `nil`)
     * `:check_mode` - `:halt | :record | :log | :disabled`
     * `:stutter_config` - stutter configuration (or `nil`)
-    * `:mock_registry` - mock service registry pid (or `nil`)
+    * `:step_observer` - the registered step observer, `{module, observer}`
+      (`PropertyDamage.Executor.StepObserver`), or `nil`
     * `:external_markers` - declared `external()` marker atoms
     * `:command_specs` - `%{command_module => resolved_spec}` (built once)
     * `:placeholder_registry` - DR-021 id-indexed placeholder registry
@@ -105,7 +106,6 @@ defmodule PropertyDamage.Executor.State do
     :event_queue,
     :check_mode,
     :stutter_config,
-    :mock_registry,
     :external_markers,
     :command_specs,
     :placeholder_registry
@@ -118,10 +118,10 @@ defmodule PropertyDamage.Executor.State do
     :event_queue,
     :check_mode,
     :stutter_config,
-    :mock_registry,
     :external_markers,
     :command_specs,
     :placeholder_registry,
+    step_observer: nil,
     rng_seed: nil,
     event_log: [],
     projections: %{},
@@ -153,7 +153,7 @@ defmodule PropertyDamage.Executor.State do
           event_queue: pid() | nil,
           check_mode: atom(),
           stutter_config: term(),
-          mock_registry: pid() | nil,
+          step_observer: PropertyDamage.Executor.StepObserver.t(),
           external_markers: list(),
           command_specs: map(),
           placeholder_registry: term(),

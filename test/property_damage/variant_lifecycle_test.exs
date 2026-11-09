@@ -174,7 +174,8 @@ defmodule PropertyDamage.VariantLifecycleTest do
       {:ok, pid} = Variant.start(variant_opts(target, SlowProbeModel, commands))
       :ok = Variant.setup(pid)
       snapshot = Variant.snapshot(pid)
-      {pid, snapshot.event_queue, snapshot.mock_registry}
+      {PropertyDamage.MockServiceRegistry, registry} = snapshot.step_observer
+      {pid, snapshot.event_queue, registry}
     end
 
     defp advance_in_task(pid) do

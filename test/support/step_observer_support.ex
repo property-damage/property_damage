@@ -422,7 +422,7 @@ defmodule PropertyDamage.Test.StepObserver do
     :ok = MockServiceRegistry.register(registry, Mock)
     {:ok, mock_context} = Mock.setup(Map.put(mock_config, :registry, registry))
 
-    state = Stepping.init_state(Model, mock_registry: registry)
+    state = Stepping.init_state(Model, step_observer: MockServiceRegistry.observer(registry))
 
     ctx = %Stepping.Context{
       model: Model,
