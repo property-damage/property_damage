@@ -6,7 +6,9 @@ defmodule PropertyDamage.OffTableSpecTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Sequence}
+  alias PropertyDamage.Sequence
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule Unlisted do
     @moduledoc false
@@ -79,7 +81,7 @@ defmodule PropertyDamage.OffTableSpecTest do
     })
 
     {:ok, _result} =
-      Executor.run(Sequence.linear([command]), Model, CountingAdapter,
+      StepRun.run(Sequence.linear([command]), Model, CountingAdapter,
         stutter_config: @always_stutter,
         rng_seed: 7
       )

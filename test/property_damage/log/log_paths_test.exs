@@ -6,9 +6,9 @@ defmodule PropertyDamage.Log.PathsTest do
   # that wrote it, or the call raises `PropertyDamage.Log.NoScopeError`.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.Executor
   alias PropertyDamage.Test.LogFixtures, as: F
   alias PropertyDamage.Test.LogPathFixtures, as: P
+  alias PropertyDamage.Test.StepRun
 
   setup do
     F.compile!()
@@ -36,7 +36,7 @@ defmodule PropertyDamage.Log.PathsTest do
 
     test "cannot log under a later point on the linear engine either" do
       {:ok, result} =
-        Executor.run([%F.Act{n: 0, amount: 1}], F.Model, P.SetupTaskAdapter,
+        StepRun.run([%F.Act{n: 0, amount: 1}], F.Model, P.SetupTaskAdapter,
           config: %{test_pid: self()}
         )
 

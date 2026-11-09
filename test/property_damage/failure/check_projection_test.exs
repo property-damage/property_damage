@@ -6,10 +6,12 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
   # field existed loads with it nil.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence}
+
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.ReferenceReport, as: R
   alias PropertyDamage.Test.ReportLayout, as: L
+  alias PropertyDamage.Test.StepRun
   alias PropertyDamage.Test.TmpPath
 
   alias __MODULE__.{AtStartupModel, AtTeardownModel, NeverModel, SharedNameModel}
@@ -148,7 +150,7 @@ defmodule PropertyDamage.Failure.CheckProjectionTest do
 
     try do
       {:ok, result} =
-        Executor.run(Sequence.linear([%Bump{}]), model, BumpAdapter, event_queue: queue)
+        StepRun.run(Sequence.linear([%Bump{}]), model, BumpAdapter, event_queue: queue)
 
       result
     after
