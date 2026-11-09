@@ -637,6 +637,35 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
+    test "a configured think time pauses the worker before each command" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: OrderingModel,
+          target: %PropertyDamage.Target{
+            adapter: OrderingAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
+          metrics: metrics,
+          think_time_range: {60, 60},
+          check_mode: :record
+        )
+
+      started = System.monotonic_time(:millisecond)
+      assert {:ok, stats} = Worker.execute_sequence(worker)
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      assert stats.commands_run >= 1
+      assert elapsed >= 60 * stats.commands_run
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
     test "a raising adapter is captured as a command error, not a worker crash" do
       # The worker is linked to us via start_link; trap exits so a (buggy) cascade
       # surfaces as a caught exit here rather than taking the test process down.
