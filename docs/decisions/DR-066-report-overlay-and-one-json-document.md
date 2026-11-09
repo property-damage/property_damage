@@ -58,7 +58,14 @@ view of that bundle. A program that read one of them could not read another.
    `replay_path`. They are the report's stable fields. The readers are the
    exports, `PropertyDamage.Analysis` and the failure-intelligence modules.
    The eight derived fields are not part of that surface.
-8. **Dependency cycles.** The module cycle between `FailureReport` and
+8. **A failing section does not lose the document.** If the builder of one
+   section raises on user code (a projection whose `__compares__/0` raises, say),
+   the document leaves that section out of `sections`, writes every other
+   member including `logs`, logs the raise as a warning that names the section,
+   and adds a top-level `render_errors` list of `{"section", "message"}`
+   entries. The key is absent when every section builds. The terminal and
+   markdown formats still raise, since they print the section.
+9. **Dependency cycles.** The module cycle between `FailureReport` and
    `ReplayArtifact` is not broken by this change, so the count of such cycles
    is unchanged.
 

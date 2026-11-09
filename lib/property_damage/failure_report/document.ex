@@ -12,8 +12,9 @@ defmodule PropertyDamage.FailureReport.Document do
   them by id and the page prints them. It holds no process id and lists
   everything in a stable order.
 
-  When the report's sections cannot be built, `failure.fields`, `listing` and
-  `sections` are empty lists and every other member is still written.
+  A section whose builder raises is left out of `sections` (and `failure.fields`
+  is empty when it is the Failure section); every other member is still
+  written, the raise is logged, and `render_errors` names the section.
 
   ## Options
 
@@ -46,6 +47,7 @@ defmodule PropertyDamage.FailureReport.Document do
   | `reference_trace`, `reference_projections` | map | the reference side of a comparison; `null` for any other failure |
   | `logs` | map | the log lines the terminal shows, after the same filter (see below) |
   | `listing` | list | one map per target, the reference first (see below) |
+  | `render_errors` | list | present only when a section could not be built: one `{section, message}` for each, `section` being `failure`, `context`, `setup`, `listing`, `projections` or `reproduction` |
   | `sections` | list | one `{id, title, fence, data}` per `## ` section, in page order |
   | `projections` | map | the projection state at the failure; present when not empty |
   | `event_log` | list | the events of the run; present when not empty |
@@ -182,9 +184,9 @@ defmodule PropertyDamage.FailureReport.Document do
   @spec build(FailureReport.t(), keyword()) :: map()
   def build(%FailureReport{} = report, opts \\ []) do
     items = Layout.context_items(report, opts)
-    data = layout_data(report, opts)
-    sections = if data, do: data.layout.sections, else: []
-    targets = if data, do: data.targets, else: []
+    data = Layout.bundle_data(report, opts)
+    sections = data.layout.sections
+    targets = data.targets
     listing_id = listing_section_id(sections)
 
     failure = failure_member(report, sections, items)
@@ -246,6 +248,9 @@ defmodule PropertyDamage.FailureReport.Document do
       "listing" => listing,
       "sections" => section_entries
     }
+    |> put_when(data.render_errors != [], "render_errors", fn ->
+      Enum.map(data.render_errors, &%{"section" => &1.section, "message" => &1.message})
+    end)
     |> put_when(
       report.state_at_failure && map_size(report.state_at_failure) > 0,
       "projections",
@@ -263,15 +268,6 @@ defmodule PropertyDamage.FailureReport.Document do
       [failure_ids(failure), context, listing, section_entries],
       opts
     )
-  end
-
-  # The page layout: the sections and the steps of each target. A report whose
-  # sections cannot be built (a projection whose relations raise, say) still
-  # yields the rest of the document, with no fields, sections or listing.
-  defp layout_data(report, opts) do
-    Layout.bundle_data(report, opts)
-  rescue
-    _cannot_build -> nil
   end
 
   defp put_when(document, condition, key, value) do

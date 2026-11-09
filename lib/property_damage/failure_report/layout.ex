@@ -40,6 +40,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
 
+  require Logger
+
   alias PropertyDamage.Failure.Naming
   alias PropertyDamage.FailureReport.Context
   alias PropertyDamage.Log.{Filter, Gap, Line}
@@ -89,27 +91,39 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec build(FailureReport.t(), keyword()) :: t()
   def build(%FailureReport{} = report, opts \\ []) do
-    {layout, _listing, _context} = assemble(report, opts)
+    {layout, _listing, _context, []} = assemble(report, opts, false)
     layout
   end
 
-  # One reading of the report: the layout, the data of its listing, and the
-  # items of the "What this checks" section.
-  defp assemble(report, opts) do
+  # One reading of the report: the layout, the data of its listing, the
+  # items of the "What this checks" section, and the render errors. With
+  # `guard?` false a section that raises lets the raise through. With it true
+  # the section is left out of the layout, the raise is logged, and an error
+  # `%{section: name, message: text}` names it.
+  defp assemble(report, opts, guard?) do
     listing = listing_data(report, opts)
     %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
     context = Context.items(report, focus, context_targets(report))
 
-    sections =
-      [
-        failure_section(report, focus, filter, unknown),
-        context_section(context),
-        setup && setup.section,
-        listing.section,
-        projections_section(report, variant, focus),
-        reproduction_section(report)
-      ]
-      |> Enum.reject(&is_nil/1)
+    guarded = [
+      {"failure", fn -> failure_section(report, focus, filter, unknown) end},
+      {"context", fn -> context_section(context) end},
+      {"setup", fn -> setup && setup.section end},
+      {"listing", fn -> listing.section end},
+      {"projections", fn -> projections_section(report, variant, focus) end},
+      {"reproduction", fn -> reproduction_section(report) end}
+    ]
+
+    {sections, errors} =
+      Enum.reduce(guarded, {[], []}, fn {name, build}, {sections, errors} ->
+        case guard_section(name, build, guard?) do
+          {:ok, section} -> {[section | sections], errors}
+          {:error, error} -> {sections, [error | errors]}
+        end
+      end)
+
+    sections = sections |> Enum.reverse() |> Enum.reject(&is_nil/1)
+    errors = Enum.reverse(errors)
 
     layout = %__MODULE__{
       banner: banner(report),
@@ -118,7 +132,18 @@ defmodule PropertyDamage.FailureReport.Layout do
       logs: logs_of(listing)
     }
 
-    {layout, listing, context}
+    {layout, listing, context, errors}
+  end
+
+  defp guard_section(_name, build, false), do: {:ok, build.()}
+
+  defp guard_section(name, build, true) do
+    {:ok, build.()}
+  rescue
+    exception ->
+      message = Exception.message(exception)
+      Logger.warning("failure report: the #{name} section could not be built: #{message}")
+      {:error, %{section: name, message: message}}
   end
 
   # What the JSON bundle of an HTML page is built from, read once so that a
@@ -132,18 +157,22 @@ defmodule PropertyDamage.FailureReport.Layout do
   #     of the events tied to no command
   #   * `setup_commands`, `projections`, `reproduction` - the data of the
   #     Setup, Projections and Reproduction sections
+  #   * `render_errors` - one `%{section: name, message: text}` for each
+  #     section whose builder raised; the layout leaves that section out
   @doc false
   @spec bundle_data(FailureReport.t(), keyword()) :: map()
   def bundle_data(%FailureReport{} = report, opts \\ []) do
-    {layout, listing, context} = assemble(report, opts)
+    {layout, listing, context, errors} = assemble(report, opts, true)
+    failed = Enum.map(errors, & &1.section)
 
     %{
       layout: layout,
       context: context,
       targets: Enum.map(listing.listed, &target_data/1),
       setup_commands: setup_command_data(report),
-      projections: projection_data(report),
-      reproduction: reproduction_data(report)
+      projections: if("projections" in failed, do: [], else: projection_data(report)),
+      reproduction: if("reproduction" in failed, do: nil, else: reproduction_data(report)),
+      render_errors: errors
     }
   end
 

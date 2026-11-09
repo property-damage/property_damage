@@ -772,7 +772,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "What this checks" items under `context`, and the source members `modules`,
   `ids`, `missing_sources` and `redactions` appear only with `sources: true`.
   `Formatter.reference_json` is removed. `mix pd.explain` still reads pages
-  that carry a format 1 bundle.
+  that carry a format 1 bundle. If the builder of one section raises, the
+  document leaves the section out, keeps every other member, logs the raise
+  and lists it under `render_errors`.
 
 - **Breaking: failure files are written at format 19.** `.pd` and `.pdtrace`
   files of format 18 and older are refused with

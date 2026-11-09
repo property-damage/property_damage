@@ -289,6 +289,14 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** the `:json` format SHALL be the one document of `PropertyDamage.FailureReport.Document` (`"format"` equal to `2`), which names every field of the report and the sections the printed formats dropped (DR-055, DR-066)
 - **AND** `Persistence.export_json/1` and `Bundle.build/2` SHALL return that same document, the first encoded as indented JSON (DR-066)
 
+#### Scenario: A section that fails to build does not lose the JSON document (DR-066)
+
+- **GIVEN** a report whose Failure section raises while it is built, because a projection's `__compares__/0` raises
+- **WHEN** the report is formatted as `:json`
+- **THEN** the document SHALL hold `logs` as it does for a report that builds, SHALL leave the Failure section out of `sections` and SHALL hold an empty `failure.fields`
+- **AND** it SHALL hold a `render_errors` list with one `{"section": "failure", "message": ...}` entry carrying the exception's message, and the raise SHALL be logged as a warning that names the section
+- **AND** a report whose sections all build SHALL have no `render_errors` key
+
 #### Scenario: Report with error origin
 
 - **WHEN** a failure report is created
