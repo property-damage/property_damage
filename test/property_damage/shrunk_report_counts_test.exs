@@ -5,9 +5,11 @@ defmodule PropertyDamage.ShrunkReportCountsTest do
   # one plus the reproduction, in place of the failing run, from both.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, Sequence}
+
   alias PropertyDamage.Test.{FailingModel, SimpleAdapter}
   alias PropertyDamage.Test.ShrinkAxis, as: A
+  alias PropertyDamage.Test.StepRun
 
   # At seed 1 the run fails at root 5 and shrinks to one root.
   defp parts_run(opts) do
@@ -44,7 +46,7 @@ defmodule PropertyDamage.ShrunkReportCountsTest do
   # The check firings of the shrunk sequence, run once on its own.
   defp fires_of(report) do
     {:ok, result} =
-      Executor.run(FailureReport.shrunk_sequence(report), FailingModel, SimpleAdapter, [])
+      StepRun.run(FailureReport.shrunk_sequence(report), FailingModel, SimpleAdapter, [])
 
     for {{:fired, projection, name}, count} <- result.check_counters,
         into: %{},

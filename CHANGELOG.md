@@ -349,7 +349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Executor.Stepping.drain/2` and `finalize/2` (DR-044).** `drain/2` folds the
   events waiting in the context's event queue into a stepped state, checking each
   one as it folds. `finalize/2` finishes a stepped run into the result
-  `Executor.run/4` reports.
+  `Executor.run` reports.
 - **Pollers, injectors and mocks in multi-target runs (DR-044).**
   `runtime.start_poller` is allowed in multi-target runs (the old refusal is gone),
   and each target's `injectors:` and `mocks:` are honored. Each belongs to its own
@@ -641,6 +641,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `PropertyDamage.Executor.run` is removed.** Every run goes
+  through `PropertyDamage.Runner.execute/2`; to run one command at a time,
+  use `PropertyDamage.Executor.Stepping`. `Executor.execute_raw/3` is
+  unchanged.
+- **Breaking: `PropertyDamage.Executor.execute_sequence` is removed.** Its
+  caller owned the adapter context and the teardown; step the sequence
+  through `PropertyDamage.Executor.Stepping.step/4` instead.
 - **Breaking: `Executor.Stepping.step_leaf/4` takes the leaf step as one
   `{command, position}` pair.** The leaf's command and its `Position.leaf/2`
   position were two arguments, so the function took five. The pair is the
@@ -661,9 +668,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a run the executor reports (before the adapter call, after a step's
   events, at a drain, at finalization), and `PropertyDamage.MockServiceRegistry`
   is its first implementation. The `:mock_registry` option of
-  `PropertyDamage.Executor.run/4` and of `Executor.Stepping.init_state/2` is
+  `PropertyDamage.Executor.run` and of `Executor.Stepping.init_state/2` is
   removed: pass `step_observer: MockServiceRegistry.observer(registry)`. The
-  `mock_registry` argument of `Executor.execute_sequence/12` is
+  `mock_registry` argument of `Executor.execute_sequence` is
   `step_observer`, and the executor state's `mock_registry` field is
   `step_observer`. An adapter still reaches the mocks through
   `runtime.mock_registry`.
@@ -1128,7 +1135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `config`, `injectors` and `mocks`.
     - `PropertyDamage.Differential.Result` fields `reference` and `targets`
       hold `%{index, name}` maps.
-    - The `Executor.run/4` option for the adapter's setup configuration is
+    - The `Executor.run` option for the adapter's setup configuration is
       `config:`.
 
 - **BREAKING (DR-042): vocabulary renames, with no compatibility layer.** The
@@ -1854,7 +1861,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another one compiled with its `@compare` observation dropped; it now fails to
   compile with an error naming the module and `@compare`.
 - **A raise during finalization still runs the teardown commands.** A raise,
-  throw or exit while `Executor.run/4` finalized a run skipped the teardown
+  throw or exit while `Executor.run` finalized a run skipped the teardown
   commands; they now run, then `Adapter.teardown/1`, and the raise propagates.
 - **`Replay.stop/1` stops a session once.** A second call ran the teardown
   commands and `Adapter.teardown/1` again; it now returns `:ok` and runs nothing.

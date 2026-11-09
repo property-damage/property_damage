@@ -8,8 +8,10 @@ defmodule PropertyDamage.MintTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Generator, Mint, Sequence}
+  alias PropertyDamage.{Generator, Mint, Sequence}
+
   alias PropertyDamage.Sequence.Position
+  alias PropertyDamage.Test.StepRun
 
   # ---- A model whose command carries a minted request id ---------------------
 
@@ -67,7 +69,7 @@ defmodule PropertyDamage.MintTest do
 
   defp run(seq, run_nonce, mint_epoch) do
     {:ok, result} =
-      Executor.run(seq, Model, Adapter, run_nonce: run_nonce, mint_epoch: mint_epoch)
+      StepRun.run(seq, Model, Adapter, run_nonce: run_nonce, mint_epoch: mint_epoch)
 
     result
   end
@@ -191,8 +193,8 @@ defmodule PropertyDamage.MintTest do
         |> Generator.generate_sequence(max_commands: 3)
         |> Generator.generate_value(1234)
 
-      {:ok, a} = Executor.run(seq, PlainModel, PlainAdapter, run_nonce: 111, mint_epoch: 0)
-      {:ok, b} = Executor.run(seq, PlainModel, PlainAdapter, run_nonce: 222, mint_epoch: 5)
+      {:ok, a} = StepRun.run(seq, PlainModel, PlainAdapter, run_nonce: 111, mint_epoch: 0)
+      {:ok, b} = StepRun.run(seq, PlainModel, PlainAdapter, run_nonce: 222, mint_epoch: 5)
 
       assert a.executed == b.executed
     end

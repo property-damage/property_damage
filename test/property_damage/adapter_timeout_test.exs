@@ -9,7 +9,8 @@ defmodule PropertyDamage.AdapterTimeoutTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{CommandTimeoutError, Executor, Failure, Sequence}
+  alias PropertyDamage.{CommandTimeoutError, Failure, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Cmd do
     defstruct [:value]
@@ -136,7 +137,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     seq = Sequence.linear([%Cmd{value: 1}])
 
     start = System.monotonic_time(:millisecond)
-    {:ok, result} = Executor.run(seq, Model, SlowAdapter)
+    {:ok, result} = StepRun.run(seq, Model, SlowAdapter)
     elapsed = System.monotonic_time(:millisecond) - start
 
     refute result.success
@@ -155,7 +156,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
   test "a fast adapter is unaffected by the timeout" do
     seq = Sequence.linear([%Cmd{value: 1}])
 
-    {:ok, result} = Executor.run(seq, Model, FastAdapter)
+    {:ok, result} = StepRun.run(seq, Model, FastAdapter)
 
     assert result.success
   end
@@ -185,7 +186,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     run_pid = self()
     seq = Sequence.linear([%Cmd{value: 1}])
 
-    {:ok, result} = Executor.run(seq, Model, CallersAdapter, config: %{test_pid: run_pid})
+    {:ok, result} = StepRun.run(seq, Model, CallersAdapter, config: %{test_pid: run_pid})
 
     assert result.success
     assert_received {:callers, callers}

@@ -7,7 +7,8 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Failure, Sequence}
+  alias PropertyDamage.{Failure, Sequence}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Cmd do
     use PropertyDamage.Command
@@ -122,7 +123,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
   defp run(model, behaviour) do
     seq = Sequence.linear([%Cmd{tag: :x}])
-    Executor.run(seq, model, Adversary, config: %{behaviour: behaviour})
+    StepRun.run(seq, model, Adversary, config: %{behaviour: behaviour})
   end
 
   test "a raising adapter becomes a graceful adapter_error, not a crash" do
@@ -233,7 +234,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     seq = Sequence.linear([%Cmd{tag: :x}])
 
     assert_raise ArgumentError, ~r/command specs for model/, fn ->
-      Executor.run(seq, BadCommandSpecModel, Adversary, config: %{behaviour: :ok})
+      StepRun.run(seq, BadCommandSpecModel, Adversary, config: %{behaviour: :ok})
     end
   end
 

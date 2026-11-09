@@ -11,7 +11,8 @@ defmodule PropertyDamage.ExecutorTest do
     FailingModel,
     SimpleAdapter,
     SimpleInjectorAdapter,
-    SimpleModel
+    SimpleModel,
+    StepRun
   }
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
@@ -20,7 +21,7 @@ defmodule PropertyDamage.ExecutorTest do
 
   describe "run/4 with empty sequence" do
     test "succeeds with empty command list" do
-      {:ok, result} = Executor.run([], ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run([], ExecutorModel, SimpleAdapter)
 
       assert result.success == true
       assert result.event_log == []
@@ -29,7 +30,7 @@ defmodule PropertyDamage.ExecutorTest do
     end
 
     test "initializes projections" do
-      {:ok, result} = Executor.run([], ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run([], ExecutorModel, SimpleAdapter)
 
       assert Map.has_key?(result.projections, ModelState)
       assert result.projections[ModelState] == ModelState.init()
@@ -40,7 +41,7 @@ defmodule PropertyDamage.ExecutorTest do
     test "executes command and records events" do
       command = %CreateItem{name: "Widget", quantity: 10}
 
-      {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run([command], ExecutorModel, SimpleAdapter)
 
       assert result.success == true
       assert length(result.event_log) == 1
@@ -54,7 +55,7 @@ defmodule PropertyDamage.ExecutorTest do
     test "updates projections with command and events" do
       command = %CreateItem{name: "Widget", quantity: 10}
 
-      {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run([command], ExecutorModel, SimpleAdapter)
 
       # ModelState should have the item
       model_state = result.projections[ModelState]
@@ -70,7 +71,7 @@ defmodule PropertyDamage.ExecutorTest do
       create_cmd = %CreateItem{name: "Test", quantity: 5}
 
       result =
-        Executor.execute_sequence(
+        StepRun.run_in_context(
           [create_cmd],
           SimpleModel,
           SimpleAdapter,
@@ -90,7 +91,7 @@ defmodule PropertyDamage.ExecutorTest do
       ph = Placeholder.new_at(ItemCreated, [:item_ref], Position.prefix(0), 0)
       command = %ViewItem{item_ref: ph}
 
-      {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run([command], ExecutorModel, SimpleAdapter)
 
       assert result.success == false
       assert Failure.kind(result.failure_reason) == :placeholder_resolution
@@ -105,7 +106,7 @@ defmodule PropertyDamage.ExecutorTest do
         %CreateItem{name: "Third", quantity: 3}
       ]
 
-      {:ok, result} = Executor.run(commands, ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, ExecutorModel, SimpleAdapter)
 
       assert result.success == true
       assert length(result.event_log) == 3
@@ -121,7 +122,7 @@ defmodule PropertyDamage.ExecutorTest do
         %CreateItem{name: "B", quantity: 2}
       ]
 
-      {:ok, result} = Executor.run(commands, ExecutorModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, ExecutorModel, SimpleAdapter)
 
       indices = Enum.map(result.event_log, & &1.command_index)
       assert indices == [0, 1]
@@ -135,7 +136,7 @@ defmodule PropertyDamage.ExecutorTest do
         %CreateItem{name: "Big", quantity: 101}
       ]
 
-      {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == false
       assert result.failed_at_index == 0
@@ -150,7 +151,7 @@ defmodule PropertyDamage.ExecutorTest do
         %CreateItem{name: "Medium", quantity: 30}
       ]
 
-      {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == true
       assert length(result.event_log) == 2
@@ -159,7 +160,7 @@ defmodule PropertyDamage.ExecutorTest do
     test "captures failure reason" do
       commands = [%CreateItem{name: "Huge", quantity: 150}]
 
-      {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
+      {:ok, result} = StepRun.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == false
 
@@ -188,7 +189,7 @@ defmodule PropertyDamage.ExecutorTest do
       ]
 
       {:ok, result} =
-        Executor.run(commands, FailingModel, SimpleAdapter, check_mode: :record)
+        StepRun.run(commands, FailingModel, SimpleAdapter, check_mode: :record)
 
       assert result.success == false
 
@@ -224,7 +225,7 @@ defmodule PropertyDamage.ExecutorTest do
     test "propagate through result" do
       command = %{fail: true}
 
-      {:ok, result} = Executor.run([command], ExecutorModel, ErrorAdapter)
+      {:ok, result} = StepRun.run([command], ExecutorModel, ErrorAdapter)
 
       assert result.success == false
 
@@ -241,7 +242,7 @@ defmodule PropertyDamage.ExecutorTest do
       # Push an event to queue before execution
       EventQueue.push(queue, SimpleInjectorAdapter, %ItemViewed{item_ref: "injected"})
 
-      {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter, event_queue: queue)
+      {:ok, result} = StepRun.run([command], ExecutorModel, SimpleAdapter, event_queue: queue)
 
       # Should have both command event and injector event
       assert length(result.event_log) == 2
@@ -260,7 +261,7 @@ defmodule PropertyDamage.ExecutorTest do
 
       EventQueue.push(queue, SimpleInjectorAdapter, %ItemViewed{item_ref: "test"})
 
-      {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter, event_queue: queue)
+      {:ok, result} = StepRun.run([command], ExecutorModel, SimpleAdapter, event_queue: queue)
 
       # ModelState should have view_count incremented from injector event
       model_state = result.projections[ModelState]
@@ -273,7 +274,7 @@ defmodule PropertyDamage.ExecutorTest do
   describe "event log entries" do
     test "command events have correct source" do
       {:ok, result} =
-        Executor.run([%CreateItem{name: "Test", quantity: 1}], ExecutorModel, SimpleAdapter)
+        StepRun.run([%CreateItem{name: "Test", quantity: 1}], ExecutorModel, SimpleAdapter)
 
       [entry] = result.event_log
       assert entry.source == :command
@@ -282,7 +283,7 @@ defmodule PropertyDamage.ExecutorTest do
 
     test "entries have timestamps" do
       {:ok, result} =
-        Executor.run([%CreateItem{name: "Test", quantity: 1}], ExecutorModel, SimpleAdapter)
+        StepRun.run([%CreateItem{name: "Test", quantity: 1}], ExecutorModel, SimpleAdapter)
 
       [entry] = result.event_log
       assert is_integer(entry.timestamp)

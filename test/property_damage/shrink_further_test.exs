@@ -6,7 +6,9 @@ defmodule PropertyDamage.ShrinkFurtherTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   # A counter whose invariant fails once the count reaches 3. Each Bump adds 1,
   # so the minimal reproduction is exactly 3 Bumps; anything longer is reducible.
@@ -99,7 +101,7 @@ defmodule PropertyDamage.ShrinkFurtherTest do
   end
 
   # Like FailingAdapter, but its setup/1 fails when asked to, so the report's
-  # re-execution path in shrink_further exercises the Executor.run error branch.
+  # re-execution path in shrink_further exercises the stepping run error branch.
   defmodule SetupGuardAdapter do
     @moduledoc false
     use PropertyDamage.Adapter
@@ -117,7 +119,7 @@ defmodule PropertyDamage.ShrinkFurtherTest do
 
   defp report_of_length(length, overrides \\ []) do
     sequence = Sequence.linear(List.duplicate(%Bump{}, length))
-    {:ok, result} = Executor.run(sequence, FailingModel, FailingAdapter, [])
+    {:ok, result} = StepRun.run(sequence, FailingModel, FailingAdapter, [])
 
     FailureReport.new(
       [

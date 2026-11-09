@@ -19,7 +19,7 @@ defmodule PropertyDamage.Variant do
       {:ok, [{0, observation}]} = Variant.advance_to(pid, 0)
       {:ok, observations} = Variant.advance_to(pid, 3)    # resumes at index 1
       state = Variant.snapshot(pid)
-      result = Variant.finish(pid)                         # what Executor.run/4 reports
+      result = Variant.finish(pid)                         # the run's result map
       {:ok, _entries} = Variant.run_teardown(pid)          # the teardown commands
       {:ok, _logs} = Variant.release(pid)                  # teardown/1, the log lines
       :ok = Variant.stop(pid)
@@ -38,8 +38,7 @@ defmodule PropertyDamage.Variant do
   rule: every `external()` a setup command produces must be resolved in this
   variant's registry. `run_teardown/1` steps the teardown commands
   (`:teardown_commands`) through `Stepping.step_teardown/4` once. Every other path
-  that executes a run (`PropertyDamage.Executor.run/4`,
-  `PropertyDamage.Replay`) runs both phases the same way. `stop/1`
+  that executes a run (`PropertyDamage.Replay`) runs both phases the same way. `stop/1`
   runs them first when nobody did, so they run for every variant whose adapter
   `setup/1` succeeded, whatever happened after it, and never for one whose
   `setup/1` failed.
@@ -73,8 +72,8 @@ defmodule PropertyDamage.Variant do
 
   Setup runs the model's `@check at: :startup` checks after the adapter's
   `setup/1` and before command 0, as the linear engine does. A
-  one-variant run therefore folds the same events in the same order as
-  `PropertyDamage.Executor.run/4` on the same sequence.
+  one-variant run therefore folds the same events in the same order as the
+  linear engine on the same sequence.
 
   ## Telemetry
 
@@ -128,7 +127,7 @@ defmodule PropertyDamage.Variant do
 
   After a failure the variant steps nothing more: every later `advance_to/2`
   returns the same `{:failed, failure}`, and `finish/1` reports the failed run
-  as `Executor.run/4` would. A run that goes on without the failed variant
+  as a one-target run would. A run that goes on without the failed variant
   calls `retire/1` instead of `finish/1`.
   """
 
@@ -326,7 +325,7 @@ defmodule PropertyDamage.Variant do
 
   @doc """
   Finalize the run in the variant process and return the result
-  `PropertyDamage.Executor.run/4` reports for it (see `Stepping.finalize/2`).
+  of the run (see `Stepping.finalize/2`).
 
   Calling it again returns the same result.
   """
@@ -339,7 +338,7 @@ defmodule PropertyDamage.Variant do
   Finalizes the failed run as `finish/1` does, which stops every poller the
   variant started, then runs the model's `@check at: :teardown` checks on the
   failed state. A run that ends with its failure skips those checks, as
-  `PropertyDamage.Executor.run/4` does; a retired variant runs them, because
+  a one-target run does; a retired variant runs them, because
   it leaves while the system keeps being exercised by the other targets.
   Call `stop/1` afterwards to tear the adapter down.
 

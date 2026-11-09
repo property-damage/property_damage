@@ -2,7 +2,7 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
   @moduledoc """
   Integration coverage for the executor surface: stutter (idempotency
   retries), resource pollers (@eventually eventual consistency), and
-  mid-execution event injection ("mocks") all in a SINGLE Executor.run
+  mid-execution event injection ("mocks") all in a SINGLE StepRun.run
   sequence sharing one event log, projection set, and run loop. Each mechanism is tested in isolation elsewhere; this asserts they
   compose without interfering.
 
@@ -12,8 +12,9 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Sequence}
+  alias PropertyDamage.{EventQueue, Sequence}
   alias PropertyDamage.Stutter.Config
+  alias PropertyDamage.Test.StepRun
 
   defmodule Events do
     defmodule Initiated, do: defstruct([:id])
@@ -139,7 +140,7 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     result =
       try do
         {:ok, result} =
-          Executor.run(sequence, Model, Adapter,
+          StepRun.run(sequence, Model, Adapter,
             event_queue: queue,
             stutter_config: stutter_config,
             config: %{charge_counter: charge_counter}

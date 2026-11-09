@@ -12,8 +12,10 @@ defmodule PropertyDamage.Execute3RuntimeTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Sequence}
+  alias PropertyDamage.Sequence
+
   alias PropertyDamage.LoadTest.{Metrics, Worker}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Cmd do
     defstruct [:value]
@@ -67,7 +69,7 @@ defmodule PropertyDamage.Execute3RuntimeTest do
       seq = Sequence.linear([%Cmd{value: 1}])
 
       {:ok, _result} =
-        Executor.run(seq, Model, PurityAdapter, config: %{test_pid: self()})
+        StepRun.run(seq, Model, PurityAdapter, config: %{test_pid: self()})
 
       assert_received {:user_context, user_context}
       assert user_context == %{marker: :only_mine, test_pid: self()}

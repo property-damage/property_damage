@@ -13,8 +13,10 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence}
+  alias PropertyDamage.{EventQueue, Failure, Sequence}
+
   alias PropertyDamage.Test.ShrinkSupport
+  alias PropertyDamage.Test.StepRun
 
   defmodule Bumped, do: defstruct([])
 
@@ -95,7 +97,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     {:ok, queue} = EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue)
+      StepRun.run(seq, model, adapter, event_queue: queue)
     after
       EventQueue.stop(queue)
     end
@@ -210,7 +212,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     {:ok, queue} = EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue, check_mode: mode)
+      StepRun.run(seq, model, adapter, event_queue: queue, check_mode: mode)
     after
       EventQueue.stop(queue)
     end

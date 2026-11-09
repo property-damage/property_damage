@@ -6,7 +6,9 @@ defmodule PropertyDamage.EventuallyVerdictTest do
   # and the exception. Neither waits out the window or reports a timeout.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{CheckFailed, ErrorOrigin, Executor, Failure, FailureReport}
+  alias PropertyDamage.{CheckFailed, ErrorOrigin, Failure, FailureReport}
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule PaymentInitiated, do: defstruct([:id])
 
@@ -93,7 +95,7 @@ defmodule PropertyDamage.EventuallyVerdictTest do
     started = System.monotonic_time(:millisecond)
 
     try do
-      {:ok, result} = Executor.run(seq, model, Adapter, [event_queue: queue] ++ opts)
+      {:ok, result} = StepRun.run(seq, model, Adapter, [event_queue: queue] ++ opts)
       {result, System.monotonic_time(:millisecond) - started}
     after
       PropertyDamage.EventQueue.stop(queue)

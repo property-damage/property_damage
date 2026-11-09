@@ -19,14 +19,14 @@ defmodule PropertyDamage.ExecutorSettledTest do
 
   import ExUnit.CaptureLog
 
-  alias PropertyDamage.{EventQueue, Executor, Failure}
+  alias PropertyDamage.{EventQueue, Failure}
 
   # credo's AliasOrder sorts a multi-alias by its first member, so
   # PropertyDamage.Test.{FailingModel, ...} sorts as ...Test.FailingModel and
   # belongs between Test.Events and Test.Projections.
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter}
+  alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter, StepRun}
   alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   # A probe command that settles after two {:retry, _} attempts. It carries the
@@ -158,7 +158,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
   describe "a command with a partial settle map" do
     test "settles with the default interval and backoff for the omitted keys" do
       {:ok, result} =
-        Executor.run(
+        StepRun.run(
           [%PartialSettleCreate{name: "Widget", quantity: 1}],
           PartialSettleModel,
           PartialSettleAdapter
@@ -173,7 +173,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     test "a probe command that settles records its event and updates projections" do
       command = %SettledCreate{name: "Widget", quantity: 10}
 
-      {:ok, result} = Executor.run([command], SettledModel, RetryThenSettleAdapter)
+      {:ok, result} = StepRun.run([command], SettledModel, RetryThenSettleAdapter)
 
       assert result.success == true
       assert result.failure_reason == nil
@@ -195,7 +195,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     test "a settled event that trips an every: check fails identically to the sync path" do
       # Sync equivalent: CreateItem over the same limit fails with this shape.
       {:ok, sync_result} =
-        Executor.run([%CreateItem{name: "Big", quantity: 150}], FailingModel, SimpleAdapter)
+        StepRun.run([%CreateItem{name: "Big", quantity: 150}], FailingModel, SimpleAdapter)
 
       assert sync_result.success == false
 
@@ -212,7 +212,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
       # Settled path: the probe command's settled event drives the same
       # @check every: 1 check and must produce the same failure_reason shape.
       {:ok, settled_result} =
-        Executor.run(
+        StepRun.run(
           [%SettledCreate{name: "Big", quantity: 150}],
           SettledModel,
           RetryThenSettleAdapter
@@ -243,7 +243,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
       EventQueue.push(queue, SimpleInjectorAdapter, %ItemViewed{item_ref: "injected"})
 
       {:ok, result} =
-        Executor.run(
+        StepRun.run(
           [%SettledCreate{name: "Widget", quantity: 5}],
           SettledModel,
           RetryThenSettleAdapter,
@@ -269,7 +269,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
   describe "check_mode: :record (end-to-end)" do
     test "a check failure is recorded, the run completes, and success is false" do
       {:ok, result} =
-        Executor.run(
+        StepRun.run(
           [%CreateItem{name: "Huge", quantity: 150}],
           FailingModel,
           SimpleAdapter,
@@ -296,7 +296,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
       {result, log} =
         with_log(fn ->
           {:ok, result} =
-            Executor.run(
+            StepRun.run(
               [%CreateItem{name: "Huge", quantity: 150}],
               FailingModel,
               SimpleAdapter,

@@ -366,7 +366,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Stepping Outcome, Drain and Finalize (DR-044)
 
-`PropertyDamage.Executor.Stepping.step/4` SHALL execute exactly one command and return `{:ok, state, outcome}` or `{:error, %PropertyDamage.Failure{}, failed_state, outcome}`. `outcome` SHALL be the raw answer to the command: `{:ok, events}` (for a `:probe` or `:async` command, the settled events), `{:error, reason}` (the adapter's own error term), `{:raised, exception}` (`execute/3` raised) or `:not_called` (a placeholder in the command could not be resolved). `Stepping.drain/2` SHALL fold the events waiting in the context's event queue into the state and return `{:ok, state}` or `{:error, %PropertyDamage.Failure{}, failed_state}`. `Stepping.finalize/2` SHALL take the last state, or `{:failed, index, %PropertyDamage.Failure{}, failed_state}`, restore the faults still active, finalize the run as `PropertyDamage.Executor.run/4` does, and return the result map `Executor.run/4` reports.
+`PropertyDamage.Executor.Stepping.step/4` SHALL execute exactly one command and return `{:ok, state, outcome}` or `{:error, %PropertyDamage.Failure{}, failed_state, outcome}`. `outcome` SHALL be the raw answer to the command: `{:ok, events}` (for a `:probe` or `:async` command, the settled events), `{:error, reason}` (the adapter's own error term), `{:raised, exception}` (`execute/3` raised) or `:not_called` (a placeholder in the command could not be resolved). `Stepping.drain/2` SHALL fold the events waiting in the context's event queue into the state and return `{:ok, state}` or `{:error, %PropertyDamage.Failure{}, failed_state}`. `Stepping.finalize/2` SHALL take the last state, or `{:failed, index, %PropertyDamage.Failure{}, failed_state}`, restore the faults still active, finalize the run, and return the result map of the run.
 
 #### Scenario: Outcome of a returned error
 
@@ -395,7 +395,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 - **WHEN** `finalize/2` is called on the state of a clean stepped run
 - **THEN** it SHALL await the `@eventually` pollers, settle the queue, evaluate `@check at: :teardown` checks and stop every poller
-- **AND** SHALL return the result map that `Executor.run/4` returns for the same sequence
+- **AND** SHALL return the result map of the run
 
 ### Requirement: Variant Process (DR-044)
 
@@ -590,7 +590,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 ### Requirement: Every Run Driver Goes Through the Runner (DR-065)
 
-Every execution of a plan SHALL go through `PropertyDamage.Runner.execute/2`: a campaign run, the reproduction of a failure, `PropertyDamage.RunTrace.Capture.capture/1` and `PropertyDamage.Analysis.isolate_trigger/2`. The runner SHALL drain the event queue after every root, so every one of them folds the events that arrive at a boundary. `PropertyDamage.Executor.run/4` SHALL NOT be how a run executes; it is the one-target path without the per-root drain. The shrinker's candidate runs are not covered until they move to the runner.
+Every execution of a plan SHALL go through `PropertyDamage.Runner.execute/2`: a campaign run, the reproduction of a failure, `PropertyDamage.RunTrace.Capture.capture/1` and `PropertyDamage.Analysis.isolate_trigger/2`. The runner SHALL drain the event queue after every root, so every one of them folds the events that arrive at a boundary. The shrinker's candidate runs are not covered until they move to the runner.
 
 #### Scenario: A trace records the events of the run it explains
 - **GIVEN** a target whose injector pushes an event after each command step

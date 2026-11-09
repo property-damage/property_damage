@@ -6,7 +6,9 @@ defmodule PropertyDamage.EventuallyReturnTest do
   # BadFunctionError on every poll.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Failure}
+  alias PropertyDamage.Failure
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule PaymentInitiated, do: defstruct([:id])
 
@@ -61,7 +63,7 @@ defmodule PropertyDamage.EventuallyReturnTest do
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
 
     try do
-      Executor.run(seq, Model, Adapter, [event_queue: queue] ++ opts)
+      StepRun.run(seq, Model, Adapter, [event_queue: queue] ++ opts)
     after
       PropertyDamage.EventQueue.stop(queue)
     end

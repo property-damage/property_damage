@@ -130,14 +130,15 @@ defmodule PropertyDamage.EngineTelemetryTest do
 
   # A command's `index` counts across the whole run.
   describe "command index" do
-    alias PropertyDamage.{Executor, Sequence}
+    alias PropertyDamage.Sequence
     alias PropertyDamage.Test.Lockstep.Step
+    alias PropertyDamage.Test.StepRun
 
     defp indices(sequence, name) do
       context = PropertyDamage.Telemetry.engine_context(%{index: 0, name: name}, 0)
 
       assert {:ok, %{success: true}} =
-               Executor.run(sequence, StepModel, StepAdapter,
+               StepRun.run(sequence, StepModel, StepAdapter,
                  config: %{name: name},
                  telemetry: context
                )

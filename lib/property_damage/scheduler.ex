@@ -207,8 +207,8 @@ defmodule PropertyDamage.Scheduler do
   The outcome of one run. `results` and `latencies` hold one entry per target
   in target order (none when the reference's `setup/1` failed; a `nil` result
   and no latencies for another target whose `setup/1` failed). Each result is what
-  `PropertyDamage.Executor.run/4` reports for that target's run; a retired
-  target's is the result it had when it left the run. A result's `logs` hold
+  `PropertyDamage.Executor.Stepping.finalize/2` reports for that target's
+  run; a retired target's is the result it had when it left the run. A result's `logs` hold
   every log line the target's user code wrote (DR-054), its adapter's
   `setup/1` and `teardown/1` included. `failure` is the
   primary failure and `other_failures` the run's other failures, in root

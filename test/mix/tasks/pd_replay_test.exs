@@ -6,7 +6,8 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pd.Replay
-  alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.Test.StepRun
   alias PropertyDamage.Test.TmpPath
 
   # Success paths and decision logic are exercised through `exec/1`, the
@@ -129,7 +130,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   # naming `model`/`adapter`, and save it to `dir`. Returns the file path.
   defp save_failure(dir, model, adapter) do
     sequence = Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
-    {:ok, result} = Executor.run(sequence, FailingModel, FailingAdapter, [])
+    {:ok, result} = StepRun.run(sequence, FailingModel, FailingAdapter, [])
 
     failure =
       FailureReport.new(

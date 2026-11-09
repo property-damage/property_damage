@@ -18,9 +18,11 @@ defmodule PropertyDamage.StutterShrinkTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Failure, Sequence}
+  alias PropertyDamage.{Failure, Sequence}
+
   alias PropertyDamage.Stutter.Config
   alias PropertyDamage.Test.ShrinkSupport
+  alias PropertyDamage.Test.StepRun
 
   # --- Commands ---------------------------------------------------------------
 
@@ -102,7 +104,7 @@ defmodule PropertyDamage.StutterShrinkTest do
     sequence = Sequence.linear(commands)
 
     {:ok, result} =
-      Executor.run(sequence, Model, Adapter,
+      StepRun.run(sequence, Model, Adapter,
         stutter_config: @stutter,
         rng_seed: rng_seed
       )
