@@ -875,7 +875,8 @@ defmodule PropertyDamage.Expansion do
       commands: Enum.map(done, & &1.command),
       leaves?: true,
       seed_key: seed_key(walk.run_seed, name, base.root_id),
-      aliases: Map.new(aliases, fn {root, leaf} -> {root.id, leaf.id} end),
+      aliases:
+        Map.new(aliases, fn {root, leaf} -> {Placeholder.id(root), Placeholder.id(leaf)} end),
       fields:
         done
         |> Enum.with_index()
@@ -1094,7 +1095,8 @@ defmodule PropertyDamage.Expansion do
           commands: Enum.map(done, & &1.command),
           leaves?: true,
           seed_key: seed_key,
-          aliases: Map.new(aliases, fn {root, leaf} -> {root.id, leaf.id} end),
+          aliases:
+            Map.new(aliases, fn {root, leaf} -> {Placeholder.id(root), Placeholder.id(leaf)} end),
           generated: generated
         }
 
@@ -1294,7 +1296,11 @@ defmodule PropertyDamage.Expansion do
 
   defp alias_leaf!(base, key, done, minted, root) do
     candidates =
-      Enum.filter(minted, &(&1.event_module == root.event_module and &1.path == root.path))
+      Enum.filter(
+        minted,
+        &(Placeholder.event_module(&1) == Placeholder.event_module(root) and
+            Placeholder.path(&1) == Placeholder.path(root))
+      )
 
     case candidates do
       [leaf] ->
@@ -1302,7 +1308,9 @@ defmodule PropertyDamage.Expansion do
 
       _zero_or_several ->
         produced =
-          Enum.map_join(candidates, ", ", fn %{position: %{offset: leaf}, event_index: event} ->
+          Enum.map_join(candidates, ", ", fn candidate ->
+            leaf = Placeholder.position(candidate).offset
+            event = Placeholder.event_index(candidate)
             "leaf #{leaf} (#{short(Enum.at(done, leaf).command.__struct__)}) event #{event}"
           end)
 
@@ -1310,8 +1318,8 @@ defmodule PropertyDamage.Expansion do
 
         raise ArgumentError,
               "expansions/0: #{key} (#{inspect(base.root_command.__struct__)}, root " <>
-                "#{base.root}) must produce the root's external() field #{inspect(root.path)} " <>
-                "of #{inspect(root.event_module)} from exactly one leaf event, so later " <>
+                "#{base.root}) must produce the root's external() field #{inspect(Placeholder.path(root))} " <>
+                "of #{inspect(Placeholder.event_module(root))} from exactly one leaf event, so later " <>
                 "commands can use it; " <>
                 if(candidates == [],
                   do: "no leaf of [#{leaves}] produces it",
@@ -1330,7 +1338,7 @@ defmodule PropertyDamage.Expansion do
   defp as_root_state(_walk, _base, _done, [], state), do: state
 
   defp as_root_state(walk, base, done, aliases, _state) do
-    roots = Map.new(aliases, fn {root, leaf} -> {leaf.id, root} end)
+    roots = Map.new(aliases, fn {root, leaf} -> {Placeholder.id(leaf), root} end)
 
     Enum.reduce(done, base.state, fn %{command: command, events: events}, state ->
       Generator.fold_step(
@@ -1342,7 +1350,8 @@ defmodule PropertyDamage.Expansion do
     end)
   end
 
-  defp as_root(%Placeholder{id: id} = placeholder, roots), do: Map.get(roots, id, placeholder)
+  defp as_root(%Placeholder{} = placeholder, roots),
+    do: Map.get(roots, Placeholder.id(placeholder), placeholder)
 
   defp as_root(%module{} = struct, roots) do
     struct

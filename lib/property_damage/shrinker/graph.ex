@@ -112,7 +112,7 @@ defmodule PropertyDamage.Shrinker.Graph do
       placeholders = collect_placeholders(command)
 
       Enum.reduce(placeholders, prods, fn %Placeholder{} = p, acc ->
-        Map.put(acc, {:placeholder, p.id}, placeholder_producer_index(p))
+        Map.put(acc, {:placeholder, Placeholder.id(p)}, placeholder_producer_index(p))
       end)
     end)
   end
@@ -120,10 +120,12 @@ defmodule PropertyDamage.Shrinker.Graph do
   # The producing command's index for a placeholder, in the linear command-list
   # index space the graph uses. Non-prefix positions have no producer in this
   # space (nil → no dependency edge).
-  defp placeholder_producer_index(%Placeholder{position: %Position{section: :prefix, offset: i}}),
-    do: i
-
-  defp placeholder_producer_index(%Placeholder{}), do: nil
+  defp placeholder_producer_index(%Placeholder{} = p) do
+    case Placeholder.position(p) do
+      %Position{section: :prefix, offset: i} -> i
+      _other -> nil
+    end
+  end
 
   # Collect all Placeholder structs from a data structure
   defp collect_placeholders(data), do: do_collect_placeholders(data, [])
@@ -273,7 +275,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   end
 
   # Collect placeholder dependencies - use the placeholder's id as the dependency key
-  defp collect_deps(%Placeholder{id: id}, acc), do: [{:placeholder, id} | acc]
+  defp collect_deps(%Placeholder{} = p, acc), do: [{:placeholder, Placeholder.id(p)} | acc]
 
   # Skip other structs (like DateTime) - they don't contain placeholders
   defp collect_deps(%{__struct__: _}, acc), do: acc

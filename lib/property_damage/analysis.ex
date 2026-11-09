@@ -264,9 +264,9 @@ defmodule PropertyDamage.Analysis do
     |> Map.new()
   end
 
-  defp placeholder_label(%Placeholder{path: path, position: position}) do
-    path_str = Enum.map_join(path, ".", &to_string/1)
-    "placeholder:#{path_str}@#{inspect(position)}"
+  defp placeholder_label(%Placeholder{} = placeholder) do
+    path_str = Enum.map_join(Placeholder.path(placeholder), ".", &to_string/1)
+    "placeholder:#{path_str}@#{inspect(Placeholder.position(placeholder))}"
   end
 
   defp format_placeholders(placeholders) when map_size(placeholders) == 0, do: nil

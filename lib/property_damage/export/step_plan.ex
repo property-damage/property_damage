@@ -284,7 +284,7 @@ defmodule PropertyDamage.Export.StepPlan do
   # recursing into lists and plain maps so nested placeholders resolve too.
   # Non-placeholder structs and scalars are left untouched for the target to
   # render as it always has.
-  defp tag(%Placeholder{} = ph, var_map), do: %Var{name: Map.fetch!(var_map, ph.id)}
+  defp tag(%Placeholder{} = ph, var_map), do: %Var{name: Map.fetch!(var_map, Placeholder.id(ph))}
   defp tag(value, var_map) when is_list(value), do: Enum.map(value, &tag(&1, var_map))
   defp tag(%_{} = struct, _var_map), do: struct
 
@@ -297,7 +297,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp producer_bindings(extractions, key) do
     extractions
     |> Map.get(key, [])
-    |> Enum.map(fn {%Placeholder{path: path}, var} -> {path, var} end)
+    |> Enum.map(fn {ph, var} -> {Placeholder.path(ph), var} end)
   end
 
   # The position the step's command had when the sequence was generated,
@@ -346,7 +346,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp placeholder_bindings(commands) do
     commands
     |> Enum.flat_map(&collect_placeholders/1)
-    |> Enum.uniq_by(& &1.id)
+    |> Enum.uniq_by(&Placeholder.id/1)
     |> Enum.map(&{&1, placeholder_var(&1)})
   end
 
@@ -355,7 +355,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp placeholder_var_map(commands) do
     commands
     |> placeholder_bindings()
-    |> Map.new(fn {ph, name} -> {ph.id, name} end)
+    |> Map.new(fn {ph, name} -> {Placeholder.id(ph), name} end)
   end
 
   # Map from a producing command's position to the `[{placeholder,
@@ -372,10 +372,10 @@ defmodule PropertyDamage.Export.StepPlan do
     |> placeholder_bindings()
     |> Enum.flat_map(fn {ph, _name} = binding ->
       position =
-        case Map.fetch(producers, ph.id) do
+        case Map.fetch(producers, Placeholder.id(ph)) do
           {:ok, {:alias, leaf_id}} -> Placeholder.id_position(leaf_id)
           {:ok, {:at, position}} -> position
-          :error -> ph.position
+          :error -> Placeholder.position(ph)
         end
 
       case position do
@@ -392,7 +392,10 @@ defmodule PropertyDamage.Export.StepPlan do
     |> Enum.group_by(fn {key, _binding} -> key end, fn {_key, binding} -> binding end)
   end
 
-  defp placeholder_var(%Placeholder{event_module: mod, path: path, position: position}) do
+  defp placeholder_var(%Placeholder{} = ph) do
+    mod = Placeholder.event_module(ph)
+    path = Placeholder.path(ph)
+    position = Placeholder.position(ph)
     module_part = mod |> Module.split() |> List.last() |> to_string()
     path_part = Enum.map_join(path, "_", &to_string/1)
     idx_part = position_suffix(position)

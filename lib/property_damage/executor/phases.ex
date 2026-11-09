@@ -176,8 +176,8 @@ defmodule PropertyDamage.Executor.Phases do
         registry ->
           registry
           |> PlaceholderRegistry.unresolved()
-          |> Enum.filter(&match?(%Position{section: :setup}, &1.position))
-          |> Enum.sort_by(&{&1.position.offset, &1.event_index, &1.path})
+          |> Enum.filter(&match?(%Position{section: :setup}, Placeholder.position(&1)))
+          |> Enum.sort_by(&setup_order/1)
       end
 
     case unresolved do
@@ -189,14 +189,18 @@ defmodule PropertyDamage.Executor.Phases do
     end
   end
 
-  defp unresolved_failure(
-         commands,
-         %Placeholder{position: %Position{offset: offset}} = placeholder
-       ) do
+  defp setup_order(placeholder) do
+    {Placeholder.position(placeholder).offset, Placeholder.event_index(placeholder),
+     Placeholder.path(placeholder)}
+  end
+
+  defp unresolved_failure(commands, %Placeholder{} = placeholder) do
+    %Position{offset: offset} = Placeholder.position(placeholder)
+
     Failure.setup_failed(:unresolved_placeholder,
       command: command_at(commands, offset),
       setup_index: offset,
-      field: placeholder.path,
+      field: Placeholder.path(placeholder),
       detail: placeholder
     )
   end
@@ -210,14 +214,18 @@ defmodule PropertyDamage.Executor.Phases do
     |> placeholder_ids()
     |> Enum.map(&PlaceholderRegistry.get(registry, &1))
     |> Enum.filter(fn
-      %Placeholder{position: %Position{section: :setup}} = p -> not Placeholder.resolved?(p)
-      _other -> false
+      %Placeholder{} = p ->
+        match?(%Position{section: :setup}, Placeholder.position(p)) and
+          not Placeholder.resolved?(p)
+
+      _other ->
+        false
     end)
-    |> Enum.sort_by(&{&1.position.offset, &1.event_index, &1.path})
+    |> Enum.sort_by(&setup_order/1)
     |> List.first()
   end
 
-  defp placeholder_ids(%Placeholder{id: id}), do: [id]
+  defp placeholder_ids(%Placeholder{} = p), do: [Placeholder.id(p)]
 
   defp placeholder_ids(%{__struct__: _} = struct),
     do: struct |> Map.from_struct() |> placeholder_ids()
