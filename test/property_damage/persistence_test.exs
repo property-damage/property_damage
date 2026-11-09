@@ -389,6 +389,21 @@ defmodule PropertyDamage.PersistenceTest do
     end
   end
 
+  describe "list/2 over a directory with an unreadable file" do
+    @tag :tmp_dir
+    test "lists the loadable report and the unreadable file, whatever the sort", %{tmp_dir: dir} do
+      {:ok, saved} = Persistence.save(create_test_report(), dir)
+      File.write!(Path.join(dir, "older.pd"), <<"PD", 3, 0::32, "old payload">>)
+
+      for sort <- [:newest, :oldest, :seed] do
+        assert [loadable, unreadable] = Persistence.list(dir, sort: sort)
+        assert loadable.path == saved
+        assert unreadable.filename == "older.pd"
+        assert unreadable.error == :unreadable
+      end
+    end
+  end
+
   describe "capture_dependency_versions/1" do
     test "captures versions from command structs" do
       report = create_test_report()
