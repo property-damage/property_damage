@@ -641,6 +641,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `Executor.Stepping.step_leaf/4` takes the leaf step as one
+  `{command, position}` pair.** The leaf's command and its `Position.leaf/2`
+  position were two arguments, so the function took five. The pair is the
+  shape `Expansion.steps/1` yields: call
+  `Stepping.step_leaf({command, position}, index, state, ctx)`.
+- **The executor's step primitives live in `PropertyDamage.Executor.Step`.**
+  Command execution, the step checks, the async checks, the `@check at:`
+  phase checks, poller start and refresh, placeholder resolution and the
+  runtime handle of a path with no injection window moved out of
+  `PropertyDamage.Executor`, whose stepping, finalization, phase and stutter
+  modules called back into it. Each primitive takes the command or index, the
+  executor state, the `Stepping.Context` and one keyword of options.
+  `Stepping.Context` moved to a file of its own; its name is unchanged.
 - **Breaking: `Shrinker.shrink/2` takes an oracle and runs no candidate
   itself.** A test of the shrinker needed a whole system to run, because the
   shrinker ran each candidate through the scheduler. Now it hands each

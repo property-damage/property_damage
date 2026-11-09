@@ -2,17 +2,17 @@ defmodule PropertyDamage.Executor.State do
   @moduledoc """
   Typed run-state for `PropertyDamage.Executor` (DR-029).
 
-  Built once per run by `Executor.build_initial_state/7` (and via `init_state/2`
-  for the `PropertyDamage.Replay` stepping shell), then threaded through the
+  Built once per run by `PropertyDamage.Executor.Step.new_state/2` (also through
+  `PropertyDamage.Executor.Stepping.init_state/2`), then threaded through the
   per-command engine and the finalize chain.
 
-  This replaces the former untyped flat map. With `Executor.put_state/2` rewritten
-  to `struct!/2` and the in-loop updates using struct-update syntax, a write to an
+  This replaces the former untyped flat map. With the step's state writes going
+  through `struct!/2` and the in-loop updates using struct-update syntax, a write to an
   **undeclared** field now raises instead of silently producing a corrupt
   struct-shaped map (`Map.merge/2` onto a struct does not raise). A field
   that previously existed only as a "ghost" (entering solely via `Map.put`
   writes and `Map.get(state, k, default)` reads, never initialized in
-  `build_initial_state/7`) is declared here with an explicit default:
+  `PropertyDamage.Executor.Step.new_state/2`) is declared here with an explicit default:
   `:async_halt`.
 
   ## Fields

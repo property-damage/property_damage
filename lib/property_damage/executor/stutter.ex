@@ -9,9 +9,8 @@ defmodule PropertyDamage.Executor.Stutter do
   # PropertyDamage.Stutter; this module is the execution glue (it drives
   # adapter.execute/3, records stutter entries, and reports violations).
   #
-  # `inject_unavailable_runtime/2` is shared with Executor.execute_raw/3 and stays
-  # in PropertyDamage.Executor; it is called back here (stutter retries run after
-  # the per-command injection window has closed).
+  # The retries' runtime is `Executor.Step.unavailable_runtime/2`: stutter
+  # retries run after the per-command injection window has closed.
   #
   # Stutter draws come from an explicit RNG (DR-029): a fresh generator state
   # derived per command from `{state.rng_seed, index}`. Keying on the command's
@@ -20,13 +19,15 @@ defmodule PropertyDamage.Executor.Stutter do
   # command's stutter decisions.
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor
-  alias PropertyDamage.Executor.Timeout
+  alias PropertyDamage.Executor.{Step, Timeout}
   alias PropertyDamage.Log.Cap
   alias PropertyDamage.Stutter
 
   @doc false
-  # Execute stutter retries after successful first execution.
+  # Execute stutter retries after a successful first execution of `command`,
+  # whose adapter answered `original_events`. `state` is the step's state after
+  # its checks: its event log, its last command index, the resolved command it
+  # executed and the step's log lines; `ctx` gives the adapter.
   # Returns {outcome, lines}: the outcome is {:ok, event_log} or
   # {:error, :idempotency_violation | :stutter_execution_failed, details}, and
   # the lines are the step's whole list of log lines (DR-054) once the retries
@@ -34,16 +35,10 @@ defmodule PropertyDamage.Executor.Stutter do
   # no retry ran. The retries are attempts of the same step: they continue the
   # step's kept lines under the same cap, so the step still holds the lines of
   # at most `keep_attempts + 1` attempts.
-  def maybe_execute_stutter_retries(
-        command,
-        resolved_command,
-        original_events,
-        index,
-        event_log,
-        state,
-        adapter,
-        adapter_context
-      ) do
+  def maybe_execute_stutter_retries(command, original_events, state, ctx) do
+    resolved_command = Map.fetch!(state.executed, state.current_position)
+    index = state.last_command_index
+    event_log = state.event_log
     stutter_config = Map.get(state, :stutter_config)
     rng = stutter_rng(Map.get(state, :rng_seed), index)
 
@@ -73,8 +68,8 @@ defmodule PropertyDamage.Executor.Stutter do
             index,
             event_log,
             stutter_config,
-            adapter,
-            adapter_context,
+            ctx.adapter,
+            ctx.adapter_context,
             {rng, sink}
           )
         end,
@@ -122,7 +117,7 @@ defmodule PropertyDamage.Executor.Stutter do
         stutter_ctx = Stutter.build_context(attempt, true, idempotency_key)
 
         runtime = %{
-          Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
+          Step.unavailable_runtime("during stutter retries", stutter: stutter_ctx)
           | log: PropertyDamage.Log.writer(sink, attempt)
         }
 

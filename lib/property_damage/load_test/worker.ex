@@ -438,7 +438,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
     # Fold the command AND all of its events into the projections BEFORE running
     # any check, mirroring the main Executor (which asserts against the
-    # post-events state; see Executor.run_checks, invoked with projections that
+    # post-events state; see Executor.Step.execute/4, which runs the step checks with projections that
     # already have both the command and its events applied). A command-level
     # `@check every: Cmd` therefore observes this command's own events — e.g. a
     # read-consistency check sees the value just retrieved. Folding events one at

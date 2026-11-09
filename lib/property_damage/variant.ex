@@ -29,7 +29,7 @@ defmodule PropertyDamage.Variant do
   state. "Boundary r" means "after root r". A root is one command, or, when
   the variant runs it as an expansion (`:roots`), the leaves of that
   expansion in order: each leaf is an executed command, stepped through
-  `Stepping.step_leaf/5`.
+  `Stepping.step_leaf/4`.
 
   ## Setup and teardown commands
 
@@ -148,7 +148,7 @@ defmodule PropertyDamage.Variant do
     Verdict
   }
 
-  alias PropertyDamage.Executor.{Phases, Stepping}
+  alias PropertyDamage.Executor.{Phases, Step, Stepping}
   alias PropertyDamage.Runtime.RunServices
 
   @setup_slot 1
@@ -729,7 +729,7 @@ defmodule PropertyDamage.Variant do
 
     state = %{state | ctx: setup_context(state, adapter_context)}
 
-    case Executor.run_startup_checks(exec) do
+    case Step.run_startup_checks(exec) do
       {:ok, exec} ->
         %{state | phase: :ready, exec: exec}
 
@@ -887,7 +887,7 @@ defmodule PropertyDamage.Variant do
     stepped =
       case position do
         nil -> Stepping.step(command, index, state.exec, state.ctx)
-        leaf -> Stepping.step_leaf(command, index, leaf, state.exec, state.ctx)
+        leaf -> Stepping.step_leaf({command, leaf}, index, state.exec, state.ctx)
       end
 
     state = record_latency(state, latency_key(index, position), stepped)
@@ -1147,7 +1147,7 @@ defmodule PropertyDamage.Variant do
   # The `@check at: :teardown` checks on a failed variant's state, as
   # `%Failure{}`s in check order.
   defp teardown_check_failures(exec) do
-    case Executor.run_phase_checks(exec, :teardown) do
+    case Step.run_phase_checks(exec, :teardown) do
       {:halt, name, projection, reason, _counters} ->
         [Failure.check_failed(name, reason, projection)]
 
@@ -1197,7 +1197,7 @@ defmodule PropertyDamage.Variant do
     if state.ctx do
       torn_down =
         timed(state.adapter_timers, @teardown_slot, fn ->
-          Executor.safe_teardown(state.ctx.adapter, state.ctx.adapter_context)
+          Step.teardown_adapter(state.ctx)
         end)
 
       released ++ torn_down

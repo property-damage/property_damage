@@ -9,7 +9,7 @@ defmodule PropertyDamage.Executor.Finalization do
   #     -> finalize_resource_pollers
   #     -> settle_event_queue (drain queued injector/poller events + async checks)
   #     -> finalize_after_settle
-  #     -> Executor.run_phase_checks(:teardown)
+  #     -> Step.run_phase_checks(:teardown)
   #
   # and the strict precedence among competing finalize-time failures (locked by
   # test/property_damage/executor/finalize_ordering_test.exs):
@@ -19,12 +19,13 @@ defmodule PropertyDamage.Executor.Finalization do
   # Each clause takes a %PropertyDamage.Executor.State{} and returns either the
   # run-result map or the rich tagged tuple its job needs (finalize keeps its
   # five-outcome return including the async-halt command_index precedence and the
-  # :record accumulator). Shared helpers that the live command path also uses
-  # (run_phase_checks, check_async, process_injector_events,
-  # update_poller_state_getters) remain in PropertyDamage.Executor and are called
-  # back here; this module owns only the finalize-exclusive logic.
+  # :record accumulator). The primitives the live command path also uses
+  # (run_phase_checks, check_async, refresh_pollers) live in
+  # PropertyDamage.Executor.Step, and event folding in Executor.Events; this
+  # module owns only the finalize-exclusive logic.
 
   alias PropertyDamage.{Executor, Failure, ResourcePoller, StatePoller}
+  alias PropertyDamage.Executor.Step
 
   # ============================================================================
   # Result Finalization
@@ -92,8 +93,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
         async_failure_result(
           state,
-          normalized,
-          stacktrace,
+          {normalized, stacktrace},
           command_index,
           Enum.reverse(check_failures)
         )
@@ -118,8 +118,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
         async_failure_result(
           state,
-          failure,
-          stacktrace,
+          {failure, stacktrace},
           Map.get(info.triggered_by, :command_index),
           check_failures
         )
@@ -167,8 +166,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
             async_failure_result(
               state,
-              normalized,
-              stacktrace,
+              {normalized, stacktrace},
               command_index,
               combined_failures
             )
@@ -178,8 +176,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
             async_failure_result(
               state,
-              normalized,
-              stacktrace,
+              {normalized, stacktrace},
               command_index,
               Enum.reverse(failures) ++ resource_failures
             )
@@ -218,7 +215,7 @@ defmodule PropertyDamage.Executor.Finalization do
         # @eventually liveness timeout has already preempted it above (no
         # hoist): a liveness timeout is itself a not-settled outcome, so
         # there is no settled state to check.
-        case Executor.run_phase_checks(state, :teardown) do
+        case Step.run_phase_checks(state, :teardown) do
           {:halt, name, projection, reason, teardown_counters} ->
             {normalized, stacktrace} =
               extract_stacktrace(Failure.check_failed(name, reason, projection))
@@ -313,13 +310,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # carries the observing event's `command_index` as `failed_at_index` so the
   # shrinker can truncate to the command that caused it (nil for a pure injector
   # event, which the shrinker tolerates by falling back to its sequence search).
-  defp async_failure_result(
-         state,
-         failure_reason,
-         stacktrace,
-         command_index,
-         failures
-       ) do
+  defp async_failure_result(state, {failure_reason, stacktrace}, command_index, failures) do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
@@ -386,7 +377,6 @@ defmodule PropertyDamage.Executor.Finalization do
   defp settle_event_queue(state, failures) do
     projs_before = state.projections
     log_before = state.event_log
-    mode = Map.get(state, :check_mode, :halt)
 
     {projections, event_log, fold_counter} =
       Executor.Events.process_injector_events(
@@ -424,16 +414,7 @@ defmodule PropertyDamage.Executor.Finalization do
         logs: logs
       })
 
-    case Executor.check_async(
-           Map.fetch!(state, :model),
-           projs_before,
-           log_before,
-           event_log,
-           state.check_counters,
-           mode,
-           failures,
-           Map.get(state, :telemetry)
-         ) do
+    case Step.check_async(state, since: {projs_before, log_before}, failures: failures) do
       {:ok, counters, failures} ->
         {:ok, %{state | check_counters: counters}, failures}
 
@@ -458,7 +439,7 @@ defmodule PropertyDamage.Executor.Finalization do
               e.lines
             )
 
-          {:failed, Executor.mock_events_failure(error), Map.get(state, :last_command_index),
+          {:failed, Step.mock_events_failure(error), Map.get(state, :last_command_index),
            Map.put(state, :logs, logs), failures}
       end
   end
@@ -576,7 +557,6 @@ defmodule PropertyDamage.Executor.Finalization do
     #    checks on each event as it folds (DR-025).
     projs_before = state.projections
     log_before = state.event_log
-    mode = Map.get(state, :check_mode, :halt)
 
     {projections, event_log, fold_counter} =
       Executor.Events.process_injector_events(
@@ -587,16 +567,7 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :await_matchers, [])
       )
 
-    case Executor.check_async(
-           Map.fetch!(state, :model),
-           projs_before,
-           log_before,
-           event_log,
-           state.check_counters,
-           mode,
-           Map.get(state, :check_failures, []),
-           Map.get(state, :telemetry)
-         ) do
+    case Step.check_async(%{state | event_log: event_log}, since: {projs_before, log_before}) do
       # DR-025: an async every: check tripped during the await window under
       # :halt mode. Stop pollers and surface via :async_halt (checked in
       # finalize_result, ahead of any poll timeout).
@@ -625,7 +596,7 @@ defmodule PropertyDamage.Executor.Finalization do
         }
 
         # 2. Refresh each poller's getter to read the freshly-updated projections
-        Executor.update_poller_state_getters(%{state | active_pollers: pollers})
+        Step.refresh_pollers(%{state | active_pollers: pollers})
 
         # 3. Collect a result if one is ready, bounded by the tick (so we drain
         #    again soon) and the overall deadline

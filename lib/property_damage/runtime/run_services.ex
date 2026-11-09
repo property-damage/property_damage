@@ -18,18 +18,18 @@ defmodule PropertyDamage.Runtime.RunServices do
   # down even when a mock setup or `fun` raises. An injector setup that fails
   # or raises returns `{:error, reason}` without calling `fun`, the shape
   # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails;
-  # `with_services_logged/2` returns the shape `run_logged/4` gives.
+  # `with_services_logged/2` returns `{:error, reason, logs}`.
   #
   # Injector and mock setup and teardown are execution points (DR-054). When
   # `fun` returns `{:ok, result}` with a `logs` map, or
-  # `{:error, reason, logs}` (`PropertyDamage.Executor.run_logged/4` after a
-  # failed adapter setup), the lines their setup wrote go before the
+  # `{:error, reason, logs}` (a failed adapter setup with the lines it
+  # wrote), the lines their setup wrote go before the
   # adapter's own under `:adapter_setup`, and the lines their teardown wrote
   # after them under `:adapter_teardown`; any other result drops them.
   def with_services(target, fun), do: services(target, fun, false)
 
   @doc false
-  # `with_services/2` for a `fun` that calls `Executor.run_logged/4`: an
+  # `with_services/2` for a `fun` that keeps the log lines: an
   # injector setup that fails or raises returns `{:error, reason, logs}`, the
   # lines the injectors wrote, the teardown of those already set up included,
   # under `:adapter_setup`, as `PropertyDamage.Variant` keeps them.
