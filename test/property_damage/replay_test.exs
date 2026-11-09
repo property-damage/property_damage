@@ -1,7 +1,9 @@
 defmodule PropertyDamage.ReplayTest do
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, FailureReport, Replay, Sequence}
+  alias PropertyDamage.{FailureReport, Replay, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   # ----------------------------------------------------------------------------
   # Self-contained fixture: a counter that fails its invariant on the 3rd bump.
@@ -141,7 +143,7 @@ defmodule PropertyDamage.ReplayTest do
   defp recorded_failure do
     sequence = Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
 
-    {:ok, result} = Executor.run(sequence, CounterModel, CounterAdapter, [])
+    {:ok, result} = StepRun.run(sequence, CounterModel, CounterAdapter, [])
 
     refute result.success
     assert result.failed_at_index == 2
@@ -288,7 +290,7 @@ defmodule PropertyDamage.ReplayTest do
     }
 
     {:ok, result} =
-      Executor.run(sequence, LifecycleCounterModel, CounterAdapter,
+      StepRun.run(sequence, LifecycleCounterModel, CounterAdapter,
         setup_commands: sequence.setup,
         teardown_commands: sequence.teardown
       )

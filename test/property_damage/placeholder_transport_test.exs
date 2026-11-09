@@ -12,7 +12,9 @@ defmodule PropertyDamage.PlaceholderTransportTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule SomeEvent do
     defstruct [:id]
@@ -69,7 +71,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
       |> Sequence.with_registry(reg)
 
     {:ok, _result} =
-      Executor.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
+      StepRun.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
 
     assert_received {:executed, %UseExternal{order_id: "ord_123"}}
   end
@@ -82,7 +84,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
     seq = Sequence.linear([%UseExternal{order_id: ph}])
 
     {:ok, result} =
-      Executor.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
+      StepRun.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
 
     refute_received {:executed, _}
     assert match?(%{failed_at_index: 0}, result)

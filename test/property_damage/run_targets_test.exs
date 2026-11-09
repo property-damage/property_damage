@@ -7,9 +7,11 @@ defmodule PropertyDamage.RunTargetsTest do
   import PropertyDamage.Test.VariantSupport
 
   alias PropertyDamage.{EventQueue, Failure, FailureReport, Generator, Persistence, Sequence}
+
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.RunResult
   alias PropertyDamage.RunTargetsTest.{Sink, SinkModel}
+  alias PropertyDamage.Test.StepRun
 
   alias PropertyDamage.Test.Lockstep.{
     Answers,
@@ -116,7 +118,7 @@ defmodule PropertyDamage.RunTargetsTest do
   end
 
   describe "one target" do
-    test "runs the adapter calls and folds the state Executor.run/4 does on the same seed" do
+    test "runs the adapter calls and folds the state a one-target run does on the same seed" do
       model = SinkModel
       sequence = generated(model, @seed, 0, 4)
 
@@ -125,7 +127,7 @@ defmodule PropertyDamage.RunTargetsTest do
 
       {:ok, oracle} =
         with_sink(fn ->
-          PropertyDamage.Executor.run(sequence, model, StepAdapter,
+          StepRun.run(sequence, model, StepAdapter,
             config: %{name: "solo", recorder: oracle_recorder},
             event_queue: queue,
             rng_seed: Generator.run_seed(@seed, 0),

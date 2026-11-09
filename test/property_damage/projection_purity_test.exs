@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ProjectionPurityTest do
   @moduledoc """
   DR-040: the derived per-step state timeline and the projection-purity
-  check, end-to-end through a real `Executor.run` + `FailureReport`.
+  check, end-to-end through a real stepped run + `FailureReport`.
 
   Done-gates exercised here:
 
@@ -13,7 +13,9 @@ defmodule PropertyDamage.ProjectionPurityTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{EventQueue, FailureReport, RunTrace, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   # ---- Events / commands ----------------------------------------------------
 
@@ -118,7 +120,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     {:ok, queue} = EventQueue.start_link()
 
     try do
-      Executor.run(sequence, model, Adapter,
+      StepRun.run(sequence, model, Adapter,
         config: %{event_queue: queue},
         event_queue: queue
       )

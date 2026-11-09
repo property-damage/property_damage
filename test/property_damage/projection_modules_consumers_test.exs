@@ -7,7 +7,9 @@ defmodule PropertyDamage.ProjectionModulesConsumersTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{EventQueue, Executor, Failure, RunTrace, Sequence}
+  alias PropertyDamage.{EventQueue, Failure, RunTrace, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule Pinged, do: defstruct([])
 
@@ -79,7 +81,7 @@ defmodule PropertyDamage.ProjectionModulesConsumersTest do
 
   defp run(commands) do
     {:ok, queue} = EventQueue.start_link()
-    {:ok, result} = Executor.run(Sequence.linear(commands), Model, Adapter, event_queue: queue)
+    {:ok, result} = StepRun.run(Sequence.linear(commands), Model, Adapter, event_queue: queue)
     result
   end
 
