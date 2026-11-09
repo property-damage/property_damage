@@ -247,6 +247,19 @@ defmodule PropertyDamage.ReportBuilder do
   def variant_of(target), do: %{index: target.index, name: target.name}
 
   @doc """
+  Projects the colocated `{:fired, projection, name}` keys out of the check
+  counters into the public `%{{projection, name} => count}` fire map, dropping
+  the sampling counters (`:step`, `:command`, `:event`, per-module) that share
+  the map.
+  """
+  @spec project_fires(map()) :: map()
+  def project_fires(counters) do
+    for {{:fired, projection, name}, count} <- counters, into: %{} do
+      {{projection, name}, count}
+    end
+  end
+
+  @doc """
   Adds the counts of two check-fire maps key by key.
   """
   @spec merge_fires(map(), map()) :: map()

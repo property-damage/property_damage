@@ -4,7 +4,7 @@ defmodule PropertyDamage.FlakyFailureReportTest do
   reproduce must still report the reason it actually observed, not a
   contentless "Unknown Failure" with a nil reason.
 
-  `handle_failure/N` re-executes the (shrunk) sequence to gather fresh state for
+  `Reproduction.handle_failure/2` re-executes the (shrunk) sequence to gather fresh state for
   the report. For a flaky failure that re-run can pass, leaving the fresh result
   with `success: true / failure_reason: nil / failed_at_index: nil`. Building the
   report straight from that fresh result discards the failure we observed and

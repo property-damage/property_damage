@@ -511,7 +511,7 @@ defmodule PropertyDamage.RegressionTest do
     # Note: Full integration tests would require a working model/adapter pair
     # These tests verify the option parsing works
 
-    test "build_on_failure_callback composes regression and on_failure" do
+    test "on_failure_callback composes regression and on_failure" do
       # Test that the internal callback building works correctly
       # by checking the Regression.handler/1 function
       handler = Regression.handler(save_failures: "/tmp")

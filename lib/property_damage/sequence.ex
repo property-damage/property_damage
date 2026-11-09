@@ -133,6 +133,24 @@ defmodule PropertyDamage.Sequence do
   def to_list(%__MODULE__{prefix: prefix}), do: prefix
 
   @doc """
+  The plan of `sequence`: its roots and the setup and teardown commands every
+  target runs, with `variants` per target (`nil` when every target runs every
+  root as itself).
+
+  The plan is what `PropertyDamage.Runner.execute/2` runs.
+  """
+  @spec plan(t(), map() | nil) :: map()
+  def plan(%__MODULE__{} = sequence, variants) do
+    %{
+      commands: to_list(sequence),
+      variants: variants,
+      setup_commands: sequence.setup,
+      teardown_commands: sequence.teardown,
+      placeholder_registry: sequence.registry
+    }
+  end
+
+  @doc """
   Pair every root with its structured `Position` and its index.
 
   Returns `[{%Position{}, index, command}]` in `to_list/1` order. The `index`
