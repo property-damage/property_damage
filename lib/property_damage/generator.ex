@@ -423,8 +423,10 @@ defmodule PropertyDamage.Generator do
     if map_size(linked) == 0, do: events, else: relink_value(events, linked)
   end
 
-  defp relink_value(%Placeholder{id: {_position, event_index, path}} = placeholder, linked),
-    do: Map.get(linked, {event_index, path}) || placeholder
+  defp relink_value(%Placeholder{} = placeholder, linked) do
+    {_position, event_index, path} = Placeholder.id(placeholder)
+    Map.get(linked, {event_index, path}) || placeholder
+  end
 
   defp relink_value(%module{} = struct, linked) do
     struct
@@ -754,8 +756,12 @@ defmodule PropertyDamage.Generator do
   def available_externals(state, opts \\ []) do
     state
     |> PlaceholderRegistry.collect_placeholders()
-    |> filter_by(:event_module, Keyword.get(opts, :event_module), &(&1.event_module == &2))
-    |> filter_by(:path, Keyword.get(opts, :path), &(&1.path == &2))
+    |> filter_by(
+      :event_module,
+      Keyword.get(opts, :event_module),
+      &(Placeholder.event_module(&1) == &2)
+    )
+    |> filter_by(:path, Keyword.get(opts, :path), &(Placeholder.path(&1) == &2))
   end
 
   @doc """

@@ -23,7 +23,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
   # carry the account placeholder (fixture smoke test below).
   @external_seed 4
 
-  @header "# PropertyDamage replay artifact, format 3"
+  @header "# PropertyDamage replay artifact, format 4"
 
   @term_keys [
     :choices,
@@ -74,7 +74,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
     ids = Enum.map(choices["ref"], & &1.root_id)
 
     %{
-      format: 3,
+      format: 4,
       model: model,
       seed: FailureReport.seed(report),
       run: 1,

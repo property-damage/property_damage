@@ -382,7 +382,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       assert_setup_ran(recorded(recorder), "a")
     end
 
-    for {label, config} <- [missing_field: %{drop_id: true}, no_event: %{no_event: true}] do
+    for {label, config} <- [missing_field: %{omit_id: true}, no_event: %{no_event: true}] do
       test "an external() that never arrives is an unresolved-placeholder setup failure (#{label})" do
         recorder = start_recorder()
         model = model!(Module.concat(Unresolved, unquote(label)), setup: [CreateUser])
@@ -416,7 +416,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       end
     end
 
-    for {label, config} <- [missing_field: %{drop_id: true}, no_event: %{no_event: true}] do
+    for {label, config} <- [missing_field: %{omit_id: true}, no_event: %{no_event: true}] do
       test "an external() that never arrives and a later setup command consumes fails on its producer (#{label})" do
         recorder = start_recorder()
         model = standard_model(Module.concat(UnresolvedConsumed, unquote(label)))

@@ -222,7 +222,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       end
     end
 
-    test "the tracked bench replay artifact is at format 3 and holds a signature" do
+    test "the tracked bench replay artifact is at format 4 and holds a signature" do
       path =
         Path.join([
           __DIR__,
@@ -236,8 +236,8 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
         ])
 
       text = File.read!(path)
-      assert String.starts_with?(text, "# PropertyDamage replay artifact, format 3\n")
-      assert text =~ ~r/^  format: 3,$/m
+      assert String.starts_with?(text, "# PropertyDamage replay artifact, format 4\n")
+      assert text =~ ~r/^  format: 4,$/m
       assert text =~ ~r/^    signature: \{/m
       refute text =~ "variant_index:"
     end

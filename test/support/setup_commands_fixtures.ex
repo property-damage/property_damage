@@ -287,7 +287,8 @@ defmodule PropertyDamage.Test.SetupCommands do
     #   :recorder      the shared recorder
     #   :fail_setup    setup/1 answers {:error, :no_backend}
     #   :fail          %{command_module => :error | :raise}
-    #   :drop_id       CreateUser answers a UserCreated without its id
+    #   :drop_id       CreateUser answers a UserCreated whose id is nil
+    #   :omit_id       CreateUser answers a UserCreated that lacks the id field
     #   :no_event      CreateUser answers no event
     #   :mode          Acted's mode (:plain | :shift | :pending)
     use PropertyDamage.Adapter
@@ -337,9 +338,17 @@ defmodule PropertyDamage.Test.SetupCommands do
 
     defp answer(%CreateUser{name: name}, ctx) do
       cond do
-        ctx[:no_event] -> []
-        ctx[:drop_id] -> [%UserCreated{name: name, id: nil, by: ctx.name, sink: ctx[:recorder]}]
-        true -> [%UserCreated{name: name, id: mint(ctx, "u"), by: ctx.name, sink: ctx[:recorder]}]
+        ctx[:no_event] ->
+          []
+
+        ctx[:omit_id] ->
+          [Map.delete(%UserCreated{name: name, by: ctx.name, sink: ctx[:recorder]}, :id)]
+
+        ctx[:drop_id] ->
+          [%UserCreated{name: name, id: nil, by: ctx.name, sink: ctx[:recorder]}]
+
+        true ->
+          [%UserCreated{name: name, id: mint(ctx, "u"), by: ctx.name, sink: ctx[:recorder]}]
       end
     end
 

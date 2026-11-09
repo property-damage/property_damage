@@ -230,13 +230,49 @@ execution.
       CreateOrder{amount: 100}       →  OrderCreated{id: "ord_abc123"}
       GetOrder{order_ref: "ord_abc123"}  ← placeholder resolved from event
 
-1. **Generation**: each `external()` field in a simulated event becomes a `%Placeholder{}`
+1. **Generation**: each `external()` field in a simulated event becomes a placeholder
 2. **Simulation**: the simulator predicts events carrying those placeholders
 3. **State tracking**: projections store the placeholder as a value
 4. **Execution**: after the adapter returns (or injects) real events, the framework
    captures the concrete value from each `external()` field by the producer's position
 5. **Resolution**: subsequent commands have their placeholder fields replaced with the
    concrete values
+
+### Reading a Placeholder
+
+A placeholder is an opaque type. A `when:` predicate, an `overrides:` function or a
+simulator that receives one in projection state reads it through the accessors of
+`PropertyDamage.Placeholder`, never through struct fields:
+
+- `path/1`, `event_module/1`, `position/1`, `event_index/1` and `id/1` say which event
+  field it stands for.
+- `resolved?/1` tells whether the system has answered.
+- `value/1` returns `{:ok, value}` or `:error`; `value!/1` raises when unresolved.
+
+An answer of `nil` resolves the placeholder to `nil`, so `resolved?/1` is the test for
+"answered", not a comparison with `nil`. If the producing event lacks the field, the
+placeholder stays unresolved.
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+alias PropertyDamage.Placeholder
+alias PropertyDamage.Sequence.Position
+
+placeholder =
+  Placeholder.new_at(MyTest.Events.OrderCreated, [:order_id], Position.prefix(0), 0)
+
+# A `when:` predicate that only needs the order's field path, not its value.
+when_fun = fn state ->
+  Enum.any?(Map.keys(state.orders), &(Placeholder.path(&1) == [:order_id]))
+end
+
+true = when_fun.(%{orders: %{placeholder => %{status: :active}}})
+false = when_fun.(%{orders: %{}})
+
+# Before the system answers, the placeholder is unresolved.
+false = Placeholder.resolved?(placeholder)
+:error = Placeholder.value(placeholder)
+```
 
 ### Dependency-Aware Shrinking
 
@@ -870,7 +906,8 @@ with the same target names runs the same entries.
 A later root may consume a value that an earlier root's simulation minted with
 `external()`. In a target that ran a rewrite, the framework aliases each such
 placeholder to the placeholder of exactly one leaf whose simulated events hold
-the same event module at the same field. Zero matches, or several (two leaves,
+the same event module at the same field (`Placeholder.event_module/1` and
+`Placeholder.path/1` name them). Zero matches, or several (two leaves,
 or two events of one leaf), are a generation error that names the root, the
 entry and the candidate leaves. Make the leaves' events agree with the root's
 event to fix it.

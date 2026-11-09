@@ -12,14 +12,14 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Test.ReplayFixtures, as: R
 
-  @header "# PropertyDamage replay artifact, format 3"
+  @header "# PropertyDamage replay artifact, format 4"
   @marker "PAYLOAD_SOURCE"
 
   # A complete artifact for CleanModel whose one leaf holds `payload` (Elixir
   # source) on a line of its own.
   defp template(opts \\ []) do
     header = Keyword.get(opts, :header, @header)
-    format = Keyword.get(opts, :format, 3)
+    format = Keyword.get(opts, :format, 4)
 
     """
     #{header}
@@ -86,7 +86,7 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
       },
       external_markers: [],
       failure: %{signature: {:diverged, {R.Tally, :total}, 0}, root_index: 0},
-      format: 3,
+      format: 4,
       model: R.CleanModel,
       prefix: [],
       roots: [%{command: %R.Mark{n: 1}, root_id: 0}],
@@ -145,8 +145,7 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
         event_module: PropertyDamage.Test.ReplayFixtures.Opened,
         path: [:id],
         position: %PropertyDamage.Sequence.Position{section: {:leaf, 2}, offset: 1},
-        event_index: 0,
-        resolved: nil
+        event_index: 0
       }
       """
 
@@ -183,9 +182,25 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
     end
 
     test "when the term's format disagrees with it" do
-      message = refused(artifact(":ok", format: 4))
+      message = refused(artifact(":ok", format: 3))
       assert message =~ "header"
-      assert message =~ ~r/format:? 4/
+      assert message =~ ~r/format:? 3/
+    end
+  end
+
+  describe "refuses an artifact written at the previous format" do
+    @format_3 Path.join([__DIR__, "..", "fixtures", "replay", "format_3_artifact.exs"])
+
+    test "the fixture is a complete artifact that holds a placeholder" do
+      assert File.read!(@format_3) =~ "%PropertyDamage.Placeholder{"
+    end
+
+    test "and names the format it reads" do
+      assert {:error, reason} = R.read_artifact(@format_3)
+
+      message = R.reason_text(reason)
+      assert message =~ "the replay artifact header names format 3; this version reads format"
+      refute message =~ "reads format 3"
     end
   end
 

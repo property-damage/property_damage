@@ -4,7 +4,7 @@
 
 Commands are the semantic building blocks of stateful property-based tests. Each command defines a pure generator that produces field maps, a specification describing execution and shrinking behavior, and optional metadata callbacks. Commands are deliberately decoupled from state shape and execution transport, enabling reuse across different models and adapters.
 
-Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-058 (Failure Report Context and Explanations)
+Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-058 (Failure Report Context and Explanations), DR-067 (The Placeholder Is a Public Opaque Type with an Explicit Unresolved Marker)
 
 ## Requirements
 
@@ -21,6 +21,11 @@ Commands SHALL define a `generator/1` callback that accepts an overrides map and
 - **WHEN** a command's generator is invoked with an overrides map containing field keys
 - **THEN** the overrides replace the corresponding default generators
 - **AND** raw values in the overrides map are automatically lifted to constant generators
+
+#### Scenario: A placeholder in model state is read through accessors (DR-067)
+- **GIVEN** a `when:` predicate or an `overrides:` function that receives a placeholder in projection state
+- **WHEN** it needs the placeholder's coordinates or answer
+- **THEN** it SHALL read them with `Placeholder.path/1`, `Placeholder.resolved?/1` and `Placeholder.value/1`, not by struct fields, and an unresolved placeholder SHALL be passed on unchanged
 
 #### Scenario: Generator composability
 - **WHEN** a specialized command calls another command's generator
@@ -264,7 +269,7 @@ A command generator MAY mark a field as run-scoped via `PropertyDamage.mint_per_
 
 ### Requirement: Value Provenance Classification (DR-034)
 
-Each value appearing in a run's executed commands and events SHALL be classifiable into one of three provenance classes, and the framework SHALL make this classification available to consumers (notably run comparison): `plan-generated` (a pure function of the effective seed), `run-scoped` (minted via `mint_per_run`, a function of the `run_nonce`/`mint_epoch`), and `server-resolved` (produced by the SUT). Classification SHALL be derived structurally at consumption time from the plan, the trace, and event-module metadata; no per-value tag is stored on `EventLog.Entry`. The concrete rules: a command field whose plan value is a mint marker is `run-scoped`; a command field whose plan value is a `%Placeholder{}` is `server-resolved`; any other command field is `plan-generated`. An event field at a path in `External.external_paths(event_module)` is `server-resolved`; an event field whose value is a member of the run's minted-value set is a `run-scoped` echo (sound because mint kinds are high-entropy); any other event field is observed SUT output and treated as `server-resolved`. Provenance SHALL determine how a cross-run difference is interpreted: a differing `plan-generated` command field across runs that claim the same plan is a comparability violation (this tripwire applies to command fields only; event fields are never `plan-generated`); a differing `run-scoped` value is expected by design; a differing `server-resolved` value is an observed behavioral difference.
+Each value appearing in a run's executed commands and events SHALL be classifiable into one of three provenance classes, and the framework SHALL make this classification available to consumers (notably run comparison): `plan-generated` (a pure function of the effective seed), `run-scoped` (minted via `mint_per_run`, a function of the `run_nonce`/`mint_epoch`), and `server-resolved` (produced by the SUT). Classification SHALL be derived structurally at consumption time from the plan, the trace, and event-module metadata; no per-value tag is stored on `EventLog.Entry`. The concrete rules: a command field whose plan value is a mint marker is `run-scoped`; a command field whose plan value is a placeholder (`Placeholder.placeholder?/1`) is `server-resolved`; any other command field is `plan-generated`. An event field at a path in `External.external_paths(event_module)` is `server-resolved`; an event field whose value is a member of the run's minted-value set is a `run-scoped` echo (sound because mint kinds are high-entropy); any other event field is observed SUT output and treated as `server-resolved`. Provenance SHALL determine how a cross-run difference is interpreted: a differing `plan-generated` command field across runs that claim the same plan is a comparability violation (this tripwire applies to command fields only; event fields are never `plan-generated`); a differing `run-scoped` value is expected by design; a differing `server-resolved` value is an observed behavioral difference.
 
 #### Scenario: Provenance derivable by consumers
 

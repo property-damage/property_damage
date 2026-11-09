@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-065 (One Run Driver, Not Only One Step Seam). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-065 (One Run Driver, Not Only One Step Seam), DR-067 (The Placeholder Is a Public Opaque Type with an Explicit Unresolved Marker). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -178,7 +178,18 @@ The system SHALL support `external()` markers in event struct definitions to ide
 #### Scenario: Downstream resolution
 - **WHEN** a later command field holds a placeholder for an external value produced earlier
 - **THEN** the framework SHALL replace the placeholder with the captured concrete value before executing that command
-- **AND** if the placeholder has not been resolved (its producer has not run), execution SHALL fail
+- **AND** if the placeholder has not been resolved (its producer has not run, or the producing event lacks the field), execution SHALL fail
+
+#### Scenario: A nil answer resolves to nil (DR-067)
+- **GIVEN** a producing event whose `external()` field holds `nil`
+- **WHEN** the framework captures the event
+- **THEN** the placeholder SHALL be resolved, `Placeholder.value/1` SHALL return `{:ok, nil}`, and a later command SHALL receive `nil` in that field
+- **AND** an event that lacks the field at that path SHALL leave the placeholder unresolved, found through `External.fetch_at_path/2`
+
+#### Scenario: Placeholders are read through accessors (DR-067)
+- **WHEN** user code or the framework reads a placeholder
+- **THEN** it SHALL use `id/1`, `position/1`, `path/1`, `event_module/1`, `event_index/1`, `resolved?/1`, `value/1` or `value!/1`, because `PropertyDamage.Placeholder.t/0` is opaque
+- **AND** a placeholder's resolution SHALL be `:unresolved | {:resolved, term()}`, never `nil` for unresolved
 
 #### Scenario: Placeholder identity
 - **WHEN** placeholders are compared
@@ -527,7 +538,7 @@ Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce
 
 ### Requirement: Deterministic Symbolic Identity (DR-036)
 
-Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
+Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A placeholder's id (`Placeholder.id/1`) SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
 
 #### Scenario: Same plan generates equal
 

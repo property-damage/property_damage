@@ -438,7 +438,7 @@ The artifact is one Elixir literal term, so you can read it and edit an
 argument before you run it again. This is the start of a real one:
 
 ```elixir
-# PropertyDamage replay artifact, format 3
+# PropertyDamage replay artifact, format 4
 # model: CachexBench.Model
 # seed: 3
 # run: 1 (the run this seed generates)

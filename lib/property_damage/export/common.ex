@@ -105,7 +105,9 @@ defmodule PropertyDamage.Export.Common do
     end
   end
 
-  defp format_comment_value(%Placeholder{event_module: mod, path: path}) do
+  defp format_comment_value(%Placeholder{} = placeholder) do
+    mod = Placeholder.event_module(placeholder)
+    path = Placeholder.path(placeholder)
     "external(#{mod |> Module.split() |> List.last()}.#{Enum.join(path, ".")})"
   end
 

@@ -43,7 +43,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   def build(items) when is_list(items) do
     items
     |> Enum.flat_map(&collect_placeholders/1)
-    |> Enum.uniq_by(& &1.id)
+    |> Enum.uniq_by(&Placeholder.id/1)
     |> Enum.reduce(new(), &register(&2, &1))
   end
 
@@ -55,17 +55,23 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @spec register(t(), Placeholder.t()) :: t()
   def register(%__MODULE__{} = reg, %Placeholder{} = p) do
     reg
-    |> Map.update!(:placeholders, &Map.put(&1, p.id, p))
+    |> Map.update!(:placeholders, &Map.put(&1, Placeholder.id(p), p))
     |> index_by_position(p)
   end
 
   # Index by structured producer position (DR-021).
-  defp index_by_position(reg, %Placeholder{position: nil}), do: reg
+  defp index_by_position(reg, p) do
+    case Placeholder.position(p) do
+      nil ->
+        reg
 
-  defp index_by_position(reg, %Placeholder{position: position, id: id}) do
-    Map.update!(reg, :producer_link, fn link ->
-      Map.update(link, position, [id], &(&1 ++ [id]))
-    end)
+      position ->
+        id = Placeholder.id(p)
+
+        Map.update!(reg, :producer_link, fn link ->
+          Map.update(link, position, [id], &(&1 ++ [id]))
+        end)
+    end
   end
 
   @doc """
@@ -86,13 +92,8 @@ defmodule PropertyDamage.PlaceholderRegistry do
   its leaves instead.
   """
   @spec alias_to(t(), Placeholder.t(), Placeholder.t()) :: t()
-  def alias_to(%__MODULE__{} = reg, %Placeholder{} = root, %Placeholder{} = leaf) do
-    register(reg, %{
-      root
-      | position: leaf.position,
-        event_index: leaf.event_index,
-        path: leaf.path
-    })
+  def alias_to(%__MODULE__{} = reg, root, leaf) do
+    register(reg, Placeholder.retarget(root, leaf))
   end
 
   @doc """
@@ -155,16 +156,22 @@ defmodule PropertyDamage.PlaceholderRegistry do
     |> ids_at_position(position)
     |> Enum.reduce(reg, fn id, acc ->
       case get(acc, id) do
-        %Placeholder{path: path, event_index: event_index, event_module: module} ->
-          case producing_event(events, event_index, module) do
-            nil -> acc
-            event -> resolve(acc, id, External.get_at_path(event, path))
-          end
-
-        _ ->
-          acc
+        nil -> acc
+        p -> capture_one(acc, id, p, events)
       end
     end)
+  end
+
+  defp capture_one(reg, id, p, events) do
+    module = Placeholder.event_module(p)
+
+    with event when not is_nil(event) <-
+           producing_event(events, Placeholder.event_index(p), module),
+         {:ok, value} <- External.fetch_at_path(event, Placeholder.path(p)) do
+      resolve(reg, id, value)
+    else
+      _ -> reg
+    end
   end
 
   # The event a placeholder is read from: the event at its index when that
@@ -210,18 +217,24 @@ defmodule PropertyDamage.PlaceholderRegistry do
     do_deep_resolve({reg, run_nonce, mint_epoch}, data)
   end
 
-  defp do_deep_resolve({reg, _nonce, _epoch}, %Placeholder{id: id}) do
+  defp do_deep_resolve({reg, _nonce, _epoch}, %Placeholder{} = placeholder) do
+    id = Placeholder.id(placeholder)
+
     case Map.get(reg.placeholders, id) do
       nil ->
         raise ArgumentError, "Unknown placeholder ID: #{inspect(id)}"
 
-      %{resolved: nil} = p ->
-        raise ArgumentError,
-              "Unresolved placeholder at #{inspect(p.path)} " <>
-                "(position #{inspect(p.position)}, event #{p.event_index})"
+      p ->
+        case Placeholder.value(p) do
+          {:ok, value} ->
+            value
 
-      %{resolved: value} ->
-        value
+          :error ->
+            raise ArgumentError,
+                  "Unresolved placeholder at #{inspect(Placeholder.path(p))} " <>
+                    "(position #{inspect(Placeholder.position(p))}, " <>
+                    "event #{Placeholder.event_index(p)})"
+        end
     end
   end
 
@@ -317,7 +330,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
     |> Enum.uniq()
   end
 
-  defp do_collect_ids(%Placeholder{id: id}, acc), do: [id | acc]
+  defp do_collect_ids(%Placeholder{} = p, acc), do: [Placeholder.id(p) | acc]
 
   defp do_collect_ids(%{__struct__: _} = struct, acc) do
     struct
@@ -360,7 +373,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
     data
     |> do_collect_placeholders([])
     |> Enum.reverse()
-    |> Enum.uniq_by(& &1.id)
+    |> Enum.uniq_by(&Placeholder.id/1)
   end
 
   defp do_collect_placeholders(%Placeholder{} = p, acc), do: [p | acc]

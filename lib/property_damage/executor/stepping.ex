@@ -424,11 +424,10 @@ defmodule PropertyDamage.Executor.Stepping do
     |> Enum.find_value(fn {field, value} -> unresolved_path(value, registry, [field]) end)
   end
 
-  defp unresolved_path(%Placeholder{id: id}, registry, path) do
-    case PlaceholderRegistry.get(registry, id) do
-      %Placeholder{resolved: nil} -> path
+  defp unresolved_path(%Placeholder{} = placeholder, registry, path) do
+    case PlaceholderRegistry.get(registry, Placeholder.id(placeholder)) do
       nil -> path
-      _resolved -> nil
+      known -> if Placeholder.resolved?(known), do: nil, else: path
     end
   end
 

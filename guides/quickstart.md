@@ -194,8 +194,11 @@ During generation, the framework mints a placeholder (rendered as
 `<Placeholder:field@position/evtN>`). During execution, the real value from the
 SUT replaces the placeholder wherever it appears in subsequent commands. You work
 with concrete values in your projections and generators; placeholders only surface
-in generated/inspected sequences. See [Writing Commands](writing_commands.md) for
-the full `external()` lifecycle.
+in generated/inspected sequences. A placeholder is an opaque type: if a `when:`
+predicate or `overrides:` function receives one, read it with
+`PropertyDamage.Placeholder.resolved?/1`, `value/1` or `path/1`, not through struct
+fields. See [Writing Commands](writing_commands.md#reading-a-placeholder) for the
+full `external()` lifecycle.
 
 ## IEx Helpers
 

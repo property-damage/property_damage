@@ -210,7 +210,7 @@ defmodule PropertyDamage.SetupCommandsReportTest do
     test "names the field of an unresolved placeholder" do
       # Nothing consumes the id, so only the completion rule notices it.
       report =
-        setup_failure_report(Unresolved, %{drop_id: true}, [
+        setup_failure_report(Unresolved, %{omit_id: true}, [
           {CreateUser, overrides: %{name: "fixture"}}
         ])
 

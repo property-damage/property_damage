@@ -39,8 +39,6 @@ defmodule PropertyDamage.Executor.Step do
 
   alias PropertyDamage.{
     Failure,
-    Mint,
-    Placeholder,
     PlaceholderRegistry,
     ResourcePoller,
     Runtime,
@@ -1177,60 +1175,10 @@ defmodule PropertyDamage.Executor.Step do
   @spec resolve_placeholders(term(), term(), keyword()) ::
           {:ok, term()} | {:error, String.t()}
   def resolve_placeholders(command, registry, opts \\ []) do
-    ctx = {registry, Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
-    {:ok, deep_resolve_placeholders(command, ctx)}
-  rescue
+    mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
     # The message alone is the reason: the stacktrace is the framework's own
     # resolution frames, and a failure compared across targets must not
     # differ by them.
-    e in ArgumentError -> {:error, e.message}
+    PlaceholderRegistry.resolve_data(registry, command, mint)
   end
-
-  defp deep_resolve_placeholders(%Placeholder{} = p, {registry, _nonce, _epoch}) do
-    case PlaceholderRegistry.get(registry, p.id) do
-      nil ->
-        raise ArgumentError, "Unknown placeholder: #{inspect(p)}"
-
-      %{resolved: nil} = placeholder ->
-        raise ArgumentError,
-              "Unresolved placeholder at #{inspect(placeholder.path)} " <>
-                "(position #{inspect(placeholder.position)}, event #{placeholder.event_index})"
-
-      %{resolved: value} ->
-        value
-    end
-  end
-
-  # Client-minted run-scoped value (DR-034): a pure function of the run's
-  # (nonce, epoch) and the marker's baked coordinates.
-  defp deep_resolve_placeholders(%Mint{} = marker, {_registry, run_nonce, mint_epoch}) do
-    Mint.resolve(marker, run_nonce, mint_epoch)
-  end
-
-  defp deep_resolve_placeholders(%{__struct__: mod} = struct, ctx) do
-    struct
-    |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, deep_resolve_placeholders(v, ctx)} end)
-    |> Map.new()
-    |> then(&struct(mod, &1))
-  end
-
-  defp deep_resolve_placeholders(map, ctx) when is_map(map) do
-    Map.new(map, fn {k, v} ->
-      {deep_resolve_placeholders(k, ctx), deep_resolve_placeholders(v, ctx)}
-    end)
-  end
-
-  defp deep_resolve_placeholders(list, ctx) when is_list(list) do
-    Enum.map(list, &deep_resolve_placeholders(&1, ctx))
-  end
-
-  defp deep_resolve_placeholders(tuple, ctx) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.map(&deep_resolve_placeholders(&1, ctx))
-    |> List.to_tuple()
-  end
-
-  defp deep_resolve_placeholders(other, _ctx), do: other
 end
