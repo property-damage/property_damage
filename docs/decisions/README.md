@@ -98,6 +98,6 @@ Every record is **self-contained**: it carries enough context and rationale to s
 - `openspec/specs/export/spec.md`: DR-021, DR-028, DR-043
 - `openspec/specs/load-testing/spec.md`: DR-021, DR-022, DR-042
 - `openspec/specs/persistence/spec.md`: DR-020, DR-023, DR-033, DR-034, DR-036, DR-039, DR-040, DR-041, DR-042, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050, DR-054, DR-055, DR-056, DR-061, DR-062, DR-063, DR-066, DR-067
-- `openspec/specs/concurrency/spec.md`: DR-028, DR-046, DR-051, DR-052, DR-063
+- `openspec/specs/stutter-and-idempotency/spec.md`: DR-028, DR-046, DR-051, DR-052, DR-063
 
 DR-008 is additionally cited in `test/property_damage/shrinker_test.exs`, `test/support/test_commands.ex`, and `test/support/executor_test_support.ex`.
