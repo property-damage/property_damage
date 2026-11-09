@@ -2168,6 +2168,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shrunk sequence still failed. A run that failed with another failure was
   reported as `:still_failing`. Verification now replays the shrunk sequence
   and reports `:different_failure` for another signature.
+- **Example code in suggestions declares checks with `@check`.** The example
+  code of a `Suggestions` entry used a `check(:always)` line and a
+  three-argument `def check`, which no projection accepts. It now shows the
+  `@check every: N` form with a two-argument check function, and compiles in a
+  projection.
+- **`Analysis.isolate_trigger/2` reads the run's `external_markers:`.** It
+  validated each varied sequence with no markers, so for a model whose events
+  carry a marker atom the ids folded into one key, every variation looked
+  invalid, and the result listed no change that eliminates the failure. It now
+  uses the markers the report records.
 
 ## [0.2.0] - 2026-06-25
 
