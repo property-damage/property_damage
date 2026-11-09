@@ -17,7 +17,7 @@ defmodule PropertyDamage.Runtime.RunServices do
   # raise in injector or mock setup cannot leak it; the injectors are torn
   # down even when a mock setup or `fun` raises. An injector setup that fails
   # or raises returns `{:error, reason}` without calling `fun`, the shape
-  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
+  # a run gives when the adapter's setup fails.
   #
   # Injector and mock setup and teardown are execution points (DR-054). When
   # `fun` returns `{:ok, result}` with a `logs` map, the lines their setup

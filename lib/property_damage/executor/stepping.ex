@@ -516,10 +516,10 @@ defmodule PropertyDamage.Executor.Stepping do
   Takes either the last state, or the failed tuple
   `{:failed, index, %PropertyDamage.Failure{}, failed_state}` for a run that
   stopped at `index` (`nil` when no command was to blame). The run is
-  finalized exactly as `PropertyDamage.Executor.run/4` finalizes it: await the
+  finalized as a one-target run finalizes it: await the
   `@eventually` pollers, settle the queue, run `@check at: :teardown` checks,
   and stop every poller. Returns the result map
-  `PropertyDamage.Executor.run/4` reports.
+  of the run.
   """
   @spec finalize(map() | {:failed, non_neg_integer() | nil, Failure.t(), map()}, Context.t()) ::
           map()

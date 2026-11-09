@@ -106,7 +106,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   end
 
   # An adapter whose setup/1 always fails, to exercise the replay path's
-  # Executor.run error handling (A4).
+  # stepped-run error handling.
   defmodule SetupFailAdapter do
     use PropertyDamage.Adapter
     def setup(_config), do: {:error, :setup_failed}

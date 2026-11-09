@@ -7,8 +7,7 @@ defmodule PropertyDamage.Executor.Phases do
   # after the run is finalized, before the adapter's `teardown/1`. Every path
   # that executes a run uses this module for both phases, so they behave alike
   # wherever a run is executed again: `PropertyDamage.Variant` (the lockstep
-  # scheduler), `PropertyDamage.Executor.run/4` (the one-target path
-  # without the per-root drain) and `PropertyDamage.Replay`.
+  # scheduler) and `PropertyDamage.Replay`.
   #
   # The setup phase steps every setup command through `Stepping.step_setup/4`,
   # drains the event queue, and then applies the completion rule: every
