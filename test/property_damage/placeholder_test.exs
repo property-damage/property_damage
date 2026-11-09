@@ -14,7 +14,7 @@ defmodule PropertyDamage.PlaceholderTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       assert %Placeholder{} = p
-      assert p.id == {Position.prefix(0), 0, [:id]}
+      assert Placeholder.id(p) == {Position.prefix(0), 0, [:id]}
     end
 
     test "same coordinates produce equal ids; distinct coordinates produce distinct ids (DR-036)" do
@@ -22,12 +22,17 @@ defmodule PropertyDamage.PlaceholderTest do
       # same command are the same placeholder (they cannot coexist in a plan).
       p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       p2 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
-      assert p1.id == p2.id
+      assert Placeholder.id(p1) == Placeholder.id(p2)
 
       # Any differing coordinate yields a distinct id.
-      assert p1.id != Placeholder.new_at(TestEvent, [:id], Position.prefix(1), 0).id
-      assert p1.id != Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 1).id
-      assert p1.id != Placeholder.new_at(TestEvent, [:amount], Position.prefix(0), 0).id
+      assert Placeholder.id(p1) !=
+               Placeholder.id(Placeholder.new_at(TestEvent, [:id], Position.prefix(1), 0))
+
+      assert Placeholder.id(p1) !=
+               Placeholder.id(Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 1))
+
+      assert Placeholder.id(p1) !=
+               Placeholder.id(Placeholder.new_at(TestEvent, [:amount], Position.prefix(0), 0))
     end
 
     test "stores event module" do
@@ -39,14 +44,14 @@ defmodule PropertyDamage.PlaceholderTest do
     test "stores path" do
       p = Placeholder.new_at(TestEvent, [:ids, :order], Position.prefix(0), 0)
 
-      assert p.path == [:ids, :order]
+      assert Placeholder.path(p) == [:ids, :order]
     end
 
     test "stores structured position" do
-      assert Placeholder.new_at(TestEvent, [:id], Position.prefix(5), 0).position ==
+      assert Placeholder.position(Placeholder.new_at(TestEvent, [:id], Position.prefix(5), 0)) ==
                Position.prefix(5)
 
-      assert Placeholder.new_at(TestEvent, [:id], Position.setup(3), 0).position ==
+      assert Placeholder.position(Placeholder.new_at(TestEvent, [:id], Position.setup(3), 0)) ==
                Position.setup(3)
     end
 
@@ -65,7 +70,7 @@ defmodule PropertyDamage.PlaceholderTest do
     test "supports list indices in path" do
       p = Placeholder.new_at(TestEvent, [:items, 0], Position.prefix(0), 0)
 
-      assert p.path == [:items, 0]
+      assert Placeholder.path(p) == [:items, 0]
     end
   end
 
@@ -81,15 +86,15 @@ defmodule PropertyDamage.PlaceholderTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       resolved = Placeholder.resolve(p, "order_123")
 
-      assert resolved.id == p.id
+      assert Placeholder.id(resolved) == Placeholder.id(p)
     end
 
     test "preserves path and position" do
       p = Placeholder.new_at(TestEvent, [:ids, :order], Position.prefix(5), 3)
       resolved = Placeholder.resolve(p, "order_123")
 
-      assert resolved.path == [:ids, :order]
-      assert resolved.position == Position.prefix(5)
+      assert Placeholder.path(resolved) == [:ids, :order]
+      assert Placeholder.position(resolved) == Position.prefix(5)
       assert resolved.event_index == 3
     end
 
@@ -119,7 +124,6 @@ defmodule PropertyDamage.PlaceholderTest do
       assert Placeholder.resolved?(p)
     end
 
-    @tag :known_defect
     test "resolution to nil is resolved" do
       p =
         Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)

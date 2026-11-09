@@ -142,7 +142,7 @@ defmodule PropertyDamage.Executor.SteppingTest do
 
       {:error, failure, _failed_state, :not_called} = Stepping.step(command, 0, state, ctx)
 
-      assert "Unknown placeholder: " <> _ = Failure.detail(failure)
+      assert "Unknown placeholder ID: " <> _ = Failure.detail(failure)
     end
   end
 

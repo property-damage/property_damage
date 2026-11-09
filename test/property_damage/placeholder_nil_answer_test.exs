@@ -99,7 +99,6 @@ defmodule PropertyDamage.PlaceholderNilAnswerTest do
   end
 
   describe "a root producer" do
-    @tag :known_defect
     test "answering nil resolves the placeholder, and the consumer receives nil" do
       assert {:ok, result} = run_root([:id], %{answer: nil})
 
@@ -107,7 +106,6 @@ defmodule PropertyDamage.PlaceholderNilAnswerTest do
       assert_received {:used, nil}
     end
 
-    @tag :known_defect
     test "answering nil at a nested path resolves the placeholder too" do
       assert {:ok, result} = run_root([:ids, :order], %{answer: nil})
 
@@ -159,7 +157,6 @@ defmodule PropertyDamage.PlaceholderNilAnswerTest do
       {result, recorder}
     end
 
-    @tag :known_defect
     test "answering nil resolves the placeholder, and the next setup command receives nil" do
       {result, recorder} = run_setup(%{drop_id: true})
 

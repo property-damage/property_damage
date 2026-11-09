@@ -31,7 +31,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg = PlaceholderRegistry.register(reg, p)
 
-      assert Map.has_key?(reg.placeholders, p.id)
+      assert Map.has_key?(reg.placeholders, Placeholder.id(p))
     end
 
     test "indexes by producer position" do
@@ -40,7 +40,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg = PlaceholderRegistry.register(reg, p)
 
-      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [Placeholder.id(p)]
     end
 
     test "collects multiple placeholders at the same position in order" do
@@ -50,7 +50,10 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
-      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p1.id, p2.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [
+               Placeholder.id(p1),
+               Placeholder.id(p2)
+             ]
     end
 
     test "can register multiple placeholders at distinct positions" do
@@ -61,8 +64,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
       assert map_size(reg.placeholders) == 2
-      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p1.id]
-      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(1)) == [p2.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [Placeholder.id(p1)]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(1)) == [Placeholder.id(p2)]
     end
   end
 
@@ -79,7 +82,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
-      assert PlaceholderRegistry.get(reg, p.id) == p
+      assert PlaceholderRegistry.get(reg, Placeholder.id(p)) == p
     end
 
     test "returns nil for unknown ID" do
@@ -93,9 +96,9 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
-      reg = PlaceholderRegistry.resolve(reg, p.id, "order_123")
+      reg = PlaceholderRegistry.resolve(reg, Placeholder.id(p), "order_123")
 
-      assert Placeholder.value!(PlaceholderRegistry.get(reg, p.id)) == "order_123"
+      assert Placeholder.value!(PlaceholderRegistry.get(reg, Placeholder.id(p))) == "order_123"
     end
 
     test "returns the registry unchanged for an unknown id" do
@@ -105,7 +108,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       reg2 = PlaceholderRegistry.resolve(reg, make_ref(), "value")
 
-      refute Placeholder.resolved?(PlaceholderRegistry.get(reg2, p.id))
+      refute Placeholder.resolved?(PlaceholderRegistry.get(reg2, Placeholder.id(p)))
     end
 
     test "resolves only the targeted placeholder when several exist" do
@@ -117,10 +120,10 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve(p2.id, "order_456")
+        |> PlaceholderRegistry.resolve(Placeholder.id(p2), "order_456")
 
-      refute Placeholder.resolved?(PlaceholderRegistry.get(reg, p1.id))
-      assert Placeholder.value!(PlaceholderRegistry.get(reg, p2.id)) == "order_456"
+      refute Placeholder.resolved?(PlaceholderRegistry.get(reg, Placeholder.id(p1)))
+      assert Placeholder.value!(PlaceholderRegistry.get(reg, Placeholder.id(p2))) == "order_456"
     end
   end
 
@@ -130,7 +133,9 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       reg =
-        reg |> PlaceholderRegistry.register(p) |> PlaceholderRegistry.resolve(p.id, "order_123")
+        reg
+        |> PlaceholderRegistry.register(p)
+        |> PlaceholderRegistry.resolve(Placeholder.id(p), "order_123")
 
       {:ok, reg: reg, p: p}
     end
@@ -176,8 +181,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve(p1.id, "order_123")
-        |> PlaceholderRegistry.resolve(p2.id, "ref_456")
+        |> PlaceholderRegistry.resolve(Placeholder.id(p1), "order_123")
+        |> PlaceholderRegistry.resolve(Placeholder.id(p2), "ref_456")
 
       assert PlaceholderRegistry.deep_resolve(reg, %{order_id: p1, other_ref: p2}) ==
                %{order_id: "order_123", other_ref: "ref_456"}
@@ -271,7 +276,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
     test "collects ID from a single placeholder" do
       p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
-      assert PlaceholderRegistry.collect_placeholder_ids(p) == [p.id]
+      assert PlaceholderRegistry.collect_placeholder_ids(p) == [Placeholder.id(p)]
     end
 
     test "collects IDs from nested structures and deduplicates" do
@@ -280,7 +285,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       ids = PlaceholderRegistry.collect_placeholder_ids(%{a: [p1, p2], b: %{c: p1}})
 
-      assert Enum.sort(ids) == Enum.sort([p1.id, p2.id])
+      assert Enum.sort(ids) == Enum.sort([Placeholder.id(p1), Placeholder.id(p2)])
     end
 
     test "returns [] for non-placeholder data" do
@@ -296,7 +301,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       collected = PlaceholderRegistry.collect_placeholders(%{a: p1, b: [p2, p1]})
 
-      assert Enum.sort_by(collected, & &1.id) == Enum.sort_by([p1, p2], & &1.id)
+      assert Enum.sort_by(collected, &Placeholder.id/1) ==
+               Enum.sort_by([p1, p2], &Placeholder.id/1)
     end
   end
 
@@ -310,7 +316,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve(p1.id, "value")
+        |> PlaceholderRegistry.resolve(Placeholder.id(p1), "value")
 
       {:ok, reg: reg, p1: p1, p2: p2}
     end
@@ -318,17 +324,19 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
     test "all/1 returns every placeholder", %{reg: reg, p1: p1, p2: p2} do
       all = PlaceholderRegistry.all(reg)
       assert length(all) == 2
-      assert Enum.map(all, & &1.id) |> Enum.sort() == Enum.sort([p1.id, p2.id])
+
+      assert Enum.map(all, &Placeholder.id/1) |> Enum.sort() ==
+               Enum.sort([Placeholder.id(p1), Placeholder.id(p2)])
     end
 
     test "resolved/1 returns only resolved", %{reg: reg, p1: p1} do
       assert [only] = PlaceholderRegistry.resolved(reg)
-      assert only.id == p1.id
+      assert Placeholder.id(only) == Placeholder.id(p1)
     end
 
     test "unresolved/1 returns only unresolved", %{reg: reg, p2: p2} do
       assert [only] = PlaceholderRegistry.unresolved(reg)
-      assert only.id == p2.id
+      assert Placeholder.id(only) == Placeholder.id(p2)
     end
   end
 end

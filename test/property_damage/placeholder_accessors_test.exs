@@ -23,8 +23,6 @@ defmodule PropertyDamage.PlaceholderAccessorsTest do
   defp build(:value_resolved), do: value_resolved()
 
   describe "the identity accessors" do
-    @describetag :known_defect
-
     for label <- [:fresh, :nil_resolved, :value_resolved] do
       test "read the coordinates of a #{label} placeholder" do
         placeholder = build(unquote(label))
@@ -60,15 +58,12 @@ defmodule PropertyDamage.PlaceholderAccessorsTest do
       assert Placeholder.resolved?(value_resolved())
     end
 
-    @tag :known_defect
     test "is true for a placeholder resolved to nil" do
       assert Placeholder.resolved?(nil_resolved())
     end
   end
 
   describe "value/1" do
-    @describetag :known_defect
-
     test "is :error for a fresh placeholder" do
       assert Placeholder.value(fresh()) == :error
     end
@@ -91,7 +86,6 @@ defmodule PropertyDamage.PlaceholderAccessorsTest do
       assert Placeholder.value!(value_resolved()) == "order_1"
     end
 
-    @tag :known_defect
     test "returns nil for a placeholder resolved to nil" do
       assert Placeholder.value!(nil_resolved()) == nil
     end
@@ -106,7 +100,6 @@ defmodule PropertyDamage.PlaceholderAccessorsTest do
       assert value_resolved() == Placeholder.resolve(fresh(), "order_1")
     end
 
-    @tag :known_defect
     test "a placeholder resolved to nil differs from the fresh one" do
       refute nil_resolved() == fresh()
     end
@@ -123,8 +116,6 @@ defmodule PropertyDamage.PlaceholderAccessorsTest do
   end
 
   describe "External.fetch_at_path/2" do
-    @describetag :known_defect
-
     test "returns {:ok, value} for a present value" do
       assert External.fetch_at_path(%{ids: %{order: "o1"}}, [:ids, :order]) == {:ok, "o1"}
     end

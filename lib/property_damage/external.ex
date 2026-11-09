@@ -295,6 +295,38 @@ defmodule PropertyDamage.External do
   def get_at_path(_, _), do: nil
 
   @doc """
+  Fetch the value at a path in a nested structure.
+
+  Returns `{:ok, value}` when the path leads to a value (including `nil`), and
+  `:error` for a missing key, an out-of-range index or a non-container.
+
+  ## Examples
+
+      iex> PropertyDamage.External.fetch_at_path(%{ids: %{order: nil}}, [:ids, :order])
+      {:ok, nil}
+
+      iex> PropertyDamage.External.fetch_at_path(%{ids: %{}}, [:ids, :order])
+      :error
+  """
+  @spec fetch_at_path(term(), [atom() | non_neg_integer()]) :: {:ok, term()} | :error
+  def fetch_at_path(data, []), do: {:ok, data}
+
+  def fetch_at_path(data, [key | rest]) when is_map(data) do
+    case Map.fetch(data, key) do
+      {:ok, inner} -> fetch_at_path(inner, rest)
+      :error -> :error
+    end
+  end
+
+  def fetch_at_path(data, [index | rest]) when is_list(data) and is_integer(index) do
+    if index >= 0 and index < length(data),
+      do: fetch_at_path(Enum.at(data, index), rest),
+      else: :error
+  end
+
+  def fetch_at_path(_, _), do: :error
+
+  @doc """
   Put a value at a path in a nested structure.
 
   Supports map keys and list indices. Creates intermediate structures as needed.
