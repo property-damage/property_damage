@@ -24,11 +24,11 @@ defmodule PropertyDamage.PersistenceExportJsonReferenceTest do
     assert exported["reference_trace"] == formatted["reference_trace"]
 
     assert %{"Ledger" => %{"by" => "a"}} =
-             exported["reference_state_at_failure"]
+             exported["reference_projections"]
 
-    assert exported["reference_state_at_failure"] == formatted["reference_projections"]
-    assert exported["shrink_stop"] == "done"
-    assert exported["shrink_stop"] == formatted["shrinking"]["stop"]
+    assert exported["reference_projections"] == formatted["reference_projections"]
+    assert exported["shrinking"]["stop"] == "done"
+    assert exported == formatted
   end
 
   test "the export of a report that is not a comparison failure carries them as null" do
@@ -41,9 +41,11 @@ defmodule PropertyDamage.PersistenceExportJsonReferenceTest do
 
     exported = report |> Persistence.export_json() |> Jason.decode!()
 
-    for key <- ["reference_trace", "reference_state_at_failure", "shrink_stop"] do
+    for key <- ["reference_trace", "reference_projections"] do
       assert Map.has_key?(exported, key), "the export lacks #{key}"
       assert Map.fetch!(exported, key) == nil
     end
+
+    assert exported["shrinking"]["stop"] == nil
   end
 end

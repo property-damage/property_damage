@@ -63,8 +63,8 @@ defmodule PropertyDamage.Persistence do
   file holds.
   """
 
-  alias PropertyDamage.{EventLog.Entry, Failure, FailureReport, RunTrace, Sequence}
-  alias PropertyDamage.FailureReport.Formatter
+  alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.Document
 
   @version 20
   @extension ".pd"
@@ -351,64 +351,20 @@ defmodule PropertyDamage.Persistence do
   @doc """
   Export a failure to JSON format for external tools.
 
-  A comparison failure's reference side is written as `reference_trace`,
-  `reference_state_at_failure` and `shrink_stop`, in the shape the `:json`
-  format gives `reference_trace`, `reference_projections` and the shrinking
-  `stop`; each is `null` when the report has none.
+  The result is the one document of `PropertyDamage.FailureReport.Document`
+  (see its moduledoc for the keys), encoded as indented JSON.
 
   Note: JSON export is lossy - some Elixir-specific data may be simplified.
   Use `save/3` for lossless storage.
   """
   @spec export_json(FailureReport.t()) :: String.t()
   def export_json(%FailureReport{} = report) do
-    reference = Formatter.reference_json(report)
-
-    %{
-      version: @version,
-      seed: FailureReport.seed(report),
-      run_number: FailureReport.run_number(report),
-      failed_at_index: report.failed_at_index,
-      kind: FailureReport.kind(report),
-      check_name: name_string(FailureReport.check_name(report)),
-      failure_message: FailureReport.failure_message(report),
-      shrink_iterations: report.shrink_iterations,
-      shrink_time_ms: report.shrink_time_ms,
-      timestamp: DateTime.to_iso8601(FailureReport.timestamp(report)),
-      model: FailureReport.model(report) && inspect(FailureReport.model(report)),
-      report_kind: report.report_kind,
-      variant: report.variant,
-      targets: Enum.map(report.targets, &export_target/1),
-      compare: Map.new(report.compare),
-      compare_counts:
-        Map.new(report.compare_counts, fn {key, counts} -> {name_string(key), counts} end),
-      other_failures: Enum.map(report.other_failures, &export_other_failure/1),
-      stutter: report.stutter && inspect(report.stutter),
-      max_commands: report.max_commands,
-      shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
-      setup_commands: Enum.map(FailureReport.setup_commands(report), &inspect/1),
-      teardown_commands: Enum.map(FailureReport.teardown_commands(report), &inspect/1),
-      original_command_count: length(Sequence.to_list(report.original_sequence)),
-      reference_trace: reference.trace,
-      reference_state_at_failure: reference.projections,
-      shrink_stop: reference.stop,
-      reproduction_command: FailureReport.reproduction_command(report)
-    }
-    |> Jason.encode!(pretty: true)
+    report |> Document.build() |> Jason.encode!(pretty: true)
   end
 
   # ============================================================================
   # Private Helpers
   # ============================================================================
-
-  defp export_other_failure(%{variant: variant, root: root, failure: failure}) do
-    %{
-      variant: variant,
-      root: root,
-      kind: Failure.kind(failure),
-      name: name_string(Failure.name(failure)),
-      message: FailureReport.failure_message(failure)
-    }
-  end
 
   # A failure's name as JSON and in a file name: a module by its Elixir name,
   # a `{projection, function}` key as `Projection.function`, any other atom as
@@ -423,18 +379,6 @@ defmodule PropertyDamage.Persistence do
       "Elixir." <> module -> module
       string -> string
     end
-  end
-
-  # A `targets:` entry as JSON: the adapter and name as strings, the config,
-  # injectors and mocks inspected (they may hold terms JSON cannot encode).
-  defp export_target({adapter, entry}) do
-    %{
-      adapter: inspect(adapter),
-      name: Keyword.get(entry, :name),
-      config: inspect(Keyword.get(entry, :config, %{})),
-      injectors: Enum.map(Keyword.get(entry, :injectors, []), &inspect/1),
-      mocks: inspect(Keyword.get(entry, :mocks, []))
-    }
   end
 
   defp do_save(report, path) do

@@ -90,7 +90,7 @@ defmodule PropertyDamage.CompareReportingTest do
 
     assert exported["compare"] == %{"converge_within" => 100}
     assert exported["compare_counts"][@label]["waited_ms"] == 120
-    assert exported["check_name"] == @label
+    assert exported["failure"]["check_name"] == @label
   end
 
   test "a failure to converge is rebuilt from its signature" do

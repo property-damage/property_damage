@@ -159,7 +159,7 @@ defmodule Mix.Tasks.Pd.ExplainEdgesTest do
 
       assert_refused(E.exec([page, "--prompt"]), [
         "#{page}: bundle format \"1\" (a string) is not supported; " <>
-          "this version reads formats: 1"
+          "this version reads formats: 1, 2"
       ])
     end
 
@@ -168,7 +168,7 @@ defmodule Mix.Tasks.Pd.ExplainEdgesTest do
       page = page_with_bundle(dir, &Map.delete(&1, "format"))
 
       assert_refused(E.exec([page, "--prompt"]), [
-        "#{page}: the bundle has no format field; this version reads formats: 1"
+        "#{page}: the bundle has no format field; this version reads formats: 1, 2"
       ])
     end
 
@@ -177,13 +177,13 @@ defmodule Mix.Tasks.Pd.ExplainEdgesTest do
       page = page_with_bundle(dir, &Map.put(&1, "format", nil))
 
       assert_refused(E.exec([page, "--prompt"]), [
-        "#{page}: bundle format null is not supported; this version reads formats: 1"
+        "#{page}: bundle format null is not supported; this version reads formats: 1, 2"
       ])
 
       page = page_with_bundle(dir, &Map.put(&1, "format", [1]))
 
       assert_refused(E.exec([page, "--prompt"]), [
-        "#{page}: bundle format [1] (a list) is not supported; this version reads formats: 1"
+        "#{page}: bundle format [1] (a list) is not supported; this version reads formats: 1, 2"
       ])
     end
 

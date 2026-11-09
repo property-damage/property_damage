@@ -158,8 +158,8 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
     test "names the fine kind `kind` and the outcome `report_kind`" do
       json = exported(idempotency_report())
 
-      assert json["version"] == @current_version
-      assert json["kind"] == "idempotency_violation"
+      assert json["format"] == 2
+      assert json["failure"]["kind"] == "idempotency_violation"
       assert json["report_kind"] == "check_failed"
       refute Map.has_key?(json, "failure_type")
     end
@@ -167,10 +167,10 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
     test "gives each real check failure the same fine kind and outcome words" do
       json = exported(failing_report())
 
-      assert json["kind"] == "check_failed"
+      assert json["failure"]["kind"] == "check_failed"
       assert json["report_kind"] == "check_failed"
 
-      assert json["check_name"] ==
+      assert json["failure"]["check_name"] ==
                "at_most_one"
     end
 
@@ -178,11 +178,15 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       report = failing_report()
       other = Failure.from_signature(:adapter_error, nil)
 
-      with_other = %{report | other_failures: [%{variant: 0, root: 1, failure: other}]}
+      with_other = %{
+        report
+        | other_failures: [%{variant: %{index: 0, name: "a"}, root: 1, failure: other}]
+      }
+
       assert [entry] = exported(with_other)["other_failures"]
 
       assert entry["kind"] == "adapter_error"
-      assert entry["name"] == nil
+      assert entry["check_name"] == nil
       refute Map.has_key?(entry, "failure_type")
     end
   end

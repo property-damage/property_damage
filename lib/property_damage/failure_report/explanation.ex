@@ -46,7 +46,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
   """
 
   @prompt_version 1
-  @supported_formats [1]
+  @supported_formats [1, 2]
 
   @instructions_path Path.expand("../../../priv/explain/instructions.md", __DIR__)
   @external_resource @instructions_path

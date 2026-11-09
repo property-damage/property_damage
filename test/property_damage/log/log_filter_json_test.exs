@@ -141,13 +141,17 @@ defmodule PropertyDamage.Log.LogFilterJsonTest do
         do: assert(messages(step(side, "[0]")["lines"]) == ["plain line", "accept: json"])
   end
 
-  test "leaves every other JSON key as it was" do
+  # The Failure, listing and section members describe the printed page, which
+  # names the filter and the log lines it shows; every other key is the same.
+  test "leaves every key that does not describe the printed page as it was" do
     report = filtered_report()
     plain = report |> Map.put(:log_filter, nil) |> Map.put(:setup_log, []) |> json()
 
     with_logs = json(report)
     assert Map.keys(with_logs) -- Map.keys(plain) == []
-    assert Map.delete(with_logs, "logs") == Map.delete(plain, "logs")
+    printed = ["logs", "failure", "listing", "sections"]
+    assert Map.drop(with_logs, printed) == Map.drop(plain, printed)
+    assert Map.delete(with_logs["failure"], "fields") == Map.delete(plain["failure"], "fields")
     assert is_map(with_logs["logs"])
   end
 

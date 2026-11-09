@@ -601,11 +601,11 @@ defmodule PropertyDamage.Test.ContextSection do
   @doc "The items of the JSON data, failing when the key is missing or is not a list."
   def json_items!(report) do
     case json(report) do
-      %{"what_this_checks" => items} when is_list(items) ->
-        items
+      %{"context" => items} when is_list(items) ->
+        Enum.map(items, &Map.delete(&1, "id"))
 
       other ->
-        flunk("no what_this_checks list in the JSON data, keys: #{inspect(Map.keys(other))}")
+        flunk("no context list in the JSON data, keys: #{inspect(Map.keys(other))}")
     end
   end
 

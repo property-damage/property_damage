@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Pd.ExplainDefaultTest do
       {E.write(dir, "not_json.html", String.replace(html, bytes, ~s({"format":1,))),
        "the bundle in this page is not valid JSON"},
       {E.copy(dir, "page_format_999.html"),
-       "bundle format 999 is not supported; this version reads formats: 1"}
+       "bundle format 999 is not supported; this version reads formats: 1, 2"}
     ]
   end
 

@@ -50,14 +50,14 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       assert out =~ "NonNegativeBalance"
     end
 
-    test ":json renders valid, decodable JSON carrying the seed and type" do
+    test ":json renders valid, decodable JSON carrying the seed and kind" do
       out = Formatter.format(sut_failure(), :json)
       assert {:ok, decoded} = Jason.decode(out)
       assert decoded["location"]["seed"] == 512_902_757
-      assert decoded["failure"]["type"] == "check_failed"
+      assert decoded["failure"]["kind"] == "check_failed"
     end
 
-    test ":json carries format version 2.0 and event entries without a branch field" do
+    test ":json carries format 2 and event entries without a branch field" do
       seq = Sequence.linear([%CreateAccount{currency: :USD}])
 
       report =
@@ -73,7 +73,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
 
       decoded = report |> Formatter.format(:json) |> Jason.decode!()
 
-      assert decoded["version"] == "2.0"
+      assert decoded["format"] == 2
 
       assert [entry] = decoded["event_log"]
       assert Map.keys(entry) |> Enum.sort() == ["command_index", "event", "event_type", "source"]

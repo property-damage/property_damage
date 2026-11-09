@@ -295,7 +295,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
         assert FailureReport.failure_reason(loaded) == FailureReport.failure_reason(report)
 
         decoded = report |> Persistence.export_json() |> Jason.decode!()
-        assert decoded["kind"] == Atom.to_string(kind)
+        assert decoded["failure"]["kind"] == Atom.to_string(kind)
       end
     end
   end

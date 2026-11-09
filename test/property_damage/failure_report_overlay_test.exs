@@ -96,7 +96,6 @@ defmodule PropertyDamage.FailureReportOverlayTest do
   end
 
   describe "the JSON document" do
-    @tag :known_defect
     test "is the same from the formatter, the export and the bundle, and names the failure" do
       report = F.failing_report()
       document = json(report)
@@ -110,7 +109,6 @@ defmodule PropertyDamage.FailureReportOverlayTest do
       assert reason =~ "at_most_one" or reason =~ "two sends"
     end
 
-    @tag :known_defect
     test "differs when the report differs, so equality is not vacuous" do
       report = F.failing_report()
       changed = with_seed(report, 99)
@@ -123,7 +121,6 @@ defmodule PropertyDamage.FailureReportOverlayTest do
       assert json(changed) == bundled(changed)
     end
 
-    @tag :known_defect
     test "carries the source members only when sources are requested" do
       report = F.failing_report()
       source_members = ["modules", "ids", "missing_sources", "redactions"]

@@ -41,15 +41,15 @@ defmodule PropertyDamage.Test.BundleSupport do
   end
 
   @doc """
-  The bundle of `report` as the page carries it: built with `Bundle.build/2`,
-  then through JSON, so every key is a string.
+  The document of `report` as the page carries it: built with `Bundle.build/2`
+  and `sources: true`, then through JSON, so every key is a string.
   """
   def build(report, opts \\ []) do
     mod = bundle()
     assert function_exported?(mod, :build, 2), "#{inspect(mod)}.build/2 is not defined"
 
     report
-    |> then(&mod.build(&1, opts))
+    |> then(&mod.build(&1, Keyword.put_new(opts, :sources, true)))
     |> Jason.encode!()
     |> Jason.decode!()
   end
