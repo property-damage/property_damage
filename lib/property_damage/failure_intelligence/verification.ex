@@ -15,7 +15,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   `PropertyDamage.FailureIntelligence.Exploration`.
   """
 
-  alias PropertyDamage.{Failure, FailureReport, Options, ReplayArtifact, Target}
+  alias PropertyDamage.{Campaign, Failure, FailureReport, Options, ReplayArtifact, Target}
 
   @type status :: :verified | :still_failing | :different_failure
 
@@ -156,7 +156,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
     try do
       {:ok, path} = ReplayArtifact.write(term, dir)
 
-      PropertyDamage.run(
+      Campaign.run(
         model: model,
         targets: [Target.to_entry(target)],
         only: [replay: path],

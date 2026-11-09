@@ -9,7 +9,7 @@ defmodule PropertyDamage.FailureIntelligence.Exploration do
   fix.
   """
 
-  alias PropertyDamage.{FailureReport, Options, Target}
+  alias PropertyDamage.{Campaign, FailureReport, Options, Target}
 
   @type result :: %{
           original_seed: integer(),
@@ -70,7 +70,7 @@ defmodule PropertyDamage.FailureIntelligence.Exploration do
   end
 
   defp run_seed(seed, model, target) do
-    PropertyDamage.run(
+    Campaign.run(
       model: model,
       targets: [Target.to_entry(target)],
       seed: seed,

@@ -60,6 +60,15 @@ defmodule PropertyDamage.Campaign do
         }
 
   @doc """
+  Runs a campaign with no `on_failure` callback and no regression handler.
+
+  This is `run/2` for internal reruns (verification, exploration) that pass
+  neither option.
+  """
+  @spec run(keyword()) :: {:ok, map()} | {:error, FailureReport.t()}
+  def run(opts), do: run(opts, fn _opts -> nil end)
+
+  @doc """
   Runs a campaign: validates `opts`, builds the campaign context, replays the
   seed library when it is on, then runs every run and returns the result.
 
