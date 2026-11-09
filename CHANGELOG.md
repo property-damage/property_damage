@@ -646,9 +646,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all candidates, all in milliseconds. The stop metadata adds `stop`, why the
   shrink ended. `PropertyDamage.Shrinker.Outcome` has a new `adapter_ms` field
   for an oracle that times the adapters.
+- **Placeholder accessors.** `PropertyDamage.Placeholder` has `id/1`,
+  `position/1`, `path/1`, `event_module/1`, `event_index/1`, `resolved?/1`,
+  `value/1` and `value!/1`. `value/1` returns `{:ok, value}` or `:error`.
+- **`PropertyDamage.External.fetch_at_path/2`.** It reads the value at a path in
+  an event and returns `{:ok, value}` or `:error`, so a field that holds `nil`
+  differs from a field the event lacks.
+- **`PropertyDamage.Placeholder.retarget/2`.** It returns a placeholder for
+  another event field, which the registry uses to alias a root's placeholder to
+  a leaf's.
 
 ### Changed
 
+- **Breaking: the placeholder is an opaque type read through accessors (DR-067).**
+  `PropertyDamage.Placeholder.t/0` is `@opaque`; code that read `placeholder.id`,
+  `.path`, `.position`, `.event_module`, `.event_index` or `.resolved` calls
+  `Placeholder.id/1`, `path/1`, `position/1`, `event_module/1`,
+  `event_index/1`, `resolved?/1` or `value/1`.
+- **Breaking: a placeholder's `resolved` marker is `:unresolved | {:resolved,
+  term()}`.** It was `nil` for unresolved, so a system that answered `nil` for an
+  `external()` field looked unanswered. An answer of `nil` now resolves the
+  placeholder to `nil`; an event that lacks the field leaves it unresolved.
+- **Breaking: persistence version 21 and replay artifact format 4.** The saved
+  placeholder holds the new marker. Reports saved at version 20 or older and
+  replay artifacts of format 3 or older are refused with the existing errors;
+  capture the failure again.
 - **Breaking: `PropertyDamage.Executor.run` is removed.** Every run goes
   through `PropertyDamage.Runner.execute/2`; to run one command at a time,
   use `PropertyDamage.Executor.Stepping`. `Executor.execute_raw/3` is

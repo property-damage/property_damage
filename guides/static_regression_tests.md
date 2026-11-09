@@ -213,7 +213,9 @@ the sequence, and `execute/2` runs exactly the list you give it. If you pass
 A placeholder names the command that produces its value by position, and
 `execute/2` captures a command's events under `Position.prefix(index)`, where
 `index` is the command's place in the list you pass. After you prepend setup
-commands, build each placeholder with the producer's new index.
+commands, build each placeholder with the producer's new index. A placeholder is
+opaque: `Placeholder.position/1`, `path/1` and `resolved?/1` read it, and
+`Placeholder.value/1` returns `{:ok, value}` once a run has answered it.
 
 ### From Generated Test Code
 
