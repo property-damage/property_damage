@@ -205,8 +205,8 @@ defmodule PropertyDamage do
     Progress.RunResult,
     Progress.RunUpdate,
     ReplayArtifact,
+    ReportBuilder,
     Runner,
-    RunTrace,
     Scheduler,
     SeedLibrary,
     Sequence,
@@ -888,7 +888,7 @@ defmodule PropertyDamage do
 
     case judge_latency(ctx, metrics) do
       [] -> finish_campaign(ctx, acc, metrics)
-      breaches -> report_failure(ctx, latency_report(ctx, acc, metrics, breaches))
+      breaches -> report_failure(ctx, ReportBuilder.latency_exceeded(ctx, acc, metrics, breaches))
     end
   end
 
@@ -932,55 +932,6 @@ defmodule PropertyDamage do
     end)
 
     {:ok, stats}
-  end
-
-  # The budget is judged once, after every run passed, so the report is not
-  # localized to a command and nothing is shrunk or re-executed. It records the
-  # last run's sequence, seed and number, and the failing target's result of
-  # that run (each run replaces the previous one, so one run stays in memory).
-  defp latency_report(ctx, acc, metrics, [{target, failure} | rest]) do
-    last = acc.last_run
-    result = Enum.at(last.results, target.index) || %{}
-
-    FailureReport.new(
-      seed: last.run_seed,
-      run_number: last.run_number,
-      original_sequence: last.sequence,
-      shrunk_sequence: last.sequence,
-      plan_source: :generated,
-      source_revision: RunTrace.source_revision(),
-      run_nonce: ctx.run_nonce,
-      mint_epoch: 0,
-      failed_at_index: nil,
-      executed: Map.get(result, :executed, %{}),
-      event_log: Map.get(result, :event_log, []),
-      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      logs: Map.get(result, :logs, %{}),
-      failure_reason: failure,
-      report_kind: :latency_exceeded,
-      variant: variant_of(target),
-      shrink_iterations: 0,
-      shrink_time_ms: 0,
-      model: ctx.model,
-      targets: ctx.target_entries,
-      concurrency: ctx.concurrency,
-      compare: ctx.compare,
-      setup_log: ctx.setup_log,
-      log_filter: ctx.log_filter,
-      stutter: ctx.stutter,
-      max_commands: ctx.max_commands,
-      check_fires: acc.fires,
-      compare_counts: acc.compare_counts,
-      other_failures:
-        for({other, other_failure} <- rest) do
-          %{variant: variant_of(other), root: nil, failure: other_failure}
-        end,
-      check_mode: ctx.check_mode,
-      external_markers: ctx.external_markers,
-      campaign: %{seed: ctx.seed, max_runs: ctx.max_runs},
-      latency: ctx.latency,
-      metrics: metrics
-    )
   end
 
   # One run: generate its sequence (setup commands, roots and teardown
@@ -1151,8 +1102,6 @@ defmodule PropertyDamage do
     }
   end
 
-  defp variant_of(target), do: %{index: target.index, name: target.name}
-
   # Under `latency:`, each run at or after the warm-up contributes its
   # per-target timings to the metrics.
   defp record_sample(%{samples: samples} = acc, ctx, run, outcome) do
@@ -1229,7 +1178,7 @@ defmodule PropertyDamage do
   # only) records the sequence via the existing Coverage path.
   defp accumulate_coverage(acc, result, sequence, choices) do
     run_fires = project_fires(Map.get(result, :check_counters, %{}))
-    fires = merge_fires(acc.fires, run_fires)
+    fires = ReportBuilder.merge_fires(acc.fires, run_fires)
 
     tracker =
       if acc.tracker do
@@ -1260,23 +1209,6 @@ defmodule PropertyDamage do
     for {{:fired, projection, name}, count} <- counters, into: %{} do
       {{projection, name}, count}
     end
-  end
-
-  # The firings the run a found failure describes fired: its reproduction's,
-  # else the whole-run firings less those of the runs before it.
-  defp run_fires(%{run_fires: fires}), do: fires
-  defp run_fires(found), do: subtract_fires(found.fires, Map.get(found, :fires_before, %{}))
-
-  defp subtract_fires(fires, taken) do
-    for {key, count} <- fires,
-        left = count - Map.get(taken, key, 0),
-        left > 0,
-        into: %{},
-        do: {key, left}
-  end
-
-  defp merge_fires(acc, new) do
-    Map.merge(acc, new, fn _key, a, b -> a + b end)
   end
 
   # Attach the whole-run coverage data to the success stats map: always the
@@ -1604,7 +1536,7 @@ defmodule PropertyDamage do
   # sequence, reproduce the shrunk sequence once, and report. A target's setup
   # failure implicates no command, so it is reported as found, unshrunk.
   defp handle_failure(ctx, %{failure: %{report_kind: :setup_failed}} = found) do
-    report_failure(ctx, failure_report(ctx, found, :found))
+    report_failure(ctx, ReportBuilder.from_found(ctx, found, :found))
   end
 
   defp handle_failure(ctx, found) do
@@ -1669,17 +1601,21 @@ defmodule PropertyDamage do
               other_failures: other_failures,
               expansion: expansion,
               original_root: found.failure.root,
-              fires: merge_fires(Map.get(found, :fires_before, %{}), counts.fires),
+              fires: ReportBuilder.merge_fires(Map.get(found, :fires_before, %{}), counts.fires),
               run_fires: counts.fires,
               compare_counts: counts.compare_counts
             })
 
-          failure_report(ctx, reproduced, {:shrunk, shrunk_sequence, fresh_epoch, shrink})
+          ReportBuilder.from_found(
+            ctx,
+            reproduced,
+            {:shrunk, shrunk_sequence, fresh_epoch, shrink}
+          )
 
         # A passing re-run, or a re-execution whose adapter setup failed: not
         # a reproduction.
         _not_reproduced ->
-          failure_report(ctx, found, {:fallback, shrink})
+          ReportBuilder.from_found(ctx, found, {:fallback, shrink})
       end
 
     report_failure(ctx, report)
@@ -1780,104 +1716,6 @@ defmodule PropertyDamage do
     Failure.signature(failure.reason, failure.variant.index) ==
       Failure.signature(found_failure.reason, found_failure.variant.index)
   end
-
-  # The report of a found failure. `:found` reports it as the run found it (no
-  # shrinking); `{:fallback, shrink}` likewise, after a shrink whose result did
-  # not reproduce; `{:shrunk, sequence, epoch, shrink}` reports the reproduction
-  # of the shrunk sequence (`found` then holds the reproduction's failure and
-  # result).
-  defp failure_report(ctx, found, how) do
-    {shrunk_sequence, plan_source, mint_epoch, shrink} =
-      case how do
-        :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0, stop: :done}}
-        {:fallback, shrink} -> {found.sequence, :generated, 0, shrink}
-        # Without shrinking the reproduced sequence is the generated one.
-        {:shrunk, sequence, epoch, shrink} -> {sequence, plan_source(ctx), epoch, shrink}
-      end
-
-    result = found.result || %{}
-    failure = found.failure
-    last_root = last_root(failure, result)
-
-    FailureReport.new(
-      seed: found.run_seed,
-      run_number: found.run_number,
-      original_sequence: found.sequence,
-      shrunk_sequence: shrunk_sequence,
-      # The embedded trace describes whichever run carries the observed
-      # failure (DR-033): the shrunk minimal reproduction when it reproduced,
-      # else the original generated run.
-      plan_source: plan_source,
-      source_revision: RunTrace.source_revision(),
-      # Record the run inputs of the execution the report describes (DR-034):
-      # the reproduction re-execution's epoch when it reproduced, else the
-      # exploration run's epoch 0.
-      run_nonce: ctx.run_nonce,
-      mint_epoch: mint_epoch,
-      executed: Map.get(result, :executed, %{}),
-      failed_at_index: failure.root,
-      original_failed_at_index: Map.get(found, :original_root, failure.root),
-      last_root: last_root,
-      failure_reason: failure.reason,
-      report_kind: failure.report_kind,
-      variant: failure.variant,
-      shrink_iterations: shrink.iterations,
-      shrink_time_ms: shrink.time_ms,
-      shrink_stop: shrink.stop,
-      reference_result: Map.get(found, :reference_result),
-      event_log: Map.get(result, :event_log, []),
-      projections: Map.get(result, :projections, %{}),
-      projections_before: Map.get(result, :projections_before),
-      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      # The reported run's log lines (DR-054); a target whose setup/1 failed
-      # has no result, and its failure carries that setup's lines.
-      logs: Map.get(result, :logs) || Map.get(failure, :logs, %{}),
-      stacktrace: failure.stacktrace,
-      model: ctx.model,
-      targets: ctx.target_entries,
-      concurrency: ctx.concurrency,
-      compare: ctx.compare,
-      setup_log: ctx.setup_log,
-      log_filter: ctx.log_filter,
-      stutter: ctx.stutter,
-      max_commands: ctx.max_commands,
-      check_mode: ctx.check_mode,
-      external_markers: ctx.external_markers,
-      check_fires: found.fires,
-      run_check_fires: run_fires(found),
-      other_failures: Enum.map(found.other_failures, &other_failure/1),
-      compare_counts: found.compare_counts,
-      expansion: report_expansion(ctx, found, shrunk_sequence),
-      expansion_counts:
-        Expansion.merge_counts(
-          found.expansion_counts,
-          Expansion.counts(found.expansion, last_root)
-        ),
-      latency: Map.get(ctx, :latency, false),
-      metrics: Map.get(ctx, :measured_metrics)
-    )
-  end
-
-  defp plan_source(%{shrink: false}), do: :generated
-  defp plan_source(_ctx), do: :shrunk
-
-  # The last root the failing run executed: none when a setup command failed,
-  # the failing root, or for a failure at no root (a `:startup` check, the end
-  # of the run) every root when any root executed, else none.
-  defp last_root(%{report_kind: :setup_failed}, _result), do: -1
-  defp last_root(%{root: nil}, result), do: if(ran_a_root?(result), do: nil, else: -1)
-  defp last_root(failure, _result), do: failure.root
-
-  defp ran_a_root?(result),
-    do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
-
-  # The concrete sequences of the run the report describes; a found failure
-  # that carries none ran the reference target's roots as generated.
-  defp report_expansion(_ctx, %{expansion: %{} = expansion}, _sequence), do: expansion
-  defp report_expansion(ctx, _found, sequence), do: Expansion.identity(sequence, [ctx.target])
-
-  defp other_failure(failure),
-    do: %{variant: failure.variant, root: failure.root, failure: failure.reason}
 
   # Announces a failure report and returns it as the run's result.
   defp report_failure(ctx, failure_report) do
@@ -2193,7 +2031,7 @@ defmodule PropertyDamage do
       run_number: report.run_number,
       failure: %{
         report_kind: report.report_kind,
-        variant: report.variant || variant_of(ctx.target),
+        variant: report.variant || ReportBuilder.variant_of(ctx.target),
         root: report.failed_at_index,
         reason: report.failure_reason,
         stacktrace: report.stacktrace
@@ -2240,55 +2078,19 @@ defmodule PropertyDamage do
         elapsed = System.monotonic_time(:millisecond) - start_time
 
         further =
-          FailureReport.new(
-            seed: report.seed,
-            run_number: report.run_number,
-            original_sequence: report.original_sequence,
-            shrunk_sequence: shrink_result.sequence,
-            failed_at_index: failure.root,
-            original_failed_at_index: report.original_failed_at_index,
-            failure_reason: failure.reason,
-            report_kind: failure.report_kind,
-            variant: failure.variant,
-            shrink_iterations: report.shrink_iterations + shrink_result.iterations,
-            shrink_time_ms: report.shrink_time_ms + elapsed,
-            shrink_stop: shrink_result.stop,
-            reference_result: counts.reference_result,
-            event_log: Map.get(result, :event_log, []),
-            executed: Map.get(result, :executed, %{}),
-            # A further-shrunk report only reaches here on a genuine
-            # reproduction, so its plan is a shrinker product (DR-033).
-            plan_source: :shrunk,
-            source_revision: RunTrace.source_revision(),
-            run_nonce: ctx.run_nonce,
-            mint_epoch: fresh_epoch,
-            projections: Map.get(result, :projections, %{}),
-            projections_before: Map.get(result, :projections_before),
-            command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-            model: report.model,
-            targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
-            concurrency: ctx.concurrency,
-            compare: ctx.compare,
-            # The compare counts are the reproduction's, and its firings
-            # replace the share the report's own run fired.
-            compare_counts: counts.compare_counts,
-            check_fires:
-              (report.check_fires || %{})
-              |> subtract_fires(Map.get(report, :run_check_fires) || %{})
-              |> merge_fires(counts.fires),
-            run_check_fires: counts.fires,
-            other_failures: Enum.map(other_failures, &other_failure/1),
-            # The report's own setup lines stay, as the caller gave them.
-            setup_log: report.setup_log,
-            log_filter: report.log_filter,
-            stutter: ctx.stutter,
-            max_commands: report.max_commands,
-            check_mode: ctx.check_mode,
-            external_markers: ctx.external_markers,
-            logs: Map.get(result, :logs, %{}),
-            stacktrace: failure.stacktrace,
-            expansion: shrink_result.expansion,
-            expansion_counts: recount(report, shrink_result.expansion, failure.root)
+          ReportBuilder.further_shrink(
+            ctx,
+            report,
+            %{
+              targets: targets,
+              failure: failure,
+              result: result,
+              other_failures: other_failures,
+              counts: counts,
+              epoch: fresh_epoch
+            },
+            shrink_result,
+            elapsed
           )
 
         {:ok, further_replay(report, further)}
@@ -2302,32 +2104,6 @@ defmodule PropertyDamage do
         {:ok, report}
     end
   end
-
-  # The report's expansion counts with the failing run's share replaced by
-  # the further-shrunk run's; the counts of the runs that passed before it
-  # stay.
-  defp recount(report, expansion, failed_at) do
-    recorded = %{
-      variants: Map.new(recorded_choices(report), &{elem(&1, 0), %{choices: elem(&1, 1)}})
-    }
-
-    (report.expansion_counts || %{})
-    |> Expansion.subtract_counts(Expansion.counts(recorded, report.failed_at_index))
-    |> Expansion.merge_counts(Expansion.counts(expansion, failed_at))
-  end
-
-  # What every target of the report's run ran, by name: the replay term's
-  # choices (each given its root's module), else the trace's.
-  defp recorded_choices(%FailureReport{replay: %{roots: roots, choices: choices}}) do
-    modules = Map.new(roots, &{&1.root_id, &1.command.__struct__})
-
-    Map.new(choices, fn {name, ran} ->
-      {name, Enum.map(ran, &Map.put(&1, :module, Map.fetch!(modules, &1.root_id)))}
-    end)
-  end
-
-  defp recorded_choices(%FailureReport{trace: %RunTrace{expansion: %{} = traced}}), do: traced
-  defp recorded_choices(_report), do: %{}
 
   # The further-shrunk report's replay term and artifact. The artifact goes
   # beside the one the report came with, replacing it (the same seed names
