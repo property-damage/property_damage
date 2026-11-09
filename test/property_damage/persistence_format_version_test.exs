@@ -4,6 +4,8 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
   # engine never produces is refused rather than loaded.
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.{FailureReport, Persistence}
 
   # Reports saved at earlier format versions. A format-17 report's sequence
@@ -105,13 +107,14 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
   describe "an older format version" do
     test "is refused by load/1" do
       for {version, path} <- @older_fixtures do
-        assert {:error, {:unsupported_format_version, ^version, 19}} = Persistence.load(path)
+        assert {:error, {:unsupported_format_version, ^version, @version}} =
+                 Persistence.load(path)
       end
     end
 
     test "is refused by load_trace/1" do
       for {version, path} <- @older_fixtures do
-        assert {:error, {:unsupported_format_version, ^version, 19}} =
+        assert {:error, {:unsupported_format_version, ^version, @version}} =
                  Persistence.load_trace(path)
       end
     end
@@ -126,10 +129,10 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
       {:ok, path} = Persistence.save(report, dir)
 
       version = saved_header(path)
-      assert version == 19
+      assert version == @version
 
       <<"PD", _v::8, _crc::32, bin::binary>> = File.read!(path)
-      assert %{format_version: 19} = :erlang.binary_to_term(bin)
+      assert %{format_version: @version} = :erlang.binary_to_term(bin)
 
       assert {:ok, loaded} = Persistence.load(path)
       assert loaded.failure_reason == report.failure_reason

@@ -1,6 +1,8 @@
 defmodule PropertyDamage.PersistenceTest do
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.{Failure, FailureReport, Persistence, RunTrace, Sequence}
 
   # Test command/event structs for version capture
@@ -62,7 +64,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read raw binary to verify format
       {:ok, <<"PD", version::8, _checksum::32, _rest::binary>>} = File.read(path)
-      assert version == 19
+      assert version == @version
     end
   end
 
@@ -85,7 +87,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read the file and manually modify the metadata to simulate version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 19::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", @version::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       # Add a fake dependency that will be missing (guaranteed to trigger warning)
@@ -94,7 +96,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 19::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, new_checksum::32, new_term_binary::binary>>)
 
       # Now load should return warnings about missing dependency
       {:ok, _report, warnings} = Persistence.load(path)
@@ -123,7 +125,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify file to add fake missing dependency (guaranteed to trigger warning)
       {:ok, binary} = File.read(path)
-      <<"PD", 19::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", @version::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata = %{payload.metadata | dependency_versions: %{fake_missing_app: "1.0.0"}}
@@ -131,7 +133,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 19::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, new_checksum::32, new_term_binary::binary>>)
 
       assert_raise ArgumentError, ~r/Version compatibility warnings/, fn ->
         Persistence.load!(path)
@@ -149,12 +151,12 @@ defmodule PropertyDamage.PersistenceTest do
     # The smallest file the loader reads: the magic, a version byte and a
     # checksum, with no payload. The version byte alone decides the refusal.
     @tag :tmp_dir
-    test "a file of version 18 or above 19 is refused for a report and a trace", %{
+    test "a file of an older or a newer version is refused for a report and a trace", %{
       tmp_dir: dir
     } do
       for {version, error} <- [
-            {17, {:unsupported_format_version, 17, 19}},
-            {20, {:incompatible_version, 20, 19}}
+            {@version - 2, {:unsupported_format_version, @version - 2, @version}},
+            {@version + 1, {:incompatible_version, @version + 1, @version}}
           ] do
         path = Path.join(dir, "v#{version}.pd")
         File.write!(path, <<"PD", version::8, 0::32>>)
@@ -178,18 +180,19 @@ defmodule PropertyDamage.PersistenceTest do
       path = Path.join(dir, "v7-legacy.pd")
       File.write!(path, <<"PD", 7::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 7, 19}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 7, @version}} = Persistence.load(path)
     end
 
     @tag :tmp_dir
-    test "v1 through v6 and v8 through v18 files are all refused", %{tmp_dir: dir} do
-      for version <- [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] do
+    test "every older version except 7 is refused", %{tmp_dir: dir} do
+      for version <- Enum.reject(1..(@version - 1), &(&1 == 7)) do
         term_binary = :erlang.term_to_binary(%{report: create_test_report()}, [:compressed])
         checksum = :erlang.crc32(term_binary)
         path = Path.join(dir, "v#{version}-legacy.pd")
         File.write!(path, <<"PD", version::8, checksum::32, term_binary::binary>>)
 
-        assert {:error, {:unsupported_format_version, ^version, 19}} = Persistence.load(path)
+        assert {:error, {:unsupported_format_version, ^version, @version}} =
+                 Persistence.load(path)
       end
     end
   end
@@ -221,7 +224,7 @@ defmodule PropertyDamage.PersistenceTest do
       assert report.teardown_commands == [%TestCommand{id: "teardown", amount: 2}]
 
       {:ok, path} = Persistence.save(report, dir)
-      {:ok, <<"PD", 19::8, _checksum::32, _rest::binary>>} = File.read(path)
+      {:ok, <<"PD", @version::8, _checksum::32, _rest::binary>>} = File.read(path)
       {:ok, loaded} = Persistence.load(path)
 
       assert loaded.setup_commands == report.setup_commands
@@ -242,7 +245,7 @@ defmodule PropertyDamage.PersistenceTest do
       path = Path.join(dir, "v10-legacy.pd")
       File.write!(path, <<"PD", 10::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 10, 19}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 10, @version}} = Persistence.load(path)
     end
   end
 
@@ -284,7 +287,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "unknown-atom.pd")
-      File.write!(path, <<"PD", 19::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, checksum::32, term_binary::binary>>)
 
       assert {:error, :unsafe_terms} = Persistence.load(path)
     end
@@ -311,7 +314,7 @@ defmodule PropertyDamage.PersistenceTest do
       term_binary = :erlang.term_to_binary(payload, [:compressed])
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "drifted.pd")
-      File.write!(path, <<"PD", 19::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, checksum::32, term_binary::binary>>)
 
       assert {:ok, _report, warnings} = Persistence.load(path)
       assert Enum.any?(warnings, &match?({:struct_shape_drift, _, _}, &1))
@@ -335,7 +338,7 @@ defmodule PropertyDamage.PersistenceTest do
       term_binary = :erlang.term_to_binary(payload, [:compressed])
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "non-map.pd")
-      File.write!(path, <<"PD", 19::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, checksum::32, term_binary::binary>>)
 
       assert {:error, :unsafe_terms} = Persistence.load(path)
     end
@@ -361,7 +364,7 @@ defmodule PropertyDamage.PersistenceTest do
       term_binary = <<131, 80, huge_size::unsigned-32, "compressed-bytes-do-not-matter">>
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "bomb.pd")
-      File.write!(path, <<"PD", 19::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, checksum::32, term_binary::binary>>)
 
       assert {:error, :term_too_large} = Persistence.load(path)
     end
@@ -427,7 +430,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify to cause version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 19::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", @version::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata =
@@ -437,7 +440,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 19::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, new_checksum::32, new_term_binary::binary>>)
 
       # Still valid even with warnings
       assert Persistence.valid?(path)
@@ -547,7 +550,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "unknown-atom.pd")
-      File.write!(path, <<"PD", 19::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", @version::8, checksum::32, term_binary::binary>>)
 
       # Before interning: exactly what a fresh `mix pd.replay` VM hits when the
       # SUT's modules have been compiled but not loaded.

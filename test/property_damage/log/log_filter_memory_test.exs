@@ -4,6 +4,8 @@ defmodule PropertyDamage.Log.LogFilterMemoryTest do
   # the field existed still loads, and the persistence version is unchanged.
   use ExUnit.Case, async: false
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.Persistence
   alias PropertyDamage.Test.LogFixtures, as: F
   alias PropertyDamage.Test.TmpPath
@@ -23,14 +25,16 @@ defmodule PropertyDamage.Log.LogFilterMemoryTest do
     end
   end
 
-  test "a saved and loaded report holds no filter, and the file is still version 19", %{dir: dir} do
+  test "a saved and loaded report holds no filter, and the file is still the current version", %{
+    dir: dir
+  } do
     report = F.filter_report!(log: [only: [:http], except: [:body]])
 
     assert F.field(report, :log_filter) == [only: [:http], except: [:body]],
            "control: it holds one"
 
     assert {:ok, path} = Persistence.save(report, dir)
-    assert <<"PD", 19, _checksum::32, term::binary>> = File.read!(path)
+    assert <<"PD", @version, _checksum::32, term::binary>> = File.read!(path)
 
     saved = inspect(:erlang.binary_to_term(term), limit: :infinity, printable_limit: :infinity)
     refute saved =~ "only: [:http]"

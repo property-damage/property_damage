@@ -5,6 +5,8 @@ defmodule PropertyDamage.OtherFailuresTest do
   # persists with the report.
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence}
   alias PropertyDamage.Test.{ActiveSet, Compare, VariantSupport}
   alias PropertyDamage.Test.ActiveSet.Book
@@ -184,7 +186,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       assert [_ | _] = others(report)
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 19::8, _checksum::32, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", @version::8, _checksum::32, _rest::binary>>} = File.read(path)
 
       assert {:ok, loaded} = Persistence.load(path)
       assert others(loaded) == others(report)
@@ -211,7 +213,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 19}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, @version}} = Persistence.load(path)
     end
   end
 end

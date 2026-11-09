@@ -5,6 +5,8 @@ defmodule PropertyDamage.ExpansionReportTest do
   # command telemetry, the exported script, and the per-entry counters.
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   import ExUnit.CaptureIO
   import PropertyDamage.Test.VariantSupport
 
@@ -140,12 +142,12 @@ defmodule PropertyDamage.ExpansionReportTest do
     end
 
     @tag :tmp_dir
-    test "survives a persistence round trip at format version 19", %{tmp_dir: dir} do
+    test "survives a persistence round trip at the current format version", %{tmp_dir: dir} do
       {report, _entries} = diverged_report()
       assert expansions(report, "beta") != []
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert <<"PD", 19::8, _rest::binary>> = File.read!(path)
+      assert <<"PD", @version::8, _rest::binary>> = File.read!(path)
       assert {:ok, loaded} = Persistence.load(path)
       assert Map.fetch!(loaded, :expansions) == Map.fetch!(report, :expansions)
       assert Map.fetch!(loaded, :expansion_counts) == Map.fetch!(report, :expansion_counts)
@@ -159,7 +161,7 @@ defmodule PropertyDamage.ExpansionReportTest do
       path = Path.join(dir, "v12-legacy.pd")
       File.write!(path, <<"PD", 12::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 12, 19}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 12, @version}} = Persistence.load(path)
     end
   end
 

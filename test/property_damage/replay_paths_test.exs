@@ -15,7 +15,7 @@ defmodule PropertyDamage.ReplayPathsTest do
   @model F.Model
   @seed 2
   @max_commands 8
-  @version 19
+  @version PropertyDamage.Persistence.version()
 
   @base_url "http://localhost:4000"
 

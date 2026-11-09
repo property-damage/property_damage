@@ -93,6 +93,10 @@ defmodule PropertyDamage.Persistence do
           overwrite: boolean()
         ]
 
+  @doc "The format version `save/3` writes and `load/1` accepts."
+  @spec version() :: pos_integer()
+  def version, do: @version
+
   @doc """
   Save a failure report to disk.
 

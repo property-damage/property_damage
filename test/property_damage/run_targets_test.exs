@@ -4,6 +4,8 @@ defmodule PropertyDamage.RunTargetsTest do
   # happened in.
   use ExUnit.Case, async: true
 
+  @version PropertyDamage.Persistence.version()
+
   import PropertyDamage.Test.VariantSupport
 
   alias PropertyDamage.{EventQueue, Failure, FailureReport, Generator, Persistence, Sequence}
@@ -312,7 +314,7 @@ defmodule PropertyDamage.RunTargetsTest do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 19::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", @version::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.report_kind == :diverged
@@ -327,7 +329,7 @@ defmodule PropertyDamage.RunTargetsTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 19}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, @version}} = Persistence.load(path)
     end
   end
 

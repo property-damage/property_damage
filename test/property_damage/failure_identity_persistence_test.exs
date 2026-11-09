@@ -14,7 +14,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
   @fixtures Path.join([__DIR__, "..", "fixtures"])
   @persistence_fixtures Path.join(@fixtures, "persistence")
-  @current_version 19
+  @current_version PropertyDamage.Persistence.version()
 
   defmodule Send do
     @behaviour PropertyDamage.Command
@@ -112,7 +112,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
       tmp_dir: dir
     } do
       # Control: the refusal above is about the header version, not the file.
-      # Re-framing the same bytes under header 19 gets past the version check
+      # Re-framing the same bytes under the current header version gets past the version check
       # (it may fail later, on its checksum or payload, but not as unsupported).
       path = Path.join(@persistence_fixtures, "format_18_report.pd")
       <<"PD", _v::8, rest::binary>> = File.read!(path)
@@ -125,7 +125,7 @@ defmodule PropertyDamage.FailureIdentityPersistenceTest do
 
   describe "a saved report" do
     @tag :tmp_dir
-    test "round-trips at format 19 with its report kind derived from the failure", %{
+    test "round-trips at the current format with its report kind derived from the failure", %{
       tmp_dir: dir
     } do
       report = failing_report()
