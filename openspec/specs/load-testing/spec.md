@@ -57,8 +57,39 @@ Each worker SHALL hold a persistent adapter context and execute independent comm
 #### Scenario: Worker sequence execution
 
 - **WHEN** a worker is checked out for an arrival
-- **THEN** the worker SHALL execute a command sequence using the model, adapter, and projections
+- **THEN** the worker SHALL execute a command sequence through the engine's stepping interface (`PropertyDamage.Executor.Stepping`), using the model, adapter, and projections
 - **AND** the sequence SHALL be independent of sequences run by other workers
+
+### Requirement: Worker Session Phases
+
+A worker SHALL run each sequence as an engine session, in this order: the `@check at: :startup` checks, the model's `setup_each/0` commands, the sequence's roots, finalization (the `@eventually` checks the session started and the `@check at: :teardown` checks), and the model's `teardown_each/0` commands. Each root SHALL run through the same step a property run uses (placeholder resolution, the adapter call under `timeout/1`, settle, projections and step checks), and the worker SHALL drain the event queue after each root. A worker SHALL NOT apply the model's `expansions/0`: it runs each root as itself.
+
+#### Scenario: Setup, eventual and teardown run
+
+- **GIVEN** a model with a `setup_each/0` command, a `teardown_each/0` command and a projection with an `@eventually` check
+- **WHEN** a load test runs it with `check_mode:` other than `:disabled`
+- **THEN** each worker sequence SHALL run the setup command before the first root, the `@eventually` check after a root's events trigger it, and the teardown command after the last root
+
+#### Scenario: Checks follow check mode
+
+- **WHEN** a load test runs with `check_mode: :disabled`
+- **THEN** the worker SHALL run no startup, step, `@eventually` or teardown check
+- **AND** the worker SHALL still run the setup and teardown commands, settle and stutter
+
+#### Scenario: A failed root does not end the sequence
+
+- **WHEN** a root's adapter call returns an error, raises, or exceeds its timeout, or a placeholder in the root does not resolve
+- **THEN** the worker SHALL count one error for that root and continue with the next root
+
+#### Scenario: A failed setup command ends the sequence
+
+- **WHEN** a setup command fails
+- **THEN** the worker SHALL count one error, run none of the sequence's roots, and record no request for the setup command
+
+#### Scenario: Worker result
+
+- **WHEN** a worker finishes a sequence
+- **THEN** `Worker.execute_sequence/1` SHALL return `{:ok, result}` with the counts of commands run, errors and check failures
 
 ### Requirement: Ramp Strategies
 
@@ -139,6 +170,20 @@ Metrics SHALL be command-centric: one command execution counts as one request, r
 - **THEN** the metrics system SHALL record this as 1 request
 - **AND** the latency SHALL reflect the total wall-clock time including polling
 
+### Requirement: Request Latency
+
+The latency of a request SHALL be the wall-clock time of the engine step (`Stepping.step/4`) of one root command: placeholder resolution, the adapter call, settle, projection updates, step checks and stutter retries. Think time, the drain after the root, finalization, and setup and teardown commands SHALL NOT be part of any request's latency. Only roots SHALL count as requests.
+
+#### Scenario: Think time is excluded
+
+- **WHEN** a load test runs with `think_time: {100, 100}` against an adapter that answers at once
+- **THEN** the recorded latency of each root SHALL NOT include the 100 ms of think time
+
+#### Scenario: Setup and teardown commands are not requests
+
+- **WHEN** a sequence runs one setup command, three roots and one teardown command
+- **THEN** the metrics system SHALL record three requests for that sequence
+
 ### Requirement: Memory-Bounded Metrics
 
 The metrics system SHALL use reservoir sampling to bound memory usage for percentile calculation.
@@ -151,18 +196,22 @@ The metrics system SHALL use reservoir sampling to bound memory usage for percen
 
 ### Requirement: Check Mode
 
-The load test check mode SHALL default to `:record`, continuing execution after check failures rather than halting.
+The load test check mode SHALL default to `:disabled`. In `:record` mode, execution SHALL continue after check failures rather than halting.
 
 #### Scenario: Default check mode
 
 - **WHEN** a load test is started without specifying check mode
-- **THEN** the framework SHALL use `:record` mode
-- **AND** check failures SHALL be counted in metrics but SHALL NOT halt the test
+- **THEN** the framework SHALL use `:disabled` mode and evaluate no check
+
+#### Scenario: Recorded checks
+
+- **WHEN** a load test is started with `check_mode: :record`
+- **THEN** check failures SHALL be counted in metrics but SHALL NOT halt the test
 
 #### Scenario: Disabled checks
 
 - **WHEN** check mode is set to `:disabled`
-- **THEN** the framework SHALL skip check evaluation entirely during the load test
+- **THEN** the framework SHALL skip check evaluation entirely during the load test, the startup, step, `@eventually` and teardown checks included
 
 ### Requirement: Retired Check Mode Key Is Rejected (DR-042)
 
@@ -179,12 +228,52 @@ The framework SHALL support per-command timeouts to prevent hung commands from c
 #### Scenario: Command exceeds timeout
 
 - **WHEN** a command execution exceeds the timeout specified by the adapter's `timeout/1` callback
-- **THEN** the framework SHALL raise `PropertyDamage.CommandTimeoutError`
+- **THEN** the framework SHALL stop waiting and report `PropertyDamage.CommandTimeoutError` as the command's adapter error
+- **AND** the worker SHALL count one error and continue with the sequence
 
 #### Scenario: Default timeout
 
 - **WHEN** an adapter specifies `default_timeout: 30` and a command has no specific timeout override
 - **THEN** the framework SHALL apply a 30-second timeout to that command's execution
+
+### Requirement: Stutter Option
+
+The load test SHALL accept the `stutter:` option with the validation `PropertyDamage.run/1` applies, SHALL leave stutter off when the option is absent, and SHALL pass the parsed configuration to every worker, which applies it to each root as a property run does.
+
+#### Scenario: Stutter retries run in a load test
+
+- **GIVEN** a load test with `stutter: [probability: 1.0, max_repeats: 1]` against an idempotent adapter
+- **WHEN** a worker runs a sequence
+- **THEN** the worker SHALL retry each root once and compare the retry's events with the original's (probability 1.0 stutters every root)
+- **AND** `phase_counts.stutter_retries` SHALL be above zero
+
+#### Scenario: A stutter mismatch
+
+- **WHEN** a retry's events differ from the original's
+- **THEN** the worker SHALL end that sequence and count one check failure
+
+#### Scenario: Invalid stutter option
+
+- **WHEN** a load test is started with an invalid `stutter:` value
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError`
+
+### Requirement: Phase Counts
+
+The metrics snapshot SHALL carry `phase_counts`, a map with the keys `setup_commands`, `teardown_commands`, `eventual_checks` and `stutter_retries`, each the sum over the run. `setup_commands` and `teardown_commands` SHALL count the commands the adapter answered, `eventual_checks` the `@eventually` windows the run opened, and `stutter_retries` the retries whose events the event log kept. `format/2` and `summary/1` SHALL show the counts when any is above zero and SHALL omit them when all are zero.
+
+#### Scenario: Counts after a run with every phase
+
+- **GIVEN** a model with a setup command, a teardown command and an `@eventually` check, and a load test with `check_mode: :record` and `stutter:` on
+- **WHEN** the load test completes
+- **THEN** `report.metrics.phase_counts` SHALL have every count above zero
+- **AND** the terminal and markdown formats SHALL show a "Phases" section and `summary/1` a `Phases:` line
+
+#### Scenario: Counts after a run with no phase
+
+- **GIVEN** a model with no setup or teardown command and no `@eventually` check, and a load test with stutter off
+- **WHEN** the load test completes
+- **THEN** every count SHALL be zero
+- **AND** `format/2` and `summary/1` SHALL omit the phase counts
 
 ### Requirement: Model and Adapter Reuse
 

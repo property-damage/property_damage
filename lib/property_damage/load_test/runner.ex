@@ -9,6 +9,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   alias PropertyDamage.Options
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{LoadResult, LoadUpdate, Notifier}
+  alias PropertyDamage.Stutter
   alias PropertyDamage.Telemetry
 
   defstruct [
@@ -60,6 +61,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
     `LoadUpdate` each interval and a terminal `LoadResult` (DR-022)
   - `:check_mode` - How to handle checks (default: :disabled)
+  - `:stutter` - Idempotency retries, as for `PropertyDamage.run/1` (default: off)
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -151,7 +153,8 @@ defmodule PropertyDamage.LoadTest.Runner do
            think_time_range: think_time_range,
            check_mode: check_mode,
            run_nonce: run_nonce,
-           seed: seed
+           seed: seed,
+           stutter_config: Stutter.parse_config(opts[:stutter])
          ) do
       {:ok, pool} ->
         # Unified progress projection (DR-022): the user `on_progress:` callback

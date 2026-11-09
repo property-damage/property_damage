@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from each worker. Without it, the load test draws a seed and records it as
   `config.seed` in the report, which prints it in the terminal, markdown and
   JSON formats.
+- **`stutter:` option for `PropertyDamage.LoadTest`.** It takes what
+  `PropertyDamage.run/1` takes for `stutter:` and is off by default. A worker
+  retries a stuttered command and compares the retry's events with the
+  original's; a mismatch ends that sequence and counts a check failure.
+- **`phase_counts` in the load-test report.** `report.metrics.phase_counts`
+  holds `setup_commands`, `teardown_commands`, `eventual_checks` and
+  `stutter_retries`. `format/2` and `summary/1` show them when any is above
+  zero.
 - **`mix pd.scaffold --force` overwrites existing files.** Without it, the
   task refuses, names the files that already exist and writes nothing.
 - **`PropertyDamage.shrink_further/2` takes `external_markers:`.** The option
@@ -679,6 +687,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PropertyDamage.Reproduction` and `PropertyDamage.ReportBuilder`. This is
   internal: the public API is unchanged. The module-cycle gate in CI is lowered
   to three.
+- **Breaking: a load run executes the phases of an engine session.** Load
+  workers ran their own command loop, which skipped settle, the setup and
+  teardown commands and the startup, `@eventually` and teardown checks. They
+  now run each sequence through `PropertyDamage.Executor.Stepping`, as
+  `PropertyDamage.run/1` does. Checks run only when `check_mode:` is not
+  `:disabled`, the default. Load adapters must return struct events, which the engine
+  requires; the loop tolerated plain maps.
+- **Breaking: load-test latency is the duration of `Stepping.step/4` for a
+  root.** It spans the adapter call, settle, projection updates, step checks
+  and stutter retries, and still excludes think time. Setup and teardown
+  commands are not requests and have no latency.
+- **Breaking: `LoadTest.Worker.execute_sequence` always
+  returns `{:ok, result}`.** The `{:error, reason}` return is gone; a command
+  that exceeds its timeout is an adapter error that counts as one error.
 - **Breaking: `Shrinker.shrink/2` takes an oracle and runs no candidate
   itself.** A test of the shrinker needed a whole system to run, because the
   shrinker ran each candidate through the scheduler. Now it hands each

@@ -45,7 +45,24 @@ defmodule PropertyDamage.LoadTest.Metrics do
           # Arrival metrics
           arrivals_spawned: non_neg_integer(),
           arrivals_completed: non_neg_integer(),
-          arrivals_per_second: float()
+          arrivals_per_second: float(),
+          phase_counts: phase_counts()
+        }
+
+  @typedoc """
+  What the phases of a sequence besides its roots ran, summed over the run:
+
+    * `:setup_commands` - setup commands the adapter answered
+    * `:teardown_commands` - teardown commands the adapter answered
+    * `:eventual_checks` - `@eventually` windows the run opened
+    * `:stutter_retries` - stutter retries whose events the event log kept; a
+      retry that answered no events leaves no entry and is not counted
+  """
+  @type phase_counts :: %{
+          setup_commands: non_neg_integer(),
+          teardown_commands: non_neg_integer(),
+          eventual_checks: non_neg_integer(),
+          stutter_retries: non_neg_integer()
         }
 
   @type command_metrics :: %{
@@ -72,9 +89,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @check_failures 5
   @arrivals_spawned 6
   @arrivals_completed 7
+  @setup_commands 8
+  @teardown_commands 9
+  @eventual_checks 10
+  @stutter_retries 11
 
   # Total counter indices
-  @counter_count 7
+  @counter_count 11
 
   # Max recent failures to keep
   @max_recent_failures 100
@@ -106,12 +127,23 @@ defmodule PropertyDamage.LoadTest.Metrics do
 
   - `pid` - Metrics collector pid
   - `command_module` - The command module that was executed
-  - `latency_ms` - Request latency in milliseconds
+  - `latency_ms` - Request latency in milliseconds: the time `Stepping.step/4`
+    takes for a root, which spans the adapter call, settling, projection
+    updates, checks and stutter retries. Think time between roots is not
+    included.
   - `result` - `:ok` for success, `{:error, type}` for errors
   """
   @spec record_request(pid(), module(), number(), :ok | {:error, atom()}) :: :ok
   def record_request(pid, command_module, latency_ms, result) do
     GenServer.cast(pid, {:record_request, command_module, latency_ms, result})
+  end
+
+  @doc """
+  Add the phase counts of one sequence (see `t:phase_counts/0`) to the run's.
+  """
+  @spec record_phase_counts(pid(), phase_counts()) :: :ok
+  def record_phase_counts(pid, counts) do
+    GenServer.cast(pid, {:record_phase_counts, counts})
   end
 
   @doc """
@@ -237,6 +269,16 @@ defmodule PropertyDamage.LoadTest.Metrics do
         :ok
     end
 
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:record_phase_counts, counts}, state) do
+    counters = get_counters(state.counters_table)
+    :atomics.add(counters, @setup_commands, counts.setup_commands)
+    :atomics.add(counters, @teardown_commands, counts.teardown_commands)
+    :atomics.add(counters, @eventual_checks, counts.eventual_checks)
+    :atomics.add(counters, @stutter_retries, counts.stutter_retries)
     {:noreply, state}
   end
 
@@ -602,7 +644,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
       # Arrival metrics
       arrivals_spawned: arrivals_spawned,
       arrivals_completed: arrivals_completed,
-      arrivals_per_second: arrivals_per_second
+      arrivals_per_second: arrivals_per_second,
+      phase_counts: %{
+        setup_commands: :atomics.get(counters, @setup_commands),
+        teardown_commands: :atomics.get(counters, @teardown_commands),
+        eventual_checks: :atomics.get(counters, @eventual_checks),
+        stutter_retries: :atomics.get(counters, @stutter_retries)
+      }
     }
   end
 
