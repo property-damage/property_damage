@@ -12,7 +12,9 @@ defmodule PropertyDamage.ExternalE2ETest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Generator, Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{Generator, Placeholder, PlaceholderRegistry, Sequence}
+
+  alias PropertyDamage.Test.StepRun
 
   defmodule Created do
     import PropertyDamage, only: [external: 0]
@@ -122,7 +124,7 @@ defmodule PropertyDamage.ExternalE2ETest do
         |> Sequence.with_registry(reg)
 
       {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
+        StepRun.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
       assert_received {:used, target}
@@ -150,7 +152,7 @@ defmodule PropertyDamage.ExternalE2ETest do
       assert seq, "no seed produced a Use carrying a placeholder target"
 
       {:ok, result} =
-        Executor.run(seq, RoutingModel, Adapter, config: %{test_pid: self()})
+        StepRun.run(seq, RoutingModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
 
@@ -202,7 +204,7 @@ defmodule PropertyDamage.ExternalE2ETest do
         |> Sequence.with_registry(reg)
 
       {:ok, result} =
-        Executor.run(seq, PlainModel, InjectingAdapter, config: %{test_pid: self()})
+        StepRun.run(seq, PlainModel, InjectingAdapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
       assert_received {:used, target}
