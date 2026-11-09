@@ -144,11 +144,139 @@ test starts.
 
 `stutter:` turns on idempotency retries in a load run. It takes the keyword list
 `PropertyDamage.run/1` takes for `stutter:` (for example
-`stutter: [probability: 0.1, max_repeats: 1]`) and is off by default.
+`stutter: [probability: 0.1, max_repeats: 1]`) and is off by default. The
+[runnable example](#a-runnable-example) turns it on.
 
 A worker re-runs a stuttered command and compares the retry's events with the
 original's. A mismatch ends that sequence and counts one check failure. Retries
 add to the latency of the root they follow, because the root's step includes them.
+
+### A runnable example
+
+A small in-process system with one command in every phase: `Open` is the setup
+command, `Put` the root, `Close` the teardown command, and the projection has an
+`@eventually` check. `Put` is idempotent, so stutter retries find no mismatch.
+The run turns checks and stutter on and prints the phase counts:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Tally.Open do
+  use PropertyDamage.Command
+  defstruct []
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Tally.Put do
+  use PropertyDamage.Command
+  defstruct [:value]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{value: StreamData.integer(1..9)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Tally.Close do
+  use PropertyDamage.Command
+  defstruct []
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Tally.Opened, do: defstruct([])
+defmodule Tally.Stored, do: defstruct([:value])
+defmodule Tally.Closed, do: defstruct([])
+
+defmodule Tally.Adapter do
+  use PropertyDamage.Adapter
+
+  @impl true
+  def setup(_config), do: Agent.start_link(fn -> nil end)
+
+  @impl true
+  def teardown(store), do: Agent.stop(store)
+
+  @impl true
+  def execute(%Tally.Open{}, store, _runtime) do
+    Agent.update(store, fn _ -> 0 end)
+    {:ok, [%Tally.Opened{}]}
+  end
+
+  def execute(%Tally.Put{value: value}, store, _runtime) do
+    Agent.update(store, fn _ -> value end)
+    {:ok, [%Tally.Stored{value: value}]}
+  end
+
+  def execute(%Tally.Close{}, store, _runtime) do
+    Agent.update(store, fn _ -> nil end)
+    {:ok, [%Tally.Closed{}]}
+  end
+end
+
+defmodule Tally.Projection do
+  use PropertyDamage.Model.Projection
+
+  @impl true
+  def init, do: %{stored: nil}
+
+  @impl true
+  def apply(state, %Tally.Stored{value: value}), do: %{state | stored: value}
+  def apply(state, _event), do: state
+
+  # Runs after every `Stored` event, and the load run waits for it to hold.
+  @eventually after: Tally.Stored, timeout: {1, :seconds}, interval: {5, :milliseconds}
+  def value_is_stored(_state, %Tally.Stored{value: value}) do
+    fn state -> state.stored == value end
+  end
+end
+
+defmodule Tally.Model do
+  use PropertyDamage.Model
+
+  @impl true
+  def commands, do: [Tally.Put]
+
+  @impl true
+  def setup_each, do: [Tally.Open]
+
+  @impl true
+  def teardown_each, do: [Tally.Close]
+
+  @impl true
+  def command_sequence_projection, do: Tally.Projection
+
+  @impl true
+  def check_projections, do: [Tally.Projection]
+end
+
+{:ok, report} =
+  PropertyDamage.LoadTest.run(
+    model: Tally.Model,
+    targets: [Tally.Adapter],
+    arrival_rate: 20,
+    duration: {1, :seconds},
+    check_mode: :record,
+    stutter: [probability: 1.0, max_repeats: 1, delay_ms: 0]
+  )
+
+IO.inspect(report.metrics.phase_counts)
+```
+
+Each count is above zero. Setup and teardown run once per sequence, an
+`@eventually` window opens for every `Put`, and every `Put` is retried once.
 
 ## Invariants under sustained load
 
