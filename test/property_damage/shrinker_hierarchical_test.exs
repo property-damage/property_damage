@@ -3,8 +3,10 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{Failure, Placeholder, PlaceholderRegistry, Sequence}
+
   alias PropertyDamage.Shrinker.Config
+  alias PropertyDamage.Test.StepRun
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded
@@ -54,7 +56,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
   end
 
   defp run_and_shrink(sequence, config) do
-    {:ok, result} = Executor.run(sequence, LinkModel, LinkAdapter)
+    {:ok, result} = StepRun.run(sequence, LinkModel, LinkAdapter)
     refute result.success
 
     ShrinkSupport.shrink(sequence,
@@ -114,7 +116,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
       sequence = chain_with_trailing_heavy(8)
       result = run_and_shrink(sequence, Config.new(shrink_arguments: false))
 
-      {:ok, replayed} = Executor.run(result.sequence, LinkModel, LinkAdapter)
+      {:ok, replayed} = StepRun.run(result.sequence, LinkModel, LinkAdapter)
       refute replayed.success
 
       assert match?(
@@ -149,7 +151,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
         |> Sequence.linear()
         |> Sequence.with_registry(registry)
 
-      {:ok, result} = Executor.run(sequence, LinkModel, LinkAdapter)
+      {:ok, result} = StepRun.run(sequence, LinkModel, LinkAdapter)
       refute result.success
       assert result.failed_at_index == 1
 
@@ -169,7 +171,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
           config: Config.new(shrink_arguments: false)
         )
 
-      {:ok, replayed} = Executor.run(shrunk.sequence, LinkModel, LinkAdapter)
+      {:ok, replayed} = StepRun.run(shrunk.sequence, LinkModel, LinkAdapter)
       refute replayed.success
 
       refute match?(

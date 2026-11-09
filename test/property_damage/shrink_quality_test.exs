@@ -20,10 +20,12 @@ defmodule PropertyDamage.ShrinkQualityTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Sequence}
+  alias PropertyDamage.Sequence
+
   alias PropertyDamage.Test.ShrinkQuality.Commands.{DelKey, GetKey, PutKey}
   alias PropertyDamage.Test.ShrinkQuality.{CorrectAdapter, Model, Store}
   alias PropertyDamage.Test.ShrinkQuality.Events.{EntryDeleted, EntryPut}
+  alias PropertyDamage.Test.StepRun
 
   # The bug: delete claims success but never touches the store. The minimal
   # reproduction is put k -> del k -> get k on one key (3 commands): only then
@@ -80,7 +82,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
   end
 
   defp reproduces?(sequence, adapter) do
-    {:ok, replay} = Executor.run(sequence, Model, adapter, config: %{})
+    {:ok, replay} = StepRun.run(sequence, Model, adapter, config: %{})
     not replay.success
   end
 

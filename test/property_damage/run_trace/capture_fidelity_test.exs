@@ -12,10 +12,12 @@ defmodule PropertyDamage.RunTrace.CaptureFidelityTest do
   # The fixture's event box is one named process.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Failure, RunTrace}
+  alias PropertyDamage.{Failure, RunTrace}
+
   alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.Test.BoundaryDrain, as: Drain
   alias PropertyDamage.Test.RunnerSupport
+  alias PropertyDamage.Test.StepRun
 
   @seed 1
   @max_commands 4
@@ -56,7 +58,7 @@ defmodule PropertyDamage.RunTrace.CaptureFidelityTest do
 
     {:ok, result} =
       RunServices.with_services(target, fn event_queue, _mocks ->
-        Executor.run(plan, model, target.adapter,
+        StepRun.run(plan, model, target.adapter,
           config: target.config,
           event_queue: event_queue,
           rng_seed: PropertyDamage.Generator.run_seed(@seed, 0),
