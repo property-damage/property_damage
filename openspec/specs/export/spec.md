@@ -116,10 +116,10 @@ The system SHALL wire server-generated values (external placeholders) through ge
 - **THEN** every target SHALL render it as a reference to the producer's variable at its nested position
 - **AND** the generated output SHALL NOT contain the raw internal placeholder struct
 
-#### Scenario: Best-effort linear wiring
+#### Scenario: Best-effort wiring
 
-- **WHEN** a produced value originates from a parallel branch or suffix command rather than the linear prefix
-- **THEN** the wiring MAY be omitted, since standalone scripts reproduce the linear sequence
+- **WHEN** a produced value originates from a command whose producer the export cannot resolve
+- **THEN** the wiring MAY be omitted, since standalone scripts reproduce the sequence as run
 
 ### Requirement: LiveBook Export
 

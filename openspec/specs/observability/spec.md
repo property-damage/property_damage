@@ -183,7 +183,7 @@ The system SHALL report progress for long-running operations (`PropertyDamage.ru
 #### Scenario: Verbose output is a consumer
 
 - **WHEN** `verbose: true` is set
-- **THEN** the system SHALL install a built-in printing consumer that renders the progress stream to stdout: for `run/1` the run header (model, targets, max_runs, max_commands, optional seed), per-run progress (current run number out of total, command count, and branch info if applicable, updated in-place with a carriage return), and the success or failure summary; for mutation a status line per item
+- **THEN** the system SHALL install a built-in printing consumer that renders the progress stream to stdout: for `run/1` the run header (model, targets, max_runs, max_commands, optional seed), per-run progress (current run number out of total, command count (the run has no branch info since the branching mode is gone, DR-063), updated in-place with a carriage return), and the success or failure summary; for mutation a status line per item
 - **AND** the printed output SHALL be identical to the prior `verbose:` output
 
 #### Scenario: User callback is a consumer

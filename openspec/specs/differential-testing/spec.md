@@ -234,7 +234,7 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 
 ### Requirement: Lockstep Concurrency (DR-044)
 
-`PropertyDamage.run/1` SHALL run each generated linear command sequence against every target in lockstep, through `PropertyDamage.Scheduler` (DR-045). Every command of the sequence is a root. For each root `r`, in order, every variant SHALL execute root `r` and stop at boundary `r`; only then SHALL the comparison run, and only after it SHALL any variant start root `r + 1`. The `concurrency:` option SHALL decide how the variants reach a boundary: `:serial` (the default) advances one variant at a time in target order, and `:parallel` advances all variants at the same time. Targets that share one system under `:parallel` MUST isolate their slices of it through `config:`. The option `execution:` MUST be rejected.
+`PropertyDamage.run/1` SHALL run each generated command sequence against every target in lockstep, through `PropertyDamage.Scheduler` (DR-045). Every command of the sequence is a root. For each root `r`, in order, every variant SHALL execute root `r` and stop at boundary `r`; only then SHALL the comparison run, and only after it SHALL any variant start root `r + 1`. The `concurrency:` option SHALL decide how the variants reach a boundary: `:serial` (the default) advances one variant at a time in target order, and `:parallel` advances all variants at the same time. Targets that share one system under `:parallel` MUST isolate their slices of it through `config:`. The option `execution:` MUST be rejected.
 
 #### Scenario: Serial concurrency is the default
 
@@ -788,7 +788,7 @@ The framework SHALL compare two or more full `RunTrace` records (DR-033) of the 
 #### Scenario: Command and event alignment
 
 - **WHEN** traces are aligned
-- **THEN** commands SHALL align by their branch-aware step position, which is identical across same-plan runs
+- **THEN** commands SHALL align by their step position, which is identical across same-plan runs
 - **AND** events within a command SHALL align by a longest-common-subsequence keyed on event struct module, so a value difference within a matched event is distinguished from an inserted or removed event
 - **AND** a model MAY supply a per-event identity function to override the default module key
 
