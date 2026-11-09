@@ -29,7 +29,7 @@ defmodule PropertyDamage.ReplayArtifact do
   # The term:
   #
   #   %{
-  #     format: 3,
+  #     format: 4,
   #     model: module,
   #     seed: the seed the run generated from,
   #     run: 1,
@@ -64,7 +64,7 @@ defmodule PropertyDamage.ReplayArtifact do
 
   alias PropertyDamage.Sequence.Position
 
-  @format 3
+  @format 4
   @header "# PropertyDamage replay artifact, format #{@format}"
   @header_prefix "# PropertyDamage replay artifact, format "
   @keys [

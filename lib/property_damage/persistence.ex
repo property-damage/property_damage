@@ -32,11 +32,14 @@ defmodule PropertyDamage.Persistence do
 
   A file of an older format version is refused with
   `{:error, {:unsupported_format_version, saved, current}}`: re-capture the
-  failure under the current version. Format 20 dropped the eight fields a
-  report copied from its trace (`seed`, `run_number`, `model`, `timestamp`,
-  `command_labels`, `failure_reason`, `setup_commands`, `teardown_commands`),
-  which the report now reads from the trace, so a format 19 file no longer
-  decodes into the current report.
+  failure under the current version. Format 21 changed the placeholder's
+  resolution marker to `:unresolved | {:resolved, term()}` (it was `nil` for
+  unresolved), so a format 20 file holds placeholders the current type does
+  not read. Format 20 dropped the eight fields a report copied from its trace
+  (`seed`, `run_number`, `model`, `timestamp`, `command_labels`,
+  `failure_reason`, `setup_commands`, `teardown_commands`), which the report
+  now reads from the trace, so a format 19 file no longer decodes into the
+  current report.
 
   ## Naming Convention
 
@@ -66,7 +69,7 @@ defmodule PropertyDamage.Persistence do
   alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.FailureReport.Document
 
-  @version 20
+  @version 21
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -452,6 +455,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V21 format: a placeholder's `resolved` field is `:unresolved` or
+  # `{:resolved, value}`; it was `nil` for unresolved, so an answer of `nil`
+  # could not be told from no answer.
   # V20 format: a report no longer stores `seed`, `run_number`, `model`,
   # `timestamp`, `command_labels`, `failure_reason`, `setup_commands` and
   # `teardown_commands`; it reads them from its trace.
@@ -522,7 +528,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Files of format versions 1-19 are refused (DR-041, following DR-039/DR-040).
+  # Files of format versions 1-20 are refused (DR-041, following DR-039/DR-040).
+  # A v20 placeholder marks "unresolved" with `nil`, which the current type
+  # reads as a resolved nil.
   # A v19 report stores the eight fields v20 dropped, so it no longer decodes
   # into the current report.
   # A v18 report stores its outcome in a `kind` field that v19 renamed

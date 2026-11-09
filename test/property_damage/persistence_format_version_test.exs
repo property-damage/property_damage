@@ -141,12 +141,10 @@ defmodule PropertyDamage.PersistenceFormatVersionTest do
       assert saved_header(@format_20) == 20
     end
 
-    @tag :known_defect
     test "is refused by load/1" do
       assert {:error, {:unsupported_format_version, 20, @version}} == Persistence.load(@format_20)
     end
 
-    @tag :known_defect
     test "is refused by load_trace/1" do
       assert {:error, {:unsupported_format_version, 20, @version}} ==
                Persistence.load_trace(@format_20)

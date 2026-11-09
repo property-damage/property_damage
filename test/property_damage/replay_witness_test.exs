@@ -91,7 +91,7 @@ defmodule PropertyDamage.ReplayWitnessTest do
 
     # The loader refuses an unknown format and a function in the file.
     text = File.read!(path)
-    version_zero = String.replace(text, "artifact, format 3", "artifact, format 0")
+    version_zero = String.replace(text, "artifact, format 4", "artifact, format 0")
     assert {:error, _reason} = R.parse_artifact(version_zero)
 
     with_function = replace_in_term(text, "run: 1", "run: fn -> 1 end")

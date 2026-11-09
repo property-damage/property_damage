@@ -12,14 +12,14 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Test.ReplayFixtures, as: R
 
-  @header "# PropertyDamage replay artifact, format 3"
+  @header "# PropertyDamage replay artifact, format 4"
   @marker "PAYLOAD_SOURCE"
 
   # A complete artifact for CleanModel whose one leaf holds `payload` (Elixir
   # source) on a line of its own.
   defp template(opts \\ []) do
     header = Keyword.get(opts, :header, @header)
-    format = Keyword.get(opts, :format, 3)
+    format = Keyword.get(opts, :format, 4)
 
     """
     #{header}
@@ -86,7 +86,7 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
       },
       external_markers: [],
       failure: %{signature: {:diverged, {R.Tally, :total}, 0}, root_index: 0},
-      format: 3,
+      format: 4,
       model: R.CleanModel,
       prefix: [],
       roots: [%{command: %R.Mark{n: 1}, root_id: 0}],
@@ -182,9 +182,9 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
     end
 
     test "when the term's format disagrees with it" do
-      message = refused(artifact(":ok", format: 4))
+      message = refused(artifact(":ok", format: 3))
       assert message =~ "header"
-      assert message =~ ~r/format:? 4/
+      assert message =~ ~r/format:? 3/
     end
   end
 
@@ -195,7 +195,6 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
       assert File.read!(@format_3) =~ "%PropertyDamage.Placeholder{"
     end
 
-    @tag :known_defect
     test "and names the format it reads" do
       assert {:error, reason} = R.read_artifact(@format_3)
 

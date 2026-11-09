@@ -80,12 +80,12 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
     end
   end
 
-  describe "the replay artifact at format 3" do
+  describe "the replay artifact at format 4" do
     test "records the signature and the root in its failure map" do
       report = failing()
       term = ReplayArtifact.build(report)
 
-      assert term.format == 3
+      assert term.format == 4
 
       assert term.failure == %{
                signature: signature(FailureReport.failure_reason(report), report.variant.index),
@@ -100,7 +100,7 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
       {:ok, path} = ReplayArtifact.write(term, dir)
 
       assert File.read!(path)
-             |> String.starts_with?("# PropertyDamage replay artifact, format 3\n")
+             |> String.starts_with?("# PropertyDamage replay artifact, format 4\n")
 
       assert {:ok, read} = ReplayArtifact.read(path)
       assert read == term
@@ -143,7 +143,7 @@ defmodule PropertyDamage.FailureIdentityArtifactTest do
       assert {:error, message} = ReplayArtifact.parse(text)
 
       assert message ==
-               "the replay artifact header names format 2; this version reads format 3"
+               "the replay artifact header names format 2; this version reads format 4"
     end
   end
 end

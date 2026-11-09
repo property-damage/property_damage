@@ -1,4 +1,4 @@
-# PropertyDamage replay artifact, format 3
+# PropertyDamage replay artifact, format 4
 # model: CachexBench.Model
 # seed: 3
 # run: 1 (the run this seed generates)
@@ -33,7 +33,7 @@
     root_index: 0,
     signature: {:diverged, {CachexBench.Projection, :expected_contents}, 1}
   },
-  format: 3,
+  format: 4,
   model: CachexBench.Model,
   prefix: [],
   roots: [
