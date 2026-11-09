@@ -54,32 +54,13 @@ defmodule PropertyDamage.Executor do
   - `:failure_reason` - Check failure reason (nil if success)
   """
 
-  alias PropertyDamage.{
-    EventQueue,
-    Failure,
-    Mint,
-    MockServiceRegistry,
-    Placeholder,
-    PlaceholderRegistry,
-    ResourcePoller,
-    Sequence,
-    StatePoller,
-    Stutter,
-    Verdict
-  }
-
-  alias PropertyDamage.Model.Projection
-  alias PropertyDamage.Model.Projection.Checks
+  alias PropertyDamage.{EventQueue, Failure, PlaceholderRegistry, Sequence, Stutter}
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Log.Cap
 
-  alias PropertyDamage.Executor.Events
-  alias PropertyDamage.Executor.Finalization
-  alias PropertyDamage.Executor.Phases
-  alias PropertyDamage.Executor.Settle
-  alias PropertyDamage.Executor.State
-  alias PropertyDamage.Executor.Timeout
+  alias PropertyDamage.Executor.{Finalization, Phases, Step, Stepping, Timeout}
+  alias PropertyDamage.Executor.Stepping.Context
 
   alias PropertyDamage.Runtime
   alias PropertyDamage.Sequence.Position
@@ -136,7 +117,9 @@ defmodule PropertyDamage.Executor do
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:keep_attempts` - How many of a step's last settle or stutter attempts keep
     their log lines, besides the first attempt's (default 3, DR-054)
-  - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
+  - `:step_observer` - the step observer, `{module, observer}`, told of every
+    step (`PropertyDamage.Executor.StepObserver`); for mocks,
+    `PropertyDamage.MockServiceRegistry.observer/1` (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
   - `:telemetry` - The context command and check telemetry is emitted with
     (`PropertyDamage.Telemetry`); default `nil`, which emits none
@@ -183,40 +166,13 @@ defmodule PropertyDamage.Executor do
     run(Sequence.linear(commands), model, adapter, opts)
   end
 
-  @doc false
-  # `run/4`, except that a failed adapter setup/1 returns
-  # `{:error, reason, logs}`: the lines that setup wrote, under
-  # `:adapter_setup` (DR-054). A setup/1 that raises, exits or throws
-  # fails the same way, with the exception (or `{kind, reason}`) as the
-  # reason, as `PropertyDamage.Variant` reports it on the lockstep path.
-  @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
-          {:ok, result()} | {:error, term(), PropertyDamage.Log.logs()} | term()
-  def run_logged(sequence_or_commands, model, adapter, opts \\ [])
-
-  def run_logged(%Sequence{} = sequence, model, adapter, opts) do
-    case set_up_and_run(sequence, model, adapter, opts, &guarded_setup/2) do
-      {:not_set_up, {:error, reason}, setup_lines} ->
-        {:error, reason, PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)}
-
-      {:not_set_up, setup_result, _setup_lines} ->
-        setup_result
-
-      ran ->
-        ran
-    end
-  end
-
-  def run_logged(commands, model, adapter, opts) when is_list(commands) do
-    run_logged(Sequence.linear(commands), model, adapter, opts)
-  end
-
   # The adapter's setup/1 and teardown/1 are execution points of their own;
   # their log lines are kept under :adapter_setup and :adapter_teardown
   # (DR-054). A setup/1 that does not answer `{:ok, context}` comes back as
   # `{:not_set_up, its answer, its lines}`.
-  defp set_up_and_run(sequence, model, adapter, opts, setup \\ & &1.setup(&2)) do
+  defp set_up_and_run(sequence, model, adapter, opts) do
     config = Keyword.get(opts, :config, %{})
-    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> setup.(adapter, config) end)
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
 
     case setup_result do
       {:ok, adapter_context} ->
@@ -227,20 +183,10 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # The adapter's setup/1, with a raise, exit or throw turned into an error,
-  # so the lines it wrote before stay with the setup failure.
-  defp guarded_setup(adapter, config) do
-    adapter.setup(config)
-  rescue
-    exception -> {:error, exception}
-  catch
-    kind, reason -> {:error, {kind, reason}}
-  end
-
   defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
-    mock_registry = Keyword.get(opts, :mock_registry)
+    step_observer = Keyword.get(opts, :step_observer)
     check_mode = Keyword.get(opts, :check_mode, :halt)
     external_markers = Keyword.get(opts, :external_markers, [])
     rng_seed = Keyword.get(opts, :rng_seed)
@@ -248,6 +194,7 @@ defmodule PropertyDamage.Executor do
     # mint epoch for this SUT execution (default epoch 0 = the recorded run).
     mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
     telemetry = Keyword.get(opts, :telemetry)
+    teardown_ctx = %Context{model: model, adapter: adapter, adapter_context: adapter_context}
 
     result =
       try do
@@ -257,7 +204,7 @@ defmodule PropertyDamage.Executor do
           adapter_context: adapter_context,
           event_queue: event_queue,
           stutter_config: stutter_config,
-          mock_registry: mock_registry,
+          step_observer: step_observer,
           check_mode: check_mode,
           external_markers: external_markers,
           rng_seed: rng_seed,
@@ -272,53 +219,14 @@ defmodule PropertyDamage.Executor do
         execute_run(sequence, env)
       catch
         kind, reason ->
-          safe_teardown(adapter, adapter_context)
+          Step.teardown_adapter(teardown_ctx)
           :erlang.raise(kind, reason, __STACKTRACE__)
       end
 
-    teardown_lines = safe_teardown(adapter, adapter_context)
+    teardown_lines = Step.teardown_adapter(teardown_ctx)
 
     {:ok,
      %{result | logs: PropertyDamage.Log.append(result.logs, :adapter_teardown, teardown_lines)}}
-  end
-
-  # Adapter teardown is best-effort (DR-027): a raising teardown logs a warning
-  # but never fails the run, so a cleanup hiccup cannot mask the actual result
-  # (or, during shrinking, perturb the failure being minimized). It runs as an
-  # execution point of its own and returns the log lines it wrote (DR-054).
-  # Shared with PropertyDamage.Variant.
-  @doc false
-  def safe_teardown(adapter, user_context) do
-    {:ok, lines} = PropertyDamage.Log.inline(fn -> try_teardown(adapter, user_context) end)
-    lines
-  end
-
-  defp try_teardown(adapter, user_context) do
-    require Logger
-
-    try do
-      adapter.teardown(user_context)
-      :ok
-    rescue
-      e ->
-        Logger.warning(
-          "Adapter #{inspect(adapter)} teardown/1 raised: " <>
-            Exception.format(:error, e, __STACKTRACE__)
-        )
-
-        :ok
-    catch
-      # A BEAM exit/throw from teardown/1 bypasses `rescue`; keep teardown
-      # best-effort so a cleanup hiccup cannot crash the run or perturb the
-      # failure being minimized during shrinking (A5).
-      kind, reason ->
-        Logger.warning(
-          "Adapter #{inspect(adapter)} teardown/1 escaped via #{kind}: " <>
-            Exception.format(kind, reason, __STACKTRACE__)
-        )
-
-        :ok
-    end
   end
 
   @doc """
@@ -335,7 +243,7 @@ defmodule PropertyDamage.Executor do
   - `adapter_context` - Pre-established adapter context
   - `event_queue` - EventQueue pid (optional)
   - `stutter_config` - Stutter.Config for idempotency testing (optional)
-  - `mock_registry` - MockServiceRegistry pid (optional)
+  - `step_observer` - the step observer, `{module, observer}` (optional)
   - `check_mode` - How to handle check failures (optional, default: `:halt`)
 
   ## Returns
@@ -364,7 +272,7 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue \\ nil,
         stutter_config \\ nil,
-        mock_registry \\ nil,
+        step_observer \\ nil,
         check_mode \\ :halt,
         external_markers \\ [],
         rng_seed \\ nil,
@@ -379,7 +287,7 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue,
         stutter_config,
-        mock_registry,
+        step_observer,
         check_mode,
         external_markers,
         rng_seed,
@@ -397,7 +305,7 @@ defmodule PropertyDamage.Executor do
       adapter_context: adapter_context,
       event_queue: event_queue,
       stutter_config: stutter_config,
-      mock_registry: mock_registry,
+      step_observer: step_observer,
       check_mode: check_mode,
       external_markers: external_markers,
       rng_seed: rng_seed,
@@ -416,18 +324,20 @@ defmodule PropertyDamage.Executor do
   # checks, the setup commands, the sequence, the
   # finalization, then the teardown commands. `env` holds the run's inputs.
   defp execute_run(%Sequence{} = sequence, env) do
+    {run_nonce, mint_epoch} = env.mint
+
     initial_state =
-      build_initial_state(
-        env.model,
-        env.event_queue,
-        env.stutter_config,
-        env.mock_registry,
-        env.check_mode,
-        env.external_markers,
-        sequence.registry,
-        env.rng_seed,
-        env.mint,
-        env.telemetry
+      Step.new_state(env.model,
+        event_queue: env.event_queue,
+        stutter_config: env.stutter_config,
+        step_observer: env.step_observer,
+        check_mode: env.check_mode,
+        external_markers: env.external_markers,
+        placeholder_registry: sequence.registry,
+        rng_seed: env.rng_seed,
+        run_nonce: run_nonce,
+        mint_epoch: mint_epoch,
+        telemetry: env.telemetry
       )
 
     # The adapter setup/1's log lines, when the run set the adapter up itself.
@@ -437,7 +347,7 @@ defmodule PropertyDamage.Executor do
         keep_attempts: Map.get(env, :keep_attempts, Cap.default_keep_attempts())
     }
 
-    ctx = %PropertyDamage.Executor.Stepping.Context{
+    ctx = %Context{
       model: env.model,
       adapter: env.adapter,
       adapter_context: env.adapter_context,
@@ -446,9 +356,9 @@ defmodule PropertyDamage.Executor do
     }
 
     ended =
-      with {:ok, state} <- run_startup_checks(initial_state),
+      with {:ok, state} <- Step.run_startup_checks(initial_state),
            {:ok, state} <- Phases.run_setup(env.setup_commands, state, ctx) do
-        execute_body(sequence, state, env)
+        execute_body(sequence, state, ctx)
       else
         {:failed, nil, _failure, _state} = failed -> failed
         {:failed, failure, failed_state} -> {:failed, nil, failure, failed_state}
@@ -479,1441 +389,22 @@ defmodule PropertyDamage.Executor do
   defp ended_state({:failed, _index, _reason, state}), do: state
   defp ended_state(state), do: state
 
-  # The sequence itself, from the state the setup phase left. Returns the
-  # state (or the failed tuple) to finalize.
-  defp execute_body(%Sequence{} = sequence, state, env) do
+  # The sequence itself, from the state the setup phase left, one
+  # `Stepping.step/4` per command. Returns the state (or the failed tuple) to
+  # finalize.
+  defp execute_body(%Sequence{} = sequence, state, ctx) do
     sequence
     |> Sequence.to_list()
-    |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
-  end
-
-  # ============================================================================
-  # Linear Execution
-  # ============================================================================
-
-  defp execute_linear(commands, initial_state, model, adapter, adapter_context, event_queue) do
-    commands
     |> Enum.with_index()
-    |> Enum.reduce_while(initial_state, fn {command, index}, state ->
-      # Capture projections before this command executes
-      state_with_before = %{
-        state
-        | projections_before: state.projections,
-          current_position: Position.prefix(index)
-      }
-
-      case execute_command(
-             command,
-             index,
-             state_with_before,
-             model,
-             adapter,
-             adapter_context,
-             event_queue
-           ) do
-        {:ok, new_state} ->
+    |> Enum.reduce_while(state, fn {command, index}, state ->
+      case Stepping.step(command, index, state, ctx) do
+        {:ok, new_state, _outcome} ->
           {:cont, new_state}
 
-        {:error, reason, failed_state} ->
+        {:error, reason, failed_state, _outcome} ->
           {:halt, {:failed, index, reason, failed_state}}
       end
     end)
-  end
-
-  # DR-024: @check at: :startup checks run on the initial init/0 state, after
-  # setup/1 and before command 1. Returns {:ok, state} with any recorded
-  # failures and the fire counters folded in, or, when a check halts, the failed
-  # tuple {:failed, nil, failure, state} that finalize_result/1 reports with no
-  # command index. Used by the linear loop and PropertyDamage.Variant.
-  @doc false
-  def run_startup_checks(state) do
-    case run_phase_checks(state, :startup) do
-      {:halt, name, projection, reason, _counters} ->
-        {:failed, nil, Failure.check_failed(name, reason, projection), state}
-
-      {:ok, startup_recorded, startup_counters} ->
-        {:ok,
-         %{
-           state
-           | check_failures: startup_recorded ++ state.check_failures,
-             check_counters: startup_counters
-         }}
-    end
-  end
-
-  # ============================================================================
-  # Command Execution
-  # ============================================================================
-
-  # Initialize all projection states
-  defp init_projections(model) do
-    for projection <- PropertyDamage.Model.projection_modules(model), into: %{} do
-      {projection, projection.init()}
-    end
-  end
-
-  # Build the executor's internal per-run state map. Exposed to the stepping
-  # shell via init_state/2 so the state shape lives in exactly one place.
-  # DR-029.
-  @doc false
-  def build_initial_state(
-        model,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        registry,
-        rng_seed \\ nil,
-        mint \\ {nil, 0},
-        telemetry \\ nil
-      ) do
-    {run_nonce, mint_epoch} = mint
-
-    %State{
-      event_log: [],
-      projections: init_projections(model),
-      projections_before: nil,
-      # Explicit stutter RNG base (DR-029); the per-command generator is derived
-      # from {rng_seed, index} in PropertyDamage.Executor.Stutter.
-      rng_seed: rng_seed,
-      # Client-minted run-scoped value inputs (DR-034); consulted only when a
-      # command carries a mint_per_run marker.
-      run_nonce: run_nonce,
-      mint_epoch: mint_epoch,
-      # Seed the placeholder registry from the generated sequence (DR-021); the
-      # id-indexed registry + producer_link transport from generation to here.
-      placeholder_registry: registry || PlaceholderRegistry.new(),
-      # Structured position of the command currently executing (DR-021); set by
-      # the dispatch loops so external capture keys on position, not a flat index.
-      current_position: nil,
-      step_count: 0,
-      check_counters: %{step: 0, command: 0, event: 0},
-      check_failures: [],
-      check_mode: check_mode,
-      stutter_config: stutter_config,
-      mock_registry: mock_registry,
-      active_pollers: [],
-      active_resource_pollers: [],
-      model: model,
-      external_markers: external_markers,
-      event_queue: event_queue,
-      command_specs: PropertyDamage.Model.spec_table(model),
-      telemetry: telemetry
-    }
-  end
-
-  # The per-command stepping seam (init_state / step / drain / finalize /
-  # stop_pollers) lives in PropertyDamage.Executor.Stepping, the documented
-  # public interface. It builds on the engine primitives below
-  # (build_initial_state / execute_command_with_outcome) (DR-029).
-
-  # Execute a single command
-  defp execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    case execute_command_with_outcome(
-           command,
-           index,
-           state,
-           model,
-           adapter,
-           adapter_context,
-           event_queue
-         ) do
-      {:ok, new_state, _outcome} -> {:ok, new_state}
-      {:error, reason, failed_state, _outcome} -> {:error, reason, failed_state}
-    end
-  end
-
-  # Execute a single command and also return the raw adapter outcome, so a
-  # caller that compares what the adapter answered does not rebuild it from the
-  # state. The outcome is one of:
-  #
-  #   {:ok, events}      the events the adapter returned (settled events for
-  #                      :probe/:async)
-  #   {:error, reason}   the adapter's own error term;
-  #                      a settle timeout is {:error, {:timeout, last_reason}}
-  #                      and a return outside the adapter protocol is
-  #                      {:error, return_value}
-  #   {:raised, e}       execute/3 raised `e`
-  #   :not_called        a placeholder could not be resolved, so the adapter
-  #                      was never called
-  #
-  # Returns {:ok, state, outcome} | {:error, failure, failed_state, outcome}.
-  # The state and failure halves are exactly what execute_command/7 reports.
-  # Used by PropertyDamage.Executor.Stepping.
-  @doc false
-  def execute_command_with_outcome(
-        command,
-        index,
-        state,
-        model,
-        adapter,
-        adapter_context,
-        event_queue
-      ) do
-    # Only a command that reaches the adapter's execute/3 records a time.
-    state = %{state | last_execute_us: nil, last_command_index: index}
-
-    # The engine attributes a setup command by `{:setup, offset}` (see
-    # PropertyDamage.EventLog.Entry, "Phase"); telemetry reports it as the
-    # offset within the setup phase.
-    PropertyDamage.Telemetry.command_span(
-      state.telemetry,
-      command,
-      index,
-      fn ->
-        execute_regular_command(
-          command,
-          index,
-          state,
-          model,
-          adapter,
-          adapter_context,
-          event_queue,
-          state.mock_registry
-        )
-      end,
-      leaf_index(state.current_position)
-    )
-  end
-
-  # The leaf a command is when it runs as part of a root's expansion.
-  defp leaf_index(%Position{section: {:leaf, _root}, offset: leaf}), do: leaf
-  defp leaf_index(_position), do: nil
-
-  # Whether a step advances the check sampling counters: a root does, a setup
-  # command does not (its `every: N` triggers neither count nor fire).
-  defp sampling?({:setup, _offset}), do: false
-  defp sampling?(_index), do: true
-
-  # The mocks' on_command/2 runs under a scope of its own; its lines go under
-  # the command's step (DR-054). A callback that raised, exited or threw comes
-  # back as the registry's `{:error, {module, :on_command, reason}}`.
-  defp notify_mocks(state, nil, _command), do: {:ok, state}
-
-  defp notify_mocks(state, mock_registry, command) do
-    {notified, lines} =
-      PropertyDamage.Log.collect(fn sink ->
-        MockServiceRegistry.notify_command(
-          mock_registry,
-          command,
-          PropertyDamage.Log.writer(sink, 1)
-        )
-      end)
-
-    state = %{state | logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)}
-
-    case notified do
-      :ok -> {:ok, state}
-      {:error, reason} -> {:error, reason, state}
-    end
-  end
-
-  # Execute a command. The mocks are told of it first;
-  # a mock's on_command/2 that raised fails the step before the adapter is
-  # called, as an adapter error whose detail names the mock and the callback,
-  # the shape a raising execute/3 gets.
-  defp execute_regular_command(
-         command,
-         index,
-         state,
-         model,
-         adapter,
-         adapter_context,
-         event_queue,
-         mock_registry
-       ) do
-    case notify_mocks(state, mock_registry, command) do
-      {:ok, state} ->
-        execute_notified_command(
-          command,
-          index,
-          state,
-          model,
-          adapter,
-          adapter_context,
-          event_queue,
-          mock_registry
-        )
-
-      {:error, reason, state} ->
-        {:error, Failure.adapter_error(reason), state, :not_called}
-    end
-  end
-
-  defp execute_notified_command(
-         command,
-         index,
-         state,
-         model,
-         adapter,
-         adapter_context,
-         event_queue,
-         mock_registry
-       ) do
-    placeholder_registry = state.placeholder_registry
-
-    # 1. Resolve placeholders and mint markers in the command (DR-021/DR-034).
-    case resolve_command_placeholders(
-           command,
-           placeholder_registry,
-           {state.run_nonce, state.mint_epoch}
-         ) do
-      {:ok, resolved_command} ->
-        # 2. Per-command injection/poller sink (DR-027), opened via the shared
-        # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
-        # same window the load-test path uses). The engine seeds
-        # a rich context its inject folds projections into, and starts real
-        # resource pollers; those closures below are the engine's contribution to
-        # the shared window.
-        initial_ctx = %{
-          projections: state.projections,
-          event_log: state.event_log,
-          injected_events: [],
-          command_index: index,
-          command: command,
-          # DR-040: seed the fold counter so injected events folded during
-          # adapter execution take real fold ordinals ahead of the command fold.
-          fold_counter: state.fold_counter
-        }
-
-        # Capture the run process now: `runtime.start_poller` is invoked from
-        # inside adapter.execute/3, which (DR-032) runs in a child Task; the
-        # poller must route its result to this stable mailbox, not the
-        # short-lived Task's.
-        poller_owner = self()
-        poller_started = state.on_resource_poller_start
-
-        build_runtime = fn sink ->
-          start_poller_fn = fn opts ->
-            poller =
-              ResourcePoller.start(
-                Keyword.merge(opts,
-                  event_queue: event_queue,
-                  command_index: index,
-                  caller: poller_owner
-                )
-              )
-
-            Runtime.Sink.add_poller(sink, poller)
-            if poller_started, do: poller_started.(poller.pid)
-            poller
-          end
-
-          # The per-command Runtime handle (DR-027). user_context stays exactly
-          # the adapter's setup/1 return; inject/start_poller travel here over the
-          # explicit sink rather than being merged into the user's map.
-          %Runtime{
-            inject: fn event -> inject_event(sink, event) end,
-            start_poller: start_poller_fn,
-            # The per-run mock registry (or nil) travels on the runtime handle so
-            # an adapter can reach a mocked third party's handle_request/2 during
-            # execute/3 (WP-C5); the framework flushes what the mock pushes after
-            # the command (source: :mock, step 7.5 below).
-            mock_registry: mock_registry,
-            # DR-054: the first attempt's log lines go into the same sink.
-            log: PropertyDamage.Log.writer(sink, 1)
-          }
-        end
-
-        # 3. Execute via adapter (with settle logic for probes/async).
-        # Commands may be plain maps in low-level/test usage, hence the guard.
-        command_spec = PropertyDamage.Model.spec_for(state.command_specs, command)
-
-        # The adapter's wall-clock, every settle attempt and the waits between
-        # them included, is timed here and nothing after it answered.
-        # Each settle attempt gets the runtime with its own attempt number on
-        # the lines it logs (DR-054), all written into the one sink.
-        execute_fn = fn runtime, sink ->
-          started = System.monotonic_time(:microsecond)
-
-          runtime_for = fn attempt ->
-            %{runtime | log: PropertyDamage.Log.writer(sink, attempt)}
-          end
-
-          result =
-            try do
-              Settle.execute_with_settle(
-                resolved_command,
-                adapter,
-                adapter_context,
-                runtime_for,
-                command_spec
-              )
-            rescue
-              # A raise outside the adapter's Task (for example in its timeout/1)
-              # is tagged like one inside it.
-              e -> {:raised, e, __STACKTRACE__}
-            end
-
-          {result, System.monotonic_time(:microsecond) - started}
-        end
-
-        # The window drains the accumulated injection context, any resource
-        # pollers started during execution and the log lines written, then
-        # stops the sink (even if the adapter raises). The lines move under
-        # the command's position on every outcome path below (DR-054).
-        {{result, execute_us}, final_injection_ctx, started_resource_pollers, lines} =
-          Runtime.InjectionWindow.run_logged(
-            initial_ctx,
-            build_runtime,
-            execute_fn,
-            keep_attempts: state.keep_attempts
-          )
-
-        started_resource_pollers = drop_timed_out_pollers(result, started_resource_pollers)
-
-        state = %{
-          state
-          | last_execute_us: execute_us,
-            logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)
-        }
-
-        # Use injection context state as base (already has injected events applied)
-        base_projections = final_injection_ctx.projections
-        base_event_log = final_injection_ctx.event_log
-        injected_events = final_injection_ctx.injected_events
-
-        check_mode = state.check_mode
-        check_failures = state.check_failures
-
-        # Pollers started during this command's execution must be tracked even on
-        # the failure branches below, so finalize_result/2 can stop them at run
-        # end; otherwise an adapter that starts a poller and then errors leaks it
-        # (and shrinking re-runs failures many times).
-        state_with_pollers = %{
-          state
-          | active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers,
-            # The command was resolved and sent to the adapter even on these
-            # error arms, so record it by position (DR-033) like the success path.
-            executed:
-              Map.put(
-                state.executed,
-                state.current_position,
-                resolved_command
-              )
-        }
-
-        # Lexical inputs the shared post-events pipeline closes over. Both
-        # success arms run the identical pipeline (verified byte-for-byte on the
-        # unfolded code), so both pass this context to handle_command_events/2.
-        event_ctx = %{
-          state: state,
-          command: command,
-          resolved_command: resolved_command,
-          index: index,
-          model: model,
-          adapter: adapter,
-          adapter_context: adapter_context,
-          event_queue: event_queue,
-          mock_registry: mock_registry,
-          placeholder_registry: placeholder_registry,
-          injected_events: injected_events,
-          base_projections: base_projections,
-          base_event_log: base_event_log,
-          check_mode: check_mode,
-          check_failures: check_failures,
-          started_resource_pollers: started_resource_pollers,
-          # DR-040: the fold counter after any injected events folded during
-          # adapter execution; the command fold continues from here.
-          base_fold_counter: final_injection_ctx.fold_counter
-        }
-
-        case result do
-          # Sync commands return {:ok, events}; probe/async commands that settle
-          # return {:settled, events} (Settle passes it through). The post-events
-          # pipeline is identical for both, so both delegate to the one shared
-          # implementation (handle_command_events/2 below). The non-success arms
-          # stay here so a {:retry, _} from a sync command is still rejected.
-          {:ok, events} when is_list(events) ->
-            fold_command_events(events, event_ctx)
-
-          {:settled, events} ->
-            fold_command_events(events, event_ctx)
-
-          {:timeout, last_reason} ->
-            {:error, Failure.settle_timeout(last_reason), state_with_pollers, {:error, result}}
-
-          {:error, reason} ->
-            {:error, Failure.adapter_error(reason), state_with_pollers, result}
-
-          # The report keeps the shape a raise has always had,
-          # {exception, stacktrace}; only the outcome tells it apart from an
-          # adapter that returned {:error, {exception, stacktrace}}.
-          {:raised, exception, stacktrace} ->
-            {:error, Failure.adapter_error({exception, stacktrace}), state_with_pollers,
-             {:raised, exception}}
-
-          {:retry, reason} ->
-            # {:retry, _} is the probe/async settle protocol: only :probe/:async
-            # commands run through Settle, which consumes {:retry, _} by
-            # re-invoking execute until {:settled, _} or timeout. Reaching this
-            # case means a :sync command returned {:retry, _}, which it must not.
-            command_module = if is_struct(resolved_command), do: resolved_command.__struct__
-
-            {:error, Failure.retry_from_sync_command(%{command: command_module, reason: reason}),
-             state_with_pollers, {:error, result}}
-
-          # Adapter returned something other than {:ok, list} / {:error, _} /
-          # {:timeout, _} / {:retry, _}: report a graceful failure instead of
-          # crashing the run with a CaseClauseError (this clause sits outside
-          # the execute rescue).
-          other ->
-            {:error, Failure.malformed_adapter_return(other), state_with_pollers, {:error, other}}
-        end
-
-      {:error, reason} ->
-        {:error, Failure.placeholder_resolution(reason), state, :not_called}
-    end
-  end
-
-  # Run the post-events pipeline for a command whose adapter answered with
-  # `events`, and attach that answer as the outcome. A projection that signals a
-  # transition-invariant violation by raising is reported as a failure carrying
-  # the pre-command state, rather than crashing the run.
-  # A timed-out attempt's Task is shut down, and the resource pollers started
-  # inside it die with it through their link. They leave the active list here,
-  # each stopped first so that none outlives the list. The command has failed,
-  # so the pollers of its earlier settle attempts go too.
-  defp drop_timed_out_pollers({:error, %PropertyDamage.CommandTimeoutError{}}, pollers) do
-    Enum.each(pollers, &ResourcePoller.stop/1)
-    []
-  end
-
-  defp drop_timed_out_pollers(_result, pollers), do: pollers
-
-  defp fold_command_events(events, event_ctx) do
-    case handle_command_events(events, event_ctx) do
-      {:ok, new_state} -> {:ok, new_state, {:ok, events}}
-      {:error, reason, failed_state} -> {:error, reason, failed_state, {:ok, events}}
-    end
-  rescue
-    e in PropertyDamage.ProjectionError ->
-      {:error, Failure.projection_violation(e.projection, e.original), event_ctx.state,
-       {:ok, events}}
-
-    # A mock event the mocks or the projections refused; the lines the mocks'
-    # on_event/2 wrote stay under the step (DR-054).
-    e in Events.MockEventsError ->
-      state = event_ctx.state
-      logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
-      {:error, mock_events_failure(e.error), %{state | logs: logs}, {:ok, events}}
-  end
-
-  @doc false
-  # The failure of a step whose mock events could not be folded
-  # (`Events.process_mock_events/6`): a mock's on_event/2 that raised is an
-  # adapter error naming the mock and the callback, as for on_command/2; a
-  # projection that rejected a mock event is a projection violation.
-  @spec mock_events_failure(term()) :: Failure.t()
-  def mock_events_failure({:mock_callback, reason}), do: Failure.adapter_error(reason)
-
-  def mock_events_failure({:projection, e, _stacktrace}),
-    do: Failure.projection_violation(e.projection, e.original)
-
-  # Shared post-events pipeline for both command success arms: {:ok, events} from
-  # sync commands and {:settled, events} from probe/async commands that settled
-  # via Settle. The two arms were byte-for-byte identical (only their comments
-  # differed), so this is the single implementation of the pipeline. `ctx` is the
-  # event_ctx map assembled in execute_regular_command, carrying the lexical
-  # inputs both arms used.
-  defp handle_command_events(events, ctx) do
-    %{
-      state: state,
-      command: command,
-      resolved_command: resolved_command,
-      index: index,
-      model: model,
-      adapter: adapter,
-      adapter_context: adapter_context,
-      event_queue: event_queue,
-      mock_registry: mock_registry,
-      placeholder_registry: placeholder_registry,
-      injected_events: injected_events,
-      base_projections: base_projections,
-      base_event_log: base_event_log,
-      check_mode: check_mode,
-      check_failures: check_failures,
-      started_resource_pollers: started_resource_pollers,
-      base_fold_counter: base_fold_counter
-    } = ctx
-
-    # 4b. Capture external values from real events (DR-021): resolve the
-    # placeholders this command produces, found by its structured position.
-    # Injected events come first so externals they carry resolve too.
-    updated_registry =
-      capture_externals(
-        injected_events ++ events,
-        state.current_position,
-        placeholder_registry
-      )
-
-    # 5. Update projections with command. Record the command's own fold ordinal
-    #    (DR-040) keyed by its position, then advance the run counter. Any
-    #    injected events (`runtime.inject.(event)`) already folded during adapter
-    #    execution took earlier ordinals, so `base_fold_counter` is the ordinal
-    #    of the command fold itself.
-    command_fold_ordinal = base_fold_counter
-    fold_counter = base_fold_counter + 1
-
-    command_fold_ordinals =
-      Map.put(state.command_fold_ordinals, state.current_position, command_fold_ordinal)
-
-    projections = Events.update_projections(base_projections, resolved_command)
-
-    # 6. Update projections with returned events and record in log
-    {projections, event_log, fold_counter} =
-      Events.process_events(
-        events,
-        :command,
-        index,
-        base_event_log,
-        projections,
-        fold_counter
-      )
-
-    # 6.5. DR-030: register this command's awaits matchers (post-capture,
-    #      so the match predicate can close over captured response values).
-    #      Persist them on the state so later drains (including finalize)
-    #      still correlate, then drain with the full registry in effect.
-    state = register_awaits(state, resolved_command, index, model, projections)
-
-    # 7. Drain and process injector events. DR-025: capture the
-    #    pre-drain projections/log so check_async can assert each async
-    #    event on the state it produced and locate a violation at the
-    #    observing event's command_index.
-    projs_before_async = projections
-    log_before_async = event_log
-
-    {projections, event_log, fold_counter} =
-      Events.process_injector_events(
-        event_queue,
-        event_log,
-        projections,
-        fold_counter,
-        state.await_matchers
-      )
-
-    # 7.5. Flush and process mock-injected events; the mocks' on_event/2
-    # lines go under this command's step (DR-054).
-    {projections, event_log, fold_counter, mock_lines} =
-      mock_registry
-      |> Events.process_mock_events(index, event_log, projections, fold_counter)
-      |> Events.folded_or_raise!()
-
-    state = %{
-      state
-      | logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
-    }
-
-    # 7.6. Update mock projections
-    if mock_registry do
-      MockServiceRegistry.update_projections(mock_registry, projections)
-    end
-
-    # Pack the post-events State. Every outcome path below writes the same
-    # State fields; only the event_log (final_event_log on the success path),
-    # the check counters, and whether check_failures is set differ.
-    # put_state/2 is struct!/2, so omitting :check_failures preserves the
-    # prior value (the async-halt and check-fail paths deliberately do not
-    # overwrite it). This closure is the single pack site the two former arms
-    # mirrored across ten put_state calls.
-    pack = fn fields ->
-      put_state(
-        state,
-        Map.merge(
-          %{
-            event_log: event_log,
-            projections: projections,
-            placeholder_registry: updated_registry,
-            # Record the concrete resolved command by its structured position
-            # (DR-033), on every outcome path (the failing command included).
-            executed:
-              Map.put(
-                state.executed,
-                state.current_position,
-                resolved_command
-              ),
-            step_count: state.step_count + 1,
-            active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers,
-            # DR-040: persist the advanced fold counter and this command's
-            # recorded fold ordinal on every outcome path.
-            fold_counter: fold_counter,
-            command_fold_ordinals: command_fold_ordinals
-          },
-          fields
-        )
-      )
-    end
-
-    # 7.7. DR-025: evaluate @check every: checks on the async
-    #      events just folded (injector + mock), incrementally.
-    case check_async(
-           model,
-           projs_before_async,
-           log_before_async,
-           event_log,
-           state.check_counters,
-           check_mode,
-           check_failures,
-           state.telemetry
-         ) do
-      {:halt, async_name, async_projection, async_reason, async_index, async_counters} ->
-        # DR-025: attribute the failure to the offending event's command_index
-        # (`async_index`), which may be an earlier command than the one currently
-        # executing (or nil for an ambient injector event) — never blindly to the
-        # current command. Finalization reads this to set `failed_at_index`.
-        failed_state =
-          pack.(%{check_counters: async_counters, async_failed_index: async_index})
-
-        {:error, Failure.check_failed(async_name, async_reason, async_projection), failed_state}
-
-      {:ok, async_counters, async_failures} ->
-        # 8. Run checks
-        check_ctx = %{
-          command: resolved_command,
-          events: events,
-          command_index: index,
-          step_count: state.step_count + 1,
-          projections: projections,
-          telemetry: state.telemetry,
-          sampling: sampling?(index)
-        }
-
-        case run_checks(
-               model,
-               projections,
-               check_ctx,
-               async_counters,
-               check_mode,
-               async_failures
-             ) do
-          {:ok, check_counters, updated_failures} ->
-            # 9. Execute stutter retries if configured. Their log lines join
-            #    the command's under the same cap, each with its attempt
-            #    number (DR-054); `stutter_lines` is the step's whole list
-            #    then, and nil when no retry ran.
-            {stutter_outcome, stutter_lines} =
-              PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
-                command,
-                resolved_command,
-                events,
-                index,
-                event_log,
-                state,
-                adapter,
-                adapter_context
-              )
-
-            logs =
-              if stutter_lines,
-                do: Map.put(state.logs, state.current_position, stutter_lines),
-                else: state.logs
-
-            case stutter_outcome do
-              {:ok, final_event_log} ->
-                new_state =
-                  pack.(%{
-                    event_log: final_event_log,
-                    check_counters: check_counters,
-                    check_failures: updated_failures,
-                    logs: logs
-                  })
-
-                # Spawn pollers for any @eventually checks triggered by these events
-                case maybe_spawn_pollers(new_state, events, model, resolved_command, index) do
-                  {:ok, new_state} ->
-                    {:ok, update_poller_state_getters(new_state)}
-
-                  {:error, check_name, projection, reason, failed_state} ->
-                    {:error, Failure.check_failed(check_name, reason, projection), failed_state}
-                end
-
-              {:error, :idempotency_violation, violation} ->
-                failed_state =
-                  pack.(%{
-                    check_counters: check_counters,
-                    check_failures: updated_failures,
-                    logs: logs
-                  })
-
-                {:error, Failure.idempotency_violation(violation), failed_state}
-
-              {:error, :stutter_execution_failed, details} ->
-                failed_state =
-                  pack.(%{
-                    check_counters: check_counters,
-                    check_failures: updated_failures,
-                    logs: logs
-                  })
-
-                {:error, Failure.stutter_execution_failed(details), failed_state}
-            end
-
-          {:error, check_name, projection, reason, check_counters} ->
-            failed_state = pack.(%{check_counters: check_counters})
-            {:error, Failure.check_failed(check_name, reason, projection), failed_state}
-        end
-    end
-  end
-
-  # Inject an event mid-execution from an adapter.
-  # Called via runtime.inject.(event) from adapter execute; `sink` is the per-command
-  # Runtime.Sink (DR-027), replacing the former process-dictionary channel.
-  # Updates projections immediately and records in the event log.
-  defp inject_event(sink, event) do
-    case Runtime.Sink.get_ctx(sink) do
-      nil ->
-        raise ArgumentError, "inject called outside adapter execution context"
-
-      ctx ->
-        # 1. Update projections immediately. The fold runs HERE, in the caller
-        # (adapter) process, so a projection apply/2 that raises a
-        # transition-invariant violation propagates into the adapter exactly as
-        # before, rather than crashing the sink's Agent.
-        projections = Events.update_projections(ctx.projections, event)
-
-        # 2. Create entry with source :injected, stamping its fold ordinal
-        #    (DR-040) from the sink's threaded counter.
-        entry =
-          Entry.from_injected(event, ctx.command_index)
-          |> Map.put(:fold_index, ctx.fold_counter)
-
-        # 3. Store the accumulated state. Injected events are accumulated in
-        # injection order so external() values they carry can be captured
-        # (DR-021): the producer's logical event list is the injected events
-        # followed by the events returned from execute, matching the order used to
-        # assign each placeholder's event_index during generation.
-        Runtime.Sink.update_ctx(sink, fn ctx ->
-          %{
-            ctx
-            | projections: projections,
-              injected_events: ctx.injected_events ++ [event],
-              event_log: [entry | ctx.event_log],
-              fold_counter: ctx.fold_counter + 1
-          }
-        end)
-
-        :ok
-    end
-  end
-
-  # A %Runtime{} for execution paths that have no live injection window:
-  #   * stutter retries run after the per-command sink has been drained and
-  #     stopped, and
-  #   * execute_raw/3 runs commands without projections to fold into.
-  # Calling inject/start_poller there raises a clear ArgumentError rather than
-  # the old KeyError (those keys simply weren't present in the context before).
-  # Shared with PropertyDamage.Executor.Stutter (stutter retries). DR-029.
-  @doc false
-  def inject_unavailable_runtime(reason, stutter \\ nil) do
-    %Runtime{
-      inject: fn _event ->
-        raise ArgumentError, "Runtime.inject is not available #{reason}"
-      end,
-      start_poller: fn _opts ->
-        raise ArgumentError, "Runtime.start_poller is not available #{reason}"
-      end,
-      stutter: stutter
-    }
-  end
-
-  # Apply updates onto the existing %State{}, preserving every field not being
-  # changed. Uses struct!/2 so a write to an undeclared field RAISES rather than
-  # silently producing a corrupt struct-shaped map (DR-029); the State struct is
-  # the single source of truth for the run-state shape.
-  @doc false
-  def put_state(%State{} = state, updates), do: struct!(state, updates)
-
-  # Run all triggered checks
-  # step_ctx contains: step_type (:command | :event), module, step_count
-  # check_mode controls behavior: :halt, :record, or :log
-  defp run_step_checks(
-         model,
-         projections,
-         step_ctx,
-         check_counters,
-         check_mode,
-         check_failures,
-         check_ctx
-       ) do
-    require Logger
-
-    # Get all projections that may have checks
-    all_projections = PropertyDamage.Model.projection_modules(model)
-
-    result =
-      Enum.reduce_while(
-        all_projections,
-        {:ok, check_counters, check_failures},
-        fn projection, {:ok, counters, failures} ->
-          projection_state = Map.get(projections, projection)
-
-          case Checks.step_checks(
-                 projection,
-                 projection_state,
-                 Map.put(step_ctx, :telemetry, Map.get(check_ctx, :telemetry)),
-                 counters
-               ) do
-            {:ok, new_counters} ->
-              {:cont, {:ok, new_counters, failures}}
-
-            {:error, check_name, reason, new_counters} ->
-              # Handle based on check_mode
-              case check_mode do
-                :halt ->
-                  {:halt, {:error, check_name, projection, reason, new_counters}}
-
-                :record ->
-                  # Record failure and continue
-                  failure = %{
-                    check_name: check_name,
-                    projection: projection,
-                    reason: reason,
-                    command: Map.get(check_ctx, :command),
-                    command_index: Map.get(check_ctx, :command_index),
-                    step_type: step_ctx.step_type,
-                    module: step_ctx.module,
-                    timestamp: System.monotonic_time(:millisecond)
-                  }
-
-                  {:cont, {:ok, new_counters, [failure | failures]}}
-
-                :log ->
-                  # Log warning and continue
-                  Logger.warning("Check failed: #{check_name} - #{inspect(reason)}")
-                  {:cont, {:ok, new_counters, failures}}
-              end
-          end
-        end
-      )
-
-    # Normalize result format
-    case result do
-      {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, _, _, _, _} = error -> error
-    end
-  end
-
-  # ============================================================================
-  # Lifecycle-Boundary Checks (@check at:, DR-024)
-  # ============================================================================
-
-  # Run every @check at: <phase> check once on the given projection state.
-  # Unlike during-run (every:) checks there is no step counter and no
-  # should_run?/4 sampling: the timing IS the phase boundary. The triggering
-  # command/event slot carries the phase atom (:startup | :teardown) so a
-  # state-only check ignores it.
-  #
-  # Returns one of:
-  #   {:ok, recorded_failures}  -- recorded_failures are the :record-mode
-  #                                failures from this phase, newest-first; empty
-  #                                on a clean pass and under :log/:disabled.
-  #   {:halt, name, {exception, stacktrace}} -- first failure under :halt mode.
-  #
-  # Returns one of (DR-026 threads the fire counters through so lifecycle
-  # firings are recorded, since these checks never pass through the
-  # during-run counter path):
-  #   {:ok, recorded_failures, counters}
-  #   {:halt, name, projection, {exception, stacktrace}, counters}
-  # Shared with PropertyDamage.Executor.Finalization (:teardown checkpoint). DR-029.
-  @doc false
-  def run_phase_checks(state, phase) do
-    check_mode = state.check_mode
-    counters = state.check_counters
-
-    if check_mode == :disabled do
-      {:ok, [], counters}
-    else
-      model = Map.fetch!(state, :model)
-      projections = state.projections
-
-      Enum.reduce_while(projection_modules(model), {:ok, [], counters}, fn projection,
-                                                                           {:ok, recorded,
-                                                                            acc_counters} ->
-        projection_state = Map.get(projections, projection)
-        checks = Checks.phase_checks(projection, phase)
-
-        case run_phase_projection_checks(
-               projection,
-               projection_state,
-               checks,
-               phase,
-               check_mode,
-               {recorded, acc_counters},
-               Map.get(state, :telemetry)
-             ) do
-          {:ok, new_recorded, new_counters} ->
-            {:cont, {:ok, new_recorded, new_counters}}
-
-          {:halt, name, halt_projection, reason, halt_counters} ->
-            {:halt, {:halt, name, halt_projection, reason, halt_counters}}
-        end
-      end)
-    end
-  end
-
-  defp run_phase_projection_checks(
-         projection,
-         projection_state,
-         checks,
-         phase,
-         check_mode,
-         {recorded, counters},
-         telemetry
-       ) do
-    require Logger
-
-    Enum.reduce_while(checks, {:ok, recorded, counters}, fn check,
-                                                            {:ok, acc_recorded, acc_counters} ->
-      # Record the firing (DR-026) before invoking, so a failing lifecycle check
-      # still counts as exercised.
-      fired = Checks.record_fire(acc_counters, projection, check.name)
-
-      case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
-             projection
-             |> apply(check.function_name, [projection_state, phase])
-             |> Verdict.check(check.name)
-           end) do
-        :ok ->
-          {:cont, {:ok, acc_recorded, fired}}
-
-        {:failed, e, stacktrace} ->
-          case check_mode do
-            :halt ->
-              {:halt, {:halt, check.name, projection, {e, stacktrace}, fired}}
-
-            :record ->
-              failure = %{
-                check_name: check.name,
-                projection: projection,
-                reason: {e, stacktrace},
-                command: nil,
-                command_index: nil,
-                step_type: phase,
-                module: nil,
-                timestamp: System.monotonic_time(:millisecond)
-              }
-
-              {:cont, {:ok, [failure | acc_recorded], fired}}
-
-            :log ->
-              Logger.warning("Check failed at #{phase}: #{check.name} - #{inspect(e)}")
-
-              {:cont, {:ok, acc_recorded, fired}}
-          end
-      end
-    end)
-  end
-
-  defp projection_modules(model), do: PropertyDamage.Model.projection_modules(model)
-
-  # Legacy wrapper for backward compatibility
-  # Maps old check_ctx format to new step_ctx format
-  # Now accepts check_mode and check_failures from state
-  @doc false
-  def run_checks(
-        _model,
-        _projections,
-        _check_ctx,
-        check_counters,
-        :disabled,
-        check_failures
-      ) do
-    # When disabled, skip all checks and just return success
-    {:ok, check_counters, check_failures}
-  end
-
-  def run_checks(
-        model,
-        projections,
-        check_ctx,
-        check_counters,
-        check_mode,
-        check_failures
-      ) do
-    command_module = check_ctx.command.__struct__
-    sampling = Map.get(check_ctx, :sampling, true)
-
-    # Update counters
-    counters =
-      bump_sampling(check_counters, sampling, [:step, :command, command_module])
-
-    # Run checks for command
-    step_ctx = %{
-      step_type: :command,
-      module: command_module,
-      command_or_event: check_ctx.command,
-      sampling: sampling
-    }
-
-    case run_step_checks(
-           model,
-           projections,
-           step_ctx,
-           counters,
-           check_mode,
-           check_failures,
-           check_ctx
-         ) do
-      {:ok, counters_after_cmd, updated_failures} ->
-        # Now run checks for each event
-        run_event_checks(
-          model,
-          projections,
-          check_ctx.events,
-          counters_after_cmd,
-          check_mode,
-          updated_failures,
-          check_ctx
-        )
-
-      error ->
-        error
-    end
-  end
-
-  defp run_event_checks(
-         _model,
-         _projections,
-         [],
-         counters,
-         _check_mode,
-         failures,
-         _check_ctx
-       ),
-       do: {:ok, counters, failures}
-
-  defp run_event_checks(
-         model,
-         projections,
-         [event | rest],
-         counters,
-         check_mode,
-         failures,
-         check_ctx
-       ) do
-    event_module = event.__struct__
-    sampling = Map.get(check_ctx, :sampling, true)
-
-    # Update counters for this event
-    counters = bump_sampling(counters, sampling, [:step, :event, event_module])
-
-    step_ctx = %{
-      step_type: :event,
-      module: event_module,
-      command_or_event: event,
-      sampling: sampling
-    }
-
-    case run_step_checks(
-           model,
-           projections,
-           step_ctx,
-           counters,
-           check_mode,
-           failures,
-           check_ctx
-         ) do
-      {:ok, new_counters, updated_failures} ->
-        run_event_checks(
-          model,
-          projections,
-          rest,
-          new_counters,
-          check_mode,
-          updated_failures,
-          check_ctx
-        )
-
-      error ->
-        error
-    end
-  end
-
-  # Advance the sampling counters `keys` by one, unless the step does not
-  # sample (a setup command's step, whose `every: N` triggers neither count
-  # nor fire).
-  defp bump_sampling(counters, false, _keys), do: counters
-
-  defp bump_sampling(counters, true, keys),
-    do: Enum.reduce(keys, counters, fn key, acc -> Map.update(acc, key, 1, &(&1 + 1)) end)
-
-  # ============================================================================
-  # Continuous async-observation checking (DR-025)
-  # ============================================================================
-  #
-  # The asynchronous event paths (resource-poller / injector-adapter events,
-  # mock-service events, and the finalize-time drains) fold
-  # events into projection state. DR-025 additionally evaluates `@check every:`
-  # checks on those events, so a violation is reported AT the offending event
-  # (with that event's `command_index`) rather than only at the
-  # `@check at: :teardown` settled checkpoint, giving the shrinker a tight
-  # truncation target.
-  #
-  # Evaluation is INCREMENTAL: each event is asserted on the state produced by
-  # folding *that* event, not the final drained state. `check_async/7` recovers
-  # each event's state by re-folding from `projs_before` over the entries the
-  # processor just prepended to the event log (one event at a time), and leaves
-  # the already-folded `projections` untouched. The distinction is load-bearing
-  # for shrink convergence: asserting against the final drained state would report
-  # at the *first* matching event in a batch rather than the causal one, so the
-  # reported `command_index` would not reproduce on truncation. Command-own events
-  # keep their existing batch-against-final timing (run_checks); only the async
-  # paths are incremental (the documented asymmetry, DR-025).
-
-  # Run `@check every:` checks on the events folded since `log_before`
-  # (newest-first prepended to `event_log`), incrementally on each event's
-  # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
-  # `{:halt, name, projection, reason, command_index, counters}` where `command_index`
-  # locates the offending event for the shrinker (nil for a pure injector event).
-  # Shared with PropertyDamage.Executor.Finalization (settle/drain). DR-029.
-  @doc false
-  def check_async(
-        model,
-        projs_before,
-        log_before,
-        event_log,
-        counters,
-        mode,
-        failures,
-        telemetry \\ nil
-      )
-
-  def check_async(
-        _model,
-        _projs_before,
-        _log_before,
-        _event_log,
-        counters,
-        :disabled,
-        failures,
-        _
-      ),
-      do: {:ok, counters, failures}
-
-  def check_async(model, projs_before, log_before, event_log, counters, mode, failures, telemetry) do
-    new_count = length(event_log) - length(log_before)
-
-    new_entries = event_log |> Enum.take(new_count) |> Enum.reverse()
-
-    folded =
-      Enum.reduce_while(new_entries, {projs_before, counters, failures}, fn entry,
-                                                                            {projs, c, f} ->
-        projs = Events.update_projections(projs, entry.event)
-
-        case check_async_event(model, projs, entry, c, mode, f, telemetry) do
-          {:ok, c, f} ->
-            {:cont, {projs, c, f}}
-
-          {:halt, name, projection, reason, c} ->
-            {:halt, {:halt, name, projection, reason, Entry.attribution(entry), c}}
-        end
-      end)
-
-    case folded do
-      {_projs, c, f} -> {:ok, c, f}
-      {:halt, name, projection, reason, idx, c} -> {:halt, name, projection, reason, idx, c}
-    end
-  end
-
-  # Evaluate the synchronous (`@check every:`) dispatch for a single
-  # asynchronously-observed event, on its post-fold `projections`. Mirrors
-  # `run_event_checks`' counter bumps (`:step` / `:event` / module) so
-  # `every: N` sampling counts async observations. `step_type` is `:event`, so
-  # `every: :command` checks do NOT fire (the opt-out) while `every: :event`
-  # / `every: 1` / `every: Module` do.
-  defp check_async_event(model, projections, entry, counters, mode, failures, telemetry) do
-    event = entry.event
-    module = event.__struct__
-    # An event of a setup command does not advance the sampling counters.
-    sampling = entry.phase == :root
-
-    counters = bump_sampling(counters, sampling, [:step, :event, module])
-
-    step_ctx = %{step_type: :event, module: module, command_or_event: event, sampling: sampling}
-
-    check_ctx = %{
-      command: nil,
-      command_index: Entry.attribution(entry),
-      telemetry: telemetry
-    }
-
-    case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
-      {:ok, counters, failures} -> {:ok, counters, failures}
-      {:error, name, projection, reason, counters} -> {:halt, name, projection, reason, counters}
-    end
-  end
-
-  # ============================================================================
-  # State Poller Support
-  # ============================================================================
-
-  @doc false
-  # Spawn pollers for any @eventually checks triggered by the given events
-  # DR-030: build and register the awaits matchers a command declares. Pure
-  # correlation: each %Await{match} becomes a registry entry carrying the
-  # command's index, appended in registration order (so first-registered
-  # wins on overlap). A matcher persists for the rest of the run, so a late
-  # injector event still correlates to the command that claimed it. Plain-map
-  # commands (low-level/test usage) and commands without awaits/2 are no-ops.
-  defp register_awaits(state, command, index, model, projections) do
-    if is_struct(command) and awaits?(command.__struct__) do
-      module = command.__struct__
-      model_state = Map.get(projections, model.command_sequence_projection())
-
-      new_matchers =
-        for %PropertyDamage.Await{match: match} <- module.awaits(model_state, command) do
-          %{command_index: index, match: match}
-        end
-
-      %{state | await_matchers: state.await_matchers ++ new_matchers}
-    else
-      state
-    end
-  end
-
-  defp awaits?(module) do
-    Code.ensure_loaded?(module) and function_exported?(module, :awaits, 2)
-  end
-
-  # Spawns a poller for every `@eventually` check an event of this step
-  # triggers. The check function's return must be the 1-arity predicate the
-  # poller calls; any other return is a check failure at this step, handled
-  # under the run's `check_mode:` like a synchronous check that failed.
-  # Returns `{:ok, state}` or `{:error, check_name, projection, reason, state}`.
-  defp maybe_spawn_pollers(state, events, model, command, command_index) do
-    check_mode = state.check_mode
-
-    # Skip if checks are disabled
-    if check_mode == :disabled do
-      {:ok, state}
-    else
-      all_projections = PropertyDamage.Model.projection_modules(model)
-
-      # For each event, the @eventually checks it triggers, each with the
-      # value its check function returned. Dispatch by function_name (the
-      # actual def), since :name is the logical (assert_-stripped) name shared
-      # with synchronous checks.
-      triggered =
-        for event <- events,
-            event_module = event.__struct__,
-            projection <- all_projections,
-            check <- Checks.eventually_checks(projection),
-            Projection.event_matches_poll_trigger?(check.eventually, event_module) do
-          projection_state = Map.get(state.projections, projection)
-          returned = apply(projection, check.function_name, [projection_state, event])
-          {projection, check, event, returned}
-        end
-
-      {predicates, others} =
-        Enum.split_with(triggered, fn {_projection, _check, _event, returned} ->
-          is_function(returned, 1)
-        end)
-
-      case reject_non_predicates(state, others, command, command_index) do
-        {:ok, state} -> {:ok, spawn_pollers(state, predicates, command_index)}
-        {:error, _name, _projection, _reason, _state} = error -> error
-      end
-    end
-  end
-
-  # The `@eventually` functions that returned something other than a
-  # predicate, judged under the run's `check_mode:`: `:halt` ends the run at
-  # the first, `:record` records each and goes on, `:log` warns and goes on.
-  defp reject_non_predicates(state, [], _command, _command_index), do: {:ok, state}
-
-  defp reject_non_predicates(state, others, command, command_index) do
-    require Logger
-
-    Enum.reduce_while(others, {:ok, state}, fn {projection, check, event, returned},
-                                               {:ok, state} ->
-      reason =
-        "@eventually #{check.name} must return a 1-arity predicate function " <>
-          "for the poller to call; it returned #{inspect(returned)}"
-
-      case state.check_mode do
-        :halt ->
-          {:halt, {:error, check.name, projection, reason, state}}
-
-        :record ->
-          failure = %{
-            check_name: check.name,
-            projection: projection,
-            reason: reason,
-            command: command,
-            command_index: command_index,
-            step_type: :event,
-            module: event.__struct__,
-            timestamp: System.monotonic_time(:millisecond)
-          }
-
-          {:cont, {:ok, %{state | check_failures: [failure | state.check_failures]}}}
-
-        :log ->
-          Logger.warning("Check failed: #{check.name} - #{reason}")
-          {:cont, {:ok, state}}
-      end
-    end)
-  end
-
-  defp spawn_pollers(state, [], _command_index), do: state
-
-  defp spawn_pollers(state, predicates, command_index) do
-    # Each spawned poller is paired with its (projection, check name) so
-    # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
-    # liveness check (the after: event arrived and verification began), so a
-    # timed-out or still-pending poller still counts as exercised.
-    spawned =
-      for {projection, check, event, predicate} <- predicates do
-        # Build state getter for the poller
-        get_state_fn = fn proj ->
-          # This will be updated by the executor as state changes
-          Map.get(state.projections, proj)
-        end
-
-        poller =
-          StatePoller.start(
-            predicate: predicate,
-            predicate_source: check.predicate_source,
-            projection: projection,
-            interval_ms: check.eventually.interval_ms,
-            timeout_ms: check.eventually.timeout_ms,
-            triggered_by: %{
-              event: event,
-              check_name: check.name,
-              command_index: command_index
-            },
-            get_state_fn: get_state_fn,
-            telemetry: state.telemetry
-          )
-
-        {projection, check.name, poller}
-      end
-
-    new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
-
-    counters =
-      Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
-        Checks.record_fire(acc, proj, name)
-      end)
-
-    %{state | active_pollers: state.active_pollers ++ new_pollers, check_counters: counters}
-  end
-
-  @doc false
-  # Update state getter for all active pollers with new projection state.
-  # Shared with PropertyDamage.Executor.Finalization (drain). DR-029.
-  def update_poller_state_getters(state) do
-    pollers = state.active_pollers
-    projections = state.projections
-
-    for poller <- pollers do
-      get_state_fn = fn proj -> Map.get(projections, proj) end
-      StatePoller.update_state_getter(poller, get_state_fn)
-    end
-
-    state
   end
 
   # ============================================================================
@@ -2005,7 +496,7 @@ defmodule PropertyDamage.Executor do
 
   # Collect every %Placeholder{} carried in the command list and register it, so
   # the registry's producer_link maps each producer position to its placeholder
-  # ids for capture_externals/3.
+  # ids for PlaceholderRegistry.capture/3.
   defp build_placeholder_registry(commands), do: PlaceholderRegistry.build(commands)
 
   # Event chunks are prepended per command (newest-first); restore execution
@@ -2017,7 +508,7 @@ defmodule PropertyDamage.Executor do
     # Resolve placeholders in command (only for structs that might carry them)
     resolved_result =
       if is_struct(command) do
-        resolve_command_placeholders(command, registry)
+        Step.resolve_placeholders(command, registry)
       else
         # Plain maps don't carry placeholders in raw mode
         {:ok, command}
@@ -2041,7 +532,7 @@ defmodule PropertyDamage.Executor do
               end
             }
           else
-            inject_unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
+            Step.unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
           end
 
         # Execute via adapter (bounded by adapter.timeout/1, DR-032). The
@@ -2057,7 +548,7 @@ defmodule PropertyDamage.Executor do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).
-            new_registry = capture_externals(events, Position.prefix(index), registry)
+            new_registry = PlaceholderRegistry.capture(registry, Position.prefix(index), events)
 
             # Create event log entries
             entries =
@@ -2092,80 +583,5 @@ defmodule PropertyDamage.Executor do
       {:error, reason} ->
         {:error, Failure.placeholder_resolution(reason)}
     end
-  end
-
-  # ============================================================================
-  # External/Placeholder Support
-  # ============================================================================
-
-  # Resolve placeholders in a command before execution.
-  @doc false
-  def resolve_command_placeholders(command, registry, mint \\ {nil, 0}) do
-    {run_nonce, mint_epoch} = mint
-    ctx = {registry, run_nonce, mint_epoch}
-    resolved = deep_resolve_placeholders(command, ctx)
-    {:ok, resolved}
-  rescue
-    # The message alone is the reason: the stacktrace is the framework's own
-    # resolution frames, and a failure compared across targets must not
-    # differ by them.
-    e in ArgumentError -> {:error, e.message}
-  end
-
-  defp deep_resolve_placeholders(%Placeholder{} = p, {registry, _nonce, _epoch}) do
-    case PlaceholderRegistry.get(registry, p.id) do
-      nil ->
-        raise ArgumentError, "Unknown placeholder: #{inspect(p)}"
-
-      %{resolved: nil} = placeholder ->
-        raise ArgumentError,
-              "Unresolved placeholder at #{inspect(placeholder.path)} " <>
-                "(position #{inspect(placeholder.position)}, event #{placeholder.event_index})"
-
-      %{resolved: value} ->
-        value
-    end
-  end
-
-  # Client-minted run-scoped value (DR-034): a pure function of the run's
-  # (nonce, epoch) and the marker's baked coordinates.
-  defp deep_resolve_placeholders(%Mint{} = marker, {_registry, run_nonce, mint_epoch}) do
-    Mint.resolve(marker, run_nonce, mint_epoch)
-  end
-
-  defp deep_resolve_placeholders(%{__struct__: mod} = struct, ctx) do
-    struct
-    |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, deep_resolve_placeholders(v, ctx)} end)
-    |> Map.new()
-    |> then(&struct(mod, &1))
-  end
-
-  defp deep_resolve_placeholders(map, ctx) when is_map(map) do
-    Map.new(map, fn {k, v} ->
-      {deep_resolve_placeholders(k, ctx), deep_resolve_placeholders(v, ctx)}
-    end)
-  end
-
-  defp deep_resolve_placeholders(list, ctx) when is_list(list) do
-    Enum.map(list, &deep_resolve_placeholders(&1, ctx))
-  end
-
-  defp deep_resolve_placeholders(tuple, ctx) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.map(&deep_resolve_placeholders(&1, ctx))
-    |> List.to_tuple()
-  end
-
-  defp deep_resolve_placeholders(other, _ctx), do: other
-
-  # Capture real external values from a command's events into the registry
-  # (DR-021). The command's structured `position` selects the placeholders it
-  # produces (via the registry's producer_link); each is resolved by id with the
-  # value found at its recorded path/event_index in the real events. This is
-  # position-driven, so it is correct under shrinking (the position is rebuilt per run, never a stale generation key).
-  defp capture_externals(events, position, registry) do
-    PlaceholderRegistry.capture(registry, position, events)
   end
 end

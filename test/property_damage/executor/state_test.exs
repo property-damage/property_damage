@@ -25,7 +25,7 @@ defmodule PropertyDamage.Executor.StateTest do
     :placeholder_registry,
     :command_specs,
     :stutter_config,
-    :mock_registry,
+    :step_observer,
     :external_markers,
     :event_queue,
     :model
@@ -37,7 +37,6 @@ defmodule PropertyDamage.Executor.StateTest do
       event_queue: nil,
       check_mode: :halt,
       stutter_config: nil,
-      mock_registry: nil,
       external_markers: [],
       command_specs: %{},
       placeholder_registry: nil

@@ -384,7 +384,7 @@ defmodule PropertyDamage.Replay do
   defp execute(command, index, nil, state, ctx), do: Stepping.step(command, index, state, ctx)
 
   defp execute(command, index, leaf, state, ctx),
-    do: Stepping.step_leaf(command, index, leaf, state, ctx)
+    do: Stepping.step_leaf({command, leaf}, index, state, ctx)
 
   defp emit_step(
          session,

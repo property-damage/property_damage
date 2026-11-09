@@ -83,39 +83,14 @@ defmodule PropertyDamage.Executor.Stepping do
   require Logger
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.Executor
-  alias PropertyDamage.Executor.{Events, Finalization, Settle}
+  alias PropertyDamage.Executor.{Events, Finalization, Settle, Step, StepObserver, Stutter}
+  alias PropertyDamage.Executor.Stepping.Context
   alias PropertyDamage.Failure
   alias PropertyDamage.Log.Cap
-  alias PropertyDamage.MockServiceRegistry
   alias PropertyDamage.{Placeholder, PlaceholderRegistry}
   alias PropertyDamage.ResourcePoller
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.StatePoller
-
-  defmodule Context do
-    @moduledoc """
-    The per-run inputs shared by every `step/4` of one sequence.
-
-    These do not change from one command to the next, so they are bundled once
-    rather than passed on every call: the `model` orchestrating the run, the
-    `adapter` bridging to the SUT and the `adapter_context` its `setup/1`
-    returned, and the `event_queue` async/injected events flow through (`nil`
-    when the run has no injector adapters). `target_name` names the target in
-    the warnings `step_teardown/4` logs (`nil` when there is no target name).
-    """
-
-    @enforce_keys [:model, :adapter, :adapter_context]
-    defstruct [:model, :adapter, :adapter_context, :event_queue, :target_name]
-
-    @type t :: %__MODULE__{
-            model: module(),
-            adapter: module(),
-            adapter_context: term(),
-            event_queue: pid() | nil,
-            target_name: String.t() | nil
-          }
-  end
 
   @doc """
   Build a fresh executor state for stepping a sequence.
@@ -124,7 +99,8 @@ defmodule PropertyDamage.Executor.Stepping do
 
     * `:event_queue` - the async/injected event queue (default `nil`)
     * `:stutter_config` - stutter/idempotency configuration (default `nil`)
-    * `:mock_registry` - mock service registry (default `nil`)
+    * `:step_observer` - the step observer, `{module, observer}`
+      (`PropertyDamage.Executor.StepObserver`); default `nil`, none
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:external_markers` - external value markers (default `[]`)
     * `:placeholder_registry` - registry seeded from the generated sequence (DR-021)
@@ -140,27 +116,7 @@ defmodule PropertyDamage.Executor.Stepping do
       keep their log lines, besides the first attempt's (default 3, DR-054)
   """
   @spec init_state(module(), keyword()) :: map()
-  def init_state(model, opts \\ []) do
-    state =
-      Executor.build_initial_state(
-        model,
-        Keyword.get(opts, :event_queue),
-        Keyword.get(opts, :stutter_config),
-        Keyword.get(opts, :mock_registry),
-        Keyword.get(opts, :check_mode, :halt),
-        Keyword.get(opts, :external_markers, []),
-        Keyword.get(opts, :placeholder_registry),
-        Keyword.get(opts, :rng_seed),
-        {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)},
-        Keyword.get(opts, :telemetry)
-      )
-
-    %{
-      state
-      | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start),
-        keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts())
-    }
-  end
+  def init_state(model, opts \\ []), do: Step.new_state(model, opts)
 
   @typedoc """
   What the adapter answered for one command, so a caller comparing answers does
@@ -200,42 +156,83 @@ defmodule PropertyDamage.Executor.Stepping do
         current_position: Position.prefix(index)
     }
 
-    Executor.execute_command_with_outcome(
+    run_step(command, index, state_with_before, ctx)
+  end
+
+  # The one per-command engine path: the command executes (`Step.execute/4`),
+  # then its stutter retries run, then the `@eventually` pollers its events
+  # trigger start. The command telemetry span covers all three.
+  defp run_step(command, index, state, ctx) do
+    PropertyDamage.Telemetry.command_span(
+      state.telemetry,
       command,
       index,
-      state_with_before,
-      ctx.model,
-      ctx.adapter,
-      ctx.adapter_context,
-      ctx.event_queue
+      fn -> command |> Step.execute(index, state, ctx) |> after_execute(command, ctx) end,
+      leaf_index(state.current_position)
     )
+  end
+
+  # The leaf a command is when it runs as part of a root's expansion.
+  defp leaf_index(%Position{section: {:leaf, _root}, offset: leaf}), do: leaf
+  defp leaf_index(_position), do: nil
+
+  defp after_execute({:ok, state, {:ok, events} = outcome}, command, ctx) do
+    with {:ok, state} <- stutter(command, events, state, ctx),
+         {:ok, state} <-
+           Step.spawn_pollers(events, state, ctx,
+             command: Map.fetch!(state.executed, state.current_position),
+             index: state.last_command_index
+           ) do
+      {:ok, Step.refresh_pollers(state), outcome}
+    else
+      {:error, failure, failed_state} -> {:error, failure, failed_state, outcome}
+    end
+  end
+
+  defp after_execute(failed, _command, _ctx), do: failed
+
+  # The stutter retries of a command that succeeded. Their log lines join the
+  # command's under the same cap, each with its attempt number (DR-054); the
+  # retries' events go into the log as stutter entries.
+  defp stutter(command, events, state, ctx) do
+    {stutter_outcome, stutter_lines} =
+      Stutter.maybe_execute_stutter_retries(command, events, state, ctx)
+
+    state =
+      if stutter_lines,
+        do: %{state | logs: Map.put(state.logs, state.current_position, stutter_lines)},
+        else: state
+
+    case stutter_outcome do
+      {:ok, final_event_log} ->
+        {:ok, %{state | event_log: final_event_log}}
+
+      {:error, :idempotency_violation, violation} ->
+        {:error, Failure.idempotency_violation(violation), state}
+
+      {:error, :stutter_execution_failed, details} ->
+        {:error, Failure.stutter_execution_failed(details), state}
+    end
   end
 
   @doc """
   Execute one leaf of a root's expansion against an existing stepping state.
 
   The `step/4` path for the root at `index`, with the command at `position`
-  (`Position.leaf/2`) instead of the root's own position: its externals are
+  (`Position.leaf/2`) instead of the root's own position. The leaf step is
+  the `{command, position}` pair `PropertyDamage.Expansion` yields. Its externals are
   captured there, and its event-log entries keep `index` as their command
   index and name the leaf in `leaf_index`. Returns what `step/4` returns.
   """
-  @spec step_leaf(struct(), non_neg_integer(), Position.t(), map(), Context.t()) ::
+  @spec step_leaf({struct(), Position.t()}, non_neg_integer(), map(), Context.t()) ::
           {:ok, map(), outcome()} | {:error, Failure.t(), map(), outcome()}
-  def step_leaf(command, index, %Position{section: {:leaf, _root}} = position, state, ctx) do
+  def step_leaf({command, %Position{section: {:leaf, _root}} = position}, index, state, ctx) do
     prepared = %{state | projections_before: state.projections, current_position: position}
     logged = length(state.event_log)
 
     tag = fn stepped -> tag_leaf_entries(stepped, logged, index, position.offset) end
 
-    case Executor.execute_command_with_outcome(
-           command,
-           index,
-           prepared,
-           ctx.model,
-           ctx.adapter,
-           ctx.adapter_context,
-           ctx.event_queue
-         ) do
+    case run_step(command, index, prepared, ctx) do
       {:ok, stepped, outcome} -> {:ok, tag.(stepped), outcome}
       {:error, failure, failed, outcome} -> {:error, failure, tag.(failed), outcome}
     end
@@ -277,15 +274,7 @@ defmodule PropertyDamage.Executor.Stepping do
       %{stepped | stutter_config: state.stutter_config, step_count: state.step_count}
     end
 
-    case Executor.execute_command_with_outcome(
-           command,
-           {:setup, offset},
-           prepared,
-           ctx.model,
-           ctx.adapter,
-           ctx.adapter_context,
-           ctx.event_queue
-         ) do
+    case run_step(command, {:setup, offset}, prepared, ctx) do
       {:ok, stepped, outcome} -> {:ok, restore.(stepped), outcome}
       {:error, failure, failed, outcome} -> {:error, failure, restore.(failed), outcome}
     end
@@ -309,14 +298,13 @@ defmodule PropertyDamage.Executor.Stepping do
   def step_teardown(command, offset, state, %Context{} = ctx) do
     registry = state.placeholder_registry
 
-    case Executor.resolve_command_placeholders(
-           command,
-           registry,
-           {state.run_nonce, state.mint_epoch}
+    case Step.resolve_placeholders(command, registry,
+           run_nonce: state.run_nonce,
+           mint_epoch: state.mint_epoch
          ) do
       {:ok, resolved} ->
         PropertyDamage.Telemetry.command_span(state.telemetry, command, {:teardown, offset}, fn ->
-          execute_teardown(command, resolved, offset, state, ctx)
+          execute_teardown({command, resolved}, offset, state, ctx)
         end)
 
       {:error, _reason} ->
@@ -330,9 +318,9 @@ defmodule PropertyDamage.Executor.Stepping do
     end
   end
 
-  defp execute_teardown(command, resolved, offset, state, ctx) do
+  defp execute_teardown({command, resolved}, offset, state, ctx) do
     spec = PropertyDamage.Model.spec_for(state.command_specs, command)
-    runtime = Executor.inject_unavailable_runtime("in a teardown command")
+    runtime = Step.unavailable_runtime("in a teardown command")
     position = Position.teardown(offset)
 
     # The command's log lines (DR-054) go into a sink of its own and are kept
@@ -478,7 +466,7 @@ defmodule PropertyDamage.Executor.Stepping do
     # and so do the lines the mocks' on_event/2 writes (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
       Events.process_mock_events(
-        state.mock_registry,
+        state.step_observer,
         state.last_command_index,
         event_log,
         projections,
@@ -486,9 +474,7 @@ defmodule PropertyDamage.Executor.Stepping do
       )
       |> Events.folded_or_raise!()
 
-    if state.mock_registry do
-      MockServiceRegistry.update_projections(state.mock_registry, projections)
-    end
+    :ok = StepObserver.after_fold(state.step_observer, projections, :drain)
 
     drained = %{
       state
@@ -498,19 +484,10 @@ defmodule PropertyDamage.Executor.Stepping do
         logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
     }
 
-    case Executor.check_async(
-           ctx.model,
-           projections_before,
-           log_before,
-           event_log,
-           state.check_counters,
-           state.check_mode,
-           state.check_failures,
-           state.telemetry
-         ) do
+    case Step.check_async(drained, since: {projections_before, log_before}, model: ctx.model) do
       {:ok, counters, failures} ->
         drained = %{drained | check_counters: counters, check_failures: failures}
-        {:ok, Executor.update_poller_state_getters(drained)}
+        {:ok, Step.refresh_pollers(drained)}
 
       {:halt, name, projection, reason, command_index, counters} ->
         failed = %{drained | check_counters: counters, async_failed_index: command_index}
@@ -528,7 +505,7 @@ defmodule PropertyDamage.Executor.Stepping do
         error ->
           logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
 
-          {:error, Executor.mock_events_failure(error),
+          {:error, Step.mock_events_failure(error),
            %{state | logs: logs, async_failed_index: state.last_command_index}}
       end
   end
@@ -541,10 +518,11 @@ defmodule PropertyDamage.Executor.Stepping do
   stopped at `index` (`nil` when no command was to blame). The run is
   finalized exactly as `PropertyDamage.Executor.run/4` finalizes it: await the
   `@eventually` pollers, settle the queue, run `@check at: :teardown` checks,
-  and stop every poller. Returns the result map `Executor.run/4` reports.
+  and stop every poller. Returns the result map
+  `PropertyDamage.Executor.run/4` reports.
   """
   @spec finalize(map() | {:failed, non_neg_integer() | nil, Failure.t(), map()}, Context.t()) ::
-          Executor.result()
+          map()
   def finalize(state_or_failed, %Context{}) do
     Finalization.finalize_result(state_or_failed)
   end
