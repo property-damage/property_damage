@@ -6,11 +6,12 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   The replay artifact of the report (its `replay` field) holds the shrunk
   commands, the targets and the signature of the failure
   (`PropertyDamage.Failure.signature/2`). Verification runs those commands
-  through `PropertyDamage.run(only: [replay: path])` and compares the
-  signature of what happens with the recorded one. It never draws a plan from
-  a seed, so a change to generation cannot hide a failing sequence.
+  through the same campaign loop that `PropertyDamage.run/1` uses, with
+  `only: [replay: path]`, and compares the signature of what happens with the
+  recorded one. It never draws a plan from a seed, so a change to generation
+  cannot hide a failing sequence.
 
-  A report with no replay artifact cannot be verified. Neighbouring seeds are
+  A report with no replay artifact cannot be verified. Neighboring seeds are
   a separate question, answered by
   `PropertyDamage.FailureIntelligence.Exploration`.
   """

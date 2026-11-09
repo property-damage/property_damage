@@ -38,7 +38,7 @@ defmodule PropertyDamage.Executor.Events do
           # A BEAM exit/throw from apply/2 bypasses `rescue`; without this it
           # would unwind past execute_command's ProjectionError guard and crash
           # the run. Tag it as the same ProjectionError so it is reported as a
-          # :projection_violation exactly like a raising apply/2 (A2).
+          # :projection_violation exactly like a raising apply/2.
           kind, reason ->
             reraise PropertyDamage.ProjectionError,
                     [

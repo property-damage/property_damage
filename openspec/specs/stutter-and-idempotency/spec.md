@@ -84,7 +84,7 @@ When retry events do not match the initial execution according to the `using:` r
 
 ### Requirement: Command Opt-Out from Stuttering
 
-Commands MAY opt out of stutter testing by declaring themselves as non-idempotent.
+Commands SHALL be able to opt out of stutter testing by declaring themselves as non-idempotent.
 
 #### Scenario: Non-idempotent command skipped
 - **WHEN** a command's module returns `false` from its idempotency declaration

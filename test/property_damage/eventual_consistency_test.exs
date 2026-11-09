@@ -1,7 +1,7 @@
 defmodule PropertyDamage.EventualConsistencyTest do
   @moduledoc """
   End-to-end tests for the @eventually eventual-consistency pipeline through
-  StepRun.run. These exercise the R4 fixes:
+  StepRun.run. These cover three behaviors:
 
     1. @eventually checks no longer crash the run on the first command
        (the run_projection_checks type filter)

@@ -1,6 +1,6 @@
 defmodule PropertyDamage.ExternalShrinkTest do
   @moduledoc """
-  R3 cluster D: shrinking a sequence that uses external() preserves resolution
+  Shrinking a sequence that uses external() preserves resolution
   (DR-021).
 
   Shrinking removes commands, shifting positions. The placeholder registry's

@@ -1,5 +1,5 @@
-defmodule PropertyDamage.OptionsF7Test do
-  # Covers the F7 fail-fast option schemas: each new entry point validates its
+defmodule PropertyDamage.OptionsValidationTest do
+  # Covers the fail-fast option schemas: each new entry point validates its
   # options up front, rejecting unknown keys and type violations. Also locks the
   # Regression factory-time validation (the silent-artifact-loss fix) and the
   # newly-wired Analysis.generate_test orphan schema.
@@ -33,7 +33,7 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
-  describe "Options.validate_run!/1 target mocks (WP-C5)" do
+  describe "Options.validate_run!/1 target mocks" do
     test "defaults to an empty list" do
       opts = Options.validate_run!(model: M, targets: [A])
       assert [%{mocks: []}] = opts[:targets]
@@ -183,7 +183,7 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
-  # ---- regression: run-option :targets parity (WP-C4 c) ---------------------
+  # ---- regression: run-option :targets parity ---------------------
 
   describe "run/1 :regression option accepts :targets" do
     test "the run schema validates regression: [targets: [...]] and preserves it" do

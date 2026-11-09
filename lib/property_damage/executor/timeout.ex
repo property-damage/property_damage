@@ -3,14 +3,13 @@ defmodule PropertyDamage.Executor.Timeout do
   # Per-command adapter timeout for the core Executor (DR-032).
   #
   # `adapter.timeout/1` declares a wall-clock budget for executing a command
-  # (default 30s). Before DR-032 only the load-test worker honored it; an
-  # ordinary run had no bound, so a wedged `execute/3` hung forever. This module
-  # wraps each `adapter.execute/3` attempt in a bounded Task and, on timeout,
-  # returns a structured `CommandTimeoutError` through the normal adapter result
-  # channel (`{:error, reason}`), so it flows through FailureReport/ErrorOrigin
-  # exactly like any other adapter error. It does not raise, so it composes with
-  # the settle retry loop (which treats `{:error, _}` as a final error, not a
-  # retry) and the stutter retry path (which has no surrounding rescue).
+  # (default 30s). This module wraps each `adapter.execute/3` attempt in a
+  # bounded Task. On timeout it returns a structured `CommandTimeoutError`
+  # through the normal adapter result channel (`{:error, reason}`), so the error
+  # flows through FailureReport/ErrorOrigin like any other adapter error. It does
+  # not raise, so it composes with the settle retry loop (which treats
+  # `{:error, _}` as a final error, not a retry) and the stutter retry path
+  # (which has no surrounding rescue).
   #
   # The Runtime.Sink lives in the parent process (execute_regular_command), and
   # the adapter's `runtime.inject` closure writes to it cross-process. A
@@ -28,7 +27,7 @@ defmodule PropertyDamage.Executor.Timeout do
   `{:error, %CommandTimeoutError{}}` if the timeout elapses.
 
   A raising `execute/3` comes back as `{:error, {exception, stacktrace}}`,
-  the channel stutter retries and load-test workers report through. Callers
+  the channel that stutter retries use. Callers
   that must tell a raise apart from an adapter that returned such a tuple use
   `execute_tagged/4`.
   """
@@ -64,7 +63,7 @@ defmodule PropertyDamage.Executor.Timeout do
           # and would otherwise kill this Task and, through its link, the whole
           # run. Capture it here and route it through the same `{:error, _}`
           # channel a returned error uses, so the executor reports an
-          # `:adapter_error` and the shrinker engages identically (A1).
+          # `:adapter_error` and the shrinker engages identically.
           :exit, reason -> {:caught, :exit, reason}
           :throw, value -> {:caught, :throw, value}
         end

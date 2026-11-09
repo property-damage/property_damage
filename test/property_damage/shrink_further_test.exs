@@ -210,7 +210,7 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     end
   end
 
-  test "re-execution adapter setup failure surfaces as an error, not a MatchError (A4)" do
+  test "re-execution adapter setup failure surfaces as an error, not a MatchError" do
     report = report_of_length(8, targets: [{SetupGuardAdapter, []}])
 
     assert {:error,

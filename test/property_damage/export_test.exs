@@ -464,10 +464,10 @@ defmodule PropertyDamage.ExportTest do
   end
 
   # ============================================================================
-  # Curl body variable expansion (F2)
+  # Curl body variable expansion
   # ============================================================================
 
-  describe "to_script/3 - curl body variable expansion (F2)" do
+  describe "to_script/3 - curl body variable expansion" do
     test "a produced $var inside a curl body is not trapped in single quotes" do
       # BatchCredit's body carries a placeholder produced by Provision; the
       # generated body must let the shell variable expand (DR-021), so it may
@@ -523,10 +523,10 @@ defmodule PropertyDamage.ExportTest do
   end
 
   # ============================================================================
-  # Path parameter token-boundary safety (F6)
+  # Path parameter token-boundary safety
   # ============================================================================
 
-  describe "to_script/3 - path param substitution is prefix-safe (F6)" do
+  describe "to_script/3 - path param substitution is prefix-safe" do
     defp fetch_tx_report do
       commands = [%FetchTx{}]
 
@@ -589,10 +589,10 @@ defmodule PropertyDamage.ExportTest do
   end
 
   # ============================================================================
-  # Query Parameters (F1)
+  # Query Parameters
   # ============================================================================
 
-  describe "to_script/3 - query params (F1)" do
+  describe "to_script/3 - query params" do
     defp query_params_report do
       commands = [%ListAccounts{status: "active"}]
 
@@ -1010,7 +1010,7 @@ defmodule PropertyDamage.ExportTest do
   # Characterization Goldens
   # ============================================================================
   #
-  # Byte-for-byte guard for the StepPlan refactor (F3): the generated output of
+  # Byte-for-byte guard for the StepPlan refactor: the generated output of
   # every script/notebook target must not drift for the non-nested reports.
   # Re-baseline deliberately with CAPTURE_GOLDENS=1 (only when an output change
   # is intended and reviewed).

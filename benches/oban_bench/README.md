@@ -13,7 +13,7 @@ What it validates:
   a real Oban job; an adapter resource poller watches the database between
   commands and streams the observed counter value back as events; a
   `@eventually` invariant asserts the observed value eventually matches what was
-  enqueued. This drives the R4 eventual-consistency pipeline against real async
+  enqueued. This drives the eventual-consistency pipeline against real async
   job processing rather than the framework's own mocks.
 - **Non-vacuity** (`test/seeded_bug_test.exs`): a deliberately buggy worker that
   completes its job without performing the increment. The observed value never

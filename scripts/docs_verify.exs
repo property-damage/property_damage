@@ -85,7 +85,7 @@ defmodule DocsVerify.CLI do
   end
 
   # Full corpus (in a stable, readable order) or the explicit subset from argv.
-  # Shipped pd-* agent skills join the corpus automatically (W9 Decision 6),
+  # Shipped pd-* agent skills join the corpus automatically,
   # including their bundled reference docs - skill templates carry runnable
   # exemplars precisely so this gate catches their rot.
   defp corpus(root, []) do

@@ -157,8 +157,9 @@ defmodule PropertyDamage.Executor.Step do
     state = %{state | last_execute_us: nil, last_command_index: index}
 
     # An observer that refused the command (a mock's on_command/2 that
-    # raised) fails the step before the adapter is called, as an adapter error whose detail names the mock and the
-    # callback, the shape a raising execute/3 gets.
+    # raised) fails the step before the adapter is called, as an adapter error
+    # whose detail names the mock and the callback, the shape a raising
+    # execute/3 gets.
     case notify_observer(state, command) do
       {:ok, state} -> execute_notified(command, index, state, ctx)
       {:error, reason, state} -> {:error, Failure.adapter_error(reason), state, :not_called}

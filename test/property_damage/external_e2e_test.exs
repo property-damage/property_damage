@@ -1,12 +1,12 @@
 defmodule PropertyDamage.ExternalE2ETest do
   @moduledoc """
-  R3 cluster C: end-to-end external() producer -> consumer (DR-021).
+  End-to-end external() producer -> consumer (DR-021).
 
   A producer command yields a server-generated id (declared `external()` on its
   event); the framework captures the real value by the producer's structured
   position and a downstream consumer command receives the concrete value, not a
   `%Placeholder{}` / `%External{}` sentinel. This is the headline path the suite
-  never exercised before R3.
+  never exercised before this test.
   """
   use ExUnit.Case, async: true
 

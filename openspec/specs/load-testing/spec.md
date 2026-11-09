@@ -123,7 +123,7 @@ The framework SHALL support four ramp strategies for controlling how load is app
 
 ### Requirement: Ramp Down
 
-The framework SHOULD support ramp-down strategies for graceful load reduction at the end of a test.
+The framework SHALL support ramp-down strategies for graceful load reduction at the end of a test.
 
 #### Scenario: Linear ramp down
 
@@ -328,7 +328,7 @@ The framework SHALL generate a summary report containing metrics, failures, and 
 
 ### Requirement: Live Progress Callback
 
-The framework SHOULD support a periodic progress callback for real-time observation during the test, delivered through the unified progress projection (DR-022).
+The framework SHALL support a periodic progress callback for real-time observation during the test, delivered through the unified progress projection (DR-022).
 
 #### Scenario: On-progress callback
 
@@ -344,7 +344,7 @@ The framework SHOULD support a periodic progress callback for real-time observat
 
 ### Requirement: Think Time
 
-The framework SHOULD support configurable think time between command executions within a session.
+The framework SHALL support configurable think time between command executions within a session.
 
 #### Scenario: Think time range
 

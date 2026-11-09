@@ -1184,7 +1184,8 @@ defmodule PropertyDamage.Shrinker do
   # minted there. Such a candidate is invalid: a shrunk failure it led to
   # could not be replayed from its own artifact. A simulator that raises on
   # the candidate makes it invalid too. A placeholder the rebuild misses for
-  # the sequence the shrink started from does not count: the shrink cannot lose what that sequence never had.
+  # the sequence the shrink started from does not count: the shrink cannot
+  # lose what that sequence never had.
   defp replayable?(commands, positions, expansion, state) do
     commands
     |> unreplayable(positions, expansion, state)

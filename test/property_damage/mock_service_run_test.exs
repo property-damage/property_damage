@@ -1,6 +1,6 @@
 defmodule PropertyDamage.MockServiceRunTest do
   @moduledoc """
-  WP-C5: MockServiceAdapter is reachable from the public `PropertyDamage.run/1`.
+  MockServiceAdapter is reachable from the public `PropertyDamage.run/1`.
 
   Proves the framework owns the mock lifecycle end-to-end: it starts a
   `MockServiceRegistry`, registers + `setup/1`s each declared mock, drives

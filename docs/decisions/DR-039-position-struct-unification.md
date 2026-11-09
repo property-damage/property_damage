@@ -85,12 +85,12 @@ mixed state alive.
   registry).
 - Rendered position labels that embed offsets (`_b1_2`, `pre0`) are byte-stable:
   `Placeholder`'s `loc/1` and step_plan's `position_suffix/1` keep their bespoke
-  output strings but match on the struct, so the F3 export/diagram goldens are
+  output strings but match on the struct, so the export and diagram goldens are
   unchanged.
 
 ## Alternatives considered
 
-- **F5-lite (keep tuples internally, struct at the boundary).** Rejected
+- **Keep tuples internally, struct at the boundary.** Rejected
   2026-07-03: it preserves exactly the split that generates defects and defers
   the representation change past the last cheap moment.
 - **A struct→tuple canonicalization pass in `fingerprint/1`** to preserve old

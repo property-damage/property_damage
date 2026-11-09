@@ -20,12 +20,13 @@ defmodule PropertyDamage do
   - **Model** (`PropertyDamage.Model`) says when each command may run and
     with which arguments.
   - **Projection** (`PropertyDamage.Model.Projection`) folds events into state
-    and judges that state.
+    (applies each event, in order, to a running state) and judges that state.
   - **Adapter** (`PropertyDamage.Adapter`) says how to send a command to the
     system.
   - **Target** (`PropertyDamage.Target`) names one system to run against: an
-    adapter plus its configuration. You give it as a `targets:` entry; it is
-    not a module you write.
+    adapter plus its configuration. Its `injectors:` list names modules that
+    push events into the run. You give it as a `targets:` entry; it is not a
+    module you write.
 
   ## Two-Phase Execution
 
@@ -51,7 +52,9 @@ defmodule PropertyDamage do
   (`PropertyDamage.Campaign`), which draws each sequence from the seed. For
   each generated sequence, the run driver `PropertyDamage.Runner` calls
   `PropertyDamage.Scheduler`, which starts one
-  `PropertyDamage.Variant` process per target and advances them in lockstep.
+  `PropertyDamage.Variant` process per target (it runs that target's copy of
+  the sequence) and advances them in lockstep (one step at a time, all targets
+  together).
   Each variant executes one command at a time through
   `PropertyDamage.Executor.Stepping`, and the scheduler compares the targets'
   observations after each root. The shrinker's candidates and the
@@ -182,6 +185,10 @@ defmodule PropertyDamage do
           runs: 10,
           capture: [model: Model, targets: [Adapter], seed: seed]
         )
+
+  The `capture:` option holds the options of
+  `PropertyDamage.RunTrace.Capture.capture/1`, which records one run in full as a
+  `PropertyDamage.RunTrace`.
 
   Scan a whole corpus of seeds with `PropertyDamage.RunComparison.scan/1`. See
   `PropertyDamage.RunComparison` for details.
@@ -1104,7 +1111,7 @@ defmodule PropertyDamage do
 
     # Start event queue for injectors. Its stop is guaranteed by the outer
     # `after` below so that a raise in injector or adapter setup cannot leak it
-    # (A6); injector/adapter setup therefore lives inside the outer try.
+    # injector/adapter setup therefore lives inside the outer try.
     {:ok, event_queue} = EventQueue.start_link()
 
     try do

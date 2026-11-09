@@ -5,7 +5,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
   `:log` check modes.
 
   These are characterization tests: they pin down the observable behavior of the
-  settled path and the record/log modes so the F1 refactor (folding the two
+  settled path and the record/log modes so folding the two
   identical `{:ok, events}` / `{:settled, events}` success arms into one shared
   pipeline) is provably behavior-preserving. They pass on `main` before the fold
   and must still pass after it.

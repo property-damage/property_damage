@@ -12,7 +12,7 @@
 
 > Unlike DR-001 through DR-020 (reconstructed after the fact), this is a
 > forward-looking decision recorded at the time it was made, as part of
-> implementing the `external()`/Placeholder system properly (Phase 5, item R3).
+> implementing the `external()`/Placeholder system properly.
 
 ## Decision
 

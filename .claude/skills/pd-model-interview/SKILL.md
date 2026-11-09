@@ -152,8 +152,7 @@ events of a 200, 201 or 202 response with a JSON schema, and
   TODO-stub what the user does not confirm.
 - Invariants are elicited always, blocked never: if the user defers them,
   scaffold anyway, explain what the implicit checks still catch (crashes,
-  error tuples, and, with the `branching:` option and a simulator,
-  linearization) and what they are blind to (domain wrongness),
+  error tuples) and what they are blind to (domain wrongness),
   and write concrete context-specific invariant suggestions to the spec as
   deferred.
 - Never delete files on regeneration; report removals for the user to delete.
