@@ -5,10 +5,9 @@ defmodule PropertyDamage.Executor.Step do
   around it.
 
   `PropertyDamage.Executor.Stepping` composes these primitives into a step;
-  `PropertyDamage.Executor`, `PropertyDamage.Executor.Finalization`,
-  `PropertyDamage.Executor.Stutter` and `PropertyDamage.Variant` call them
-  too. This module calls none of those back, so it is the leaf the executor
-  modules depend on.
+  `PropertyDamage.Executor`, `PropertyDamage.Variant` and the executor's
+  finalization and stutter modules call them too. This module calls none of
+  the executor modules back, so it is the leaf they depend on.
 
   Every function takes the executor state (`PropertyDamage.Executor.State`)
   and, where it needs the run's model, adapter or event queue, a
@@ -151,7 +150,7 @@ defmodule PropertyDamage.Executor.Step do
 
   Returns `{:ok, state, outcome}` or `{:error, %PropertyDamage.Failure{},
   failed_state, outcome}`. Stutter retries and `@eventually` pollers are the
-  caller's next steps (`PropertyDamage.Executor.Stutter`, `spawn_pollers/4`).
+  caller's next steps (the stutter module, then `spawn_pollers/4`).
   """
   @spec execute(struct() | map(), term(), State.t(), map()) ::
           {:ok, State.t(), outcome()} | {:error, Failure.t(), State.t(), outcome()}
@@ -1178,7 +1177,7 @@ defmodule PropertyDamage.Executor.Step do
   Returns `{:ok, resolved_command}`, or `{:error, message}` when a
   placeholder is unknown or not resolved yet.
   """
-  @spec resolve_placeholders(term(), PlaceholderRegistry.t() | nil, keyword()) ::
+  @spec resolve_placeholders(term(), term(), keyword()) ::
           {:ok, term()} | {:error, String.t()}
   def resolve_placeholders(command, registry, opts \\ []) do
     ctx = {registry, Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}

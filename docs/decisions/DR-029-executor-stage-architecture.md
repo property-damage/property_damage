@@ -6,6 +6,13 @@
 > **Note (DR-062):** the fault-injection stage `Executor.Nemesis` and the `:active_faults` run-state
 > field named below were removed by DR-062. The other stages stay as recorded.
 
+> **Note (seam list):** the public seam named below as `step_command/7` does not exist. The
+> one-command seam is `PropertyDamage.Executor.Stepping`: `init_state/2`, `step/4`,
+> `step_leaf/4`, `step_setup/4`, `step_teardown/4`, `drain/2`, `finalize/2` and
+> `stop_pollers/1`. The step primitives it composes live in the leaf module
+> `PropertyDamage.Executor.Step`, which calls none of the executor modules back. The other
+> decisions stay as recorded.
+
 > Part of the served/servant clean-break campaign. Applies the framework's own layering
 > discipline to its largest servant module. Almost entirely internal: the public seam and all
 > observable behavior (DR-024/025/026 ordering, determinism) are preserved; the decomposition
