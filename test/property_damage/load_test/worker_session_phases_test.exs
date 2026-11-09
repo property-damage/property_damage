@@ -1,6 +1,6 @@
 defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
-  # A stepping worker runs a model's startup checks, setup commands, teardown
-  # commands and `@eventually` checks, which the worker's own loop skips.
+  # A worker runs a model's startup checks, setup commands, teardown
+  # commands and `@eventually` checks.
   # The projection checks log to a named agent because they run in the
   # worker's process.
   use ExUnit.Case, async: false
@@ -137,7 +137,7 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     :ok
   end
 
-  defp run_session(session, check_mode \\ :record) do
+  defp run_session(check_mode \\ :record) do
     {:ok, metrics} = Metrics.start_link()
 
     {:ok, worker} =
@@ -147,8 +147,7 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
         model: Model,
         target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "phases", index: 0},
         metrics: metrics,
-        check_mode: check_mode,
-        session: session
+        check_mode: check_mode
       )
 
     {:ok, result} = Worker.execute_sequence(worker)
@@ -157,8 +156,8 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     {result, Agent.get(PropertyDamage.LoadTest.WorkerSessionPhasesTest.Log, &Enum.reverse/1)}
   end
 
-  test "a stepping worker runs the startup check, setup, roots, eventual check and teardown" do
-    {result, log} = run_session(:stepping)
+  test "a worker runs the startup check, setup, roots, eventual check and teardown" do
+    {result, log} = run_session()
 
     assert result.commands_run >= 1
     assert result.check_failures == 0
@@ -170,24 +169,14 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     assert List.last(log) == Cleanup
   end
 
-  test "a stepping worker counts each failed check in :record mode and the first in :halt mode" do
+  test "a worker counts each failed check in :record mode and the first in :halt mode" do
     Agent.update(Log, &[:fail_checks | &1])
 
-    {recorded, _log} = run_session(:stepping, :record)
+    {recorded, _log} = run_session(:record)
     assert recorded.check_failures == recorded.commands_run
 
-    {halted, _log} = run_session(:stepping, :halt)
+    {halted, _log} = run_session(:halt)
     assert halted.check_failures == 1
     assert halted.commands_run == 1
-  end
-
-  test "a legacy worker runs none of them" do
-    {_result, log} = run_session(:legacy)
-
-    assert Act in log
-    refute :startup in log
-    refute Seed in log
-    refute :eventually in log
-    refute Cleanup in log
   end
 end

@@ -9,11 +9,9 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  alias PropertyDamage.{EventQueue, Failure, Generator, PlaceholderRegistry, Runtime, Sequence}
-  alias PropertyDamage.Executor.{Phases, Stepping, Timeout}
+  alias PropertyDamage.{EventQueue, Failure, Generator, Sequence}
+  alias PropertyDamage.Executor.{Phases, Stepping}
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.Model.Projection.Checks
-  alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Telemetry
 
   defstruct [
@@ -30,10 +28,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     :run_nonce,
     # Seed of this worker's sequences, from `worker_seed/2`.
     :seed,
-    # How a sequence runs: `:legacy` (the worker's own loop) or `:stepping`
-    # (a stepping session over the engine's per-command path).
-    :session,
-    # Stepping session only: the `Stepping.Context`, built once per worker.
+    # The `Stepping.Context`, built once per worker.
     :context,
     # Stats
     :sequences_executed,
@@ -66,9 +61,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
   - `:seed` - Run seed the worker's sequences derive from (default: random)
-  - `:session` - Internal. `:legacy` (default) runs a sequence through the
-    worker's own loop; `:stepping` runs it as a stepping session over the
-    engine's per-command path
 
   Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
@@ -91,7 +83,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   Returns `{:ok, stats}` with execution statistics.
   """
-  @spec execute_sequence(pid()) :: {:ok, sequence_result()} | {:error, term()}
+  @spec execute_sequence(pid()) :: {:ok, sequence_result()}
   def execute_sequence(pid) do
     GenServer.call(pid, :execute_sequence, :infinity)
   end
@@ -152,7 +144,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           check_failures: 0
         }
 
-        {:ok, with_session(state, Keyword.get(opts, :session, :legacy))}
+        {:ok, with_context(state)}
 
       {:error, reason} ->
         {:stop, PropertyDamage.Failure.setup_failed(reason)}
@@ -161,13 +153,8 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   @impl true
   def handle_call(:execute_sequence, _from, state) do
-    case run_one_sequence(state) do
-      {:ok, result, new_state} ->
-        {:reply, {:ok, result}, new_state}
-
-      {:error, reason, new_state} ->
-        {:reply, {:error, reason}, new_state}
-    end
+    {result, new_state} = run_one_sequence(state)
+    {:reply, {:ok, result}, new_state}
   end
 
   @impl true
@@ -183,10 +170,8 @@ defmodule PropertyDamage.LoadTest.Worker do
     {:reply, stats, state}
   end
 
-  # A stepping session owns an event queue for the life of the worker.
-  defp with_session(state, :legacy), do: %{state | session: :legacy}
-
-  defp with_session(state, :stepping) do
+  # The worker owns an event queue for its life.
+  defp with_context(state) do
     {:ok, event_queue} = EventQueue.start_link()
 
     context = %Stepping.Context{
@@ -197,7 +182,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       target_name: state.target.name
     }
 
-    %{state | session: :stepping, context: context}
+    %{state | context: context}
   end
 
   @impl true
@@ -223,217 +208,24 @@ defmodule PropertyDamage.LoadTest.Worker do
     sequence = Generator.generate_value(generator, sequence_seed)
 
     # Execute sequence using persistent adapter context
-    case run_sequence(sequence, sequence_seed, state) do
-      {:ok, commands_run, errors, check_failure_count} ->
-        result = %{
-          commands_run: commands_run,
-          errors: errors,
-          check_failures: check_failure_count
-        }
+    {commands_run, errors, check_failure_count} =
+      execute_stepped_sequence(sequence, sequence_seed, state)
 
-        new_state = %{
-          state
-          | commands_executed: state.commands_executed + commands_run,
-            sequences_executed: state.sequences_executed + 1,
-            errors: state.errors + errors,
-            check_failures: state.check_failures + check_failure_count
-        }
+    result = %{
+      commands_run: commands_run,
+      errors: errors,
+      check_failures: check_failure_count
+    }
 
-        {:ok, result, new_state}
+    new_state = %{
+      state
+      | commands_executed: state.commands_executed + commands_run,
+        sequences_executed: state.sequences_executed + 1,
+        errors: state.errors + errors,
+        check_failures: state.check_failures + check_failure_count
+    }
 
-      {:error, reason} ->
-        new_state = %{state | errors: state.errors + 1}
-        {:error, reason, new_state}
-    end
-  end
-
-  defp run_sequence(sequence, _seed, %{session: :legacy} = state),
-    do: execute_sequence_commands(sequence, state)
-
-  defp run_sequence(sequence, seed, %{session: :stepping} = state),
-    do: execute_stepped_sequence(sequence, seed, state)
-
-  defp execute_sequence_commands(sequence, state) do
-    commands = Sequence.to_list(sequence)
-
-    # external() values a command produces resolve into later commands (DR-021).
-    registry = PlaceholderRegistry.build(commands)
-
-    # Initialize projections for this sequence
-    initial_projections =
-      if state.check_mode != :disabled do
-        init_projections(state.model)
-      else
-        nil
-      end
-
-    initial_counters =
-      if state.check_mode != :disabled do
-        %{step: 0, command: 0, event: 0}
-      else
-        nil
-      end
-
-    execute_commands(
-      commands,
-      state,
-      initial_projections,
-      initial_counters,
-      registry,
-      0,
-      0,
-      0
-    )
-  end
-
-  defp execute_commands(
-         [],
-         _state,
-         _projections,
-         _counters,
-         _registry,
-         commands_run,
-         errors,
-         check_failures
-       ) do
-    {:ok, commands_run, errors, check_failures}
-  end
-
-  defp execute_commands(
-         [command | rest],
-         state,
-         projections,
-         counters,
-         registry,
-         commands_run,
-         errors,
-         check_failures
-       ) do
-    # Apply think time between commands
-    maybe_think(state.think_time_range)
-
-    # Execute command and measure latency
-    command_module = command.__struct__
-    start_time = System.monotonic_time(:microsecond)
-
-    # `commands_run` is this command's 0-based position, so capture keys its
-    # produced externals at `Position.prefix(commands_run)` (DR-021).
-    {result, error_delta, events, registry} =
-      case execute_single_command(command, state, registry, commands_run) do
-        {:ok, returned_events, new_registry} ->
-          {:ok, 0, returned_events, new_registry}
-
-        {:error, reason} ->
-          {{:error, categorize_error(reason)}, 1, [], registry}
-      end
-
-    end_time = System.monotonic_time(:microsecond)
-    latency_ms = (end_time - start_time) / 1000.0
-
-    # Report metrics
-    Metrics.record_request(state.metrics, command_module, latency_ms, result)
-
-    # Run checks if enabled and command succeeded
-    {new_projections, new_counters, check_failure_delta} =
-      if state.check_mode != :disabled and result == :ok do
-        run_checks_for_command(
-          command,
-          events,
-          projections,
-          counters,
-          commands_run,
-          state
-        )
-      else
-        {projections, counters, 0}
-      end
-
-    # Continue with remaining commands
-    execute_commands(
-      rest,
-      state,
-      new_projections,
-      new_counters,
-      registry,
-      commands_run + 1,
-      errors + error_delta,
-      check_failures + check_failure_delta
-    )
-  end
-
-  defp execute_single_command(command, state, registry, index) do
-    # Each worker is a separate execution, so it derives a distinct mint_epoch
-    # (its worker_id) from the run nonce (DR-034): workers send distinct
-    # client-minted values rather than colliding on the shared SUT.
-    mint = {state.run_nonce, state.worker_id}
-
-    case PlaceholderRegistry.resolve_data(registry, command, mint) do
-      {:ok, resolved_command} ->
-        # Get timeout from adapter
-        timeout_ms = Timeout.normalize_timeout(state.target.adapter.timeout(resolved_command))
-
-        # Per-command injection sink (DR-027), opened via the shared
-        # Runtime.InjectionWindow. The inject closure captures the sink pid, so it
-        # accumulates correctly from inside the spawned timeout Task below; the
-        # worker's process dictionary did not cross that boundary, which made
-        # inject raise "outside adapter execution context". The window also
-        # guarantees the sink is stopped even when the command times out.
-        #
-        # Execute with timeout - wrap in Task to enforce timeout.
-        execute_fn = fn runtime ->
-          task =
-            Task.async(fn ->
-              # Capture adapter failures inside the task and convert them to an
-              # error result. Task.async links the task to this worker, so an
-              # uncaught raise/throw/exit here would otherwise cascade
-              # worker -> pool -> runner -> caller instead of being recorded as a
-              # single failed command.
-              try do
-                state.target.adapter.execute(resolved_command, state.adapter_context, runtime)
-              rescue
-                exception -> {:error, {:adapter_error, exception}}
-              catch
-                kind, reason -> {:error, {:adapter_error, {kind, reason}}}
-              end
-            end)
-
-          case Task.yield(task, timeout_ms) || Task.shutdown(task) do
-            {:ok, adapter_result} ->
-              adapter_result
-
-            nil ->
-              # Timeout - raise exception (consistent with framework heuristics)
-              raise PropertyDamage.CommandTimeoutError,
-                command: resolved_command,
-                timeout_ms: timeout_ms
-          end
-        end
-
-        {result, injected_events} =
-          Runtime.InjectionWindow.run_accumulating(
-            execute_fn,
-            "Runtime.start_poller is not supported in load-test workers"
-          )
-
-        case result do
-          {:ok, returned_events} ->
-            # Capture external() values from the command's real (adapter-returned)
-            # events, keyed by its linear position, so later commands resolve
-            # them (DR-021). Injected events are out-of-band and not captured.
-            new_registry =
-              PlaceholderRegistry.capture(registry, Position.prefix(index), returned_events)
-
-            # Combine injected events (first) with returned events
-            all_events = injected_events ++ returned_events
-            {:ok, all_events, new_registry}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, {:unresolved_placeholder, reason}}
-    end
+    {result, new_state}
   end
 
   # ============================================================================
@@ -484,7 +276,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       Phases.run_teardown(sequence.teardown, result.exec, ctx)
     end
 
-    {:ok, tally.commands_run, tally.errors, tally.check_failures}
+    {tally.commands_run, tally.errors, tally.check_failures}
   end
 
   defp run_stepped_phases(sequence, exec, tally, state) do
@@ -651,128 +443,4 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp categorize_error({:timeout, _}), do: :timeout
   defp categorize_error({:connection_refused, _}), do: :connection_error
   defp categorize_error(_), do: :unknown_error
-
-  # ============================================================================
-  # Check Support
-  # ============================================================================
-
-  defp get_module(%{__struct__: module}), do: module
-  defp get_module(map) when is_map(map), do: :plain_map_event
-  defp get_module(_other), do: :unknown_event
-
-  defp init_projections(model) do
-    for projection <- PropertyDamage.Model.projection_modules(model), into: %{} do
-      {projection, projection.init()}
-    end
-  end
-
-  defp run_checks_for_command(command, events, projections, counters, command_index, state) do
-    model = state.model
-    command_module = command.__struct__
-
-    # Fold the command AND all of its events into the projections BEFORE running
-    # any check, mirroring the main Executor (which asserts against the
-    # post-events state; see Executor.Step.execute/4, which runs the step checks with projections that
-    # already have both the command and its events applied). A command-level
-    # `@check every: Cmd` therefore observes this command's own events — e.g. a
-    # read-consistency check sees the value just retrieved. Folding events one at
-    # a time and asserting in between (the prior behavior) made such checks read
-    # stale state and misfire.
-    projections = update_projections(projections, command)
-    projections = Enum.reduce(events, projections, &update_projections(&2, &1))
-
-    # Command counters + command checks
-    counters =
-      counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:command, 1, &(&1 + 1))
-      |> Map.update(command_module, 1, &(&1 + 1))
-
-    {counters, command_failures} =
-      run_step_checks(
-        model,
-        projections,
-        :command,
-        command_module,
-        counters,
-        command_index,
-        command,
-        state
-      )
-
-    # Per-event counters + event checks, all against the fully-folded
-    # projections (again matching the Executor's event-check pass).
-    {counters, event_failures} =
-      Enum.reduce(events, {counters, 0}, fn event, {ctrs, failures} ->
-        event_module = get_module(event)
-
-        ctrs =
-          ctrs
-          |> Map.update(:step, 1, &(&1 + 1))
-          |> Map.update(:event, 1, &(&1 + 1))
-          |> Map.update(event_module, 1, &(&1 + 1))
-
-        {ctrs, event_failure_count} =
-          run_step_checks(
-            model,
-            projections,
-            :event,
-            event_module,
-            ctrs,
-            command_index,
-            event,
-            state
-          )
-
-        {ctrs, failures + event_failure_count}
-      end)
-
-    {projections, counters, command_failures + event_failures}
-  end
-
-  defp update_projections(projections, command_or_event) do
-    for {projection_module, projection_state} <- projections, into: %{} do
-      {projection_module, projection_module.apply(projection_state, command_or_event)}
-    end
-  end
-
-  defp run_step_checks(
-         model,
-         projections,
-         step_type,
-         module,
-         counters,
-         command_index,
-         command_or_event,
-         state
-       ) do
-    all_projections = PropertyDamage.Model.projection_modules(model)
-
-    step_ctx = %{step_type: step_type, module: module, command_or_event: command_or_event}
-
-    failure_count =
-      Enum.reduce(all_projections, 0, fn projection, failures ->
-        projection_state = Map.get(projections, projection)
-
-        case Checks.step_checks(projection, projection_state, step_ctx, counters) do
-          {:ok, _counters} ->
-            failures
-
-          {:error, _check_name, {e, _stacktrace}, _counters} ->
-            failure = %{
-              reason: e,
-              command_index: command_index,
-              step_type: step_type,
-              module: module,
-              timestamp: System.monotonic_time(:millisecond)
-            }
-
-            Metrics.record_check_failure(state.metrics, e.__struct__, module, failure)
-
-            failures + 1
-        end
-      end)
-
-    {counters, failure_count}
-  end
 end

@@ -1282,6 +1282,25 @@ defmodule PropertyDamage.LoadTestTest do
       def check_projections, do: [FailingCheckProjection]
     end
 
+    # The engine reads each event's struct to find the checks it triggers, so
+    # a run with checks on needs struct events.
+    defmodule CheckedEvent do
+      defstruct []
+    end
+
+    defmodule CheckedAdapter do
+      use PropertyDamage.Adapter, default_timeout: 30
+
+      @impl true
+      def setup(_config), do: {:ok, %{}}
+
+      @impl true
+      def teardown(_ctx), do: :ok
+
+      @impl true
+      def execute(_cmd, _ctx, _runtime), do: {:ok, [%CheckedEvent{}]}
+    end
+
     @tag :integration
     test "runs load test with checks disabled (default)" do
       capture_log(fn ->
@@ -1306,7 +1325,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModelWithChecks,
-            targets: [MockAdapter],
+            targets: [CheckedAdapter],
             arrival_rate: 50,
             duration: {500, :milliseconds},
             check_mode: :record
