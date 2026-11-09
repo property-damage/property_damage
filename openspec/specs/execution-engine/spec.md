@@ -453,7 +453,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Seed Library Replay Phase
 
-When the `seed_library:` option is enabled and the library is non-empty, the system SHALL run a replay phase before random exploration, as a sibling of the random run loop inside the same run lifecycle (DR-023). The phase SHALL reuse the existing per-sequence machinery (setup commands → executor → teardown commands, event queue, injectors), and SHALL NOT invoke `PropertyDamage.run/1` recursively.
+When the `seed_library:` option is enabled and the library is non-empty, the system SHALL run a replay phase before random exploration, as a sibling of the random run loop inside the same run lifecycle, the `PropertyDamage.Campaign` run loop (DR-023). The phase SHALL reuse the existing per-sequence machinery (setup commands → executor → teardown commands, event queue, injectors), and SHALL NOT invoke `PropertyDamage.run/1` recursively.
 
 #### Scenario: Replay precedes exploration
 - **WHEN** the seed library is enabled and non-empty

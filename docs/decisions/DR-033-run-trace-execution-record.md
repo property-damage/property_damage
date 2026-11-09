@@ -47,7 +47,7 @@
    concerns.** The report embeds the trace of **the run the report
    describes**: the shrunk minimal reproduction when its re-execution
    reproduced the failure, otherwise the original failing run (this is the
-   existing non-reproduction fallback in `handle_failure`, which the previous
+   existing non-reproduction fallback in `Reproduction.handle_failure/2` (`lib/property_damage/reproduction.ex`), which the previous
    draft of this decision contradicted by saying "shrunk" unconditionally).
    Field disposition rule, decided here rather than left open:
 

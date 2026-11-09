@@ -667,6 +667,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `step_observer`, and the executor state's `mock_registry` field is
   `step_observer`. An adapter still reaches the mocks through
   `runtime.mock_registry`.
+- **The run loop, reproduction path and report building moved out of the
+  `PropertyDamage` module.** They now live in `PropertyDamage.Campaign`,
+  `PropertyDamage.Reproduction` and `PropertyDamage.ReportBuilder`. This is
+  internal: the public API is unchanged. The module-cycle gate in CI is lowered
+  to four.
 - **Breaking: `Shrinker.shrink/2` takes an oracle and runs no candidate
   itself.** A test of the shrinker needed a whole system to run, because the
   shrinker ran each candidate through the scheduler. Now it hands each

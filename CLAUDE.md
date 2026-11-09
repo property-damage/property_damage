@@ -75,6 +75,9 @@ A **Target** (`lib/property_damage/target.ex`) is one system a run executes agai
 - **Settle** (`lib/property_damage/settle.ex`) — Retry logic for eventually consistent systems. Commands declare `:async` or `:probe` semantics.
 - **Export** (`lib/property_damage/export/`) — Generate ExUnit tests, scripts (curl/Python/Elixir), Livebook notebooks from failures.
 - **RunTrace / RunComparison** (`lib/property_damage/run_trace.ex`, `lib/property_damage/run_comparison.ex`): `RunTrace` is the full record of one run; `RunComparison` localizes where passing and failing runs diverge.
+- **Campaign** (`lib/property_damage/campaign.ex`, `lib/property_damage/campaign/context.ex`): The run loop behind `PropertyDamage.run/1`. Validates options into a typed `Campaign.Context`, runs the seed-library replay phase, then draws and runs one sequence after another, folding each outcome into the run accumulators (check firings, compare counts, coverage, latency) and handing a failure to `Reproduction`.
+- **Reproduction** (`lib/property_damage/reproduction.ex`): The path after a failure: shrink, re-execute to gather fresh state, place the replay artifact. Also the `shrink_further` worker behind `PropertyDamage.shrink_further/2`.
+- **ReportBuilder** (`lib/property_damage/report_builder.ex`): The one builder of `FailureReport` for every failure path.
 - **Failure / FailureReport / Persistence** (`lib/property_damage/failure.ex`, `lib/property_damage/failure_report.ex`, `lib/property_damage/persistence.ex`): Failure record, the explained report built from it, and versioned save/load.
 
 ### Test support

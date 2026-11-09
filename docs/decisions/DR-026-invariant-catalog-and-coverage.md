@@ -175,7 +175,7 @@ empty). The framework is pre-1.0; the additive surface is recorded in the change
   `should_run?` true branch (`run_projection_assertions`), the lifecycle dispatch
   (`run_phase_projection_assertions`), the asynchronous dispatch (`check_async`/
   `check_async_event`), and the synchronous poller-spawn site (`maybe_spawn_pollers`).
-- `lib/property_damage.ex`: `do_run/…` threads a whole-run coverage accumulator through its
+- `lib/property_damage/campaign.ex`: the `Campaign` run loop threads a whole-run coverage accumulator through its
   existing recursion, projecting the `{:fired, …}` keys out of each sequence's counters and
   folding them into `result.assertion_fires` on every result. A new `coverage: true` option
   (added to `options.ex`) additionally accumulates the command/transition/state dimensions

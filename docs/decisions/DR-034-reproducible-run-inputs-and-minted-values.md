@@ -167,7 +167,7 @@ under branching; epoch-less re-execution under shrinking).
 
 - `property_damage.ex` `run/1`: nonce acquisition (opt/env/strong-random)
   beside the seed, `PD_SEED` added for symmetry, both threaded through
-  `do_run`/`run_loop` and recorded.
+  the `Campaign` run loop (`lib/property_damage/campaign.ex`) and recorded.
 - New marker struct + `PropertyDamage.mint_per_run/1`; generator reifies
   markers with position/path during instantiation (same pass that
   instantiates placeholders); both executor-private resolution and
