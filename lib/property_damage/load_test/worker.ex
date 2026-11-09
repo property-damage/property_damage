@@ -28,6 +28,8 @@ defmodule PropertyDamage.LoadTest.Worker do
     :run_nonce,
     # Seed of this worker's sequences, from `worker_seed/2`.
     :seed,
+    # Stutter configuration (`PropertyDamage.Stutter.Config`), nil for none.
+    :stutter_config,
     # The `Stepping.Context`, built once per worker.
     :context,
     # Stats
@@ -61,6 +63,8 @@ defmodule PropertyDamage.LoadTest.Worker do
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
   - `:seed` - Run seed the worker's sequences derive from (default: random)
+  - `:stutter_config` - `PropertyDamage.Stutter.Config` for idempotency
+    retries, or `nil` (default) for none
 
   Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
@@ -138,6 +142,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           check_mode: check_mode,
           run_nonce: run_nonce,
           seed: worker_seed(run_seed, worker_id),
+          stutter_config: Keyword.get(opts, :stutter_config),
           sequences_executed: 0,
           commands_executed: 0,
           errors: 0,
@@ -246,6 +251,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       Stepping.init_state(state.model,
         event_queue: ctx.event_queue,
         check_mode: state.check_mode,
+        stutter_config: state.stutter_config,
         placeholder_registry: sequence.registry,
         rng_seed: seed,
         run_nonce: state.run_nonce,
@@ -272,9 +278,12 @@ defmodule PropertyDamage.LoadTest.Worker do
     {result, tally} = finish_session(outcome, tally, ctx, state)
 
     # A startup failure ran no setup command, so no teardown command runs.
-    if not match?({:failed, nil, _, _}, outcome) do
-      Phases.run_teardown(sequence.teardown, result.exec, ctx)
-    end
+    {final, _entries} =
+      if match?({:failed, nil, _, _}, outcome),
+        do: {result.exec, []},
+        else: Phases.run_teardown(sequence.teardown, result.exec, ctx)
+
+    Metrics.record_phase_counts(state.metrics, phase_counts(result.exec, final))
 
     {tally.commands_run, tally.errors, tally.check_failures}
   end
@@ -376,6 +385,32 @@ defmodule PropertyDamage.LoadTest.Worker do
         else: tally
 
     {Map.put(result, :exec, final_state(outcome)), tally}
+  end
+
+  # What the phases besides the roots ran, read from the session state: the
+  # commands the adapter answered (`executed`, keyed by position), the
+  # `@eventually` windows opened (`active_pollers`, which keeps every window
+  # until finalization) and the stutter entries the event log kept, one per
+  # retry that answered events. `settled` is the state before the teardown
+  # commands, `final` the state after them.
+  defp phase_counts(settled, final) do
+    %{
+      setup_commands: count_executed(settled, :setup),
+      teardown_commands: count_executed(final, :teardown),
+      eventual_checks: length(settled.active_pollers),
+      stutter_retries: count_stutter_retries(settled.event_log)
+    }
+  end
+
+  defp count_executed(state, section) do
+    Enum.count(state.executed, fn {position, _command} -> position.section == section end)
+  end
+
+  defp count_stutter_retries(event_log) do
+    event_log
+    |> Enum.filter(&(&1.source == :stutter))
+    |> Enum.uniq_by(&{&1.command_index, &1.stutter_attempt})
+    |> length()
   end
 
   defp final_state({:failed, _index, _failure, state}), do: state

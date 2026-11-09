@@ -362,6 +362,43 @@ defmodule PropertyDamage.Options do
     NimbleOptions.validate!([log: log], @keep_attempts_log_schema)[:log][:keep_attempts]
   end
 
+  # `stutter:` on `run/1` and `LoadTest.run/1`: one definition for both.
+  @stutter_option [
+    type: :keyword_list,
+    doc: "Options for idempotency testing (command retry behavior).",
+    keys: [
+      probability: [
+        type: :float,
+        default: 0.1,
+        doc: "Probability of stuttering each command (0.0-1.0)."
+      ],
+      max_repeats: [
+        type: :pos_integer,
+        default: 2,
+        doc: "Maximum retry attempts per stuttered command."
+      ],
+      delay_ms: [
+        type: :any,
+        doc: "Delay between retries: integer or `{min, max}` tuple."
+      ],
+      commands: [
+        type: :any,
+        default: :all,
+        doc: "`:all` or list of command modules to stutter."
+      ],
+      using: [
+        type: {:custom, __MODULE__, :validate_stutter_using, []},
+        doc: """
+        The relation that decides whether a retry's events agree with the
+        original events: `{Mod, :fun}`, called `Mod.fun(original_events,
+        retry_events)`, `{Mod, :fun, args}`, called with the args after the two
+        event lists, or a 2-arity function. Its return is a verdict, as for
+        `@compare`'s `using:` (see `PropertyDamage.Equivalence`). Default `==`.
+        """
+      ]
+    ]
+  ]
+
   @run_schema_definition [
     # Required
     model: [
@@ -629,41 +666,7 @@ defmodule PropertyDamage.Options do
     ],
 
     # Nested - Stutter (Idempotency Testing)
-    stutter: [
-      type: :keyword_list,
-      doc: "Options for idempotency testing (command retry behavior).",
-      keys: [
-        probability: [
-          type: :float,
-          default: 0.1,
-          doc: "Probability of stuttering each command (0.0-1.0)."
-        ],
-        max_repeats: [
-          type: :pos_integer,
-          default: 2,
-          doc: "Maximum retry attempts per stuttered command."
-        ],
-        delay_ms: [
-          type: :any,
-          doc: "Delay between retries: integer or `{min, max}` tuple."
-        ],
-        commands: [
-          type: :any,
-          default: :all,
-          doc: "`:all` or list of command modules to stutter."
-        ],
-        using: [
-          type: {:custom, __MODULE__, :validate_stutter_using, []},
-          doc: """
-          The relation that decides whether a retry's events agree with the
-          original events: `{Mod, :fun}`, called `Mod.fun(original_events,
-          retry_events)`, `{Mod, :fun, args}`, called with the args after the two
-          event lists, or a 2-arity function. Its return is a verdict, as for
-          `@compare`'s `using:` (see `PropertyDamage.Equivalence`). Default `==`.
-          """
-        ]
-      ]
-    ],
+    stutter: @stutter_option,
 
     # Nested - Regression
     regression: [
@@ -1380,7 +1383,8 @@ defmodule PropertyDamage.Options do
       - `:log` - Run checks and log failures as warnings
       - `:halt` - Stop on first failure
       """
-    ]
+    ],
+    stutter: @stutter_option
   ]
 
   @load_test_schema NimbleOptions.new!(@load_test_schema_definition)
@@ -1408,6 +1412,7 @@ defmodule PropertyDamage.Options do
   @spec validate_load_test!(keyword()) :: keyword()
   def validate_load_test!(opts) do
     reject_retired_keys!(opts, @retired_load_test_keys)
+    reject_retired_stutter_keys!(opts)
     validate_single!(opts, @load_test_schema)
   end
 

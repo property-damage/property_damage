@@ -174,6 +174,10 @@ defmodule PropertyDamage.LoadTest do
     - `:record` - Run checks and record failures in metrics
     - `:log` - Run checks and log failures as warnings
     - `:halt` - Run checks and halt on the first failure
+  - `:stutter` - Idempotency retries: each worker re-runs a stuttered command and
+    compares the retry's events with the original's. Takes the keyword list
+    `PropertyDamage.run/1` takes for `:stutter` and is off by default. A run
+    that finds a mismatch ends that sequence and counts a check failure.
 
   ## Returns
 

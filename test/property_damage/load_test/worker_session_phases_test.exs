@@ -6,6 +6,7 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.Generator
+  alias PropertyDamage.LoadTest
   alias PropertyDamage.LoadTest.{Metrics, Worker}
   alias PropertyDamage.LoadTest.WorkerSessionPhasesTest.Log
 
@@ -178,5 +179,67 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     {halted, _log} = run_session(:halt)
     assert halted.check_failures == 1
     assert halted.commands_run == 1
+  end
+
+  defp stutter_all, do: [probability: 1.0, max_repeats: 1, delay_ms: 0]
+
+  defp run_load(opts) do
+    LoadTest.run(
+      [
+        model: Model,
+        targets: [Adapter],
+        arrival_rate: 20,
+        duration: {300, :milliseconds},
+        check_mode: :record
+      ] ++ opts
+    )
+  end
+
+  test "a load run counts the commands, checks and retries of every phase" do
+    {:ok, report} = run_load(stutter: stutter_all())
+
+    counts = report.metrics.phase_counts
+    assert counts.setup_commands > 0
+    assert counts.teardown_commands > 0
+    assert counts.eventual_checks > 0
+    assert counts.stutter_retries > 0
+    assert report.metrics.check_failures == 0
+
+    assert LoadTest.format(report, :terminal) =~ "Stutter Retries:"
+    assert LoadTest.format(report, :markdown) =~ "**Stutter Retries:** #{counts.stutter_retries}"
+    assert LoadTest.summary(report) =~ "#{counts.stutter_retries} stutter retries"
+  end
+
+  test "a load run without stutter counts no retries" do
+    {:ok, report} = run_load([])
+
+    assert report.metrics.phase_counts.stutter_retries == 0
+    assert report.metrics.phase_counts.setup_commands > 0
+  end
+
+  test "a load run emits engine command telemetry" do
+    handler = {__MODULE__, make_ref()}
+    test_pid = self()
+
+    :telemetry.attach(
+      handler,
+      [:property_damage, :command, :stop],
+      fn _event, _measurements, meta, _config -> send(test_pid, {:command, meta.phase}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {:ok, _report} = run_load([])
+
+    assert_received {:command, :root}
+    assert_received {:command, :setup}
+    assert_received {:command, :teardown}
+  end
+
+  test "a load run rejects an invalid stutter option" do
+    assert_raise NimbleOptions.ValidationError, fn ->
+      run_load(stutter: [probability: "always"])
+    end
   end
 end

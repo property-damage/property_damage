@@ -15,6 +15,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :think_time_range,
     :check_mode,
     :run_nonce,
+    :stutter_config,
     :seed,
     # Owning process (runner); we stop with it so workers never orphan
     :owner,
@@ -46,6 +47,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
+  - `:stutter_config` - `PropertyDamage.Stutter.Config` or `nil` (default), passed to each worker
 
   Returns `{:ok, pid}` or `{:error, reason}`.
   """
@@ -117,6 +119,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       think_time_range: think_time_range,
       check_mode: check_mode,
       run_nonce: Keyword.get(opts, :run_nonce),
+      stutter_config: Keyword.get(opts, :stutter_config),
       seed: Keyword.get(opts, :seed),
       owner: Keyword.get(opts, :owner),
       available: :queue.new(),
@@ -301,7 +304,8 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
            think_time_range: state.think_time_range,
            check_mode: state.check_mode,
            run_nonce: state.run_nonce,
-           seed: state.seed
+           seed: state.seed,
+           stutter_config: state.stutter_config
          ) do
       {:ok, worker} ->
         Process.monitor(worker)

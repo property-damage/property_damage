@@ -53,6 +53,7 @@ defmodule PropertyDamage.LoadTest.Report do
     Latency: p50=#{format_float(m.latency_p50)}ms, p95=#{format_float(m.latency_p95)}ms, p99=#{format_float(m.latency_p99)}ms
     Errors: #{m.total_errors} (#{format_float(m.error_rate)}%)
     #{format_check_summary_line(m)}
+    #{format_phases_line(m)}
     """
   end
 
@@ -72,6 +73,7 @@ defmodule PropertyDamage.LoadTest.Report do
       terminal_latency(m),
       terminal_errors(m),
       terminal_checks(m),
+      terminal_phases(m),
       terminal_commands(m),
       terminal_chart(m),
       terminal_footer()
@@ -177,6 +179,24 @@ defmodule PropertyDamage.LoadTest.Report do
       │ By Exception:    #{String.pad_trailing(failure_details, 51)}│
       └──────────────────────────────────────────────────────────────────────┘
       """
+    end
+  end
+
+  # Shown when the run executed any phase besides the roots.
+  defp terminal_phases(metrics) do
+    case phase_counts(metrics) do
+      nil ->
+        ""
+
+      counts ->
+        """
+        ┌─ Phases ─────────────────────────────────────────────────────────────┐
+        │ Setup Commands:    #{String.pad_trailing(format_number(counts.setup_commands), 48)}│
+        │ Teardown Commands: #{String.pad_trailing(format_number(counts.teardown_commands), 48)}│
+        │ Eventual Checks:   #{String.pad_trailing(format_number(counts.eventual_checks), 48)}│
+        │ Stutter Retries:   #{String.pad_trailing(format_number(counts.stutter_retries), 48)}│
+        └──────────────────────────────────────────────────────────────────────┘
+        """
     end
   end
 
@@ -355,6 +375,8 @@ defmodule PropertyDamage.LoadTest.Report do
 
     #{format_checks_markdown(m)}
 
+    #{format_phases_markdown(m)}
+
     ## Per-Command Breakdown
 
     | Command | Count | p50 (ms) | p95 (ms) | Errors |
@@ -418,6 +440,44 @@ defmodule PropertyDamage.LoadTest.Report do
       failures ->
         "Checks: #{failures} failures (#{format_float(metrics.check_failure_rate)}%)"
     end
+  end
+
+  defp format_phases_line(metrics) do
+    case phase_counts(metrics) do
+      nil ->
+        ""
+
+      counts ->
+        "Phases: #{counts.setup_commands} setup commands, " <>
+          "#{counts.teardown_commands} teardown commands, " <>
+          "#{counts.eventual_checks} eventual checks, " <>
+          "#{counts.stutter_retries} stutter retries"
+    end
+  end
+
+  defp format_phases_markdown(metrics) do
+    case phase_counts(metrics) do
+      nil ->
+        ""
+
+      counts ->
+        """
+        ## Phases
+
+        - **Setup Commands:** #{counts.setup_commands}
+        - **Teardown Commands:** #{counts.teardown_commands}
+        - **Eventual Checks:** #{counts.eventual_checks}
+        - **Stutter Retries:** #{counts.stutter_retries}
+        """
+    end
+  end
+
+  # The run's phase counts, or nil when it ran no phase besides the roots (or
+  # the report predates the counts).
+  defp phase_counts(metrics) do
+    counts = Map.get(metrics, :phase_counts)
+
+    if is_map(counts) and Enum.any?(Map.values(counts), &(&1 > 0)), do: counts
   end
 
   defp format_checks_markdown(metrics) do
