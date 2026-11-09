@@ -378,6 +378,14 @@ defmodule PropertyDamage.Variant do
   def release(pid), do: GenServer.call(pid, :release, :infinity)
 
   @doc """
+  The `:atomics` ref holding the microseconds the variant's adapter spent in
+  `setup/1` (slot 1) and `teardown/1` (slot 2). It outlives the variant
+  process, so a caller can read it after the variant stopped.
+  """
+  @spec adapter_timers(pid()) :: :atomics.atomics_ref()
+  def adapter_timers(pid), do: GenServer.call(pid, :adapter_timers, :infinity)
+
+  @doc """
   The wall-clock time of every adapter call so far, as `[{key, microseconds}]` in
   execution order, when the variant was started with `measure_latency: true`
   (otherwise `[]`). The key is the root's index, or `{index, leaf}` for a leaf
@@ -552,6 +560,8 @@ defmodule PropertyDamage.Variant do
 
   def handle_call(:latencies, _from, state),
     do: {:reply, Enum.reverse(state.latencies), state}
+
+  def handle_call(:adapter_timers, _from, state), do: {:reply, state.adapter_timers, state}
 
   def handle_call(:stop, _from, state) do
     state = release_once(state)

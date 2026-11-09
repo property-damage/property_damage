@@ -7,8 +7,9 @@ defmodule PropertyDamage.Runner.Context do
   `PropertyDamage.Scheduler.run/1` option of the same name, and defaults to
   the value `PropertyDamage.run/1` passes or the scheduler assumes:
 
-    * `seed` - the campaign seed. Default `nil`; the scheduler requires a
-      seed, so a context without one fails when executed.
+    * `seed` - the campaign seed. Default `nil`; the run needs an integer
+      seed, so `PropertyDamage.Runner.execute/2` raises `ArgumentError` for a
+      context without one.
     * `run_number` - the 0-based run of the campaign. Default `0`, the first
       run.
     * `run_seed` - the run's effective seed, when `seed` and `run_number` do

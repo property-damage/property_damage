@@ -213,6 +213,9 @@ defmodule PropertyDamage.Scheduler do
   `setup/1` and `teardown/1` included. `failure` is the
   primary failure and `other_failures` the run's other failures, in root
   order, then target order (see "Which targets go on after a failure").
+  `setup_timers` holds, for each target whose `setup/1` failed, the timer
+  ref of its adapter calls (see `PropertyDamage.Variant.adapter_timers/1`), so
+  the time a failed `setup/1` took is not lost with the missing result.
   `compare_counts` holds, per boundary observation the model declares, the
   boundaries it was compared at, the boundaries it waited at, and the time it
   waited (every count 0 with one target).
@@ -221,6 +224,7 @@ defmodule PropertyDamage.Scheduler do
           failure: failure() | nil,
           other_failures: [failure()],
           results: [map()],
+          setup_timers: [:atomics.atomics_ref()],
           latencies: [
             [{non_neg_integer() | {non_neg_integer(), non_neg_integer()}, non_neg_integer()}]
           ],
@@ -297,8 +301,8 @@ defmodule PropertyDamage.Scheduler do
       {:ok, run} ->
         {:ok, finish_run(config, lockstep(config, run))}
 
-      {:error, failure} ->
-        {:ok, empty_run(config, failure)}
+      {:error, failure, setup_timers} ->
+        {:ok, empty_run(config, failure, setup_timers)}
     end
   end
 
@@ -333,11 +337,12 @@ defmodule PropertyDamage.Scheduler do
     }
   end
 
-  defp empty_run(config, failure) do
+  defp empty_run(config, failure, setup_timers) do
     %{
       failure: failure,
       other_failures: [],
       results: [],
+      setup_timers: setup_timers,
       latencies: [],
       compare_counts: config.zero_counts
     }
@@ -361,7 +366,7 @@ defmodule PropertyDamage.Scheduler do
   # variant retires it (it has no adapter context, so nothing to tear down)
   # and the variants after it are still set up. Returns the run so far.
   defp set_up(config) do
-    run = %{active: [], retired: [], failures: [], counts: config.zero_counts}
+    run = %{active: [], retired: [], failures: [], counts: config.zero_counts, setup_timers: []}
 
     config.targets
     |> Enum.reduce_while({:ok, run}, fn target, {:ok, run} ->
@@ -369,11 +374,11 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant} ->
           {:cont, {:ok, %{run | active: run.active ++ [variant]}}}
 
-        {:error, reason, logs} when target.index == 0 ->
+        {:error, reason, logs, timers} when target.index == 0 ->
           failure = failure(config, target, nil, setup_failure(reason))
-          {:halt, {:error, Map.put(failure, :logs, logs)}}
+          {:halt, {:error, Map.put(failure, :logs, logs), timers_list(timers)}}
 
-        {:error, reason, logs} ->
+        {:error, reason, logs, timers} ->
           failure =
             config
             |> failure(target, nil, setup_failure(reason))
@@ -383,10 +388,18 @@ defmodule PropertyDamage.Scheduler do
 
           {:cont,
            {:ok,
-            %{run | retired: run.retired ++ [gone], failures: run.failures ++ [{failure, true}]}}}
+            %{
+              run
+              | retired: run.retired ++ [gone],
+                failures: run.failures ++ [{failure, true}],
+                setup_timers: run.setup_timers ++ timers_list(timers)
+            }}}
       end
     end)
   end
+
+  defp timers_list(nil), do: []
+  defp timers_list(timers), do: [timers]
 
   defp set_up_variant(config, target) do
     {roots, registry} =
@@ -422,9 +435,10 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant}
 
       {:ok, {:error, reason}} ->
+        timers = Variant.adapter_timers(pid)
         logs = release_variant(variant)
         stop_variant(variant)
-        {:error, setup_reason(reason), logs}
+        {:error, setup_reason(reason), logs, timers}
 
       # The variant process died inside its setup call. The adapter's
       # `setup/1`, an injector's or a mock's setup, and model code all run
@@ -433,7 +447,7 @@ defmodule PropertyDamage.Scheduler do
       # kill, or the crash of a process linked to the variant. Which code
       # caused it is not known, so the cause is the variant itself.
       {:crashed, reason} ->
-        {:error, Failure.setup_failed(:variant, detail: reason), %{}}
+        {:error, Failure.setup_failed(:variant, detail: reason), %{}, nil}
     end
   end
 
@@ -774,6 +788,7 @@ defmodule PropertyDamage.Scheduler do
       failure: failure,
       other_failures: others,
       results: results,
+      setup_timers: run.setup_timers,
       latencies: Enum.map(finished, fn {_result, latency, _outcome} -> latency end),
       compare_counts: run.counts
     }

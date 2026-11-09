@@ -51,6 +51,11 @@ defmodule PropertyDamage.Runner do
   outcome, `{:ok, run}` (see `t:PropertyDamage.Scheduler.run/0`).
   """
   @spec execute(plan(), Context.t()) :: {:ok, Scheduler.run()}
+  def execute(_plan, %Context{seed: seed}) when not is_integer(seed) do
+    raise ArgumentError,
+          "`PropertyDamage.Runner.Context` needs an integer `seed`, got: #{inspect(seed)}"
+  end
+
   def execute(plan, %Context{} = context) do
     context
     |> Map.from_struct()
@@ -101,9 +106,10 @@ defmodule PropertyDamage.Runner do
 
   # The milliseconds the run's targets spent in the adapters' setup/1 and
   # teardown/1. Each target's result holds the timers its variant filled in;
-  # a target that left no result (its setup failed) holds none.
-  defp adapter_ms(%{results: results}) do
-    timers = for %{adapter_timers: timers} <- results, do: timers
+  # a target whose setup failed left no result, so the run lists its timers
+  # apart.
+  defp adapter_ms(%{results: results, setup_timers: setup_timers}) do
+    timers = for(%{adapter_timers: timers} <- results, do: timers) ++ setup_timers
 
     %{
       setup: Enum.sum(for t <- timers, do: :atomics.get(t, 1)) / 1000,
