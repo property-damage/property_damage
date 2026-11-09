@@ -12,7 +12,9 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Sequence, Settle}
+  alias PropertyDamage.{Sequence, Settle}
+
+  alias PropertyDamage.Test.StepRun
 
   # --- Commands declaring metadata ONLY via command_spec -----------------------
 
@@ -132,7 +134,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   test "idempotent: false via command_spec excludes a command from stutter (RED on HEAD)" do
     {:ok, result} =
-      Executor.run(
+      StepRun.run(
         Sequence.linear([%NonIdempotentViaSpec{id: "x"}]),
         IdempotentModel,
         NonIdempotentAdapter,
@@ -193,7 +195,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   test "a stutter using: predicate accepts an alternative retry answer" do
     {:ok, result} =
-      Executor.run(
+      StepRun.run(
         Sequence.linear([%AcceptableRetryViaSpec{id: "x"}]),
         AcceptableModel,
         AcceptableAdapter,

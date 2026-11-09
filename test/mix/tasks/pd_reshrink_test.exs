@@ -6,7 +6,8 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pd.Reshrink
-  alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.Test.StepRun
   alias PropertyDamage.Test.TmpPath
 
   # The decision logic is exercised through `exec/1`, the halt-free seam: `run/1`
@@ -114,7 +115,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   # deliberately as long as `length` so re-shrink has slack to remove.
   defp save_failure(dir, length, opts \\ []) do
     sequence = Sequence.linear(List.duplicate(%Bump{}, length))
-    {:ok, result} = Executor.run(sequence, FailingModel, FailingAdapter, [])
+    {:ok, result} = StepRun.run(sequence, FailingModel, FailingAdapter, [])
 
     failure =
       FailureReport.new(

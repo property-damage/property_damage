@@ -7,8 +7,10 @@ defmodule PropertyDamage.CheckVerdictTest do
   # the load-test worker.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{CheckFailed, Executor, Failure, Forensics, Sequence}
+  alias PropertyDamage.{CheckFailed, Failure, Forensics, Sequence}
+
   alias PropertyDamage.LoadTest.{Metrics, Worker}
+  alias PropertyDamage.Test.StepRun
 
   defmodule Tick do
     @behaviour PropertyDamage.Command
@@ -106,7 +108,7 @@ defmodule PropertyDamage.CheckVerdictTest do
 
     try do
       {:ok, result} =
-        Executor.run(Sequence.linear([%Tick{}]), model(name, timing), TickAdapter,
+        StepRun.run(Sequence.linear([%Tick{}]), model(name, timing), TickAdapter,
           event_queue: queue
         )
 
