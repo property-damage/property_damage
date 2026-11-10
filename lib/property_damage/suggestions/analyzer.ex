@@ -546,29 +546,24 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     field = pattern.field
 
     """
-    check(:always)
-    def check(:#{field}_non_negative, state, _ctx) do
-      # Check that #{field} is never negative
+    @check every: 1
+    def assert_#{field}_non_negative(state, _cmd_or_event) do
       violations =
         state.entities
         |> Enum.filter(fn {_id, entity} ->
           Map.get(entity, :#{field}, 0) < 0
         end)
 
-      if Enum.empty?(violations) do
-        :ok
-      else
-        {:error, "Negative #{field} detected: \#{inspect(violations)}"}
-      end
+      Enum.empty?(violations) or
+        PropertyDamage.fail!("Negative #{field} detected", violations: violations)
     end
     """
   end
 
   defp generate_currency_check_code(_pattern) do
     """
-    check(:always)
-    def check(:currency_consistency, state, _ctx) do
-      # Check that operations use matching currencies
+    @check every: 1
+    def assert_currency_consistency(state, _cmd_or_event) do
       violations =
         state.operations
         |> Enum.filter(fn op ->
@@ -576,33 +571,31 @@ defmodule PropertyDamage.Suggestions.Analyzer do
           entity && entity.currency != op.currency
         end)
 
-      if Enum.empty?(violations) do
-        :ok
-      else
-        {:error, "Currency mismatch: \#{inspect(violations)}"}
-      end
+      Enum.empty?(violations) or
+        PropertyDamage.fail!("Currency mismatch detected", violations: violations)
     end
     """
   end
 
   defp generate_cross_currency_check_code(field, _events) do
     """
-    check(:always)
-    def check(:#{field}_consistency, state, _ctx) do
-      # Verify currency remains consistent across all operations on an entity
+    @check every: 1
+    def assert_#{field}_consistency(state, _cmd_or_event) do
+      # Verify #{field} remains consistent across all operations on an entity
       violations =
         state.entities
         |> Enum.filter(fn {_id, entity} ->
-          operations = get_operations_for(state, entity.ref)
-          currencies = Enum.map(operations, & &1.#{field}) |> Enum.uniq()
-          length(currencies) > 1
+          values =
+            state.operations
+            |> Enum.filter(&(&1.entity_ref == entity.ref))
+            |> Enum.map(& &1.#{field})
+            |> Enum.uniq()
+
+          length(values) > 1
         end)
 
-      if Enum.empty?(violations) do
-        :ok
-      else
-        {:error, "Inconsistent #{field} across operations: \#{inspect(violations)}"}
-      end
+      Enum.empty?(violations) or
+        PropertyDamage.fail!("Inconsistent #{field} across operations", violations: violations)
     end
     """
   end
@@ -614,8 +607,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
       field |> Atom.to_string() |> String.replace("_ref", "") |> String.replace("_id", "")
 
     """
-    check(:always)
-    def check(:#{field}_exists, state, _ctx) do
+    @check every: 1
+    def assert_#{field}_exists(state, _cmd_or_event) do
       # Verify that referenced #{entity_type} exists
       refs_in_use =
         state.operations
@@ -624,14 +617,10 @@ defmodule PropertyDamage.Suggestions.Analyzer do
         |> Enum.uniq()
 
       known_refs = Map.keys(state.#{entity_type}s)
-
       missing = refs_in_use -- known_refs
 
-      if Enum.empty?(missing) do
-        :ok
-      else
-        {:error, "References to non-existent #{entity_type}: \#{inspect(missing)}"}
-      end
+      Enum.empty?(missing) or
+        PropertyDamage.fail!("References to non-existent #{entity_type}", missing: missing)
     end
     """
   end
@@ -640,31 +629,18 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     field = pattern.field
 
     """
-    check(:always)
-    def check(:valid_#{field}_transition, state, ctx) do
-      # Define valid status transitions
-      valid_transitions = %{
-        :pending => [:active, :cancelled],
-        :active => [:completed, :cancelled],
-        :completed => [],
-        :cancelled => []
-      }
+    @check every: 1
+    def assert_valid_#{field}(state, _cmd_or_event) do
+      valid_statuses = [:pending, :active, :completed, :cancelled]
 
-      # Check that the transition is valid
-      case ctx.events do
-        [%{#{field}: new_status} | _] ->
-          old_status = get_previous_status(state, ctx)
-          allowed = Map.get(valid_transitions, old_status, [])
+      invalid =
+        state.entities
+        |> Enum.filter(fn {_id, entity} ->
+          Map.get(entity, :#{field}) not in valid_statuses
+        end)
 
-          if new_status in allowed do
-            :ok
-          else
-            {:error, "Invalid transition from \#{old_status} to \#{new_status}"}
-          end
-
-        _ ->
-          :ok
-      end
+      Enum.empty?(invalid) or
+        PropertyDamage.fail!("Invalid #{field} values", invalid: invalid)
     end
     """
   end
@@ -674,10 +650,10 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     check_name = event_name |> Macro.underscore()
 
     """
-    check(after: #{inspect(event)})
-    def check(:after_#{check_name}, state, ctx) do
+    @check every: #{inspect(event)}
+    def assert_after_#{check_name}(_state, _cmd_or_event) do
       # Add validation logic for when #{event_name} occurs
-      :ok
+      true
     end
     """
   end

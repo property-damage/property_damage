@@ -282,6 +282,8 @@ defmodule PropertyDamage.Persistence do
   List all saved failures in a directory.
 
   Returns a list of maps with failure metadata (without loading full reports).
+  A file that cannot be loaded, such as one of an older format version, is
+  listed as `%{filename: name, error: :unreadable}` after the readable entries.
 
   ## Options
 
@@ -958,15 +960,16 @@ defmodule PropertyDamage.Persistence do
     end
   end
 
-  defp sort_failures(failures, :newest) do
-    Enum.sort_by(failures, & &1[:timestamp], {:desc, DateTime})
-  end
-
-  defp sort_failures(failures, :oldest) do
-    Enum.sort_by(failures, & &1[:timestamp], {:asc, DateTime})
-  end
+  defp sort_failures(failures, :newest), do: sort_by_timestamp(failures, :desc)
+  defp sort_failures(failures, :oldest), do: sort_by_timestamp(failures, :asc)
 
   defp sort_failures(failures, :seed) do
     Enum.sort_by(failures, & &1[:seed])
+  end
+
+  # An unreadable file has no timestamp, so it follows the dated entries.
+  defp sort_by_timestamp(failures, direction) do
+    {dated, undated} = Enum.split_with(failures, &Map.has_key?(&1, :timestamp))
+    Enum.sort_by(dated, & &1.timestamp, {direction, DateTime}) ++ undated
   end
 end

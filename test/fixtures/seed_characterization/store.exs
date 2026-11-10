@@ -11,7 +11,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k2 returned 0, model expects nil: %{key: :k2, actual: 0, expected: nil}",
+         "Read of :k2 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k2}",
        root_index: 2
      },
      original: [
@@ -167,7 +167,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k2 returned 0, model expects nil: %{key: :k2, actual: 0, expected: nil}",
+         "Read of :k2 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k2}",
        root_index: 2
      },
      original: [
@@ -384,7 +384,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k1 returned 0, model expects nil: %{key: :k1, actual: 0, expected: nil}",
+         "Read of :k1 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k1}",
        root_index: 2
      },
      original: [
@@ -601,7 +601,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k2 returned 0, model expects nil: %{key: :k2, actual: 0, expected: nil}",
+         "Read of :k2 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k2}",
        root_index: 2
      },
      original: [
@@ -660,7 +660,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k1 returned 0, model expects nil: %{key: :k1, actual: 0, expected: nil}",
+         "Read of :k1 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k1}",
        root_index: 2
      },
      original: [
@@ -737,7 +737,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k1 returned 0, model expects nil: %{key: :k1, actual: 0, expected: nil}",
+         "Read of :k1 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k1}",
        root_index: 2
      },
      original: [
@@ -796,7 +796,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k1 returned 0, model expects nil: %{key: :k1, actual: 0, expected: nil}",
+         "Read of :k1 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k1}",
        root_index: 2
      },
      original: [
@@ -934,7 +934,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k0 returned 0, model expects nil: %{key: :k0, actual: 0, expected: nil}",
+         "Read of :k0 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k0}",
        root_index: 2
      },
      original: [
@@ -993,7 +993,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k0 returned 0, model expects nil: %{key: :k0, actual: 0, expected: nil}",
+         "Read of :k0 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k0}",
        root_index: 2
      },
      original: [
@@ -1052,7 +1052,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k0 returned 0, model expects nil: %{key: :k0, actual: 0, expected: nil}",
+         "Read of :k0 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k0}",
        root_index: 2
      },
      original: [
@@ -1208,7 +1208,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k2 returned 0, model expects nil: %{key: :k2, actual: 0, expected: nil}",
+         "Read of :k2 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k2}",
        root_index: 2
      },
      original: [
@@ -1267,7 +1267,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k1 returned 0, model expects nil: %{key: :k1, actual: 0, expected: nil}",
+         "Read of :k1 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k1}",
        root_index: 2
      },
      original: [
@@ -1344,7 +1344,7 @@
        check: :read_consistent,
        kind: :check_failed,
        message:
-         "Read of :k2 returned 0, model expects nil: %{key: :k2, actual: 0, expected: nil}",
+         "Read of :k2 returned 0, model expects nil: %{actual: 0, expected: nil, key: :k2}",
        root_index: 2
      },
      original: [

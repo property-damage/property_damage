@@ -132,13 +132,11 @@ defmodule PropertyDamage.Sequence do
   @spec to_list(t()) :: [command()]
   def to_list(%__MODULE__{prefix: prefix}), do: prefix
 
-  @doc """
-  The plan of `sequence`: its roots and the setup and teardown commands every
-  target runs, with `variants` per target (`nil` when every target runs every
-  root as itself).
-
-  The plan is what `PropertyDamage.Runner.execute/2` runs.
-  """
+  # Public for `PropertyDamage.Campaign` and `PropertyDamage.Reproduction`.
+  # The plan of `sequence`: its roots and the setup and teardown commands every
+  # target runs, with `variants` per target (`nil` when every target runs every
+  # root as itself). `PropertyDamage.Runner.execute/2` runs the plan.
+  @doc false
   @spec plan(t(), map() | nil) :: map()
   def plan(%__MODULE__{} = sequence, variants) do
     %{

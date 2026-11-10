@@ -36,5 +36,7 @@ defmodule PropertyDamage.CheckFailed do
   @impl true
   def message(%__MODULE__{message: msg, data: nil}), do: msg
   def message(%__MODULE__{message: msg, data: data}) when map_size(data) == 0, do: msg
-  def message(%__MODULE__{message: msg, data: data}), do: "#{msg}: #{inspect(data)}"
+
+  def message(%__MODULE__{message: msg, data: data}),
+    do: "#{msg}: #{inspect(data, custom_options: [sort_maps: true])}"
 end

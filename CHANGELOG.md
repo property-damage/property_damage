@@ -1503,6 +1503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The `run_accumulating` function of `PropertyDamage.Runtime.InjectionWindow`.** No code in
+  the library called it. `run/3` and `run_logged/4` open the same window for
+  a caller that supplies its own runtime.
 - **BREAKING: the parallel-branch execution mode is removed (DR-063).** A
   sequence with a prefix, two or more branches and a suffix ran its branches
   one after another on one target and detected no race, at the cost of a second
@@ -1606,6 +1609,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.pd` files remained loadable at that step (see the persistence 2 → 3 note above); later format bumps refuse them (see the persistence format 14 → 15 entry above).
 
 ### Fixed
+
+- **Check-failure messages list their detail keys in a stable order.** The
+  message of a `CheckFailed` with data printed a small map's keys in the order
+  the atoms were created, so the text varied with which code loaded first. The
+  keys are now sorted.
+- **A `using:` relation of `stutter:` that raises is a check failure.** The
+  raise escaped the step and was reported as an Unknown Failure. It is now a
+  `:check_failed` failure named `:stutter` that carries the exception, as a
+  raising `@compare` relation is, and a shrink or replay of it runs with stutter
+  on.
+- **`Persistence.list/2` lists a directory that holds an unreadable file.** A
+  file that cannot be loaded, such as one of an older format version, used to
+  make the default `:newest` and the `:oldest` sort raise. It is now listed
+  after the readable entries, as `%{filename: name, error: :unreadable}`.
+- **`PropertyDamage.Runner.execute/2` refuses a context without an integer
+  `seed`.** A `Runner.Context` with no seed failed inside the engine with a
+  `FunctionClauseError`. It now raises an `ArgumentError` that names the seed.
+- **`Shrinker.shrink/2` raises on an option it does not know.** Options that
+  moved to `PropertyDamage.Runner.Context` (`:concurrency`, `:compare`,
+  `:check_mode`, `:keep_attempts`, `:stutter_config`, `:run_nonce`) were
+  ignored silently. The `ArgumentError` names them and points to the context.
+- **A shrink candidate whose adapter setup fails keeps its setup time.** The
+  `adapter_ms` of the `Shrinker.Outcome` now counts the time a failed
+  `setup/1` took, so the setup time in the shrink stop event includes it.
 
 - **Traces and trigger isolation run the boundary drain that a run runs.**
   `RunTrace.Capture.capture/1` and `Analysis.isolate_trigger/2` rerun their
@@ -2153,6 +2180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shrunk sequence still failed. A run that failed with another failure was
   reported as `:still_failing`. Verification now replays the shrunk sequence
   and reports `:different_failure` for another signature.
+- **Example code in suggestions declares checks with `@check`.** The example
+  code of a `Suggestions` entry used a `check(:always)` line and a
+  three-argument `def check`, which no projection accepts. It now shows the
+  `@check every: N` form with a two-argument check function, and compiles in a
+  projection.
+- **`Analysis.isolate_trigger/2` reads the run's `external_markers:`.** It
+  validated each varied sequence with no markers, so for a model whose events
+  carry a marker atom the ids folded into one key, every variation looked
+  invalid, and the result listed no change that eliminates the failure. It now
+  uses the markers the report records.
 
 ## [0.2.0] - 2026-06-25
 

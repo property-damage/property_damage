@@ -62,7 +62,7 @@ jobs:
       # The count of module dependency cycles may never rise. A change
       # that removes cycles lowers the number in the same change.
       - if: matrix.lint
-        run: mix xref graph --format cycles --fail-above 3
+        run: mix xref graph --format cycles --fail-above 2
 
       - run: mix test
 

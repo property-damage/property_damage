@@ -15,10 +15,8 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
 
     * the sink's initial context and how `inject` folds into it. The engine seeds
       a rich context (`:projections`, `:event_log`, ...) and folds projections in
-      real time; `run_accumulating/2` seeds `%{events: []}` and just accumulates
-      the raw injected events.
-    * the `start_poller` policy. The engine starts real resource pollers;
-      `run_accumulating/2` raises, having no poller support.
+      real time.
+    * the `start_poller` policy. The engine starts real resource pollers.
     * how the adapter is actually invoked (directly, via settle, or wrapped in a
       timeout task).
 
@@ -35,9 +33,8 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
 
   Returns `{result, final_ctx, pollers}` where `result` is `execute_fn`'s return
   value, `final_ctx` is the sink context after execution (the caller drains what
-  it seeded, e.g. `final_ctx.events` or `final_ctx.injected_events`), and
-  `pollers` are any resource pollers registered during execution (empty for paths
-  whose `start_poller` raises).
+  it seeded, e.g. `final_ctx.injected_events`), and `pollers` are any resource
+  pollers registered during execution.
 
   Arguments:
 
@@ -90,41 +87,5 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
     after
       Runtime.Sink.stop(sink)
     end
-  end
-
-  @doc """
-  Open a window for a path that only *accumulates* injected events and has no
-  resource-poller support.
-
-  Seeds the sink with `%{events: []}`, hands the adapter a runtime whose `inject`
-  appends raw events and whose `start_poller` raises `ArgumentError` with
-  `poller_error`, then returns `{result, injected_events}` where `injected_events`
-  is in injection order. This is the lean counterpart to `run/3`, which the engine
-  uses when its `inject` must fold projections in real time.
-
-  The runtime's `log` writes into the sink, and the calling process holds it as
-  its scope while `execute_fn` runs, so `PropertyDamage.log/2` works in the
-  adapter and in a `Task` the caller starts for it. The path has no report to
-  carry the lines, so they are dropped when the window closes.
-  """
-  @spec run_accumulating((Runtime.t() -> result), String.t()) :: {result, [term()]}
-        when result: var
-  def run_accumulating(execute_fn, poller_error) when is_function(execute_fn, 1) do
-    build_runtime = fn sink ->
-      %Runtime{
-        inject: fn event ->
-          Runtime.Sink.update_ctx(sink, fn ctx -> %{ctx | events: [event | ctx.events]} end)
-        end,
-        start_poller: fn _opts -> raise ArgumentError, poller_error end,
-        log: PropertyDamage.Log.writer(sink, 1)
-      }
-    end
-
-    scoped = fn runtime ->
-      PropertyDamage.Log.with_scope(runtime.log, fn -> execute_fn.(runtime) end)
-    end
-
-    {result, final_ctx, _pollers} = run(%{events: []}, build_runtime, scoped)
-    {result, Enum.reverse(final_ctx.events)}
   end
 end

@@ -51,6 +51,11 @@ defmodule PropertyDamage.Runner do
   outcome, `{:ok, run}` (see `t:PropertyDamage.Scheduler.run/0`).
   """
   @spec execute(plan(), Context.t()) :: {:ok, Scheduler.run()}
+  def execute(_plan, %Context{seed: seed}) when not is_integer(seed) do
+    raise ArgumentError,
+          "`PropertyDamage.Runner.Context` needs an integer `seed`, got: #{inspect(seed)}"
+  end
+
   def execute(plan, %Context{} = context) do
     context
     |> Map.from_struct()
@@ -70,7 +75,8 @@ defmodule PropertyDamage.Runner do
   as run 0 of that seed and the per-target RNG and the stutter decisions
   match the original run. `signature` is the original failure's
   `PropertyDamage.Failure.signature/2`, or `nil` when it is not known. A
-  stutter failure (`:idempotency_violation`, `:stutter_execution_failed`)
+  stutter failure (`:idempotency_violation`, `:stutter_execution_failed`, or a
+  `:check_failed` named `:stutter` for a `using:` relation that raised)
   reproduces only when the command at fault stutters, and its index moves as
   the shrinker removes earlier roots. So for such a signature every
   candidate runs with the context's stutter configuration forced on, at
@@ -97,13 +103,21 @@ defmodule PropertyDamage.Runner do
        when kind in [:idempotency_violation, :stutter_execution_failed],
        do: %{config | probability: 1.0, enabled: true}
 
+  # A `using:` relation that raised reports a check failure named `:stutter`.
+  defp shrink_stutter_config(
+         {:check_failed, :stutter, _variant_index},
+         %Stutter.Config{} = config
+       ),
+       do: %{config | probability: 1.0, enabled: true}
+
   defp shrink_stutter_config(_signature, _config), do: nil
 
   # The milliseconds the run's targets spent in the adapters' setup/1 and
   # teardown/1. Each target's result holds the timers its variant filled in;
-  # a target that left no result (its setup failed) holds none.
-  defp adapter_ms(%{results: results}) do
-    timers = for %{adapter_timers: timers} <- results, do: timers
+  # a target whose setup failed left no result, so the run lists its timers
+  # apart.
+  defp adapter_ms(%{results: results, setup_timers: setup_timers}) do
+    timers = for(%{adapter_timers: timers} <- results, do: timers) ++ setup_timers
 
     %{
       setup: Enum.sum(for t <- timers, do: :atomics.get(t, 1)) / 1000,

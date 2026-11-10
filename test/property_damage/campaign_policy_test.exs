@@ -6,7 +6,9 @@ defmodule PropertyDamage.CampaignPolicyTest do
 
   alias PropertyDamage.Campaign
   alias PropertyDamage.Campaign.Context
-  alias PropertyDamage.{FailureReport, Progress.Reporter, Target}
+  alias PropertyDamage.{Expansion, FailureReport, Generator, Options, Progress.Reporter, Target}
+  alias PropertyDamage.{ReplayArtifact, Sequence}
+  alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
 
   defmodule FakeCommand do
     defstruct []
@@ -196,6 +198,184 @@ defmodule PropertyDamage.CampaignPolicyTest do
 
       assert report.report_kind == :latency_exceeded
       assert report.variant == %{name: "fake", index: 0}
+    end
+  end
+
+  # The loop's own run step, on a model small enough to need no fake: it
+  # draws a sequence of `Tap` commands and hands each to an adapter that
+  # reports it to the test process.
+  describe "the campaign's own run step" do
+    defmodule Tap do
+      use PropertyDamage.Command
+      defstruct [:n]
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{n: StreamData.integer(0..9)}
+        |> Generator.merge_overrides(overrides)
+        |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule Quiet do
+      use PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{}
+
+      @impl true
+      def apply(state, _event), do: state
+    end
+
+    defmodule Tripwire do
+      use PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{}
+
+      @impl true
+      def apply(state, _event), do: state
+
+      @check every: 1
+      def assert_never(_state, _cmd_or_event), do: PropertyDamage.fail!("tripped")
+    end
+
+    defmodule PassingModel do
+      use PropertyDamage.Model
+
+      @impl true
+      def commands, do: [Tap]
+
+      @impl true
+      def command_sequence_projection, do: Quiet
+
+      @impl true
+      def check_projections, do: [Quiet]
+    end
+
+    defmodule FailingModel do
+      use PropertyDamage.Model
+
+      @impl true
+      def commands, do: [Tap]
+
+      @impl true
+      def command_sequence_projection, do: Quiet
+
+      @impl true
+      def check_projections, do: [Tripwire]
+    end
+
+    defmodule TapAdapter do
+      use PropertyDamage.Adapter
+
+      @impl true
+      def setup(config), do: {:ok, config}
+
+      @impl true
+      def teardown(_context), do: :ok
+
+      @impl true
+      def execute(%Tap{} = command, %{pid: pid}, _runtime) do
+        send(pid, {:tapped, command})
+        {:ok, []}
+      end
+    end
+
+    defp tapped(taps \\ []) do
+      receive do
+        {:tapped, command} -> tapped([command | taps])
+      after
+        0 -> Enum.reverse(taps)
+      end
+    end
+
+    defp real_context(model, fields) do
+      {:ok, [target]} = Options.validate_targets([{TapAdapter, config: %{pid: self()}}])
+      test_pid = self()
+
+      base = %Context{
+        model: model,
+        targets: [target],
+        all_targets: [target],
+        target_entries: [Target.to_entry(target)],
+        target: target,
+        reporter: Reporter.new([]),
+        seed: 7,
+        run_nonce: 1,
+        max_runs: 1,
+        max_commands: 3,
+        generator: Generator.generate_sequence(model, max_commands: 3),
+        shrink: false,
+        shrinker_config: ShrinkerConfig.new(),
+        replay_dir: false,
+        on_failure: &send(test_pid, {:on_failure, &1})
+      }
+
+      struct!(base, fields)
+    end
+
+    test "a failing run goes through the failure handler and ends the loop with its report" do
+      ctx = real_context(FailingModel, max_runs: 3)
+
+      assert {:error, %FailureReport{} = report} = Campaign.loop(ctx, acc())
+
+      assert FailureReport.seed(report) == 7
+      assert FailureReport.run_number(report) == 0
+      assert report.report_kind == :check_failed
+      assert_received {:on_failure, ^report}
+
+      # The first run's commands only: no second run followed the failure.
+      assert length(tapped()) <= 3
+    end
+
+    test "a passing run executes the sequence the seed draws" do
+      ctx = real_context(PassingModel, max_runs: 1)
+      drawn = Generator.generate_value(ctx.generator, Generator.run_seed(7, 0))
+
+      assert {:ok, %{runs: 1}} = Campaign.loop(ctx, acc())
+
+      assert tapped() == Sequence.to_list(drawn)
+      assert Sequence.to_list(drawn) != []
+    end
+
+    test "a replay executes the artifact's sequence instead of one the seed draws" do
+      recorded =
+        Sequence.linear([%Tap{n: 91}, %Tap{n: 92}])
+
+      {:ok, [target]} = Options.validate_targets([{TapAdapter, config: %{pid: self()}}])
+      replay = %{sequence: recorded, expansion: Expansion.identity(recorded, [target])}
+      ctx = real_context(PassingModel, replay: replay)
+
+      assert {:ok, %{replay: :not_reproduced}} = Campaign.loop(ctx, acc())
+
+      assert tapped() == [%Tap{n: 91}, %Tap{n: 92}]
+    end
+
+    test "a replay of a failing run runs the artifact's sequence and says it reproduced" do
+      {:error, %FailureReport{replay: term} = found} =
+        Campaign.loop(real_context(FailingModel, []), acc())
+
+      tapped()
+      sequence = ReplayArtifact.sequence(term, [])
+
+      replay = %{
+        term: term,
+        path: "found.pd",
+        sequence: sequence,
+        expansion: ReplayArtifact.expansion(term, sequence, nil, [])
+      }
+
+      assert {:error, %FailureReport{} = report} =
+               Campaign.loop(real_context(FailingModel, replay: replay), acc())
+
+      assert report.replay_status == :reproduced
+      assert report.replay_path == "found.pd"
+
+      assert FailureReport.shrunk_sequence(report) |> Sequence.to_list() ==
+               FailureReport.shrunk_sequence(found) |> Sequence.to_list()
+
+      assert tapped() != []
     end
   end
 end

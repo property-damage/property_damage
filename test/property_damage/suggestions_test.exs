@@ -817,4 +817,39 @@ defmodule PropertyDamage.SuggestionsTest do
       assert is_binary(Suggestions.format(analysis, :json))
     end
   end
+
+  defmodule EventuallyProjection do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+
+    @eventually after: Fixtures.Events.AccountCreated, timeout: 1, interval: {10, :milliseconds}
+    def account_settles(_state, _event), do: fn _state -> true end
+  end
+
+  defmodule EventuallyModel do
+    use PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Fixtures.Commands.CreateAccount, Fixtures.Commands.CreditAccount]
+
+    @impl true
+    def command_sequence_projection, do: Fixtures.Projections.Empty
+
+    @impl true
+    def check_projections, do: [EventuallyProjection]
+  end
+
+  describe "analyze/2 with an @eventually check" do
+    test "reads the eventually check without a trigger and suggests checks" do
+      analysis = Suggestions.analyze(EventuallyModel)
+
+      assert [%{name: :account_settles, trigger: nil}] = analysis.existing_checks
+      assert analysis.suggestions != []
+    end
+  end
 end

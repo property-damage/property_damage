@@ -591,8 +591,16 @@ defmodule PropertyDamage.RegressionTest do
           Regression.handle_failure(failure, seed_library: library_path)
         end)
 
-      refute log =~ "seed_library"
+      assert own_warnings(log) == []
     end
+  end
+
+  # The warnings `Regression` wrote, among the lines of a captured log. The log
+  # handler is shared, so a test running in parallel can add its own lines.
+  defp own_warnings(log) do
+    log
+    |> String.split("\n")
+    |> Enum.filter(&(&1 =~ "PropertyDamage seed_library" or &1 =~ "could not be saved to"))
   end
 
   describe "handle_failure/2 write failures" do
@@ -620,7 +628,7 @@ defmodule PropertyDamage.RegressionTest do
           assert {:ok, _} = result.saved_failure
         end)
 
-      refute log =~ "[warning]"
+      assert own_warnings(log) == []
     end
 
     @tag :tmp_dir
@@ -647,7 +655,7 @@ defmodule PropertyDamage.RegressionTest do
           assert {:ok, _} = result.generated_test
         end)
 
-      refute log =~ "[warning]"
+      assert own_warnings(log) == []
     end
   end
 end
