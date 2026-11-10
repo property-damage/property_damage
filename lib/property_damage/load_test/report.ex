@@ -81,28 +81,54 @@ defmodule PropertyDamage.LoadTest.Report do
     |> Enum.join("\n")
   end
 
+  # Every terminal box line is this many characters wide, edges included.
+  @box_width 72
+
   defp terminal_header do
+    inner = @box_width - 2
+
     """
-    ╔══════════════════════════════════════════════════════════════════════╗
-    ║                     PROPERTY DAMAGE LOAD TEST REPORT                  ║
-    ╚══════════════════════════════════════════════════════════════════════╝
+    ╔#{String.duplicate("═", inner)}╗
+    ║#{center("PROPERTY DAMAGE LOAD TEST REPORT", inner)}║
+    ╚#{String.duplicate("═", inner)}╝
     """
+  end
+
+  defp center(text, width) do
+    left = div(width - String.length(text), 2)
+    text |> String.pad_leading(left + String.length(text)) |> String.pad_trailing(width)
+  end
+
+  # A box with a title in its top edge and one row per line, each padded (or
+  # cut) to the box width.
+  defp box(title, rows) do
+    inner = @box_width - 2
+    top = "─ #{title} "
+
+    lines =
+      ["┌" <> String.pad_trailing(top, inner, "─") <> "┐"] ++
+        Enum.map(rows, &box_row/1) ++
+        ["└" <> String.duplicate("─", inner) <> "┘"]
+
+    Enum.join(lines, "\n") <> "\n"
+  end
+
+  defp box_row(text) do
+    content = @box_width - 4
+    "│ " <> (text |> String.slice(0, content) |> String.pad_trailing(content)) <> " │"
   end
 
   defp terminal_config(config) do
     model_name = config.model |> to_string() |> String.replace("Elixir.", "")
     adapter_name = config.adapter |> to_string() |> String.replace("Elixir.", "")
-    arrival_rate_str = format_arrival_rate(config.arrival_rate)
 
-    """
-    ┌─ Configuration ──────────────────────────────────────────────────────┐
-    │ Model:         #{String.pad_trailing(model_name, 53)}│
-    │ Adapter:       #{String.pad_trailing(adapter_name, 53)}│
-    │ Arrival Rate:  #{String.pad_trailing(arrival_rate_str, 53)}│
-    │ Duration:      #{String.pad_trailing(format_duration(config.duration_ms), 53)}│
-    │ Seed:          #{String.pad_trailing(format_seed(config), 53)}│
-    └──────────────────────────────────────────────────────────────────────┘
-    """
+    box("Configuration", [
+      "Model:         #{model_name}",
+      "Adapter:       #{adapter_name}",
+      "Arrival Rate:  #{format_arrival_rate(config.arrival_rate)}",
+      "Duration:      #{format_duration(config.duration_ms)}",
+      "Seed:          #{format_seed(config)}"
+    ])
   end
 
   defp format_seed(config), do: config |> Map.get(:seed, "unknown") |> to_string()
@@ -112,24 +138,22 @@ defmodule PropertyDamage.LoadTest.Report do
     arrivals_completed = Map.get(metrics, :arrivals_completed, 0)
     arrivals_per_second = Map.get(metrics, :arrivals_per_second, 0.0)
 
-    """
-    ┌─ Throughput ─────────────────────────────────────────────────────────┐
-    │ Total Commands:    #{String.pad_trailing(format_number(metrics.total_requests), 48)}│
-    │ Commands/Second:   #{String.pad_trailing(format_float(metrics.requests_per_second), 48)}│
-    │ Arrivals Spawned:  #{String.pad_trailing(format_number(arrivals_spawned), 48)}│
-    │ Arrivals Completed: #{String.pad_trailing(format_number(arrivals_completed), 47)}│
-    │ Arrivals/Second:   #{String.pad_trailing(format_float(arrivals_per_second), 48)}│
-    └──────────────────────────────────────────────────────────────────────┘
-    """
+    box("Throughput", [
+      "Total Commands:     #{format_number(metrics.total_requests)}",
+      "Commands/Second:    #{format_float(metrics.requests_per_second)}",
+      "Arrivals Spawned:   #{format_number(arrivals_spawned)}",
+      "Arrivals Completed: #{format_number(arrivals_completed)}",
+      "Arrivals/Second:    #{format_float(arrivals_per_second)}"
+    ])
   end
 
   defp terminal_latency(metrics) do
-    """
-    ┌─ Latency (ms) ───────────────────────────────────────────────────────┐
-    │ Min:     #{String.pad_trailing(format_float(metrics.latency_min), 10)} │ p50:   #{String.pad_trailing(format_float(metrics.latency_p50), 10)} │ Mean:  #{String.pad_trailing(format_float(metrics.latency_mean), 10)}│
-    │ Max:     #{String.pad_trailing(format_float(metrics.latency_max), 10)} │ p95:   #{String.pad_trailing(format_float(metrics.latency_p95), 10)} │ p99:   #{String.pad_trailing(format_float(metrics.latency_p99), 10)}│
-    └──────────────────────────────────────────────────────────────────────┘
-    """
+    cell = &String.pad_trailing(format_float(&1), 10)
+
+    box("Latency (ms)", [
+      "Min:  #{cell.(metrics.latency_min)} │ p50:  #{cell.(metrics.latency_p50)} │ Mean: #{cell.(metrics.latency_mean)}",
+      "Max:  #{cell.(metrics.latency_max)} │ p95:  #{cell.(metrics.latency_p95)} │ p99:  #{cell.(metrics.latency_p99)}"
+    ])
   end
 
   defp terminal_errors(metrics) do
@@ -141,13 +165,11 @@ defmodule PropertyDamage.LoadTest.Report do
         "none"
       end
 
-    """
-    ┌─ Execution Errors ───────────────────────────────────────────────────┐
-    │ Total:       #{String.pad_trailing(to_string(metrics.total_errors), 55)}│
-    │ Error Rate:  #{String.pad_trailing(format_float(metrics.error_rate) <> "%", 55)}│
-    │ By Type:     #{String.pad_trailing(error_details, 55)}│
-    └──────────────────────────────────────────────────────────────────────┘
-    """
+    box("Execution Errors", [
+      "Total:       #{metrics.total_errors}",
+      "Error Rate:  #{format_float(metrics.error_rate)}%",
+      "By Type:     #{error_details}"
+    ])
   end
 
   defp terminal_checks(metrics) do
@@ -172,13 +194,11 @@ defmodule PropertyDamage.LoadTest.Report do
 
       failure_rate = Map.get(metrics, :check_failure_rate, 0.0)
 
-      """
-      ┌─ Check Failures ─────────────────────────────────────────────────┐
-      │ Total Failures:  #{String.pad_trailing(to_string(failures), 51)}│
-      │ Failure Rate:    #{String.pad_trailing(format_float(failure_rate) <> "%", 51)}│
-      │ By Exception:    #{String.pad_trailing(failure_details, 51)}│
-      └──────────────────────────────────────────────────────────────────────┘
-      """
+      box("Check Failures", [
+        "Total Failures:  #{failures}",
+        "Failure Rate:    #{format_float(failure_rate)}%",
+        "By Exception:    #{failure_details}"
+      ])
     end
   end
 
@@ -189,14 +209,12 @@ defmodule PropertyDamage.LoadTest.Report do
         ""
 
       counts ->
-        """
-        ┌─ Phases ─────────────────────────────────────────────────────────────┐
-        │ Setup Commands:    #{String.pad_trailing(format_number(counts.setup_commands), 48)}│
-        │ Teardown Commands: #{String.pad_trailing(format_number(counts.teardown_commands), 48)}│
-        │ Eventual Checks:   #{String.pad_trailing(format_number(counts.eventual_checks), 48)}│
-        │ Stutter Retries:   #{String.pad_trailing(format_number(counts.stutter_retries), 48)}│
-        └──────────────────────────────────────────────────────────────────────┘
-        """
+        box("Phases", [
+          "Setup Commands:    #{format_number(counts.setup_commands)}",
+          "Teardown Commands: #{format_number(counts.teardown_commands)}",
+          "Eventual Checks:   #{format_number(counts.eventual_checks)}",
+          "Stutter Retries:   #{format_number(counts.stutter_retries)}"
+        ])
     end
   end
 
@@ -204,17 +222,11 @@ defmodule PropertyDamage.LoadTest.Report do
     if map_size(metrics.by_command) == 0 do
       ""
     else
-      header = """
-      ┌─ Per-Command Breakdown ────────────────────────────────────────────┐
-      │ Command                          Count     p50      p95    Errors  │
-      │ ─────────────────────────────────────────────────────────────────  │
-      """
-
       rows =
         metrics.by_command
         |> Enum.sort_by(fn {_, data} -> -data.count end)
         |> Enum.take(10)
-        |> Enum.map_join("\n", fn {module, data} ->
+        |> Enum.map(fn {module, data} ->
           name =
             module
             |> to_string()
@@ -229,14 +241,16 @@ defmodule PropertyDamage.LoadTest.Report do
           p95 = format_float(data.latency_p95) |> String.pad_leading(8)
           errors = data.error_count |> to_string() |> String.pad_leading(8)
 
-          "│ #{name}#{count}#{p50}#{p95}#{errors}  │"
+          "#{name}#{count}#{p50}#{p95}#{errors}"
         end)
 
-      footer = """
-      └──────────────────────────────────────────────────────────────────────┘
-      """
-
-      header <> rows <> "\n" <> footer
+      box(
+        "Per-Command Breakdown",
+        [
+          "Command                          Count     p50      p95    Errors",
+          String.duplicate("─", @box_width - 4)
+        ] ++ rows
+      )
     end
   end
 
@@ -244,11 +258,7 @@ defmodule PropertyDamage.LoadTest.Report do
     if length(metrics.history) < 2 do
       ""
     else
-      """
-      ┌─ Throughput Over Time ──────────────────────────────────────────────┐
-      #{ascii_chart(metrics.history, :rps, 60, 8)}
-      └──────────────────────────────────────────────────────────────────────┘
-      """
+      box("Throughput Over Time", ascii_chart(metrics.history, :rps, 60, 8))
     end
   end
 
@@ -263,30 +273,29 @@ defmodule PropertyDamage.LoadTest.Report do
         total_created = Map.get(stats, :total_created, 0)
         peak_in_use = Map.get(stats, :peak_in_use, 0)
 
-        """
-        ┌─ Worker Pool ────────────────────────────────────────────────────────┐
-        │ Workers Created: #{String.pad_trailing(to_string(total_created), 51)}│
-        │ Peak Workers:    #{String.pad_trailing(to_string(peak_in_use), 51)}│
-        │ Peak Utilization: #{String.pad_trailing(format_float(peak_util * 100) <> "%", 50)}│
-        │ Avg Utilization: #{String.pad_trailing(format_float(avg_util * 100) <> "%", 51)}│
-        │ Total Checkouts: #{String.pad_trailing(format_number(stats.total_checkouts), 51)}│
-        └──────────────────────────────────────────────────────────────────────┘
-        """
+        box("Worker Pool", [
+          "Workers Created:  #{total_created}",
+          "Peak Workers:     #{peak_in_use}",
+          "Peak Utilization: #{format_float(peak_util * 100)}%",
+          "Avg Utilization:  #{format_float(avg_util * 100)}%",
+          "Total Checkouts:  #{format_number(stats.total_checkouts)}"
+        ])
     end
   end
 
   defp terminal_footer do
     """
-    ════════════════════════════════════════════════════════════════════════
+    #{String.duplicate("═", @box_width)}
     Generated by PropertyDamage Load Test
     """
   end
 
+  # The chart's rows, one string each, for `box/2` to frame.
   defp ascii_chart(history, field, width, height) do
     values = Enum.map(history, &Map.get(&1, field, 0))
 
     if Enum.empty?(values) or Enum.all?(values, &(&1 == 0)) do
-      String.duplicate("│ " <> String.duplicate(" ", width) <> " │\n", height)
+      List.duplicate(String.duplicate(" ", width), height)
     else
       max_val = Enum.max(values)
       min_val = Enum.min(values)
@@ -301,21 +310,13 @@ defmodule PropertyDamage.LoadTest.Report do
           values
         end
 
-      # Build chart rows
-      rows =
-        for row <- (height - 1)..0//-1 do
-          threshold = min_val + range * (row / (height - 1))
+      for row <- (height - 1)..0//-1 do
+        threshold = min_val + range * (row / (height - 1))
 
-          chars =
-            Enum.map_join(samples, "", fn val ->
-              if val >= threshold, do: "█", else: " "
-            end)
-            |> String.pad_trailing(width)
-
-          "│ #{chars} │"
-        end
-
-      Enum.join(rows, "\n")
+        samples
+        |> Enum.map_join("", fn val -> if val >= threshold, do: "█", else: " " end)
+        |> String.pad_trailing(width)
+      end
     end
   end
 
