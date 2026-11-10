@@ -52,7 +52,7 @@ defmodule PropertyDamage.Reproduction do
     # non-resettable SUT. Epoch 0 was the exploration run.
     mint_epoch_counter = :atomics.new(1, signed: false)
 
-    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms, shrink_stop} =
+    {shrunk_sequence, expansion, shrink_iterations, shrink_time_ms, shrink_stop} =
       if ctx.shrink do
         shrink_result =
           Shrinker.shrink(found.sequence,
@@ -92,7 +92,9 @@ defmodule PropertyDamage.Reproduction do
     # intermittent failure may not reproduce on this single re-run, or may fail
     # differently (another kind, another target). Then the report falls back to
     # the original failing run: its sequence, reason, index, target and state.
-    expansion = reproduction_expansion(ctx, shrunk_sequence, shrunk_expansion, found)
+    #
+    # Every target reproduces what it ran in the failing run: its choices,
+    # realized again for the shrunk sequence (the shrinker carries them).
 
     report =
       case reproduce(ctx, shrunk_sequence, found, fresh_epoch, expansion) do
@@ -211,15 +213,6 @@ defmodule PropertyDamage.Reproduction do
       reference_result: Enum.at(outcome.results, 0)
     }
   end
-
-  # What every target runs when the shrunk sequence is reproduced: the
-  # failing run's choices, realized again for the shrunk sequence (the
-  # shrinker carries them), or every root as itself for a model without
-  # expansions.
-  defp reproduction_expansion(_ctx, _sequence, %{} = shrunk, _found), do: shrunk
-
-  defp reproduction_expansion(ctx, sequence, nil, _found),
-    do: Expansion.identity(sequence, ctx.targets)
 
   defp same_failure?(failure, found_failure) do
     Failure.signature(failure.reason, failure.variant.index) ==

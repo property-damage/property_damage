@@ -161,7 +161,7 @@ defmodule PropertyDamage.ReportBuilder do
       run_check_fires: run_fires(found),
       other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts,
-      expansion: report_expansion(ctx, found, shrunk_sequence),
+      expansion: found.expansion,
       expansion_counts:
         Expansion.merge_counts(
           found.expansion_counts,
@@ -248,18 +248,17 @@ defmodule PropertyDamage.ReportBuilder do
     )
   end
 
-  @doc """
-  The variant a target stands for in a report: its index and name.
-  """
+  # Public for `PropertyDamage.Reproduction`, which builds reports through it.
+  @doc false
   @spec variant_of(PropertyDamage.Target.t()) :: %{index: non_neg_integer(), name: String.t()}
   def variant_of(target), do: %{index: target.index, name: target.name}
 
-  @doc """
-  Projects the colocated `{:fired, projection, name}` keys out of the check
-  counters into the public `%{{projection, name} => count}` fire map, dropping
-  the sampling counters (`:step`, `:command`, `:event`, per-module) that share
-  the map.
-  """
+  # Public for `PropertyDamage.Campaign` and `PropertyDamage.Reproduction`.
+  # Projects the colocated `{:fired, projection, name}` keys out of the check
+  # counters into the public `%{{projection, name} => count}` fire map, dropping
+  # the sampling counters (`:step`, `:command`, `:event`, per-module) that share
+  # the map.
+  @doc false
   @spec project_fires(map()) :: map()
   def project_fires(counters) do
     for {{:fired, projection, name}, count} <- counters, into: %{} do
@@ -267,9 +266,9 @@ defmodule PropertyDamage.ReportBuilder do
     end
   end
 
-  @doc """
-  Adds the counts of two check-fire maps key by key.
-  """
+  # Public for `PropertyDamage.Campaign` and `PropertyDamage.Reproduction`.
+  # Adds the counts of two check-fire maps key by key.
+  @doc false
   @spec merge_fires(map(), map()) :: map()
   def merge_fires(acc, new) do
     Map.merge(acc, new, fn _key, a, b -> a + b end)
@@ -287,11 +286,6 @@ defmodule PropertyDamage.ReportBuilder do
 
   defp ran_a_root?(result),
     do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
-
-  # The concrete sequences of the run the report describes; a found failure
-  # that carries none ran the reference target's roots as generated.
-  defp report_expansion(_ctx, %{expansion: %{} = expansion}, _sequence), do: expansion
-  defp report_expansion(ctx, _found, sequence), do: Expansion.identity(sequence, [ctx.target])
 
   defp other_failure(failure),
     do: %{variant: failure.variant, root: failure.root, failure: failure.reason}
