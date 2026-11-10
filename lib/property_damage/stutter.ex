@@ -281,14 +281,18 @@ defmodule PropertyDamage.Stutter do
   Returns `:agree`, or `{:disagree, exception}` read from the predicate's
   verdict by `PropertyDamage.Verdict`: a falsy answer is a
   `PropertyDamage.ComparisonMismatch` with the original events as `left` and
-  the retry's as `right`.
+  the retry's as `right`. A relation that raises answers `{:raised, exception}`:
+  the relation is the model author's code failing, which is not a disagreement
+  of the system under test.
   """
   @spec compare_events([struct()], [struct()], Config.t()) ::
-          :agree | {:disagree, Exception.t()}
+          :agree | {:disagree, Exception.t()} | {:raised, Exception.t()}
   def compare_events(original_events, retry_events, %Config{} = config) do
     config.using
     |> call(original_events, retry_events)
     |> PropertyDamage.Verdict.relation(original_events, retry_events)
+  rescue
+    exception -> {:raised, exception}
   end
 
   defp call({module, fun}, left, right), do: apply(module, fun, [left, right])

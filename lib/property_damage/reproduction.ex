@@ -347,9 +347,12 @@ defmodule PropertyDamage.Reproduction do
   defp smaller?(report, term, replayed),
     do: report.trace.plan_source == :shrunk and length(term.roots) < length(replayed.roots)
 
-  # Check if a failure reason is stutter-related (idempotency violation or execution failure)
+  # Check if a failure reason is stutter-related (idempotency violation, execution
+  # failure, or a check failure named `:stutter` for a `using:` relation that raised)
   defp stutter_failure?(%Failure{} = failure),
-    do: Failure.kind(failure) in [:idempotency_violation, :stutter_execution_failed]
+    do:
+      Failure.kind(failure) in [:idempotency_violation, :stutter_execution_failed] or
+        (Failure.kind(failure) == :check_failed and Failure.name(failure) == :stutter)
 
   defp stutter_failure?(_), do: false
 

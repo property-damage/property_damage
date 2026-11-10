@@ -75,7 +75,8 @@ defmodule PropertyDamage.Runner do
   as run 0 of that seed and the per-target RNG and the stutter decisions
   match the original run. `signature` is the original failure's
   `PropertyDamage.Failure.signature/2`, or `nil` when it is not known. A
-  stutter failure (`:idempotency_violation`, `:stutter_execution_failed`)
+  stutter failure (`:idempotency_violation`, `:stutter_execution_failed`, or a
+  `:check_failed` named `:stutter` for a `using:` relation that raised)
   reproduces only when the command at fault stutters, and its index moves as
   the shrinker removes earlier roots. So for such a signature every
   candidate runs with the context's stutter configuration forced on, at
@@ -100,6 +101,13 @@ defmodule PropertyDamage.Runner do
 
   defp shrink_stutter_config({kind, _name, _variant_index}, %Stutter.Config{} = config)
        when kind in [:idempotency_violation, :stutter_execution_failed],
+       do: %{config | probability: 1.0, enabled: true}
+
+  # A `using:` relation that raised reports a check failure named `:stutter`.
+  defp shrink_stutter_config(
+         {:check_failed, :stutter, _variant_index},
+         %Stutter.Config{} = config
+       ),
        do: %{config | probability: 1.0, enabled: true}
 
   defp shrink_stutter_config(_signature, _config), do: nil

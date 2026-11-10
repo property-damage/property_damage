@@ -232,6 +232,9 @@ defmodule PropertyDamage.Executor.Stepping do
 
       {:error, :stutter_execution_failed, details} ->
         {:error, Failure.stutter_execution_failed(details), state}
+
+      {:error, :stutter_relation_raised, exception} ->
+        {:error, Failure.check_failed(:stutter, exception), state}
     end
   end
 

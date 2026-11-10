@@ -56,6 +56,12 @@ The system SHALL compare a retry's events with the original events through the `
 - **THEN** `Mod.fun` SHALL be called with the original and the retry events, then the args
 - **AND** its answer SHALL determine match or mismatch
 
+#### Scenario: A relation that raises is a check failure (DR-052)
+- **WHEN** the `using:` relation raises while comparing a retry
+- **THEN** the framework SHALL report a failure of kind `:check_failed` named `:stutter` that carries the exception
+- **AND** SHALL NOT report an idempotency violation
+- **AND** a shrink or replay of that failure SHALL run with stutter forced on
+
 #### Scenario: A named relation that does not exist is rejected (DR-051)
 - **WHEN** `using:` is `{Mod, :fun}` and `Mod` does not export `fun/2`
 - **THEN** the framework SHALL raise an option error that names `using:` and `fun/2`, before any adapter setup

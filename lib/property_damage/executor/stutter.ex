@@ -29,7 +29,8 @@ defmodule PropertyDamage.Executor.Stutter do
   # its checks: its event log, its last command index, the resolved command it
   # executed and the step's log lines; `ctx` gives the adapter.
   # Returns {outcome, lines}: the outcome is {:ok, event_log} or
-  # {:error, :idempotency_violation | :stutter_execution_failed, details}, and
+  # {:error, :idempotency_violation | :stutter_execution_failed |
+  # :stutter_relation_raised, details}, and
   # the lines are the step's whole list of log lines (DR-054) once the retries
   # wrote theirs, each recording its attempt (2 for the first retry); nil when
   # no retry ran. The retries are attempts of the same step: they continue the
@@ -189,6 +190,10 @@ defmodule PropertyDamage.Executor.Stutter do
 
     # Check for any mismatches
     case Enum.find(comparisons, fn {_, _, result} -> result != :agree end) do
+      {_attempt, _retry_events, {:raised, exception}} ->
+        # The `using:` relation raised: model code failed, the system did not.
+        {:error, :stutter_relation_raised, exception}
+
       {_attempt, _retry_events, {:disagree, mismatch}} ->
         # Idempotency violation detected
         violation = %Stutter.Violation{

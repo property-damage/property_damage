@@ -83,6 +83,8 @@ Because a run option is runtime data, a 2-arity function
 relation is a function you can unit-test and a run prints it as written. The
 relation's return is a verdict (DR-052): a truthy value when the retry agrees,
 and `false`, `nil`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
+A relation that raises is a failure of the relation, not of the system: the run
+reports a check failure named `:stutter` that carries the exception.
 
 ### Default: `==`
 
