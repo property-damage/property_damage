@@ -47,6 +47,8 @@ end
 
 (Your command generators call `StreamData` directly, so add it as a dependency too.)
 
+If you only run PropertyDamage from ExUnit tests, both dependencies can be `only: :test`. Keep them in every environment if you also run campaigns from `mix run` scripts or use the `mix pd.*` tasks, since those run in the `dev` environment.
+
 To use a checkout of PropertyDamage instead of a published release, point the dependency at its path. This form fits a checkout that sits next to your project, as in [Explaining a failure page](#explaining-a-failure-page):
 
 ```elixir
@@ -800,6 +802,13 @@ end
 A `:sync` command must not return `{:retry, _}`: the run fails with a
 `:retry_from_sync_command` failure.
 
+For a property that holds only once the system catches up, declare an
+`@eventually` check on a projection. Its predicate reads projection state, so
+the event that settles it must reach the run: the adapter starts a poller with
+`runtime.start_poller` or injects the event, as the
+[writing invariants guide](guides/writing_invariants.md#eventual-checks-with-eventually)
+shows.
+
 See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
 for complete documentation including bridge commands, `Adapter.Injector`, and
 handling async operations that require polling.
@@ -898,6 +907,15 @@ end
 `compare/1` refuses (returns `comparable?: false` with `guard_violations`) rather
 than emit a misleading diff when the traces are not the same plan (unequal plan
 fingerprint or model).
+
+A capture regenerates the plan from `seed:` and the generation options, so give
+it the failing run's options as well: `max_commands:` at least. A failure
+report's own trace holds the shrunk plan and never compares against a capture
+of the original run. To confirm a capture is the run a report describes, check
+that `captured.plan == FailureReport.original_sequence(report)`, that the two
+`Failure.signature/2` values match, and that the capture forms a comparable
+pair; the
+[debugging guide](guides/debugging_failures.md#comparing-runs) runs the recipe.
 
 ### Reading the Ranking
 

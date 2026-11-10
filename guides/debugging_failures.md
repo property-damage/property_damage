@@ -96,6 +96,9 @@ same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
 The banner says `BUG DETECTED!`. A failure in the test's own code says
 `TEST CODE ERROR` and adds a hint. The line under it, `Seed: 20`, is the seed
 the failing run generated from, so the failing run is run 1 of that seed.
+`FailureReport.run_number/1` is a different number: the campaign run the failure
+happened in, counting from 1, which the one-line summary prints as `run=`. For
+a failure in a campaign's first run, both are 1.
 
 ### Failure
 
@@ -177,6 +180,13 @@ event from another source keeps a badge for it (`POL` for a
 resource poller, and so on). Entries tied to no command print after the
 listing under "Not tied to a command". For log lines, see the
 [log lines guide](log_lines.md).
+
+A command that uses a value the system minted (an `external()` field) prints
+it as a placeholder, such as `<Placeholder:id@pre3/evt0>`: the `id` field of
+the first event of root 3. That position is the producer's place in the
+original plan, before shrinking, so it can differ from the producer's label in
+the minimal reproduction. The resolved value appears on the
+producer's event line, under the command that minted it.
 
 ### Projections
 
@@ -755,10 +765,45 @@ same seed (same seed and model ⇒ same plan ⇒ comparable):
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides: identical plan, different SUT behavior.
-before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: PropertyDamage.FailureReport.seed(failure))
-after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: PropertyDamage.FailureReport.seed(failure))
+# Repeat the run's generation options, such as max_commands:.
+before = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: PropertyDamage.FailureReport.seed(failure), max_commands: 25)
+after_ = RunTrace.Capture.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: PropertyDamage.FailureReport.seed(failure), max_commands: 25)
 
 comparison = RunComparison.compare([before, after_])
+```
+
+A capture generates its plan from `seed:` and the generation options, so pass
+the failing run's generation options too: `max_commands:` at least, which the
+report's Reproduction section prints when it is not the default. Without it, the
+capture generates a plan of the default length, a different plan. The report's
+own trace (`failure.trace`) holds the shrunk plan, so it never compares against
+a capture of the original run; compare captures with each other.
+
+To confirm that a capture is the failing run the report describes, check three
+things: the capture ran the report's original plan, it failed with the same
+failure signature, and it forms a comparable pair:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+alias PropertyDamage.{Failure, FailureReport, RunComparison, RunTrace}
+
+captured =
+  RunTrace.Capture.capture(
+    model: MyApp.Model,
+    targets: [MyApp.Adapter],
+    seed: FailureReport.seed(failure),
+    max_commands: failure.max_commands
+  )
+
+# 1. Same plan: the sequence the failing run generated, before shrinking.
+true = captured.plan == FailureReport.original_sequence(failure)
+
+# 2. Same failure signature: kind, check name and target.
+{:fail, reason} = captured.outcome
+true = Failure.signature(reason, 0) == Failure.signature(FailureReport.failure_reason(failure), 0)
+
+# 3. A comparable pair: the same plan, so compare/1 accepts it.
+true = RunComparison.compare([captured, captured]).comparable?
 ```
 
 `compare/1` refuses rather than emit a misleading diff when the traces are not
@@ -882,7 +927,10 @@ names any projection that disagrees with itself. See the
 
 ### Generate ExUnit Test
 
-Create a regression test:
+Create a regression test. By default the test is a regression guard: it fails
+while the bug is present and passes once it is fixed. See
+[Static Regression Tests](static_regression_tests.md#from-generated-test-code)
+for the reproduction form and for keeping the replay artifact beside the test.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
