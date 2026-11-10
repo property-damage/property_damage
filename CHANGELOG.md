@@ -1622,6 +1622,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The load-test terminal report draws every box at one width.** Rows were
+  padded to hand-counted widths, so the right edges did not line up.
+- **The load test logs "starting ramp-down" only for a configured
+  ramp-down.** The line appeared at the end of every run, though the default
+  `:immediate` strategy has none.
 - **The exported ExUnit test fails with its own message.** The regression
   guard called `FailureReport.seed/1` without an alias, so a resurfaced bug
   failed the test with an `UndefinedFunctionError`. The generated source names

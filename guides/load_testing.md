@@ -396,15 +396,15 @@ or custom reporting.
 | `requests_per_second` | Mean command throughput over the run |
 | `latency_min` / `latency_p50` / `latency_p95` / `latency_p99` / `latency_max` / `latency_mean` | Per-root latency stats in ms (see [Latency Section](#latency-section)) |
 | `phase_counts` | `%{setup_commands, teardown_commands, eventual_checks, stutter_retries}` (see [Phase Counts](#phase-counts)) |
-| `total_errors` / `error_rate` | Execution error count and percentage of commands |
+| `total_errors` / `error_rate` | Execution error count, and that count as a percentage of `total_requests` |
 | `errors_by_type` | `%{error_type => count}` |
 | `arrivals_spawned` / `arrivals_completed` / `arrivals_per_second` | Arrival (sequence) counts and rate |
 | `by_command` | `%{command_module => %{count, latency_p50, latency_p95, latency_mean, error_count}}` |
 | `duration_ms` | Wall-clock length of the run |
-| `active_sessions` / `completed_sessions` | Session gauges at snapshot time |
-| `check_failures` / `check_failure_rate` / `failures_by_exception` | Populated when `check_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
+| `active_sessions` / `completed_sessions` | Not updated by the load test runner, so both read `0`. Count sessions with `arrivals_spawned` and `arrivals_completed` (see [Key Terminology](#key-terminology)) |
+| `check_failures` / `check_failure_rate` / `failures_by_exception` | Populated when `check_mode` is not `:disabled`. `check_failure_rate` is `check_failures` as a percentage of `total_requests` (root commands), so a session that fails a check on every root counts once per root. `failures_by_exception` is `%{exception_module => count}` |
 | `recent_check_failures` | Bounded list of recent check-failure detail maps. A failure of the whole session (a startup check, an `@eventually` check found at the end of a halting session) carries `:session` as its `module` and `command_module` |
-| `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points |
+| `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points (`active_sessions` reads `0`, as above) |
 
 `report.pool_stats` describes the dynamic worker pool:
 
@@ -413,7 +413,7 @@ or custom reporting.
 | `total_created` | Total workers the pool created over the run |
 | `peak_in_use` | Maximum workers checked out at once |
 | `peak_utilization` | `peak_in_use / total_created` |
-| `avg_utilization` | Mean utilization across checkout samples |
+| `avg_utilization` | Mean of the utilization sampled at each checkout: workers in use (the one just checked out included) over workers alive |
 | `utilization` | Instantaneous utilization at report time |
 | `total_checkouts` / `total_checkins` | How many times workers were borrowed and returned |
 | `available` / `in_use` | Idle and busy worker counts at report time |
@@ -434,6 +434,7 @@ report.pool_stats.peak_in_use
 | Term | Meaning |
 |------|---------|
 | **Arrival** | One command sequence spawned |
+| **Session** | What one arrival runs on its worker: the setup commands, the roots, the teardown commands and the checks of that one sequence. Each arrival runs one session, so `arrivals_spawned` counts the sessions started |
 | **Command** | One individual operation executed |
 | **Completed arrival** | An arrival whose worker ran its sequence to completion (a worker that fails `adapter.setup/1` is spawned but never completes) |
 
@@ -443,11 +444,11 @@ A single arrival may execute multiple commands before the sequence terminates.
 
 ```
 ┌─ Throughput ─────────────────────────────────────────────────────────┐
-│ Total Commands:    15,234                                            │
-│ Commands/Second:   50.78                                             │
-│ Arrivals Spawned:  3,048                                             │
+│ Total Commands:     15,234                                           │
+│ Commands/Second:    50.78                                            │
+│ Arrivals Spawned:   3,048                                            │
 │ Arrivals Completed: 2,896                                            │
-│ Arrivals/Second:   10.16                                             │
+│ Arrivals/Second:    10.16                                            │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -481,29 +482,34 @@ while `check_mode` is `:disabled`.
 
 ```
 ┌─ Worker Pool ────────────────────────────────────────────────────────┐
-│ Workers Created: 142                                                 │
-│ Peak Workers:    100                                                 │
-│ Peak Utilization: 85.00%                                             │
-│ Avg Utilization: 62.34%                                              │
-│ Total Checkouts: 3,048                                               │
+│ Workers Created:  100                                                │
+│ Peak Workers:     100                                                │
+│ Peak Utilization: 100.00%                                            │
+│ Avg Utilization:  62.34%                                             │
+│ Total Checkouts:  3,048                                              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Workers Created**: Total workers the pool created over the run
 - **Peak Workers**: Maximum workers in use at once
-- **Peak Utilization**: Maximum utilization seen during the test
+- **Peak Utilization**: `peak_in_use / total_created`
 - **Avg Utilization**: Average utilization across all checkout attempts
 - **Total Checkouts**: How many times workers were borrowed
 
-High peak utilization (>90%) indicates the pool grew to meet bursts; high
-average utilization (>70%) indicates sustained load on the pool.
+The pool sizes itself: it creates a worker only when every worker it has is
+busy. At that moment all of them are in use, so Peak Utilization is 100% in
+any run in which no worker exited, whatever the load. Read Peak Workers for
+the concurrency the run reached. Avg Utilization is sampled at each checkout
+and counts the worker just checked out, so a run whose arrivals overlap (long
+sequences, think time) reads high even when each command is fast. A low
+average means arrivals mostly found idle workers waiting.
 
 ### Latency Section
 
 ```
 ┌─ Latency (ms) ───────────────────────────────────────────────────────┐
-│ Min:     5.23       │ p50:   45.67      │ Mean:  52.34              │
-│ Max:     523.45     │ p95:   125.89     │ p99:   234.56             │
+│ Min:  5.23       │ p50:  45.67      │ Mean: 52.34                    │
+│ Max:  523.45     │ p95:  125.89     │ p99:  234.56                   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -637,8 +643,8 @@ status = PropertyDamage.LoadTest.status(runner)
 |---------|--------------|----------|
 | Completed << Spawned | Workers failing to start (`adapter.setup`), SUT refusing connections, or slow commands still in flight | Check adapter setup, SUT connection limits and the adapter `timeout/1`; lower arrival rate |
 | Commands ≈ Arrivals | Early termination | Check `terminate_early?/3` returns `false` initially |
-| Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
-| Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
+| Peak Workers far above the arrival rate times the mean session length | Sessions take longer than modeled | Check latency and think time; lower arrival rate or scale the SUT |
+| Avg util high with fast commands | Arrivals overlap (long sequences or think time), not overload | Read Peak Workers and latency before you change the rate |
 | Low arrivals/sec vs target | Ramp-up or failed arrivals | Check ramp config and the Spawned/Completed gap |
 | Latency spikes | SUT bottleneck | Profile SUT, check for resource contention |
 
