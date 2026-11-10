@@ -403,7 +403,7 @@ or custom reporting.
 | `duration_ms` | Wall-clock length of the run |
 | `active_sessions` / `completed_sessions` | Session gauges at snapshot time |
 | `check_failures` / `check_failure_rate` / `failures_by_exception` | Populated when `check_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
-| `recent_check_failures` | Bounded list of recent check-failure detail maps |
+| `recent_check_failures` | Bounded list of recent check-failure detail maps. A failure of the whole session (a startup check, an `@eventually` check found at the end of a halting session) carries `:session` as its `module` and `command_module` |
 | `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points |
 
 `report.pool_stats` describes the dynamic worker pool:
