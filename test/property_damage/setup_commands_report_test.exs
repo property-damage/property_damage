@@ -325,7 +325,7 @@ defmodule PropertyDamage.SetupCommandsReportTest do
       code = Export.to_exunit(report)
 
       comment = position!(code, "# Setup commands, run before the roots:")
-      commands = position!(code, "_commands = [")
+      commands = position!(code, "# Shrunk command sequence that triggers the failure:")
       assert comment < commands
       assert code =~ "#   %PropertyDamage.Test.SetupCommands.CreateUser{"
     end

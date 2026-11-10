@@ -29,7 +29,7 @@ defmodule PropertyDamage.Export.Common do
       kind: FailureReport.kind(report),
       failure_message: FailureReport.failure_message(report),
       check_name: FailureReport.check_name(report),
-      failed_at_index: report.failed_at_index,
+      failed_at_index: FailureReport.failed_at_index(report),
       timestamp: FailureReport.timestamp(report),
       model: FailureReport.model(report),
       target: FailureReport.reference_target(report)

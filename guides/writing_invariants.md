@@ -377,6 +377,37 @@ def payment_confirmed(_state, %PaymentInitiated{id: id}) do
 end
 ```
 
+The predicate reads projection state, and only events change that state. So
+an `@eventually` check passes only if the event that settles it reaches the
+run, after the command that opened the window has returned. The adapter
+delivers that later event in one of two ways. It can start a poller with
+`runtime.start_poller`, which polls the system between commands and injects
+the event it returns. Or the event is injected: `runtime.inject` during
+`execute/3`, or an injector adapter (`PropertyDamage.Adapter.Injector`) for a
+system that calls back, such as a webhook. A poller for the payment above:
+
+```elixir
+def execute(%InitiatePayment{amount: amount}, %{bank: bank}, runtime) do
+  id = MyBank.initiate(bank, amount)
+
+  runtime.start_poller.(
+    poll_fn: fn -> MyBank.status(bank, id) end,
+    interval_ms: 100,
+    timeout_ms: 5_000,
+    handler: fn
+      :confirmed -> {:done, %PaymentConfirmed{id: id}}
+      _pending -> :continue
+    end
+  )
+
+  {:ok, [%PaymentInitiated{id: id}]}
+end
+```
+
+See [Async and Eventual Consistency](async_and_eventual_consistency.md) for
+both recipes and [Resource Polling](resource_polling.md) for the handler's
+return values.
+
 The predicate's return is a verdict: `nil` or `false` means "not yet", a
 truthy value means satisfied, and `{:fail, reason}` means "never", which ends
 the window at once as a check failure. Write the predicate as a total function

@@ -792,12 +792,16 @@ defmodule PropertyDamage.FailureReport do
   def seed(%__MODULE__{trace: nil}), do: nil
 
   @doc """
-  The zero-based number of the run that failed. Accessor over the embedded
-  `RunTrace`; `nil` for a report with no trace.
+  The campaign run that failed, counting from 1, as the one-line summary
+  prints it and `only: [run: n]` takes it. The embedded `RunTrace` stores the
+  run 0-based; `nil` for a report with no trace.
   """
-  @spec run_number(t()) :: non_neg_integer() | nil
-  def run_number(%__MODULE__{trace: %RunTrace{run_number: run_number}}), do: run_number
-  def run_number(%__MODULE__{trace: nil}), do: nil
+  @spec run_number(t()) :: pos_integer() | nil
+  def run_number(%__MODULE__{trace: %RunTrace{run_number: run_number}})
+      when is_integer(run_number),
+      do: run_number + 1
+
+  def run_number(%__MODULE__{}), do: nil
 
   @doc """
   The model module the run exercised. Accessor over the embedded `RunTrace`;
@@ -976,6 +980,26 @@ defmodule PropertyDamage.FailureReport do
       _none -> :unknown
     end
   end
+
+  @doc "The outcome of the run (`:check_failed`, `:diverged` and so on), or `nil`."
+  @spec report_kind(t()) :: report_kind() | nil
+  def report_kind(%__MODULE__{report_kind: report_kind}), do: report_kind
+
+  @doc "The root index the failure happened at, or `nil` when it is not localized."
+  @spec failed_at_index(t()) :: non_neg_integer() | nil
+  def failed_at_index(%__MODULE__{failed_at_index: index}), do: index
+
+  @doc "The target the failure happened in, `%{index: i, name: name}`, or `nil`."
+  @spec variant(t()) :: variant() | nil
+  def variant(%__MODULE__{variant: variant}), do: variant
+
+  @doc "The atoms the run treated as `external()` markers (`[]` by default)."
+  @spec external_markers(t()) :: [atom()]
+  def external_markers(%__MODULE__{external_markers: markers}), do: markers
+
+  @doc "The sequence the failing run generated, before shrinking."
+  @spec original_sequence(t()) :: Sequence.t() | nil
+  def original_sequence(%__MODULE__{original_sequence: sequence}), do: sequence
 
   @doc "The failing check/projection name, or `nil`."
   @spec check_name(t()) :: Failure.name()

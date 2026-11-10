@@ -168,14 +168,15 @@ defmodule PropertyDamage.EngineTelemetryTest do
 
     # The failure is first found after run 0; the reproduction is the last
     # execution of the campaign.
-    assert PropertyDamage.FailureReport.run_number(report) > 0
+    assert PropertyDamage.FailureReport.run_number(report) > 1
 
     run_numbers =
       [:property_damage, :command, :stop]
       |> collect(["tel_repro"])
       |> Enum.map(fn {_measurements, meta} -> meta.run_number end)
 
-    assert List.last(run_numbers) == PropertyDamage.FailureReport.run_number(report)
+    # Telemetry carries the 0-based run; the report counts from 1.
+    assert List.last(run_numbers) + 1 == PropertyDamage.FailureReport.run_number(report)
   end
 
   test "check stop names the target and the check" do

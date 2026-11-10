@@ -83,9 +83,26 @@ defmodule PropertyDamage.Export do
   @doc """
   Generates an ExUnit regression test from a failure report.
 
+  The default test is a regression guard: it fails if the run finds any
+  failure, so it fails while the bug is present and again if the bug comes
+  back, and it passes once the bug is fixed. With `expect_fixed: false` the
+  test is a reproduction instead: it fails if the run no longer fails with the
+  report's kind of failure (and check), so it fails once the bug is fixed.
+  The generated moduledoc says which of the two the test is.
+
   When the report has a replay artifact (`replay_path`), the test replays it
   with `only: [replay: path]` on the report's targets, so it names the file
-  it reads; otherwise it re-runs the report's seed with `max_runs: 1`.
+  it reads; otherwise it re-runs the report's seed with `max_runs: 1` and the
+  run's `max_commands:`.
+
+  The `replay_dir:` directory is a working set that prunes itself, so a
+  committed test must not read its artifact from there. Copy the artifact
+  next to the test and export from a report that points at the copy, or run
+  with `replay_dir: false` so the test re-runs the seed:
+
+      copy = Path.join("test/regressions", Path.basename(failure.replay_path))
+      File.cp!(failure.replay_path, copy)
+      test_code = PropertyDamage.Export.to_exunit(%{failure | replay_path: copy})
 
   ## Options
 
@@ -95,7 +112,8 @@ defmodule PropertyDamage.Export do
     `PropertyDamage.Target`
   - `:module_name` - Module name for the test
   - `:test_name` - Custom test name
-  - `:expect_fixed` - If true, expect the test to pass (default: false)
+  - `:expect_fixed` - `true` (the default) for the regression guard, `false`
+    for the reproduction
 
   ## Example
 

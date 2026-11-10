@@ -229,6 +229,33 @@ test_code = PropertyDamage.generate_test(failure, format: :exunit)
 IO.puts(test_code)
 ```
 
+The generated test comes in two forms, and its moduledoc says which one it is:
+
+| Form | Option | The test fails when |
+|------|--------|---------------------|
+| Regression guard | `expect_fixed: true` (the default) | the run finds any failure: the bug is still present, or it came back |
+| Reproduction | `expect_fixed: false` | the run no longer fails with the recorded kind of failure: the bug is fixed |
+
+Commit the regression guard. It fails until you fix the bug, then it guards
+against the bug's return. The reproduction is for the time you spend on the
+fix: it confirms the failure still happens, and it fails once the fix lands.
+
+When the report has a replay artifact, the generated test replays it by path.
+The `replay_dir:` directory prunes itself and belongs in `.gitignore`, so a
+committed test needs its own copy of the artifact. Copy the file next to the
+test and export from a report that points at the copy:
+
+```elixir
+copy = Path.join("test/regressions", Path.basename(failure.replay_path))
+File.cp!(failure.replay_path, copy)
+test_code = PropertyDamage.Export.to_exunit(%{failure | replay_path: copy})
+```
+
+Alternatively, run with `replay_dir: false`. The report then has no artifact,
+and the generated test re-runs the seed with `max_runs: 1` and the run's
+`max_commands:`. A changed model can generate a different sequence from the
+same seed, so the replayed artifact is the steadier choice.
+
 ### Automatic Capture with regression:
 
 To save every failure without writing capture code, pass the `regression:` run

@@ -415,6 +415,31 @@ defmodule PropertyDamage.LoadTestTest do
       assert String.contains?(output, "Throughput Over Time")
     end
 
+    test "draws every terminal box line at one width", %{report: report} do
+      report =
+        report
+        |> put_in([:metrics, :history], for(i <- 1..12, do: %{rps: i * 50.0}))
+        |> put_in([:metrics, :check_failures], 3)
+        |> put_in([:metrics, :failures_by_exception], %{RuntimeError => 3})
+        |> put_in([:metrics, :phase_counts], %{
+          setup_commands: 4,
+          teardown_commands: 0,
+          eventual_checks: 2,
+          stutter_retries: 0
+        })
+        |> put_in([:config, :seed], 42)
+
+      widths =
+        report
+        |> Report.format(:terminal)
+        |> String.split("\n")
+        |> Enum.filter(&String.match?(&1, ~r/^[│┌└╔║╚═]/u))
+        |> Enum.map(&String.length/1)
+        |> Enum.uniq()
+
+      assert [_one_width] = widths
+    end
+
     test "formats markdown report", %{report: report} do
       output = Report.format(report, :markdown)
 
@@ -1198,6 +1223,26 @@ defmodule PropertyDamage.LoadTestTest do
       assert_receive {:telemetry, [:property_damage, :load_test, :result], _m,
                       %{data: %LoadResult{}}},
                      1000
+    end
+
+    test "logs the ramp-down line only when a ramp-down is configured" do
+      run = fn opts ->
+        capture_log(fn ->
+          {:ok, _report} =
+            LoadTest.run(
+              [
+                model: MockModel,
+                targets: [MockAdapter],
+                arrival_rate: 20,
+                duration: {200, :milliseconds},
+                metrics_interval: {100, :milliseconds}
+              ] ++ opts
+            )
+        end)
+      end
+
+      refute run.([]) =~ "starting ramp-down"
+      assert run.(ramp_down: {:linear, {100, :milliseconds}}) =~ "starting ramp-down"
     end
 
     @tag :integration

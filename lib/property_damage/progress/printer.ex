@@ -108,13 +108,13 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("")
 
     # Basic failure info
-    if report.report_kind, do: IO.puts("  Kind:         #{report.report_kind}")
+    if kind = FailureReport.report_kind(report), do: IO.puts("  Kind:         #{kind}")
 
-    if variant = report.variant do
+    if variant = FailureReport.variant(report) do
       IO.puts("  Target:       [#{variant.index}] #{variant.name}")
     end
 
-    IO.puts("  Run:          #{FailureReport.run_number(report) + 1}")
+    IO.puts("  Run:          #{FailureReport.run_number(report)}")
     IO.puts("  Seed:         #{FailureReport.seed(report)}")
 
     IO.puts(
@@ -155,7 +155,7 @@ defmodule PropertyDamage.Progress.Printer do
 
     # Shrinking info
     if report.shrink_iterations > 0 do
-      original_count = Sequence.command_count(report.original_sequence)
+      original_count = Sequence.command_count(FailureReport.original_sequence(report))
       shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
       IO.puts("  Shrinking:")
@@ -204,7 +204,7 @@ defmodule PropertyDamage.Progress.Printer do
   @spec print_latency_verdicts(FailureReport.t()) :: :ok
   def print_latency_verdicts(%FailureReport{report_kind: :latency_exceeded} = report) do
     breaches =
-      [{report.variant, FailureReport.failure_reason(report)}] ++
+      [{FailureReport.variant(report), FailureReport.failure_reason(report)}] ++
         Enum.map(report.other_failures, &{&1.variant, &1.failure})
 
     for {variant, failure} <- breaches do

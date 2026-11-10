@@ -198,8 +198,8 @@ defmodule PropertyDamage.ReportBuilder do
 
     FailureReport.new(
       seed: FailureReport.seed(report),
-      run_number: FailureReport.run_number(report),
-      original_sequence: report.original_sequence,
+      run_number: report.trace && report.trace.run_number,
+      original_sequence: FailureReport.original_sequence(report),
       shrunk_sequence: shrink_result.sequence,
       failed_at_index: failure.root,
       original_failed_at_index: report.original_failed_at_index,
@@ -312,7 +312,9 @@ defmodule PropertyDamage.ReportBuilder do
     }
 
     (report.expansion_counts || %{})
-    |> Expansion.subtract_counts(Expansion.counts(recorded, report.failed_at_index))
+    |> Expansion.subtract_counts(
+      Expansion.counts(recorded, FailureReport.failed_at_index(report))
+    )
     |> Expansion.merge_counts(Expansion.counts(expansion, failed_at))
   end
 

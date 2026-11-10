@@ -657,6 +657,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `FailureReport.run_number/1` counts from 1.** It returns the
+  campaign run the failure happened in as the one-line summary prints it
+  (`run=1` for the first run) and as `only: [run: n]` takes it. The trace
+  still stores the 0-based run, and the JSON document's `location.run_number`
+  still carries that stored value.
+- **Breaking: the exported ExUnit test is a regression guard by default.**
+  `expect_fixed:` of `PropertyDamage.Export.to_exunit/2` (and of the
+  `regression: [generate_tests: dir]` handler) now defaults to `true`: the
+  test fails if the run finds any failure and passes once the bug is fixed.
+  The old default passed with the bug present. Pass `expect_fixed: false` for
+  the reproduction form, which now fails once the failure no longer
+  reproduces. The default test name of the guard reads "... stays fixed".
 - **Breaking: the placeholder is an opaque type read through accessors (DR-067).**
   `t:PropertyDamage.Placeholder.t/0` is `@opaque`; code that read `placeholder.id`,
   `.path`, `.position`, `.event_module`, `.event_index` or `.resolved` calls
@@ -1610,6 +1622,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The load-test terminal report draws every box at one width.** Rows were
+  padded to hand-counted widths, so the right edges did not line up.
+- **The load test logs "starting ramp-down" only for a configured
+  ramp-down.** The line appeared at the end of every run, though the default
+  `:immediate` strategy has none.
+- **The exported ExUnit test fails with its own message.** The regression
+  guard called `FailureReport.seed/1` without an alias, so a resurfaced bug
+  failed the test with an `UndefinedFunctionError`. The generated source names
+  the module in full.
+- **The exported ExUnit test compiles without warnings and is formatted.** It
+  lists the shrunk commands as comments instead of an unused `_commands`
+  variable, prints a placeholder by its inspected form instead of a struct
+  literal, aliases the adapter only when the run options name it, and passes
+  `mix format --check-formatted`. Its moduledoc states what the chosen form
+  asserts.
+- **The exported ExUnit test re-runs the seed with the run's `max_commands:`.**
+  Without a replay artifact, the test generated a sequence of the default
+  length, which need not be the one that failed.
 - **A load-test worker ignores an `@eventually` result that arrives after its
   session halted.** The worker logged the result as an unexpected message. It
   now drops the result without a log line.

@@ -20,6 +20,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     :current_rate,
     :duration_ms,
     :ramp_up_plan,
+    :ramp_down,
     :ramp_down_plan,
     :think_time_range,
     :metrics_interval_ms,
@@ -186,6 +187,7 @@ defmodule PropertyDamage.LoadTest.Runner do
           current_rate: {1, {1, :seconds}},
           duration_ms: duration_ms,
           ramp_up_plan: ramp_up_plan,
+          ramp_down: ramp_down,
           ramp_down_plan: ramp_down_plan,
           think_time_range: think_time_range,
           metrics_interval_ms: metrics_interval_ms,
@@ -423,8 +425,12 @@ defmodule PropertyDamage.LoadTest.Runner do
         {:noreply, state}
 
       elapsed_ms >= state.duration_ms and state.phase not in [:ramp_down, :draining] ->
-        # Duration reached, start ramp-down
-        Logger.info("Load test duration reached, starting ramp-down")
+        # Duration reached, start ramp-down. The `:immediate` default stops
+        # at once, so the line is logged only for a configured ramp-down.
+        if state.ramp_down not in [nil, :immediate] do
+          Logger.info("Load test duration reached, starting ramp-down")
+        end
+
         new_state = %{state | phase: :ramp_down, ramp_step_index: 0}
         send(self(), :execute_ramp_step)
         {:noreply, new_state}

@@ -448,7 +448,7 @@ defmodule PropertyDamage.Analysis do
             "PropertyDamage.Analysis.isolate_trigger/2"
           )
 
-        case {report.report_kind, reference_leaves(report, model, target)} do
+        case {FailureReport.report_kind(report), reference_leaves(report, model, target)} do
           # A divergence takes two targets; every variation runs one.
           {kind, _leaves} when kind in [:diverged, :did_not_converge] -> {:error, :not_applicable}
           {_kind, nil} -> isolate_in_roots(report, model, target, {sequence, commands, step})
@@ -480,7 +480,7 @@ defmodule PropertyDamage.Analysis do
       model: model,
       target: target,
       seed: FailureReport.seed(report),
-      external_markers: report.external_markers,
+      external_markers: FailureReport.external_markers(report),
       registry: sequence.registry,
       setup_commands: FailureReport.setup_commands(report),
       teardown_commands: FailureReport.teardown_commands(report)
@@ -498,7 +498,7 @@ defmodule PropertyDamage.Analysis do
     executed = (report.trace && report.trace.executed) || %{}
 
     steps =
-      RunTrace.build_steps(sequence, [], %{}, report.failed_at_index,
+      RunTrace.build_steps(sequence, [], %{}, FailureReport.failed_at_index(report),
         executed: executed,
         choices: variant.choices
       )
@@ -765,7 +765,7 @@ defmodule PropertyDamage.Analysis do
 
       Generated from PropertyDamage failure report.
       Original seed: #{FailureReport.seed(report)}
-      Shrunk from #{Sequence.command_count(report.original_sequence)} to #{length(commands)} commands.
+      Shrunk from #{Sequence.command_count(FailureReport.original_sequence(report))} to #{length(commands)} commands.
       \"\"\"
 
       use ExUnit.Case

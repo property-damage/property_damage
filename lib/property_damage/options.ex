@@ -1564,8 +1564,11 @@ defmodule PropertyDamage.Options do
     ],
     expect_fixed: [
       type: :boolean,
-      default: false,
-      doc: "If true, expect the test to pass."
+      default: true,
+      doc:
+        "`true` generates the regression guard, which fails if the run finds any " <>
+          "failure; `false` generates the reproduce form, which fails once the " <>
+          "failure no longer reproduces."
     ]
   ]
 

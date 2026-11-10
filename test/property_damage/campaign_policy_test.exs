@@ -321,7 +321,7 @@ defmodule PropertyDamage.CampaignPolicyTest do
       assert {:error, %FailureReport{} = report} = Campaign.loop(ctx, acc())
 
       assert FailureReport.seed(report) == 7
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
       assert report.report_kind == :check_failed
       assert_received {:on_failure, ^report}
 
