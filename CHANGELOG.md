@@ -1503,6 +1503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`PropertyDamage.Runtime.InjectionWindow.run_accumulating/2`.** No code in
+  the library called it. `run/3` and `run_logged/4` open the same window for
+  a caller that supplies its own runtime.
 - **BREAKING: the parallel-branch execution mode is removed (DR-063).** A
   sequence with a prefix, two or more branches and a suffix ran its branches
   one after another on one target and detected no race, at the cost of a second

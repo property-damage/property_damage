@@ -90,30 +90,4 @@ defmodule PropertyDamage.Runtime.InjectionWindowTest do
     assert_received {:sink, sink}
     refute Process.alive?(sink)
   end
-
-  describe "run_accumulating/2" do
-    test "returns {result, injected_events} with injected events in injection order" do
-      {result, injected} =
-        InjectionWindow.run_accumulating(
-          fn rt ->
-            rt.inject.(:a)
-            rt.inject.(:b)
-            {:ok, [:returned]}
-          end,
-          "no pollers"
-        )
-
-      assert result == {:ok, [:returned]}
-      assert injected == [:a, :b]
-    end
-
-    test "start_poller raises with the supplied message" do
-      assert_raise ArgumentError, "custom poller error", fn ->
-        InjectionWindow.run_accumulating(
-          fn rt -> rt.start_poller.([]) end,
-          "custom poller error"
-        )
-      end
-    end
-  end
 end
