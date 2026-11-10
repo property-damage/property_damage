@@ -183,8 +183,8 @@ defmodule PropertyDamage.FailureReport.Document do
   """
   @spec build(FailureReport.t(), keyword()) :: map()
   def build(%FailureReport{} = report, opts \\ []) do
-    items = Layout.context_items(report, opts)
     data = Layout.bundle_data(report, opts)
+    items = data.context
     sections = data.layout.sections
     targets = data.targets
     listing_id = listing_section_id(sections)
@@ -363,7 +363,9 @@ defmodule PropertyDamage.FailureReport.Document do
   # Failure and context
   # ==========================================================================
 
-  defp failure_member(report, sections, [meaning | _]) do
+  defp failure_member(report, sections, items) do
+    meaning = items |> Enum.map(& &1.text) |> List.first("")
+
     fields =
       for %{heading: "Failure", lines: lines} <- sections,
           {:field, _, _} = line <- lines,
@@ -373,7 +375,7 @@ defmodule PropertyDamage.FailureReport.Document do
 
     %{
       "kind" => report |> FailureReport.kind() |> to_string(),
-      "meaning" => meaning.text |> String.split() |> Enum.join(" "),
+      "meaning" => meaning |> String.split() |> Enum.join(" "),
       "fields" =>
         for {{:field, label, parts}, id} <- Enum.zip(fields, ids) do
           %{"id" => "failure:" <> id, "label" => label, "value" => value_text(parts)}
