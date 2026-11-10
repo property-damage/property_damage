@@ -175,6 +175,12 @@ defmodule PropertyDamage.LoadTest.Worker do
     {:reply, stats, state}
   end
 
+  # A session reads its `@eventually` results while it runs. A result that
+  # reaches the worker between sessions belongs to a session that halted with
+  # the window still open, so it is dropped.
+  @impl true
+  def handle_info({:poller_result, _id, _result}, state), do: {:noreply, state}
+
   # The worker owns an event queue for its life.
   defp with_context(state) do
     {:ok, event_queue} = EventQueue.start_link()
