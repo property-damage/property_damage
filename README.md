@@ -959,7 +959,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 
 | Format | Output | Use Case |
 |--------|--------|----------|
-| ExUnit | `.exs` test file | CI regression protection |
+| ExUnit | `.exs` test file | CI regression guard (fails while the bug is present) |
 | Elixir Script | `.exs` standalone | Elixir developers |
 | Bash/curl Script | `.sh` with curl | Any developer with a shell |
 | Python Script | `.py` with requests | Python teams |
@@ -970,9 +970,13 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 ```elixir
 {:error, failure} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
 
-# Generate ExUnit regression test
-test_code = PropertyDamage.Export.to_exunit(failure)
+# Generate an ExUnit regression guard: it fails while the bug is present,
+# passes once it is fixed, and fails again if the bug comes back.
+# Keep the replay artifact it reads beside it: replay_dir: prunes itself.
 File.mkdir_p!("test/regressions")
+copy = Path.join("test/regressions", Path.basename(failure.replay_path))
+File.cp!(failure.replay_path, copy)
+test_code = PropertyDamage.Export.to_exunit(%{failure | replay_path: copy})
 File.write!("test/regressions/seed_#{PropertyDamage.FailureReport.seed(failure)}_test.exs", test_code)
 
 # Generate standalone scripts
@@ -997,6 +1001,13 @@ notebook = PropertyDamage.Export.to_livebook(failure,
   adapter: MyHTTPAdapter
 )
 ```
+
+The exported ExUnit test is a regression guard by default. `expect_fixed: false`
+exports a reproduction instead: a test that fails once the failure no longer
+reproduces, for use while you work on the fix. A run with `replay_dir: false`
+leaves no artifact, and the exported test then re-runs the seed with the run's
+`max_commands:`. See the
+[static regression tests guide](guides/static_regression_tests.md#from-generated-test-code).
 
 ### File Operations
 

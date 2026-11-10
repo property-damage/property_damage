@@ -672,7 +672,7 @@ defmodule PropertyDamage.ExportTest do
       assert test_code =~ "defmodule"
       assert test_code =~ "use ExUnit.Case"
       assert test_code =~ "@tag :regression"
-      assert test_code =~ "@tag seed: 512902757"
+      assert test_code =~ "@tag seed: 512_902_757"
       assert test_code =~ "test"
       assert test_code =~ "PropertyDamage.run"
       assert test_code =~ "NonNegativeBalance"

@@ -54,10 +54,20 @@ The system SHALL generate ExUnit regression test files from failure reports that
 - **THEN** the generated test SHALL use those names
 - **AND** if omitted, names SHALL be auto-generated from failure metadata
 
-#### Scenario: Expect-fixed mode
+#### Scenario: Regression guard by default
 
-- **WHEN** `:expect_fixed` is set to `true`
-- **THEN** the generated test SHALL expect the test to pass rather than fail
+- **WHEN** `:expect_fixed` is omitted or set to `true`
+- **THEN** the generated test SHALL fail if the run finds any failure and pass otherwise
+
+#### Scenario: Reproduction form
+
+- **WHEN** `:expect_fixed` is set to `false`
+- **THEN** the generated test SHALL fail if the run does not fail with the report's kind of failure
+
+#### Scenario: Seed re-run carries the sequence length
+
+- **WHEN** the report has no replay artifact
+- **THEN** the generated test SHALL re-run the report's seed with the run's `max_commands:`
 
 #### Scenario: Self-contained output
 
