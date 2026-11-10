@@ -1607,6 +1607,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Check-failure messages list their detail keys in a stable order.** The
+  message of a `CheckFailed` with data printed a small map's keys in the order
+  the atoms were created, so the text varied with which code loaded first. The
+  keys are now sorted.
+- **A `using:` relation of `stutter:` that raises is a check failure.** The
+  raise escaped the step and was reported as an Unknown Failure. It is now a
+  `:check_failed` failure named `:stutter` that carries the exception, as a
+  raising `@compare` relation is, and a shrink or replay of it runs with stutter
+  on.
 - **`Persistence.list/2` lists a directory that holds an unreadable file.** A
   file that cannot be loaded, such as one of an older format version, used to
   make the default `:newest` and the `:oldest` sort raise. It is now listed
