@@ -6,6 +6,8 @@ defmodule PropertyDamage.RunnerAdapterMsTest do
   alias PropertyDamage.{Runner, Sequence}
   alias PropertyDamage.Test.Gauntlet, as: G
   alias PropertyDamage.Test.RunnerSupport
+  alias PropertyDamage.Test.SetupCommands
+  alias PropertyDamage.Test.VariantSupport
 
   @setup_ms 30
 
@@ -26,8 +28,8 @@ defmodule PropertyDamage.RunnerAdapterMsTest do
     def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
-  defp setup_ms(adapters) do
-    sequence = RunnerSupport.plan_for(G.Model, 7, 0, 5)
+  defp setup_ms(adapters, model \\ G.Model) do
+    sequence = RunnerSupport.plan_for(model, 7, 0, 5)
 
     plan = %{
       commands: Sequence.to_list(sequence),
@@ -38,7 +40,7 @@ defmodule PropertyDamage.RunnerAdapterMsTest do
     }
 
     context = %Runner.Context{
-      model: G.Model,
+      model: model,
       targets: RunnerSupport.targets(adapters),
       seed: 7
     }
@@ -51,5 +53,21 @@ defmodule PropertyDamage.RunnerAdapterMsTest do
 
   test "the reference target's failed setup is counted in adapter_ms" do
     assert setup_ms([{SleepyFailingAdapter, []}]) >= @setup_ms
+  end
+
+  test "a later target's failed setup is counted in adapter_ms" do
+    model =
+      SetupCommands.define_model!(Module.concat(__MODULE__, SecondTargetModel),
+        setup: SetupCommands.standard_setup()
+      )
+
+    recorder = VariantSupport.start_recorder()
+
+    targets = [
+      SetupCommands.target("a", recorder),
+      {SleepyFailingAdapter, name: "b", config: %{}}
+    ]
+
+    assert setup_ms(targets, model) >= @setup_ms
   end
 end
