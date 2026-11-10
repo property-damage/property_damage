@@ -201,18 +201,20 @@ defmodule PropertyDamage.Export.StepPlan do
          %FailureReport{trace: %RunTrace{plan: %PropertyDamage.Sequence{}} = trace} = report,
          choices
        ) do
-    if report.variant == nil or
-         report.variant.name == FailureReport.reference_target(report).name do
+    variant = FailureReport.variant(report)
+    failed_at_index = FailureReport.failed_at_index(report)
+
+    if variant == nil or variant.name == FailureReport.reference_target(report).name do
       RunTrace.build_steps(
         trace.plan,
         trace.event_log,
         trace.command_labels,
-        report.failed_at_index,
+        failed_at_index,
         executed: trace.executed,
         choices: choices
       )
     else
-      RunTrace.build_steps(trace.plan, [], trace.command_labels, report.failed_at_index,
+      RunTrace.build_steps(trace.plan, [], trace.command_labels, failed_at_index,
         choices: choices
       )
     end
@@ -225,7 +227,7 @@ defmodule PropertyDamage.Export.StepPlan do
     match?(
       %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{setup_index: ^offset}},
       FailureReport.failure_reason(report)
-    ) and report.report_kind == :setup_failed
+    ) and FailureReport.report_kind(report) == :setup_failed
   end
 
   @doc """

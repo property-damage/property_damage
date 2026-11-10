@@ -36,7 +36,7 @@ defmodule PropertyDamage.Replay do
   ### Jump to Failure Point
 
       {:ok, session} = Replay.start(failure)
-      {:ok, session, steps} = Replay.step_to(session, failure.failed_at_index)
+      {:ok, session, steps} = Replay.step_to(session, PropertyDamage.FailureReport.failed_at_index(failure))
       # Now at the exact point where the failure occurred
 
   ## Expansions
@@ -272,7 +272,7 @@ defmodule PropertyDamage.Replay do
           Stepping.init_state(model,
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
-            external_markers: failure.external_markers,
+            external_markers: FailureReport.external_markers(failure),
             # The run's check mode: a `:record` failure replays under
             # `:record`, recording a failing check and going on.
             check_mode: replay_check_mode(failure),

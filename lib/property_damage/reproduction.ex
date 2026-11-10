@@ -237,8 +237,8 @@ defmodule PropertyDamage.Reproduction do
       %RunResult{
         outcome: :error,
         failure: failure_report,
-        report_kind: failure_report.report_kind,
-        variant: failure_report.variant,
+        report_kind: FailureReport.report_kind(failure_report),
+        variant: FailureReport.variant(failure_report),
         metrics: failure_report.metrics
       }
     end)
@@ -373,7 +373,7 @@ defmodule PropertyDamage.Reproduction do
       is_nil(FailureReport.model(report)) or is_nil(FailureReport.reference_target(report)) ->
         {:error, :missing_model_or_target}
 
-      report.report_kind in [:setup_failed, :latency_exceeded] ->
+      FailureReport.report_kind(report) in [:setup_failed, :latency_exceeded] ->
         {:ok, report}
 
       true ->
@@ -391,15 +391,15 @@ defmodule PropertyDamage.Reproduction do
             external_markers: further_markers(report, opts)
           )
 
-        if names_failing_target?(targets, report.variant),
+        if names_failing_target?(targets, FailureReport.variant(report)),
           do: do_shrink_further(report, targets, reexecution, opts),
-          else: {:error, {:variant_not_in_targets, report.variant.name}}
+          else: {:error, {:variant_not_in_targets, FailureReport.variant(report).name}}
     end
   end
 
   # The markers a re-shrink simulates with: the option, else the run's.
   defp further_markers(report, opts),
-    do: Keyword.get(opts, :external_markers, report.external_markers)
+    do: Keyword.get(opts, :external_markers, FailureReport.external_markers(report))
 
   # Whether `targets` hold the target the report failed in at the index it
   # failed at. A candidate counts only when it fails in that target, so
@@ -435,9 +435,9 @@ defmodule PropertyDamage.Reproduction do
       run_seed: FailureReport.seed(report),
       run_number: report.trace && report.trace.run_number,
       failure: %{
-        report_kind: report.report_kind,
-        variant: report.variant || ReportBuilder.variant_of(ctx.target),
-        root: report.failed_at_index,
+        report_kind: FailureReport.report_kind(report),
+        variant: FailureReport.variant(report) || ReportBuilder.variant_of(ctx.target),
+        root: FailureReport.failed_at_index(report),
         reason: FailureReport.failure_reason(report),
         stacktrace: report.stacktrace
       }

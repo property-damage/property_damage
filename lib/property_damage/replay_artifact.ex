@@ -150,12 +150,12 @@ defmodule PropertyDamage.ReplayArtifact do
         model: FailureReport.model(report),
         seed: FailureReport.seed(report),
         run: 1,
-        external_markers: report.external_markers,
+        external_markers: FailureReport.external_markers(report),
         targets: targets,
         failure: %{
           signature:
             Failure.signature(FailureReport.failure_reason(report), variant_index(report)),
-          root_index: report.failed_at_index
+          root_index: FailureReport.failed_at_index(report)
         },
         prefix: FailureReport.setup_commands(report),
         roots: Enum.zip_with(ids, roots, &%{root_id: &1, command: &2}),
@@ -1020,7 +1020,7 @@ defmodule PropertyDamage.ReplayArtifact do
           {Sequence.t(), %{String.t() => map()} | nil}
   def reexecution(%FailureReport{} = report, names, path, opts \\ []) do
     model = FailureReport.model(report)
-    opts = recorded_markers(opts, report.external_markers)
+    opts = recorded_markers(opts, FailureReport.external_markers(report))
 
     cond do
       not Expansion.defines?(model) ->
@@ -1090,8 +1090,8 @@ defmodule PropertyDamage.ReplayArtifact do
 
     Failure.signature(FailureReport.failure_reason(report), variant_index(report)) ==
       term.failure.signature and
-      (report.variant && report.variant.name) == recorded_name and
-      report.failed_at_index == term.failure.root_index
+      (FailureReport.variant(report) || %{})[:name] == recorded_name and
+      FailureReport.failed_at_index(report) == term.failure.root_index
   end
 
   defp variant_index(%FailureReport{variant: %{index: index}}), do: index

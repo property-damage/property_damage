@@ -282,8 +282,8 @@ defmodule PropertyDamage.Export.ExUnit do
       "seed: #{FailureReport.seed(report)}",
       "max_runs: 1",
       report.max_commands && "max_commands: #{report.max_commands}",
-      report.external_markers != [] &&
-        "external_markers: #{inspect(report.external_markers)}"
+      FailureReport.external_markers(report) != [] &&
+        "external_markers: #{inspect(FailureReport.external_markers(report))}"
     ]
 
     opts = Enum.filter(opts, &is_binary/1)
