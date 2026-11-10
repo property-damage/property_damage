@@ -1610,6 +1610,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A load-test worker ignores an `@eventually` result that arrives after its
+  session halted.** The worker logged the result as an unexpected message. It
+  now drops the result without a log line.
+- **An adapter event that is not a struct is a malformed adapter return.** An
+  adapter that returns an event that is not a struct is reported as a malformed
+  adapter return instead of crashing the engine.
 - **Check-failure messages list their detail keys in a stable order.** The
   message of a `CheckFailed` with data printed a small map's keys in the order
   the atoms were created, so the text varied with which code loaded first. The
@@ -2190,6 +2196,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry a marker atom the ids folded into one key, every variation looked
   invalid, and the result listed no change that eliminates the failure. It now
   uses the markers the report records.
+- **Load-test check failures of the whole session carry the `:session` key.** A
+  failed startup check, or an `@eventually` check found unsettled at the end of
+  a halting session, was recorded in `recent_check_failures` with `nil` as its
+  `module` and `command_module`. Both are now `:session`.
+- **A raise while the failure report reads its "What this checks" items no
+  longer loses the JSON document.** The items were read before the per-section
+  guards, so a Path item that could not name an expansion module raised out of
+  the `:json` format and the page bundle. The document now leaves that section
+  out, logs the raise and lists `context` under `render_errors`.
 
 ## [0.2.0] - 2026-06-25
 
