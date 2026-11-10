@@ -175,6 +175,12 @@ defmodule PropertyDamage.LoadTest.Worker do
     {:reply, stats, state}
   end
 
+  # A session reads its `@eventually` results while it runs. A result that
+  # reaches the worker between sessions belongs to a session that halted with
+  # the window still open, so it is dropped.
+  @impl true
+  def handle_info({:poller_result, _id, _result}, state), do: {:noreply, state}
+
   # The worker owns an event queue for its life.
   defp with_context(state) do
     {:ok, event_queue} = EventQueue.start_link()
@@ -431,8 +437,9 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   defp record_recorded(tally, recorded, state) do
     {exception, _stacktrace} = split_reason(recorded.reason)
-    failure = Map.put(recorded, :reason, exception)
-    Metrics.record_check_failure(state.metrics, exception.__struct__, recorded.module, failure)
+    module = session_key(recorded.module)
+    failure = Map.merge(recorded, %{reason: exception, module: module})
+    Metrics.record_check_failure(state.metrics, exception.__struct__, module, failure)
     %{tally | check_failures: tally.check_failures + 1, seen: tally.seen + 1}
   end
 
@@ -445,6 +452,8 @@ defmodule PropertyDamage.LoadTest.Worker do
         other -> %RuntimeError{message: inspect(other)}
       end
 
+    module = session_key(module)
+
     record = %{
       reason: exception,
       command_index: tally.commands_run - 1,
@@ -456,6 +465,12 @@ defmodule PropertyDamage.LoadTest.Worker do
     Metrics.record_check_failure(state.metrics, exception.__struct__, module, record)
     %{tally | check_failures: tally.check_failures + 1}
   end
+
+  # A check failure of the whole session (a startup check, an `@eventually`
+  # check found at the end) names no command or event module; the metrics
+  # record it under this key.
+  defp session_key(nil), do: :session
+  defp session_key(module), do: module
 
   defp split_reason({exception, stacktrace}) when is_exception(exception),
     do: {exception, stacktrace}

@@ -309,10 +309,10 @@ defmodule PropertyDamage.Executor.Step do
       # non-success arms stay here so a {:retry, _} from a sync command is
       # still rejected.
       {:ok, events} when is_list(events) ->
-        fold_command_events(events, event_ctx, ctx)
+        fold_struct_events(result, events, event_ctx, ctx, state_with_pollers)
 
       {:settled, events} ->
-        fold_command_events(events, event_ctx, ctx)
+        fold_struct_events(result, events, event_ctx, ctx, state_with_pollers)
 
       {:timeout, last_reason} ->
         {:error, Failure.settle_timeout(last_reason), state_with_pollers, {:error, result}}
@@ -342,6 +342,17 @@ defmodule PropertyDamage.Executor.Step do
       # crashing the run with a CaseClauseError.
       other ->
         {:error, Failure.malformed_adapter_return(other), state_with_pollers, {:error, other}}
+    end
+  end
+
+  # The checks read each event's module, so with checks on every event is a
+  # struct. A list holding anything else is a malformed adapter return. With
+  # checks off nothing reads the module, and a plain-map event folds as before.
+  defp fold_struct_events(result, events, event_ctx, ctx, state_with_pollers) do
+    if event_ctx.state.check_mode == :disabled or Enum.all?(events, &is_struct/1) do
+      fold_command_events(events, event_ctx, ctx)
+    else
+      {:error, Failure.malformed_adapter_return(result), state_with_pollers, {:error, result}}
     end
   end
 

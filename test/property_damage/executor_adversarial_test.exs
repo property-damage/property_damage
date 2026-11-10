@@ -112,6 +112,11 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def execute(%Cmd{}, %{behaviour: :malformed_atom}, _runtime), do: :garbage
     def execute(%Cmd{}, %{behaviour: :malformed_ok}, _runtime), do: {:ok, :not_a_list}
     def execute(%Cmd{}, %{behaviour: :sync_retry}, _runtime), do: {:retry, :not_ready}
+    def execute(%Cmd{}, %{behaviour: :plain_map_event}, _runtime), do: {:ok, [%{id: 1}]}
+
+    def execute(%Cmd{}, %{behaviour: :mixed_events}, _runtime),
+      do: {:ok, [%Ev{tag: :x}, :not_an_event]}
+
     def execute(%Cmd{}, %{behaviour: :error}, _runtime), do: {:error, :nope}
     def execute(%Cmd{}, _ctx, _runtime), do: {:ok, [%Ev{tag: :x}]}
 
@@ -172,6 +177,30 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     assert %Failure{
              type: %Failure.Execution{kind: :malformed_adapter_return, detail: {:ok, :not_a_list}}
+           } = result.failure_reason
+  end
+
+  test "an {:ok, [plain map]} return is reported as malformed, not a crash on the event's struct" do
+    assert {:ok, result} = run(NoopModel, :plain_map_event)
+    assert result.failed_at_index == 0
+
+    assert %Failure{
+             type: %Failure.Execution{
+               kind: :malformed_adapter_return,
+               detail: {:ok, [%{id: 1}]}
+             }
+           } = result.failure_reason
+  end
+
+  test "an {:ok, events} return with one non-struct event is reported as malformed" do
+    assert {:ok, result} = run(NoopModel, :mixed_events)
+    assert result.failed_at_index == 0
+
+    assert %Failure{
+             type: %Failure.Execution{
+               kind: :malformed_adapter_return,
+               detail: {:ok, [%Ev{tag: :x}, :not_an_event]}
+             }
            } = result.failure_reason
   end
 

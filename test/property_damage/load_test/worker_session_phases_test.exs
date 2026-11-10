@@ -75,7 +75,11 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     @eventually after: Acted, timeout: {1, :seconds}, interval: {5, :milliseconds}
     def acts_settle(_state, %Acted{}) do
       Agent.update(PropertyDamage.LoadTest.WorkerSessionPhasesTest.Log, &[:eventually | &1])
-      fn state -> state.acts >= 1 end
+
+      unsettled? =
+        :never_settle in Agent.get(PropertyDamage.LoadTest.WorkerSessionPhasesTest.Log, & &1)
+
+      fn state -> not unsettled? and state.acts >= 1 end
     end
   end
 
@@ -168,6 +172,16 @@ defmodule PropertyDamage.LoadTest.WorkerSessionPhasesTest do
     assert Act in rest
     assert :eventually in rest
     assert List.last(log) == Cleanup
+  end
+
+  test "a worker counts an eventual check that never settles as a check failure" do
+    Agent.update(Log, &[:never_settle | &1])
+
+    {result, log} = run_session()
+
+    assert :eventually in log
+    assert result.check_failures >= 1
+    assert result.errors == 0
   end
 
   test "a worker counts each failed check in :record mode and the first in :halt mode" do

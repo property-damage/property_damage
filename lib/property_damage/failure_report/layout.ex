@@ -103,11 +103,20 @@ defmodule PropertyDamage.FailureReport.Layout do
   defp assemble(report, opts, guard?) do
     listing = listing_data(report, opts)
     %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
-    context = Context.items(report, focus, context_targets(report))
+
+    {context, context_errors} =
+      case guard_section(
+             "context",
+             fn -> Context.items(report, focus, context_targets(report)) end,
+             guard?
+           ) do
+        {:ok, items} -> {items, []}
+        {:error, error} -> {[], [error]}
+      end
 
     guarded = [
       {"failure", fn -> failure_section(report, focus, filter, unknown) end},
-      {"context", fn -> context_section(context) end},
+      {"context", fn -> context_errors == [] && context_section(context) end},
       {"setup", fn -> setup && setup.section end},
       {"listing", fn -> listing.section end},
       {"projections", fn -> projections_section(report, variant, focus) end},
@@ -122,8 +131,8 @@ defmodule PropertyDamage.FailureReport.Layout do
         end
       end)
 
-    sections = sections |> Enum.reverse() |> Enum.reject(&is_nil/1)
-    errors = Enum.reverse(errors)
+    sections = sections |> Enum.reverse() |> Enum.reject(&(&1 in [nil, false]))
+    errors = Enum.sort_by(context_errors ++ Enum.reverse(errors), &error_rank/1)
 
     layout = %__MODULE__{
       banner: banner(report),
@@ -134,6 +143,11 @@ defmodule PropertyDamage.FailureReport.Layout do
 
     {layout, listing, context, errors}
   end
+
+  # The order the sections are built in, which orders the render errors.
+  @section_order ~w(failure context setup listing projections reproduction)
+
+  defp error_rank(%{section: name}), do: Enum.find_index(@section_order, &(&1 == name))
 
   defp guard_section(_name, build, false), do: {:ok, build.()}
 
