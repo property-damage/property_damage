@@ -657,6 +657,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: `FailureReport.run_number/1` counts from 1.** It returns the
+  campaign run the failure happened in as the one-line summary prints it
+  (`run=1` for the first run) and as `only: [run: n]` takes it. The trace
+  still stores the 0-based run, and the JSON document's `location.run_number`
+  still carries that stored value.
 - **Breaking: the exported ExUnit test is a regression guard by default.**
   `expect_fixed:` of `PropertyDamage.Export.to_exunit/2` (and of the
   `regression: [generate_tests: dir]` handler) now defaults to `true`: the

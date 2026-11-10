@@ -57,7 +57,7 @@ defmodule PropertyDamage.FailureReportOverlayTest do
       values = values(F.failing_report())
 
       assert values.seed == 12_345
-      assert values.run_number == 0
+      assert values.run_number == 1
       assert values.model == F.Model
       assert %DateTime{} = values.timestamp
       assert values.command_labels == Map.new(0..49, &{&1, "send step"})

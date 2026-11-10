@@ -279,7 +279,7 @@ defmodule PropertyDamage.Reproduction do
   defp with_replay(ctx, report) do
     report = %{
       report
-      | run: FailureReport.run_number(report) && FailureReport.run_number(report) + 1
+      | run: FailureReport.run_number(report)
     }
 
     case ReplayArtifact.build(report) do
@@ -433,7 +433,7 @@ defmodule PropertyDamage.Reproduction do
     found = %{
       sequence: sequence,
       run_seed: FailureReport.seed(report),
-      run_number: FailureReport.run_number(report),
+      run_number: report.trace && report.trace.run_number,
       failure: %{
         report_kind: report.report_kind,
         variant: report.variant || ReportBuilder.variant_of(ctx.target),

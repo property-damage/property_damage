@@ -115,7 +115,7 @@ defmodule PropertyDamage.Test.SeedCharacterization do
   defp render_result({:error, %FailureReport{} = report}, model, seed, max, _answered) do
     %{
       outcome: :fail,
-      plans: plans(model, seed, FailureReport.run_number(report) + 1, max),
+      plans: plans(model, seed, FailureReport.run_number(report), max),
       events:
         report
         |> FailureReport.event_log()

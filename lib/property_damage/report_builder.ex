@@ -198,7 +198,7 @@ defmodule PropertyDamage.ReportBuilder do
 
     FailureReport.new(
       seed: FailureReport.seed(report),
-      run_number: FailureReport.run_number(report),
+      run_number: report.trace && report.trace.run_number,
       original_sequence: report.original_sequence,
       shrunk_sequence: shrink_result.sequence,
       failed_at_index: failure.root,

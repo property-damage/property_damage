@@ -792,12 +792,16 @@ defmodule PropertyDamage.FailureReport do
   def seed(%__MODULE__{trace: nil}), do: nil
 
   @doc """
-  The zero-based number of the run that failed. Accessor over the embedded
-  `RunTrace`; `nil` for a report with no trace.
+  The campaign run that failed, counting from 1, as the one-line summary
+  prints it and `only: [run: n]` takes it. The embedded `RunTrace` stores the
+  run 0-based; `nil` for a report with no trace.
   """
-  @spec run_number(t()) :: non_neg_integer() | nil
-  def run_number(%__MODULE__{trace: %RunTrace{run_number: run_number}}), do: run_number
-  def run_number(%__MODULE__{trace: nil}), do: nil
+  @spec run_number(t()) :: pos_integer() | nil
+  def run_number(%__MODULE__{trace: %RunTrace{run_number: run_number}})
+      when is_integer(run_number),
+      do: run_number + 1
+
+  def run_number(%__MODULE__{}), do: nil
 
   @doc """
   The model module the run exercised. Accessor over the embedded `RunTrace`;

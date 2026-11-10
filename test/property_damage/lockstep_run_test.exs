@@ -272,7 +272,7 @@ defmodule PropertyDamage.LockstepRunTest do
                Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
 
       assert FailureReport.seed(report) == @seed
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
       assert divergence.root == 0
       assert report.failed_at_index == 0
       assert report.variant == %{index: 1, name: "b"}
@@ -336,7 +336,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert report.report_kind == :diverged
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
       assert report.failed_at_index == 0
       # Run 0 stepped root 0 and stopped; the second 0 is the failure's
       # reproduction, a re-execution of run 0. No later run started.
@@ -375,7 +375,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "b"}
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
       assert report.failed_at_index == 0
 
       assert %Failure{
@@ -401,7 +401,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}} = report
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
 
       assert report.failed_at_index == 1
 
@@ -440,7 +440,7 @@ defmodule PropertyDamage.LockstepRunTest do
       report = failure!([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
 
       assert %{report_kind: :check_failed, variant: %{index: 1, name: "b"}} = report
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
 
       assert report.failed_at_index == nil
 
@@ -462,7 +462,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert %{report_kind: :execution_failed, variant: %{index: 1}} = report
-      assert FailureReport.run_number(report) == 2
+      assert FailureReport.run_number(report) == 3
 
       # Runs 0 to 2, then the reproduction of run 2 (which does not raise, so
       # the report keeps the original run). No run after the failing one was
@@ -529,7 +529,7 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert report.report_kind == :execution_failed
       assert report.variant == %{index: 1, name: "broken"}
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
     end
   end
 
@@ -599,7 +599,7 @@ defmodule PropertyDamage.LockstepRunTest do
         )
 
       assert %{report_kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
-      assert FailureReport.run_number(report) == 0
+      assert FailureReport.run_number(report) == 1
 
       assert report.failed_at_index == nil
       assert Failure.detail(FailureReport.failure_reason(report)) == :no_backend

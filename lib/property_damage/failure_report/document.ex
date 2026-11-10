@@ -201,7 +201,8 @@ defmodule PropertyDamage.FailureReport.Document do
       "report_kind" => report.report_kind && to_string(report.report_kind),
       "model" => FailureReport.model(report) && inspect(FailureReport.model(report)),
       "location" => %{
-        "run_number" => FailureReport.run_number(report),
+        # The stored, 0-based run; `FailureReport.run_number/1` counts from 1.
+        "run_number" => report.trace && report.trace.run_number,
         "failed_at_index" => report.failed_at_index,
         "seed" => FailureReport.seed(report)
       },

@@ -62,7 +62,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         _ -> "[FAIL]"
       end
 
-    "#{origin_tag} #{type} | run=#{FailureReport.run_number(report) + 1} cmd=#{FailureReport.failure_index(report)} " <>
+    "#{origin_tag} #{type} | run=#{FailureReport.run_number(report)} cmd=#{FailureReport.failure_index(report)} " <>
       "shrunk=#{cmd_count} seed=#{FailureReport.seed(report)}"
   end
 end

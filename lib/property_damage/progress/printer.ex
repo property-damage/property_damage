@@ -114,7 +114,7 @@ defmodule PropertyDamage.Progress.Printer do
       IO.puts("  Target:       [#{variant.index}] #{variant.name}")
     end
 
-    IO.puts("  Run:          #{FailureReport.run_number(report) + 1}")
+    IO.puts("  Run:          #{FailureReport.run_number(report)}")
     IO.puts("  Seed:         #{FailureReport.seed(report)}")
 
     IO.puts(
