@@ -30,7 +30,7 @@ defmodule PropertyDamage.Test.ShrinkOracle do
     defstruct [:account]
 
     @impl true
-    def generator(_overrides \\ %{}), do: StreamData.fixed_map(%{account: :alice})
+    def generator(_overrides \\ %{}), do: StreamData.fixed_map(account: :alice)
   end
 
   defmodule Deposit do

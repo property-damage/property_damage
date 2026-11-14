@@ -9,7 +9,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
     use PropertyDamage.Command
     defstruct [:n]
     @impl true
-    def generator(_overrides), do: StreamData.fixed_map(%{n: StreamData.integer(0..10)})
+    def generator(_overrides), do: StreamData.fixed_map(n: StreamData.integer(0..10))
   end
 
   defmodule State do
