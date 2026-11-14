@@ -235,7 +235,7 @@ defmodule PropertyDamage.RunComparisonTest do
     @behaviour PropertyDamage.Command
     defstruct [:n]
     @impl true
-    def generator(_), do: StreamData.fixed_map(%{n: StreamData.integer(1..5)})
+    def generator(_), do: StreamData.fixed_map(n: StreamData.integer(1..5))
   end
 
   defmodule RealProj do
