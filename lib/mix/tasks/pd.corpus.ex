@@ -26,7 +26,8 @@ defmodule Mix.Tasks.Pd.Corpus do
   ## Options
 
       --dir PATH        Corpus directory. Default `corpus`. Shared modules load
-                        from `PATH/support/*.exs`; every `PATH/*.exs` is an entry.
+                        from `PATH/support/*.exs`; every `PATH/*.exs` is an entry,
+                        except files named `baseline_*`, which are saved tables.
       --only NAME       Run only the named entry. May be repeated.
       --cap N           Most plans generated per run. Default 200.
       --save PATH       Write the measured table to PATH as an Elixir term file

@@ -5,7 +5,8 @@ defmodule PropertyDamage.Corpus.Loader do
   The shared system and model modules live in `<dir>/support/*.exs`. They load
   first, in name order. Each `<dir>/*.exs` file next to `support/` is one
   entry: it evaluates to a `PropertyDamage.Corpus.Entry`. Entries load in name
-  order.
+  order. A file whose name starts with `baseline_` is a saved table (see
+  `PropertyDamage.Corpus.Baseline`), not an entry, and is skipped.
   """
 
   alias PropertyDamage.Corpus.Entry
@@ -24,11 +25,18 @@ defmodule PropertyDamage.Corpus.Loader do
       |> Enum.sort()
       |> Enum.each(&require_file/1)
 
-      dir |> Path.join("*.exs") |> Path.wildcard() |> Enum.sort() |> read_entries(only)
+      dir
+      |> Path.join("*.exs")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.reject(&saved_table?/1)
+      |> read_entries(only)
     else
       {:error, "Corpus directory #{dir} does not exist"}
     end
   end
+
+  defp saved_table?(path), do: path |> Path.basename() |> String.starts_with?("baseline_")
 
   defp require_file(path), do: Code.require_file(path)
 

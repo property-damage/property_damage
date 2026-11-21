@@ -160,6 +160,29 @@ defmodule Mix.Tasks.Pd.CorpusTest do
       assert output =~ ~r/mini\s+2\/2/
     end
 
+    test "--dir skips saved tables next to the entries", %{entries: entries} do
+      dir = TmpPath.unique("pd_corpus_saved")
+      File.mkdir_p!(Path.join(dir, "support"))
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(dir, "baseline_x.exs"), "%{seeds: [], results: []}\n")
+
+      File.write!(Path.join(dir, "mini.exs"), """
+      %PropertyDamage.Corpus.Entry{
+        name: "mini",
+        engine: PropertyDamage.Corpus.Engine.Run,
+        system: Corpus.KeyValue,
+        bug: :rejected_set,
+        model: Corpus.KeyValue.Model,
+        adapter: Corpus.KeyValue.Adapter,
+        minimum: #{inspect(entries["rejected_set"].minimum)},
+        seeds: [1]
+      }
+      """)
+
+      assert {:ok, [%Entry{name: "mini"}]} = Loader.load(dir)
+    end
+
     test "an unknown entry or directory is an error" do
       capture_io(:stderr, fn ->
         assert CorpusTask.exec(["--only", "nope"]) == :error
