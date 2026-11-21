@@ -197,7 +197,8 @@ defmodule PropertyDamage.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib priv mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
+      files: ~w(lib priv mix.exs README.md LICENSE CHANGELOG.md .formatter.exs),
+      exclude_patterns: [~r"^lib/mix/tasks/pd\.corpus"]
     ]
   end
 end
