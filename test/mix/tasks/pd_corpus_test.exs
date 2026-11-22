@@ -61,7 +61,14 @@ defmodule Mix.Tasks.Pd.CorpusTest do
     # offset_refund is not in this list: it finds the bug on 19 of its 20 seeds
     # within the plan cap, and the one miss is a measured result, not a tuned
     # one. The offset_refund test below holds it to at least 19.
-    for name <- ["lost_full_refund", "double_credit", "rejected_set", "fifth_refund", "long_note"] do
+    for name <- [
+          "lost_full_refund",
+          "double_credit",
+          "rejected_set",
+          "fifth_refund",
+          "long_note",
+          "nested_price"
+        ] do
       test "#{name}: found, with the bug fired, on every seed with the bug on; never with it off",
            %{entries: entries} do
         entry = Map.fetch!(entries, unquote(name))
@@ -138,6 +145,50 @@ defmodule Mix.Tasks.Pd.CorpusTest do
       {:ok, id} = Corpus.Scheme.pay(scheme, 1)
       {:ok, 0, stored} = Corpus.Scheme.refund_noted(scheme, id, 1, String.duplicate("a", 40))
       assert String.length(stored) == 40
+    end
+  end
+
+  describe "nested_price" do
+    test "an odd amount in the alternate currency converts one unit too high, only with the bug on" do
+      price = %{amount: 1, currency: :alt}
+
+      for {bug, expected} <- [
+            {:nested_price, {{:error, :exceeds_balance}, 1}},
+            {nil, {{:ok, 0}, 0}}
+          ] do
+        log = start_log()
+        {:ok, scheme} = Corpus.Pricing.start(bug: bug, fire_log: log)
+        {:ok, id} = Corpus.Pricing.pay(scheme, 1)
+        assert {Corpus.Pricing.refund(scheme, id, price), FireLog.total(log)} == expected
+      end
+
+      # An even amount converts the same either way, so the bug stays quiet.
+      log = start_log()
+      {:ok, scheme} = Corpus.Pricing.start(bug: :nested_price, fire_log: log)
+      {:ok, id} = Corpus.Pricing.pay(scheme, 3)
+      assert Corpus.Pricing.refund(scheme, id, %{amount: 2, currency: :alt}) == {:ok, 0}
+      assert FireLog.total(log) == 0
+    end
+
+    test "control: the same entry with another bug switch neither finds nor fires", %{
+      entries: entries
+    } do
+      entry = %{entries["nested_price"] | bug: :some_other_switch}
+
+      for seed <- 1..5 do
+        run = Engine.Run.run(entry, seed, @plan_cap)
+        refute run.found?
+        refute run.bug_fired?
+      end
+    end
+
+    test "the refund's nested amount stays within the payment's balance" do
+      state = %{payments: %{"p" => %{expected: 5, reported: 5}}}
+      %{price: price} = Corpus.Pricing.Projection.refund_overrides(state)
+
+      for %{amount: amount, currency: currency} <- Enum.take(price, 200) do
+        assert Corpus.Pricing.convert(amount, currency) <= 5
+      end
     end
   end
 
@@ -523,7 +574,7 @@ defmodule Mix.Tasks.Pd.CorpusTest do
   end
 
   describe "skipped entries" do
-    @skipped ~w(racing_refunds unset_field_in_clause unset_assign_acknowledged
+    @skipped ~w(racing_refunds split_refund unset_field_in_clause unset_assign_acknowledged
                 layer_matches_no_spec command_never_eligible)
 
     test "each prints as a skipped row and is selectable with --only" do
@@ -547,7 +598,7 @@ defmodule Mix.Tasks.Pd.CorpusTest do
     test "carry the fields the harness needs", %{entries: entries} do
       assert Map.keys(entries) |> Enum.sort() ==
                Enum.sort(~w(double_credit fifth_refund long_note lost_full_refund offset_refund
-                    rejected_set ledger store) ++ @skipped)
+                    rejected_set ledger store nested_price) ++ @skipped)
 
       for {_name, %Entry{skip: nil} = entry} <- entries do
         assert entry.engine == Engine.Run
@@ -556,7 +607,7 @@ defmodule Mix.Tasks.Pd.CorpusTest do
       end
 
       for name <- ~w(double_credit fifth_refund long_note lost_full_refund offset_refund
-                     rejected_set) do
+                     rejected_set nested_price) do
         assert entries[name].seeds == @seeds
       end
     end
