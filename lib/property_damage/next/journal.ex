@@ -77,8 +77,11 @@ defmodule PropertyDamage.Next.Journal do
   defp change_key({:put, field, _generator}), do: {:put, field}
   defp change_key({:update, _fun}), do: :update
 
+  # A saved journal names only atoms that exist once its model is loaded, so
+  # decoding refuses to create any: a binary from elsewhere cannot fill the
+  # atom table.
   defp decode(binary) do
-    :erlang.binary_to_term(binary)
+    :erlang.binary_to_term(binary, [:safe])
   rescue
     ArgumentError -> not_a_journal!()
   end
