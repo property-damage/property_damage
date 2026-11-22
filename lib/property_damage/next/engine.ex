@@ -22,10 +22,35 @@ defmodule PropertyDamage.Next.Engine do
   An engine treats the key as an opaque term: it may look the key up in the
   journal and derive a seed from it, nothing else.
 
-  When a `from/2` function returns something other than a PD description,
-  generation passes it wrapped in `PropertyDamage.Next.Engine.Dependent`, so
-  an engine knows the value depends on another field. An engine that can
-  fit such a value unwraps it; PD's own engine refuses it.
+  ## Dependent generators
+
+  When a `from/2` function or a dependent assign
+  (`PropertyDamage.Next.StepSpec.assign_from_command/3`) returns a generator
+  that is not a PD description (a plain or delegated StreamData generator),
+  generation passes it wrapped in `PropertyDamage.Next.Engine.Dependent`,
+  so an engine knows the value depends on another value of the step and
+  where it was returned. The engine draws the wrapped generator.
+
+  An engine module may also export `fits_dependent?/1`. It is not a
+  callback of this behaviour: generation loads the engine module and
+  checks whether it exports the function, and an engine without it is
+  treated as answering `false`. Generation calls it with the bare
+  generator the function returned. An engine answering `true` says it
+  can fit such a value when its source changes, and generation draws the
+  value through it with no warning, no raise and no kept site.
+
+  For an engine that does not fit the value, PD's own engine included,
+  generation looks at the `dependent_stream_data:` option of
+  `PropertyDamage.Next.plan/3`, `PropertyDamage.Next.run/1` and
+  `PropertyDamage.Next.replay/2`:
+
+    * `:warn` (the default) - the value is drawn; the first draw at each
+      site in one call logs a warning that names the site and PD's
+      descriptions `integer/1`, `member_of/1` and `boolean/0`, and the site
+      is put on the kept list (`kept` of the plan, the failure and the
+      result of `run/1` and `replay/2`);
+    * `:raise` - the first draw at such a site raises
+      `PropertyDamage.Next.DependentStreamDataError`.
   """
 
   alias PropertyDamage.Next.Journal

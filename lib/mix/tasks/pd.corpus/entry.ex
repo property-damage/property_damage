@@ -30,6 +30,10 @@ defmodule PropertyDamage.Corpus.Entry do
     * `plan_cap` - when set, a positive integer that replaces the `--cap`
       option for this entry. A regression entry uses it to pin the budget its
       seed set was recorded under.
+    * `run_opts` - a keyword list of extra options for the engine's run.
+      `PropertyDamage.Corpus.Engine.Next` passes it to
+      `PropertyDamage.Next.run/1`; `PropertyDamage.Corpus.Engine.Run`
+      ignores it. Default `[]`.
     * `skip` - a reason string. A skipped entry is never run: the table shows
       `skipped: <reason>` for it and the saved table records the reason. It
       needs no other field than `name`.
@@ -49,6 +53,7 @@ defmodule PropertyDamage.Corpus.Entry do
           seeds: [integer()],
           max_commands: pos_integer(),
           plan_cap: pos_integer() | nil,
+          run_opts: keyword(),
           skip: String.t() | nil
         }
 
@@ -65,6 +70,7 @@ defmodule PropertyDamage.Corpus.Entry do
     :skip,
     compare: :ignore_ids,
     seeds: Enum.to_list(1..20),
-    max_commands: 20
+    max_commands: 20,
+    run_opts: []
   ]
 end

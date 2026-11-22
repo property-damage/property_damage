@@ -23,6 +23,11 @@ defmodule Mix.Tasks.Pd.Corpus do
   `skipped: reason` and a saved table records `%{entry: name, rows: [], skipped:
   reason}`. See `PropertyDamage.Corpus.Entry`.
 
+  After the table, the task lists each entry's kept sites: the places where
+  the engine drew a value it cannot fit when the value it depends on
+  changes (see `PropertyDamage.Next.Engine`). An entry with none is not
+  listed, and a saved table does not record them.
+
   A `found` column counts the seeds that found the bug within the plan cap.
   A seed that does not find it is counted there, never left out.
 
@@ -116,9 +121,16 @@ defmodule Mix.Tasks.Pd.Corpus do
     do: %{entry: entry.name, rows: [], skipped: reason}
 
   defp result(%{minimum: nil} = entry, cap),
-    do: %{entry: entry.name, rows: Measure.entry(entry, cap), regression: true}
+    do: entry |> measured(cap) |> Map.put(:regression, true)
 
-  defp result(entry, cap), do: %{entry: entry.name, rows: Measure.entry(entry, cap)}
+  defp result(entry, cap), do: measured(entry, cap)
+
+  # The entry's rows, with the kept sites of every row moved to the result.
+  defp measured(entry, cap) do
+    rows = Measure.entry(entry, cap)
+    kept = rows |> Enum.flat_map(&Map.get(&1, :kept, [])) |> Enum.uniq() |> Enum.sort()
+    %{entry: entry.name, rows: Enum.map(rows, &Map.delete(&1, :kept)), kept: kept}
+  end
 
   defp load_baseline(nil), do: {:ok, nil}
   defp load_baseline(path), do: Baseline.load(path)
@@ -133,6 +145,8 @@ defmodule Mix.Tasks.Pd.Corpus do
     )
 
     Mix.shell().info(Table.render(results))
+    print_kept(results)
+    results = Enum.map(results, &Map.delete(&1, :kept))
     if baseline, do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
@@ -154,6 +168,21 @@ defmodule Mix.Tasks.Pd.Corpus do
         false
     end
   end
+
+  defp print_kept(results) do
+    lines =
+      for %{entry: name, kept: [_ | _] = kept} <- results,
+          site <- kept,
+          do: "  #{name}: #{describe_site(site)}"
+
+    if lines != [], do: Mix.shell().info(Enum.join(["\nkept sites:" | lines], "\n"))
+  end
+
+  defp describe_site(%{site: :assign, command: module, key: key, spec: id}),
+    do: "#{inspect(module)}, assign #{inspect(key)} of spec #{id}"
+
+  defp describe_site(%{command: module, key: key}),
+    do: "#{inspect(module)}, field #{inspect(key)}"
 
   defp print_diff(baseline, results, cap) do
     sha = baseline.commit.sha || "unknown commit"

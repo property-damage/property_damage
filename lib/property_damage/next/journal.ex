@@ -25,7 +25,9 @@ defmodule PropertyDamage.Next.Journal do
   Format version 2 records a StreamData value with its path in the
   generator's shrink tree, `{:stream_data, value, path}`, and may hold an
   empty pick `{:empty}` for a slot that yields no step. Version 1 recorded
-  a StreamData value without its path, and is refused.
+  a StreamData value without its path, and is refused. A member entry may
+  hold a mint marker that the model read back from its predicted state,
+  with the stamp generation gave it.
 
   A journal can be loaded in a VM other than the one that saved it, such as
   a later `mix test` or `mix run`. The binary names atoms: PD's own module
@@ -38,6 +40,7 @@ defmodule PropertyDamage.Next.Journal do
   VM.
   """
 
+  alias PropertyDamage.Mint
   alias PropertyDamage.Next.Engine.Dependent
   alias PropertyDamage.Next.{Gen, Journal.Atoms, Model, Placeholder, StepSpec}
 
@@ -53,7 +56,7 @@ defmodule PropertyDamage.Next.Journal do
 
   @format :property_damage_next_journal
   @version 2
-  @own_modules [Gen, Dependent, Placeholder, Range]
+  @own_modules [Gen, Dependent, Placeholder, Mint, Range]
   @entry_atoms [:pick, :command, :assigns, :integer, :member, :stream_data, :empty]
 
   @doc "Saves `journal` as a binary that `from_binary/1` loads."

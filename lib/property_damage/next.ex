@@ -10,10 +10,13 @@ defmodule PropertyDamage.Next do
   and executes it once.
   """
 
+  require Logger
+
   alias PropertyDamage.Next.Engine.Native
 
   alias PropertyDamage.Next.{
     Checks,
+    DependentStreamDataError,
     Execution,
     Failure,
     Generation,
@@ -24,7 +27,7 @@ defmodule PropertyDamage.Next do
     Shrinker
   }
 
-  @plan_opts [max_steps: 20, engine: Native]
+  @plan_opts [max_steps: 20, engine: Native, dependent_stream_data: :warn]
   @run_opts [
     :model,
     :adapter,
@@ -34,9 +37,17 @@ defmodule PropertyDamage.Next do
     max_plans: 100,
     engine: Native,
     shrink: true,
-    max_shrink_runs: 1000
+    max_shrink_runs: 1000,
+    dependent_stream_data: :warn
   ]
-  @replay_opts [:model, :adapter, config: %{}, max_steps: 20, engine: Native]
+  @replay_opts [
+    :model,
+    :adapter,
+    config: %{},
+    max_steps: 20,
+    engine: Native,
+    dependent_stream_data: :warn
+  ]
 
   @doc """
   Builds the plan of `model` from a seed, or rebuilds it from a journal.
@@ -57,11 +68,20 @@ defmodule PropertyDamage.Next do
       `ArgumentError` is raised
     * `:engine` - the module that draws each value (default
       `PropertyDamage.Next.Engine.Native`)
+    * `:dependent_stream_data` - `:warn` (default) or `:raise`: what to do
+      when a `from/2` function or a dependent assign returns a StreamData
+      generator the engine cannot fit. `:warn` draws it, logs one warning
+      per site and lists the site in the plan's `kept`; `:raise` raises
+      `PropertyDamage.Next.DependentStreamDataError` at its first draw. See
+      `PropertyDamage.Next.Engine`.
   """
   @spec plan(module(), integer() | Journal.t(), keyword()) :: Plan.t()
   def plan(model, seed_or_journal, opts \\ []) when is_atom(model) do
     plan_opts = opts |> Keyword.validate!(@plan_opts) |> slots!(seed_or_journal, opts)
-    build(model, Model.specs!(model), seed_or_journal, plan_opts)
+    mode!(plan_opts[:dependent_stream_data])
+    plan = build(model, Model.specs!(model), seed_or_journal, plan_opts)
+    warn(plan.kept, [])
+    plan
   end
 
   @doc """
@@ -75,10 +95,13 @@ defmodule PropertyDamage.Next do
   each step the model's check projections fold the events the adapter
   returned, and their checks run.
 
-  Returns `{:ok, %{plans: n}}` when every plan passed, or
+  Returns `{:ok, %{plans: n, kept: sites}}` when every plan passed, or
   `{:error, %PropertyDamage.Next.Failure{}}` for the first plan that
   failed, shrunk unless `shrink: false`; its journal replays the final
-  plan with `replay/2`.
+  plan with `replay/2`. `kept` lists every site, in every plan the run
+  built, where PD's engine drew a dependent StreamData generator it cannot
+  fit (see `PropertyDamage.Next.Engine`); a warning names each site once
+  per run.
 
   The shrink edits the failing plan's journal and rebuilds each candidate
   plan from the edited journal by generation, so every candidate is a plan
@@ -104,12 +127,15 @@ defmodule PropertyDamage.Next do
     * `:shrink` - whether to shrink the failing plan (default `true`)
     * `:max_shrink_runs` - the most plans executed while shrinking, the
       final execution of the shrunk plan included (default 1000)
+    * `:dependent_stream_data` - `:warn` (default) or `:raise`, as for
+      `plan/3`
 
   Raises `ArgumentError` when the model's check projections declare a check
   form this engine does not run yet; it runs `@check every: N` and
   `@check every: CommandModule`.
   """
-  @spec run(keyword()) :: {:ok, %{plans: pos_integer()}} | {:error, Failure.t()}
+  @spec run(keyword()) ::
+          {:ok, %{plans: pos_integer(), kept: [map()]}} | {:error, Failure.t()}
   def run(opts) do
     opts = Keyword.validate!(opts, @run_opts)
     model = module!(opts, :model)
@@ -119,34 +145,71 @@ defmodule PropertyDamage.Next do
     max_plans = max_plans!(opts[:max_plans])
     shrink = shrink!(opts[:shrink])
     max_shrink_runs = max_shrink_runs!(opts[:max_shrink_runs])
+    mode!(opts[:dependent_stream_data])
     specs = Model.specs!(model)
     projections = Checks.load!(model)
     plan_opts = Keyword.take(opts, Keyword.keys(@plan_opts))
     execute = &Execution.run(&1, adapter, opts[:config], projections)
 
-    Enum.reduce_while(1..max_plans, nil, fn number, nil ->
+    Enum.reduce_while(1..max_plans, [], fn number, warned ->
       {plan, drawn} = trace(model, specs, plan_seed(seed, number), plan_opts)
+      warned = warn(plan.kept, warned)
 
       case execute.(plan) do
         :ok ->
-          {:cont, nil}
+          {:cont, warned}
 
         {:error, step, reason} ->
-          {:halt, {number, %{plan: plan, drawn: drawn, step: step, reason: reason}}}
+          {:halt, {number, %{plan: plan, drawn: drawn, step: step, reason: reason}, warned}}
       end
     end)
     |> case do
-      nil ->
-        {:ok, %{plans: max_plans}}
+      warned when is_list(warned) ->
+        {:ok, %{plans: max_plans, kept: warned}}
 
-      {number, found} when shrink ->
+      {number, found, warned} when shrink ->
         build = &trace(model, specs, &1, plan_opts)
-        {final, runs} = Shrinker.shrink(found, build, execute, max_shrink_runs)
-        {:error, failure(final, number, found, runs)}
+        {final, runs, warned} = shrink(found, build, execute, max_shrink_runs, warned)
+        {:error, %{failure(final, number, found, runs) | kept: warned}}
 
-      {number, found} ->
-        {:error, failure(found, number, found, 0)}
+      {number, found, warned} ->
+        {:error, %{failure(found, number, found, 0) | kept: warned}}
     end
+  end
+
+  # Shrinks `found`, warning about each kept site of a candidate plan that
+  # no earlier plan of the run named. The shrinker calls `build` once per
+  # candidate, so the sites warned about so far live in the process
+  # dictionary for the length of the shrink.
+  defp shrink(found, build, execute, max_shrink_runs, warned) do
+    slot = {__MODULE__, :warned, make_ref()}
+    Process.put(slot, warned)
+
+    build = fn journal ->
+      {plan, drawn} = build.(journal)
+      Process.put(slot, warn(plan.kept, Process.get(slot)))
+      {plan, drawn}
+    end
+
+    try do
+      {final, runs} = Shrinker.shrink(found, build, execute, max_shrink_runs)
+      {final, runs, Process.get(slot)}
+    after
+      Process.delete(slot)
+    end
+  end
+
+  # Logs one warning for each site of `kept` not in `warned`; returns the
+  # sites warned about, in the order first seen.
+  defp warn(kept, warned) do
+    Enum.reduce(kept, warned, fn site, warned ->
+      if site in warned do
+        warned
+      else
+        Logger.warning(DependentStreamDataError.warning(site))
+        warned ++ [site]
+      end
+    end)
   end
 
   @doc """
@@ -162,14 +225,16 @@ defmodule PropertyDamage.Next do
   failure gives back the failing plan. A journal recorded on a different
   spec list raises `PropertyDamage.Next.ModelChangedError` before the
   adapter is called. Returns `{:ok, %{plans: 1}}` or
-  `{:error, %PropertyDamage.Next.Failure{}}` with `plan_number` 1.
+  `{:error, %PropertyDamage.Next.Failure{}}` with `plan_number` 1. `kept`
+  in either lists the plan's kept sites, as for `run/1`.
 
   Options are those of `run/1` without `:seed` and `:max_plans`. The
   journal records the number of slots, so `:max_steps` is not needed; if
   given, it must equal the journal's number of slots, or `ArgumentError`
   is raised.
   """
-  @spec replay(Journal.t() | binary(), keyword()) :: {:ok, %{plans: 1}} | {:error, Failure.t()}
+  @spec replay(Journal.t() | binary(), keyword()) ::
+          {:ok, %{plans: 1, kept: [map()]}} | {:error, Failure.t()}
   def replay(binary, opts) when is_binary(binary) do
     model = opts |> Keyword.validate!(@replay_opts) |> module!(:model)
     binary |> Journal.from_binary(model: model) |> replay(opts)
@@ -183,16 +248,18 @@ defmodule PropertyDamage.Next do
     plan_opts =
       validated |> Keyword.take(Keyword.keys(@plan_opts)) |> slots!(journal, opts)
 
+    mode!(plan_opts[:dependent_stream_data])
     plan = build(model, Model.specs!(model), journal, plan_opts)
+    kept = warn(plan.kept, [])
     projections = Checks.load!(model)
 
     case Execution.run(plan, adapter, validated[:config], projections) do
       :ok ->
-        {:ok, %{plans: 1}}
+        {:ok, %{plans: 1, kept: kept}}
 
       {:error, step, reason} ->
         found = %{plan: plan, step: step, reason: reason}
-        {:error, failure(found, 1, found, 0)}
+        {:error, %{failure(found, 1, found, 0) | kept: kept}}
     end
   end
 
@@ -300,6 +367,13 @@ defmodule PropertyDamage.Next do
 
   defp shrink!(other),
     do: raise(ArgumentError, "the :shrink option is a boolean, got: #{inspect(other)}")
+
+  defp mode!(mode) when mode in [:warn, :raise], do: mode
+
+  defp mode!(other) do
+    raise ArgumentError,
+          "the :dependent_stream_data option is :warn or :raise, got: #{inspect(other)}"
+  end
 
   defp max_shrink_runs!(n) when is_integer(n) and n > 0, do: n
 

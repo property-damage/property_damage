@@ -15,6 +15,10 @@ defmodule PropertyDamage.Next.Failure do
   `original` holds the `plan`, `journal`, `step`, `reason` and `withdrawn`
   of the plan that failed first; without a shrink they equal the final
   ones.
+
+  `kept` lists every site where PD's engine drew a dependent StreamData
+  generator it cannot fit, across every plan the call built, shrink
+  candidates included (see `PropertyDamage.Next.Plan`).
   """
 
   defstruct [
@@ -26,7 +30,8 @@ defmodule PropertyDamage.Next.Failure do
     :reason,
     :original,
     withdrawn: [],
-    shrink_runs: 0
+    shrink_runs: 0,
+    kept: []
   ]
 
   @type reason ::
@@ -41,6 +46,7 @@ defmodule PropertyDamage.Next.Failure do
           step: term(),
           reason: reason(),
           shrink_runs: non_neg_integer(),
+          kept: [PropertyDamage.Next.Engine.Dependent.site()],
           original: %{
             plan: PropertyDamage.Next.Plan.t(),
             journal: PropertyDamage.Next.Journal.t(),

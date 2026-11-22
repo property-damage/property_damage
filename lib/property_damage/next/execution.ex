@@ -8,10 +8,12 @@ defmodule PropertyDamage.Next.Execution do
   # concrete. A placeholder becomes the value the system minted: the field at
   # the placeholder's path in the real event at its index, among the events
   # its step returned. A mint marker becomes a value derived from a nonce
-  # drawn once per execution and from where the marker sits in the step, so
-  # every execution, a replay of the same journal included, sends values no
-  # earlier execution sent. The adapter receives neither kind of marker, nor
-  # a step, a slot or a journal key.
+  # drawn once per execution and from the marker's stamp, the step and
+  # field generation drew it for, so every step that holds one marker sends
+  # one value, and every execution, a replay of the same journal included,
+  # sends values no earlier execution sent. A marker without a stamp is
+  # given one from where it sits in the step. The adapter receives neither
+  # kind of marker, nor a step, a slot or a journal key.
   #
   # The execution stops at the first step that fails: the adapter answers
   # `{:error, reason}`, raises, exits or throws, a check fails, or a value
@@ -132,8 +134,10 @@ defmodule PropertyDamage.Next.Execution do
   defp concrete(%Placeholder{} = placeholder, _key, _path, run),
     do: resolve(placeholder, run.events)
 
-  defp concrete(%Mint{} = marker, key, path, run),
+  defp concrete(%Mint{position: nil} = marker, key, path, run),
     do: marker |> Mint.reify(key, Enum.reverse(path)) |> Mint.resolve(run.nonce, 0)
+
+  defp concrete(%Mint{} = marker, _key, _path, run), do: Mint.resolve(marker, run.nonce, 0)
 
   defp concrete(%_{} = struct, key, path, run) do
     struct

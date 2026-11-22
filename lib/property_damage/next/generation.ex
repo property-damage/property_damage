@@ -17,12 +17,23 @@ defmodule PropertyDamage.Next.Generation do
   # Keys: the step is `{lane, slot}`, with lane 0 for a one-lane plan and
   # slots counted from 1. A draw is `{step, :pick}`,
   # `{step, :command, field}` or `{step, :assigns, key}`.
+  #
+  # A generator that a from/2 function or a dependent assign returns, when
+  # it is not a PD description, reaches the engine wrapped with its site.
+  # Unless the engine says it fits such a value, the site goes on the plan's
+  # kept list, or, in raise mode, generation raises at its first draw.
+  #
+  # A mint marker is stamped at its first draw with the step and the
+  # location of its key, and a stamped marker keeps its stamp: a marker the
+  # model reads back from its predicted state names the step that drew it,
+  # so execution gives it the same value there.
 
   alias PropertyDamage.External
   alias PropertyDamage.Mint
   alias PropertyDamage.Next.Engine.Dependent
 
   alias PropertyDamage.Next.{
+    DependentStreamDataError,
     From,
     Gen,
     GeneratorCheck,
@@ -60,7 +71,9 @@ defmodule PropertyDamage.Next.Generation do
       entries: %{},
       steps: [],
       withdrawn: [],
-      drawn: []
+      drawn: [],
+      mode: Keyword.get(opts, :dependent_stream_data, :warn),
+      kept: []
     }
 
     max_steps = Keyword.fetch!(opts, :max_steps)
@@ -69,7 +82,8 @@ defmodule PropertyDamage.Next.Generation do
     plan = %Plan{
       steps: Enum.reverse(acc.steps),
       journal: %{journal | entries: acc.entries, max_steps: max_steps},
-      withdrawn: Enum.reverse(acc.withdrawn)
+      withdrawn: Enum.reverse(acc.withdrawn),
+      kept: Enum.reverse(acc.kept)
     }
 
     {plan, Enum.reverse(acc.drawn)}
@@ -247,10 +261,8 @@ defmodule PropertyDamage.Next.Generation do
     end
   end
 
-  defp draw_field(_module, _field, %Mint{} = marker, _drawn, _key, acc), do: {marker, acc}
-
   defp draw_field(module, field, %From{fields: names, fun: fun}, drawn, key, acc) do
-    generator = names |> inputs(drawn) |> fun.() |> dependent(module, field)
+    generator = names |> inputs(drawn) |> fun.() |> from_result(module, field)
     draw(acc, {key, :command, field}, generator)
   end
 
@@ -260,34 +272,36 @@ defmodule PropertyDamage.Next.Generation do
   defp inputs(name, drawn) when is_atom(name), do: Map.fetch!(drawn, name)
   defp inputs(names, drawn), do: Map.take(drawn, names)
 
-  # What a from/2 function returned, as the engine receives it: a PD
-  # description or a mint as it is, any other generator wrapped so the
-  # engine knows it depends on another field.
-  defp dependent(%From{}, module, field) do
+  # What a from/2 function returned, as the engine receives it (see
+  # `dependent/2`).
+  defp from_result(%From{}, module, field) do
     raise ArgumentError,
           "#{inspect(module)}, field #{inspect(field)}: the from/2 function returned another " <>
             "from/2. Write a chain of dependencies as separate fields."
   end
 
-  defp dependent(%Gen{kind: kind} = description, _module, _field) when kind != :delegated,
-    do: description
-
-  defp dependent(%Mint{} = marker, _module, _field), do: marker
-
-  defp dependent(generator, module, field) do
-    if GeneratorCheck.generator?(generator) do
-      %Dependent{generator: generator, command: module, field: field}
-    else
+  defp from_result(value, module, field) do
+    unless GeneratorCheck.accepted?(value) do
       GeneratorCheck.refuse!(
-        generator,
+        value,
         "#{inspect(module)}, field #{inspect(field)}, the value its from/2 function returned"
       )
     end
+
+    dependent(value, %{site: :field, command: module, key: field, spec: nil})
   end
+
+  # A PD description or a mint as it is; any other generator wrapped with
+  # its site, so the engine knows it depends on another value of the step.
+  defp dependent(%Gen{kind: kind} = description, _site) when kind != :delegated,
+    do: description
+
+  defp dependent(%Mint{} = marker, _site), do: marker
+  defp dependent(generator, site), do: %Dependent{generator: generator, site: site}
 
   # --- Assigns
 
-  defp draw_assigns(%StepSpec{assigns: assigns}, command, key, acc) do
+  defp draw_assigns(%StepSpec{assigns: assigns} = spec, command, key, acc) do
     {from_command, plain} = Enum.split_with(assigns, &match?({_, %FromCommand{}}, &1))
 
     plain = Enum.sort_by(plain, &elem(&1, 0))
@@ -309,18 +323,48 @@ defmodule PropertyDamage.Next.Generation do
         )
       end
 
-      {value, acc} = draw(acc, {key, :assigns, name}, generator)
+      site = %{site: :assign, command: spec.command, key: name, spec: spec.id}
+      {value, acc} = draw(acc, {key, :assigns, name}, dependent(generator, site))
       {Map.put(drawn, name, value), acc}
     end)
   end
 
   # --- Drawing one value
 
+  # A marker drawn under `{step, kind, name}` is stamped with the step and
+  # the path `[kind, name]`, where it sits in the step; a stamped marker,
+  # read back from the predicted state, keeps the stamp it has.
+  defp draw(acc, {step, kind, name}, %Mint{position: nil} = marker),
+    do: {Mint.reify(marker, step, [kind, name]), acc}
+
   defp draw(acc, _key, %Mint{} = marker), do: {marker, acc}
 
-  defp draw(acc, key, generator) do
+  defp draw(acc, key, %Dependent{generator: generator, site: site} = dependent) do
+    cond do
+      fits_dependent?(acc.engine, generator) ->
+        engine_draw(acc, key, dependent)
+
+      acc.mode == :raise ->
+        raise DependentStreamDataError, site: site, generator: generator
+
+      true ->
+        kept = if site in acc.kept, do: acc.kept, else: [site | acc.kept]
+        engine_draw(%{acc | kept: kept}, key, dependent)
+    end
+  end
+
+  defp draw(acc, key, generator), do: engine_draw(acc, key, generator)
+
+  defp engine_draw(acc, key, generator) do
     {value, entry} = acc.engine.draw(acc.journal, key, generator, acc.journal.seed)
     {value, %{put_entry(acc, key, entry) | drawn: [key | acc.drawn]}}
+  end
+
+  # An engine says it can fit a dependent value by exporting
+  # `fits_dependent?/1` and answering true; without it, it cannot.
+  defp fits_dependent?(engine, generator) do
+    Code.ensure_loaded?(engine) and function_exported?(engine, :fits_dependent?, 1) and
+      engine.fits_dependent?(generator) == true
   end
 
   defp put_entry(acc, key, entry), do: %{acc | entries: Map.put(acc.entries, key, entry)}

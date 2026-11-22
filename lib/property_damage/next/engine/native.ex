@@ -25,9 +25,14 @@ defmodule PropertyDamage.Next.Engine.Native do
   changed generator gives a value it can draw. An entry of another kind is
   replaced by a fresh draw from the key's seed.
 
-  A `from/2` function that returns a StreamData generator, plain or
-  delegated, is refused: this engine cannot fit such a value when the field
-  it depends on changes.
+  A generator that a `from/2` function or a dependent assign returned
+  arrives wrapped in `PropertyDamage.Next.Engine.Dependent` when it is not
+  a PD description. This engine draws the wrapped generator as any other
+  StreamData generator, path included, so after its source changes the
+  value follows the stored path on the new generator. It cannot fit that
+  value to the new domain, so it does not export `fits_dependent?/1`, and
+  generation warns about the site or raises (see
+  `PropertyDamage.Next.Engine`).
   """
 
   @behaviour PropertyDamage.Next.Engine
@@ -36,13 +41,8 @@ defmodule PropertyDamage.Next.Engine.Native do
   alias PropertyDamage.Next.{Gen, Journal, Steering}
 
   @impl true
-  def draw(_journal, _key, %Dependent{command: module, field: field, generator: generator}, _seed) do
-    raise ArgumentError,
-          "#{inspect(module)}, field #{inspect(field)}: the from/2 function returned " <>
-            "#{inspect(generator)}, a StreamData generator. PD's engine cannot fit its value " <>
-            "when the field it depends on changes. Return one of PD's descriptions instead: " <>
-            "integer/1, member_of/1 or boolean/0."
-  end
+  def draw(journal, key, %Dependent{generator: generator}, seed),
+    do: draw(journal, key, generator, seed)
 
   def draw(%Journal{entries: entries}, key, generator, seed) do
     key_seed = Journal.key_seed(seed, key)

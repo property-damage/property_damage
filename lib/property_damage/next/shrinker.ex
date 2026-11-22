@@ -297,9 +297,15 @@ defmodule PropertyDamage.Next.Shrinker do
     {plan, drawn} = state.build.(journal)
     {:ok, plan, drawn}
   rescue
+    # Raise mode stops the whole run at a dependent StreamData generator,
+    # in a candidate as in the plan that failed first.
+    exception in PropertyDamage.Next.DependentStreamDataError ->
+      reraise exception, __STACKTRACE__
+
     # An edited journal can give a model a value its own code refuses; such
     # a candidate is dropped, not executed.
-    _exception -> :error
+    _exception ->
+      :error
   end
 
   defp spend(%{runs: runs, limit: limit} = state) when runs >= limit,
