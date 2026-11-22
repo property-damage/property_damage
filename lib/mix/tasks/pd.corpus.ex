@@ -3,7 +3,8 @@ defmodule Mix.Tasks.Pd.Corpus do
   Measures how well an engine finds and shrinks the seeded bugs of a corpus.
 
   A corpus is a directory of small systems, each with one bug behind a switch,
-  a model, and the hand-written smallest failing plan. For every entry the
+  a model, and the hand-written smallest failing plan (an entry may instead be
+  a regression entry or a skipped entry, see below). For every entry the
   task runs 20 seeds with the bug on, and the same seeds with the bug off,
   and prints three numbers per entry:
 
@@ -12,6 +13,15 @@ defmodule Mix.Tasks.Pd.Corpus do
     * shrink runs: runs spent shrinking (mean over the same seeds).
     * reached minimum: seeds whose shrunk plan equals the entry's smallest
       failing plan, out of the seeds run.
+
+  A regression entry sets `minimum: nil`: it has no hand-written smallest plan
+  and records what the engine does on its seed set. It shows `-` in the
+  reached-minimum cell, and the task does not fail when it finds nothing (it
+  still fails on an unexplained failure or a dirty bug-off run). It may set
+  `plan_cap` to pin the plan cap it was recorded under; that replaces `--cap`
+  for the entry. An entry with `skip: "reason"` is not run; the table shows
+  `skipped: reason` and a saved table records `%{entry: name, rows: [], skipped:
+  reason}`. See `PropertyDamage.Corpus.Entry`.
 
   A `found` column counts the seeds that found the bug within the plan cap.
   A seed that does not find it is counted there, never left out.
@@ -39,9 +49,15 @@ defmodule Mix.Tasks.Pd.Corpus do
   The printed table has no timings and no process identifiers: equal seeds
   give equal tables.
 
-  The task exits non-zero when a bug-on run finds nothing on some seed, when a
-  run fails without the seeded bug firing, or when a run with the bug off
-  fails or fires the bug.
+  Without `--baseline`, the task exits non-zero when a bug-on run finds
+  nothing on some seed, when a run fails without the seeded bug firing, or when
+  a run with the bug off fails or fires the bug.
+
+  With `--baseline`, a seed that finds nothing is a measured result, not an
+  error. The task exits non-zero only when a run is not clean (the previous
+  two cases that involve a failure), when a seed row of an entry that ran
+  differs from the saved table, or when an entry that ran is not in the saved
+  table. The reason is printed on stderr. `--save` still writes the table.
   """
 
   use Mix.Task
@@ -87,7 +103,7 @@ defmodule Mix.Tasks.Pd.Corpus do
 
     with {:ok, baseline} <- load_baseline(opts[:baseline]),
          {:ok, entries} <- Loader.load(dir, Keyword.get_values(opts, :only)) do
-      results = Enum.map(entries, &%{entry: &1.name, rows: Measure.entry(&1, cap)})
+      results = Enum.map(entries, &result(&1, cap))
       report(results, entries, cap, baseline, opts[:save])
     else
       {:error, message} ->
@@ -96,12 +112,21 @@ defmodule Mix.Tasks.Pd.Corpus do
     end
   end
 
+  defp result(%{skip: reason} = entry, _cap) when is_binary(reason),
+    do: %{entry: entry.name, rows: [], skipped: reason}
+
+  defp result(%{minimum: nil} = entry, cap),
+    do: %{entry: entry.name, rows: Measure.entry(entry, cap), regression: true}
+
+  defp result(entry, cap), do: %{entry: entry.name, rows: Measure.entry(entry, cap)}
+
   defp load_baseline(nil), do: {:ok, nil}
   defp load_baseline(path), do: Baseline.load(path)
 
   defp report(results, entries, cap, baseline, save_path) do
-    engines = entries |> Enum.map(& &1.engine.name()) |> Enum.uniq()
-    seeds = entries |> Enum.flat_map(& &1.seeds) |> Enum.uniq() |> Enum.sort()
+    run = Enum.reject(entries, &is_binary(&1.skip))
+    engines = run |> Enum.map(& &1.engine.name()) |> Enum.uniq()
+    seeds = run |> Enum.flat_map(& &1.seeds) |> Enum.uniq() |> Enum.sort()
 
     Mix.shell().info(
       "plan cap: #{cap}; seeds: #{inspect(seeds)}; engine: #{Enum.join(engines, ", ")}\n"
@@ -111,7 +136,23 @@ defmodule Mix.Tasks.Pd.Corpus do
     if baseline, do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
-    if Table.sound?(results) and saved?, do: :ok, else: :error
+    if verdict(results, baseline) and saved?, do: :ok, else: :error
+  end
+
+  # With a baseline, the run passes when it is clean and equal to the saved
+  # table; seeds that find nothing are then measured, not errors. Without one,
+  # the run must also find the bug on every seed.
+  defp verdict(results, nil), do: Table.sound?(results)
+
+  defp verdict(results, baseline) do
+    case Table.judge_against(baseline.results, results) do
+      :ok ->
+        true
+
+      {:error, reasons} ->
+        Enum.each(reasons, &Mix.shell().error("baseline check failed: " <> &1))
+        false
+    end
   end
 
   defp print_diff(baseline, results, cap) do

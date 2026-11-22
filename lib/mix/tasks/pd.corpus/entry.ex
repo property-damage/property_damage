@@ -16,30 +16,43 @@ defmodule PropertyDamage.Corpus.Entry do
     * `minimum` - the smallest failing plan, a list of plain maps. Each map
       has a `:command` key holding the command name as an atom, plus the
       command's fields. A field holding a generated identifier is written
-      as `:id`.
+      as `:id`. With `nil` the entry is a regression entry: it has no
+      hand-written smallest plan and records what the engine does on its seed
+      set. Its rows still count a seed as found when a failing run fired the
+      seeded bug, but `reached_minimum?` is always false, the printed table
+      shows `-` in the reached-minimum cell, and a run that finds nothing does
+      not fail the task.
     * `compare` - how a shrunk plan is matched against `minimum`: `:exact`,
       `:ignore_ids` (drop every field whose value is `:id`) or
       `{:ignore_fields, [atom]}` (drop the named fields).
     * `seeds` - the seed list the entry runs over.
     * `max_commands` - the longest plan the model draws.
+    * `plan_cap` - when set, a positive integer that replaces the `--cap`
+      option for this entry. A regression entry uses it to pin the budget its
+      seed set was recorded under.
+    * `skip` - a reason string. A skipped entry is never run: the table shows
+      `skipped: <reason>` for it and the saved table records the reason. It
+      needs no other field than `name`.
   """
 
   @type compare :: :exact | :ignore_ids | {:ignore_fields, [atom()]}
 
   @type t :: %__MODULE__{
           name: String.t(),
-          engine: module(),
-          system: module(),
+          engine: module() | nil,
+          system: module() | nil,
           bug: atom() | nil,
-          model: module(),
-          adapter: module(),
-          minimum: [map()],
+          model: module() | nil,
+          adapter: module() | nil,
+          minimum: [map()] | nil,
           compare: compare(),
           seeds: [integer()],
-          max_commands: pos_integer()
+          max_commands: pos_integer(),
+          plan_cap: pos_integer() | nil,
+          skip: String.t() | nil
         }
 
-  @enforce_keys [:name, :engine, :system, :bug, :model, :adapter, :minimum]
+  @enforce_keys [:name]
   defstruct [
     :name,
     :engine,
@@ -48,6 +61,8 @@ defmodule PropertyDamage.Corpus.Entry do
     :model,
     :adapter,
     :minimum,
+    :plan_cap,
+    :skip,
     compare: :ignore_ids,
     seeds: Enum.to_list(1..20),
     max_commands: 20
