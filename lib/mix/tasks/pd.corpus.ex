@@ -3,7 +3,8 @@ defmodule Mix.Tasks.Pd.Corpus do
   Measures how well an engine finds and shrinks the seeded bugs of a corpus.
 
   A corpus is a directory of small systems, each with one bug behind a switch,
-  a model, and the hand-written smallest failing plan. For every entry the
+  a model, and the hand-written smallest failing plan (an entry may instead be
+  a regression entry or a skipped entry, see below). For every entry the
   task runs 20 seeds with the bug on, and the same seeds with the bug off,
   and prints three numbers per entry:
 
@@ -12,6 +13,15 @@ defmodule Mix.Tasks.Pd.Corpus do
     * shrink runs: runs spent shrinking (mean over the same seeds).
     * reached minimum: seeds whose shrunk plan equals the entry's smallest
       failing plan, out of the seeds run.
+
+  A regression entry sets `minimum: nil`: it has no hand-written smallest plan
+  and records what the engine does on its seed set. It shows `-` in the
+  reached-minimum cell, and the task does not fail when it finds nothing (it
+  still fails on an unexplained failure or a dirty bug-off run). It may set
+  `plan_cap` to pin the plan cap it was recorded under; that replaces `--cap`
+  for the entry. An entry with `skip: "reason"` is not run; the table shows
+  `skipped: reason` and a saved table records `%{entry: name, rows: [], skipped:
+  reason}`. See `PropertyDamage.Corpus.Entry`.
 
   A `found` column counts the seeds that found the bug within the plan cap.
   A seed that does not find it is counted there, never left out.
@@ -87,7 +97,7 @@ defmodule Mix.Tasks.Pd.Corpus do
 
     with {:ok, baseline} <- load_baseline(opts[:baseline]),
          {:ok, entries} <- Loader.load(dir, Keyword.get_values(opts, :only)) do
-      results = Enum.map(entries, &%{entry: &1.name, rows: Measure.entry(&1, cap)})
+      results = Enum.map(entries, &result(&1, cap))
       report(results, entries, cap, baseline, opts[:save])
     else
       {:error, message} ->
@@ -96,12 +106,21 @@ defmodule Mix.Tasks.Pd.Corpus do
     end
   end
 
+  defp result(%{skip: reason} = entry, _cap) when is_binary(reason),
+    do: %{entry: entry.name, rows: [], skipped: reason}
+
+  defp result(%{minimum: nil} = entry, cap),
+    do: %{entry: entry.name, rows: Measure.entry(entry, cap), regression: true}
+
+  defp result(entry, cap), do: %{entry: entry.name, rows: Measure.entry(entry, cap)}
+
   defp load_baseline(nil), do: {:ok, nil}
   defp load_baseline(path), do: Baseline.load(path)
 
   defp report(results, entries, cap, baseline, save_path) do
-    engines = entries |> Enum.map(& &1.engine.name()) |> Enum.uniq()
-    seeds = entries |> Enum.flat_map(& &1.seeds) |> Enum.uniq() |> Enum.sort()
+    run = Enum.reject(entries, &is_binary(&1.skip))
+    engines = run |> Enum.map(& &1.engine.name()) |> Enum.uniq()
+    seeds = run |> Enum.flat_map(& &1.seeds) |> Enum.uniq() |> Enum.sort()
 
     Mix.shell().info(
       "plan cap: #{cap}; seeds: #{inspect(seeds)}; engine: #{Enum.join(engines, ", ")}\n"

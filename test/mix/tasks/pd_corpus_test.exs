@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Pd.CorpusTest do
 
   alias Corpus.Scheme.RefundModel
   alias Mix.Tasks.Pd.Corpus, as: CorpusTask
-  alias PropertyDamage.Corpus.{Baseline, Engine, Entry, FireLog, Loader, Measure}
+  alias PropertyDamage.Corpus.{Baseline, Engine, Entry, FireLog, Loader, Measure, Table}
   alias PropertyDamage.Test.TmpPath
 
   @corpus "corpus"
@@ -58,7 +58,7 @@ defmodule Mix.Tasks.Pd.CorpusTest do
   end
 
   describe "the seeded bugs" do
-    for name <- ["lost_full_refund", "double_credit", "rejected_set"] do
+    for name <- ["lost_full_refund", "double_credit", "rejected_set", "fifth_refund", "long_note"] do
       test "#{name}: found, with the bug fired, on every seed with the bug on; never with it off",
            %{entries: entries} do
         entry = Map.fetch!(entries, unquote(name))
@@ -97,6 +97,44 @@ defmodule Mix.Tasks.Pd.CorpusTest do
       {:ok, healthy} = Corpus.KeyValue.start(bug: nil, fire_log: log)
       assert Corpus.KeyValue.set(healthy, "k0", value) == :ok
       assert FireLog.total(log) == 1
+    end
+  end
+
+  describe "the scheme bugs added later" do
+    test "a refund of one less than the payment loses its credit, only with the bug on" do
+      for {bug, expected} <- [{:offset_refund, {2, 1}}, {nil, {1, 0}}] do
+        log = start_log()
+        {:ok, scheme} = Corpus.Scheme.start(bug: bug, fire_log: log)
+        {:ok, id} = Corpus.Scheme.pay(scheme, 2)
+        {:ok, balance} = Corpus.Scheme.refund(scheme, id, 1)
+        assert {balance, FireLog.total(log)} == expected
+      end
+    end
+
+    test "the fifth refund of a payment loses its credit; the fourth does not" do
+      log = start_log()
+      {:ok, scheme} = Corpus.Scheme.start(bug: :fifth_refund, fire_log: log)
+      {:ok, id} = Corpus.Scheme.pay(scheme, 5)
+
+      balances = for _ <- 1..5, do: elem(Corpus.Scheme.refund(scheme, id, 1), 1)
+
+      assert balances == [4, 3, 2, 1, 1]
+      assert FireLog.total(log) == 1
+    end
+
+    test "a note over 40 characters is cut, only with the bug on" do
+      for {bug, expected} <- [{:long_note, {40, 1}}, {nil, {41, 0}}] do
+        log = start_log()
+        {:ok, scheme} = Corpus.Scheme.start(bug: bug, fire_log: log)
+        {:ok, id} = Corpus.Scheme.pay(scheme, 1)
+        {:ok, 0, stored} = Corpus.Scheme.refund_noted(scheme, id, 1, String.duplicate("a", 41))
+        assert {String.length(stored), FireLog.total(log)} == expected
+      end
+
+      {:ok, scheme} = Corpus.Scheme.start(bug: :long_note, fire_log: start_log())
+      {:ok, id} = Corpus.Scheme.pay(scheme, 1)
+      {:ok, 0, stored} = Corpus.Scheme.refund_noted(scheme, id, 1, String.duplicate("a", 40))
+      assert String.length(stored) == 40
     end
   end
 
@@ -243,11 +281,103 @@ defmodule Mix.Tasks.Pd.CorpusTest do
     end
   end
 
+  describe "skipped and regression entries" do
+    setup do
+      dir = TmpPath.unique("pd_corpus_kinds")
+      File.mkdir_p!(Path.join(dir, "support"))
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(dir, "parked.exs"), """
+      %PropertyDamage.Corpus.Entry{name: "parked", skip: "waiting for a fix"}
+      """)
+
+      File.write!(Path.join(dir, "recorded.exs"), """
+      %PropertyDamage.Corpus.Entry{
+        name: "recorded",
+        engine: PropertyDamage.Corpus.Engine.Run,
+        system: Corpus.Scheme,
+        bug: :lost_full_refund,
+        model: Corpus.Scheme.RefundModel,
+        adapter: Corpus.Scheme.Adapter,
+        minimum: nil,
+        plan_cap: 1,
+        max_commands: 8,
+        seeds: [1, 2, 3]
+      }
+      """)
+
+      {:ok, dir: dir}
+    end
+
+    test "a skipped entry loads, is selectable and prints its reason without running", %{dir: dir} do
+      assert {:ok, [%Entry{name: "parked", skip: "waiting for a fix"}]} =
+               Loader.load(dir, ["parked"])
+
+      output =
+        capture_io(fn -> assert CorpusTask.exec(["--dir", dir, "--only", "parked"]) == :ok end)
+
+      assert output =~ ~r/parked\s+skipped: waiting for a fix/
+    end
+
+    @tag :tmp_dir
+    test "a skipped entry is saved with no rows and diffed without a crash", %{
+      dir: dir,
+      tmp_dir: tmp
+    } do
+      path = Path.join(tmp, "table.exs")
+      args = ["--dir", dir, "--only", "parked"]
+      capture_io(fn -> assert CorpusTask.exec(args ++ ["--save", path]) == :ok end)
+
+      assert {:ok, %{results: [%{entry: "parked", rows: [], skipped: "waiting for a fix"}]}} =
+               Baseline.load(path)
+
+      output = capture_io(fn -> assert CorpusTask.exec(args ++ ["--baseline", path]) == :ok end)
+      assert output =~ "parked: skipped: waiting for a fix"
+    end
+
+    test "a regression entry shows - for the minimum, pins its plan cap and passes with seeds not found",
+         %{dir: dir} do
+      output =
+        capture_io(fn ->
+          assert CorpusTask.exec(["--dir", dir, "--only", "recorded", "--cap", "200"]) == :ok
+        end)
+
+      # The pinned cap of 1 plan finds the bug on only some of these seeds; the
+      # global cap of 200 finds it on all of them. The task still passes.
+      assert output =~ ~r/recorded\s+[012]\/3\s.*\s-$/m
+    end
+
+    test "a regression entry never reaches a minimum and still fails on an unexplained run",
+         %{dir: dir} do
+      {:ok, [_parked, recorded]} = Loader.load(dir)
+      recorded = %{recorded | plan_cap: nil, seeds: [1]}
+
+      assert [%{found?: true, reached_minimum?: false}] = Measure.entry(recorded, @plan_cap)
+
+      wrong = %{recorded | model: WrongModel}
+
+      assert [%{found?: false, unexplained?: true}] = Measure.entry(wrong, @plan_cap)
+
+      results = [%{entry: "recorded", rows: Measure.entry(wrong, @plan_cap), regression: true}]
+      refute Table.sound?(results)
+    end
+
+    test "an entry that is neither skipped nor fully specified is an error", %{dir: dir} do
+      File.write!(Path.join(dir, "half.exs"), ~s|%PropertyDamage.Corpus.Entry{name: "half"}\n|)
+
+      assert {:error, message} = Loader.load(dir)
+      assert message =~ "half.exs does not set engine, system, model, adapter"
+    end
+  end
+
   describe "entries" do
     test "carry the fields the harness needs", %{entries: entries} do
       assert Map.keys(entries) |> Enum.sort() == [
                "double_credit",
+               "fifth_refund",
+               "long_note",
                "lost_full_refund",
+               "offset_refund",
                "rejected_set"
              ]
 
