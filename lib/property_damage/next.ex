@@ -15,6 +15,7 @@ defmodule PropertyDamage.Next do
   alias PropertyDamage.Next.Engine.Native
 
   alias PropertyDamage.Next.{
+    AssignCounts,
     Checks,
     DependentStreamDataError,
     Execution,
@@ -33,6 +34,7 @@ defmodule PropertyDamage.Next do
     :adapter,
     :seed,
     config: %{},
+    ignored_assigns: [],
     max_steps: 20,
     max_plans: 100,
     engine: Native,
@@ -44,6 +46,7 @@ defmodule PropertyDamage.Next do
     :model,
     :adapter,
     config: %{},
+    ignored_assigns: [],
     max_steps: 20,
     engine: Native,
     dependent_stream_data: :warn
@@ -121,6 +124,13 @@ defmodule PropertyDamage.Next do
     * `:adapter` - the adapter module (required)
     * `:seed` - an integer (required)
     * `:config` - passed to the adapter's `setup/2` (default `%{}`)
+    * `:ignored_assigns` - the assign keys the target's adapter never acts
+      on (default `[]`). `:adapter`, `:config` and `:ignored_assigns`
+      describe the run's one target. A key that no spec of the model sets
+      raises `ArgumentError` before the first plan; an adapter that
+      acknowledges an ignored key raises
+      `PropertyDamage.Next.AcknowledgedIgnoredAssignError` (see
+      `PropertyDamage.Next.Runtime.ack/2`)
     * `:max_steps` - the number of slots per plan (default 20)
     * `:max_plans` - the most plans to build (default 100)
     * `:engine` - the module that draws each value (default
@@ -131,6 +141,11 @@ defmodule PropertyDamage.Next do
     * `:dependent_stream_data` - `:warn` (default) or `:raise`, as for
       `plan/3`
 
+  An adapter that acknowledges an assign its step did not set raises
+  `PropertyDamage.Next.AcknowledgedUnsetAssignError` out of this function;
+  like the ignored case, it is misuse of PD and is neither a failure nor
+  shrunk.
+
   Raises `ArgumentError` when the model's check projections or its
   command-sequence projection declare a check form this engine does not run
   yet, `@compare` included; it runs `@check every: N` and
@@ -138,7 +153,16 @@ defmodule PropertyDamage.Next do
   """
   @spec run(keyword()) ::
           {:ok, %{plans: pos_integer(), kept: [map()]}} | {:error, Failure.t()}
-  def run(opts) do
+  def run(opts), do: opts |> run_counted() |> elem(0)
+
+  @doc false
+  # `run/1` and the assign counts of its search: per target (the adapter
+  # module), command module and key, how many executed steps of the search
+  # plans set the assign and how many times the adapter acknowledged it,
+  # as `%{target => [%{command:, key:, set:, acknowledged:}]}`. Shrink
+  # candidates are not counted.
+  @spec run_counted(keyword()) :: {{:ok, map()} | {:error, Failure.t()}, map()}
+  def run_counted(opts) do
     opts = Keyword.validate!(opts, @run_opts)
     model = module!(opts, :model)
     adapter = module!(opts, :adapter)
@@ -149,15 +173,35 @@ defmodule PropertyDamage.Next do
     max_shrink_runs = max_shrink_runs!(opts[:max_shrink_runs])
     mode!(opts[:dependent_stream_data])
     specs = Model.specs!(model)
+    ignored = ignored!(opts[:ignored_assigns], specs)
     projections = Checks.load!(model)
     plan_opts = Keyword.take(opts, Keyword.keys(@plan_opts))
-    execute = &Execution.run(&1, adapter, opts[:config], projections)
+    table = AssignCounts.new()
 
+    try do
+      result =
+        search(model, specs, seed, max_plans, plan_opts, table, fn plan, counts ->
+          Execution.run(plan, adapter, opts[:config], projections,
+            ignored: ignored,
+            counts: counts
+          )
+        end)
+        |> finish(model, specs, plan_opts, shrink, max_shrink_runs, fn plan ->
+          Execution.run(plan, adapter, opts[:config], projections, ignored: ignored)
+        end)
+
+      {result, AssignCounts.rows(table)}
+    after
+      AssignCounts.delete(table)
+    end
+  end
+
+  defp search(model, specs, seed, max_plans, plan_opts, table, execute) do
     Enum.reduce_while(1..max_plans, [], fn number, warned ->
       {plan, drawn} = trace(model, specs, plan_seed(seed, number), plan_opts)
       warned = warn(plan.kept, warned)
 
-      case execute.(plan) do
+      case execute.(plan, table) do
         :ok ->
           {:cont, warned}
 
@@ -165,7 +209,11 @@ defmodule PropertyDamage.Next do
           {:halt, {number, %{plan: plan, drawn: drawn, step: step, reason: reason}, warned}}
       end
     end)
-    |> case do
+    |> then(&{&1, max_plans})
+  end
+
+  defp finish({searched, max_plans}, model, specs, plan_opts, shrink, max_shrink_runs, execute) do
+    case searched do
       warned when is_list(warned) ->
         {:ok, %{plans: max_plans, kept: warned}}
 
@@ -251,17 +299,39 @@ defmodule PropertyDamage.Next do
       validated |> Keyword.take(Keyword.keys(@plan_opts)) |> slots!(journal, opts)
 
     mode!(plan_opts[:dependent_stream_data])
-    plan = build(model, Model.specs!(model), journal, plan_opts)
+    specs = Model.specs!(model)
+    ignored = ignored!(validated[:ignored_assigns], specs)
+    plan = build(model, specs, journal, plan_opts)
     kept = warn(plan.kept, [])
     projections = Checks.load!(model)
 
-    case Execution.run(plan, adapter, validated[:config], projections) do
+    case Execution.run(plan, adapter, validated[:config], projections, ignored: ignored) do
       :ok ->
         {:ok, %{plans: 1, kept: kept}}
 
       {:error, step, reason} ->
         found = %{plan: plan, step: step, reason: reason}
         {:error, %{failure(found, 1, found, 0) | kept: kept}}
+    end
+  end
+
+  # The `:ignored_assigns` option: a list of keys, each set by some spec.
+  defp ignored!(keys, specs) do
+    unless is_list(keys) and Enum.all?(keys, &is_atom/1) do
+      raise ArgumentError,
+            "the :ignored_assigns option is a list of assign keys, got: #{inspect(keys)}"
+    end
+
+    set = specs |> Enum.flat_map(&Map.keys(&1.assigns)) |> MapSet.new()
+
+    case Enum.reject(keys, &(&1 in set)) do
+      [] ->
+        keys
+
+      unknown ->
+        raise ArgumentError,
+              "the :ignored_assigns option names #{inspect(unknown)}, " <>
+                "but no spec of the model sets #{if match?([_], unknown), do: "that key", else: "those keys"}"
     end
   end
 
