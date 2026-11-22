@@ -36,7 +36,12 @@ defmodule PropertyDamage.Next.Shrinker do
   # Every execution after the plan that first failed counts as a shrink
   # run, the last one included, and there are at most `max_runs` of them.
 
+  alias PropertyDamage.Next.Engine.StreamDataSource
   alias PropertyDamage.Next.{Journal, Plan}
+
+  # The tag of an entry that records positions of a random source; its
+  # positions are read and written only through the engine that writes it.
+  @source StreamDataSource.tag()
 
   # A value written at a member's key to ask for the member at an index: it
   # is in no list, so the engine takes the member at the stored index.
@@ -149,6 +154,15 @@ defmodule PropertyDamage.Next.Shrinker do
       {:stream_data, value, path} when is_list(path) ->
         descend(state, key, value, path, 0, false)
 
+      {@source, _value, _positions} = entry ->
+        entry
+        |> StreamDataSource.positions()
+        |> Enum.reverse()
+        |> Enum.reduce({false, state}, fn {position, _drawn}, {any?, state} ->
+          {lowered?, state} = lower_position(state, key, position)
+          {any? or lowered?, state}
+        end)
+
       _other ->
         {false, state}
     end
@@ -171,6 +185,53 @@ defmodule PropertyDamage.Next.Shrinker do
       _changed -> {any?, state}
     end
   end
+
+  # Lowers one recorded position of a source entry: its lower bound first,
+  # then bisection between it and the stored value. The position is read
+  # again before each candidate, since an adoption can drop it or move its
+  # bounds.
+  defp lower_position(state, key, position) do
+    case position_at(state, key, position) do
+      {value, lo, _hi} when value > lo ->
+        case state |> edited_position(key, position, lo) |> attempt(state) do
+          {true, state} -> {true, state}
+          {false, state} -> bisect_position(state, key, position, lo, value, false)
+        end
+
+      _absent_or_lowest ->
+        {false, state}
+    end
+  end
+
+  defp bisect_position(state, _key, _position, passing, failing, any?)
+       when failing - passing <= 1,
+       do: {any?, state}
+
+  defp bisect_position(state, key, position, passing, failing, any?) do
+    middle = Integer.floor_div(passing + failing, 2)
+
+    with {_value, lo, hi} <- position_at(state, key, position),
+         true <- middle in lo..hi//1 do
+      case state |> edited_position(key, position, middle) |> attempt(state) do
+        {true, state} -> bisect_position(state, key, position, passing, middle, true)
+        {false, state} -> bisect_position(state, key, position, middle, failing, any?)
+      end
+    else
+      _changed -> {any?, state}
+    end
+  end
+
+  defp position_at(state, key, position) do
+    with {@source, _value, _positions} = entry <- entries(state)[key],
+         {^position, drawn} <- List.keyfind(StreamDataSource.positions(entry), position, 0) do
+      drawn
+    else
+      _absent -> nil
+    end
+  end
+
+  defp edited_position(state, key, position, value),
+    do: edited(state, key, StreamDataSource.put_position(entries(state)[key], position, value))
 
   defp first_adopted(state, candidates, edit) do
     Enum.reduce_while(candidates, {false, state}, fn candidate, {false, state} ->

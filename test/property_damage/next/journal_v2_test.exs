@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Next.JournalV2Test do
-  # The saved journal's format version 2: the entry of a StreamData value
-  # holds its path, a slot can hold an empty pick, and the journal records no
-  # origin. A replay runs on the model that saved the journal: it refuses a
+  # The saved journal's format, version 3 since version 2: the entry of a
+  # StreamData value holds its path, a slot can hold an empty pick, and the
+  # journal records no origin. A replay runs on the model that saved the journal: it refuses a
   # changed spec list and says nothing about a changed generator.
   use ExUnit.Case, async: true
 
@@ -13,21 +13,23 @@ defmodule PropertyDamage.Next.JournalV2Test do
 
   @format :property_damage_next_journal
 
-  test "a binary saved in format version 1 is refused, naming versions 1 and 2" do
-    v1 =
-      :erlang.term_to_binary(
-        {@format, 1, %{seed: 1, max_steps: 1, entries: %{}, fingerprint: nil}}
-      )
+  test "a binary saved in format version 1 or 2 is refused, naming its version and version 3" do
+    for version <- [1, 2] do
+      older =
+        :erlang.term_to_binary(
+          {@format, version, %{seed: 1, max_steps: 1, entries: %{}, fingerprint: nil}}
+        )
 
-    error = assert_raise ArgumentError, fn -> Journal.from_binary(v1) end
-    assert error.message =~ "version 1"
-    assert error.message =~ "version 2"
+      error = assert_raise ArgumentError, fn -> Journal.from_binary(older) end
+      assert error.message =~ "format version #{version};"
+      assert error.message =~ "loads version 3"
+    end
   end
 
-  test "a saved journal is format version 2 and holds the seed, the slots, the entries and the fingerprint only" do
+  test "a saved journal is format version 3 and holds the seed, the slots, the entries and the fingerprint only" do
     journal = Next.plan(Model, 3, max_steps: 8).journal
 
-    assert {@format, 2, content} = journal |> Journal.to_binary() |> :erlang.binary_to_term()
+    assert {@format, 3, content} = journal |> Journal.to_binary() |> :erlang.binary_to_term()
     assert content |> Map.keys() |> Enum.sort() == [:entries, :fingerprint, :max_steps, :seed]
     assert content.entries == journal.entries
   end
