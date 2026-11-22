@@ -1,8 +1,10 @@
 # The lost full refund model, written for the new engine. It drives the same
 # system as the entry in the default corpus directory, `Corpus.Scheme`, and
 # ports that entry's refund model: pay 1 to 400; refund the first payment
-# with a balance, an amount from 1 up to that balance; after every refund,
-# check that the reported balance matches the predicted one.
+# with a balance, an amount from 1 up to that balance, the whole balance one
+# time in twenty; after every refund, check that the reported balance
+# matches the predicted one. `Corpus.Next.Scheme.RangeModel` ports the
+# offset refund entry's model, which draws the amount uniformly.
 
 Code.require_file("../../support/scheme.exs", __DIR__)
 
@@ -117,17 +119,37 @@ defmodule Corpus.Next.Scheme.Simulator do
 end
 
 defmodule Corpus.Next.Scheme.RefundModel do
-  @moduledoc "Pays and refunds, with every response delivered."
+  @moduledoc """
+  Pays and refunds, with every response delivered. One refund amount in
+  twenty takes the payment's whole balance; the rest are drawn from 1 up to
+  the balance.
+  """
   use PropertyDamage.Next.Model
 
   alias Corpus.Next.Scheme.{Pay, Projection, Refund}
-  alias PropertyDamage.Next.StepSpec
+  alias PropertyDamage.Next.{Command, Gen, StepSpec}
 
   def steps do
-    StepSpec.normalize([
-      {Pay, weight: 2},
-      {Refund, weight: 3, when: &Projection.refundable?/1}
-    ])
+    [pay, refund] =
+      StepSpec.normalize([
+        {Pay, weight: 2},
+        {Refund, weight: 3, when: &Projection.refundable?/1}
+      ])
+
+    [pay, StepSpec.update_command(refund, &favor_full_refund/2)]
+  end
+
+  # The amount depends on the drawn payment's balance and mixes two
+  # generators by weight, which no PD description can say, so it is a
+  # StreamData generator returned by a from/2 function.
+  defp favor_full_refund(fields, state) do
+    amount =
+      Command.from(:payment_id, fn id ->
+        balance = state.payments[id].expected
+        Gen.frequency([{19, Gen.integer(1..balance)}, {1, Gen.constant(balance)}])
+      end)
+
+    Map.put(fields, :amount, amount)
   end
 
   def command_sequence_projection, do: Projection
