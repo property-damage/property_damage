@@ -183,7 +183,7 @@ defmodule PropertyDamage.Next.AssignAcksTest do
     end
 
     test "raises ArgumentError after the step ended, with the handle an adapter kept" do
-      {:ok, _} = Next.run(opts(RetryModel, OutsideAdapter))
+      {:ok, _} = Next.run(opts(RetryModel, OutsideAdapter, ignored_assigns: [:retry]))
       assert_received {:handle, runtime}
 
       assert_raise ArgumentError, ~r/outside a step/, fn -> Runtime.ack(runtime, :retry) end
@@ -263,7 +263,8 @@ defmodule PropertyDamage.Next.AssignAcksTest do
 
   describe "counts" do
     test "set counts executed steps with a truthy assign, acknowledged counts the calls" do
-      assert {{:ok, _}, counts} = Next.run_counted(opts(RetryDelayModel, AckAdapter))
+      assert {{:ok, _}, counts} =
+               Next.run_counted(opts(RetryDelayModel, AckAdapter, ignored_assigns: [:delay]))
 
       assert counts == %{
                AckAdapter => [
@@ -364,7 +365,7 @@ defmodule PropertyDamage.Next.AssignAcksTest do
     test "the adapter receives the assign, and no simulator or projection sees its value" do
       Process.delete(:model_saw)
 
-      assert {:ok, _} = Next.run(opts(SecretModel, SecretAdapter))
+      assert {:ok, _} = Next.run(opts(SecretModel, SecretAdapter, ignored_assigns: [:secret]))
 
       assert_received {:adapter_received, %{secret: {:secret, 9137}}}
 

@@ -147,7 +147,8 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
     end
 
     test "a run of several plans warns once per site" do
-      {result, log} = with_own_log(fn -> model_run(BothModel, max_steps: 12) end)
+      {result, log} =
+        with_own_log(fn -> model_run(BothModel, max_steps: 12, ignored_assigns: [:echo]) end)
 
       assert {:ok, %{plans: 3}} = result
       assert warnings(log) == 2
