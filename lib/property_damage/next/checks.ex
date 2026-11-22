@@ -1,14 +1,17 @@
 defmodule PropertyDamage.Next.Checks do
   @moduledoc false
   # The checks an execution evaluates: the `@check` functions of the model's
-  # check projections, each projection folding the real events the adapter
-  # returns.
+  # check projections and of its command-sequence projection, each projection
+  # folding the real events the adapter returns. A projection named in both
+  # roles is one projection: its state is folded once and its checks run
+  # once per trigger.
   #
   # This engine runs two schedules: `every: N`, sampled over the commands and
   # events executed so far (a command counts one, and so does each of its
   # events, as in today's engine), and `every: Module`, after each command or
-  # event of that module. Loading a model whose check projections declare any
-  # other form raises, so no check is skipped without a word.
+  # event of that module. Loading a model whose projections declare any other
+  # check form, or a `@compare` boundary observation, raises, so no check is
+  # skipped without a word.
   #
   # After a step, every projection first folds all of the step's events; then
   # the checks the command triggers run, then those each event triggers, in
@@ -21,8 +24,10 @@ defmodule PropertyDamage.Next.Checks do
   @type t :: %{projections: [module()], states: map(), counters: map()}
 
   @doc """
-  The check projections of `model`, after making sure every check they
-  declare has a schedule this engine runs. Raises `ArgumentError` otherwise.
+  The projections whose checks run: the check projections of `model`, then
+  its command-sequence projection unless it is one of them. Raises
+  `ArgumentError` unless every check they declare has a schedule this engine
+  runs and none declares `@compare`.
   """
   @spec load!(module()) :: [module()]
   def load!(model) do
@@ -34,6 +39,7 @@ defmodule PropertyDamage.Next.Checks do
               "modules, got: #{inspect(projections)}"
     end
 
+    projections = Enum.uniq(projections ++ [model.command_sequence_projection()])
     Enum.each(projections, &supported!/1)
     projections
   end
@@ -106,7 +112,19 @@ defmodule PropertyDamage.Next.Checks do
               "@check every: CommandModule only"
     end
 
+    for %{name: name} <- compares(projection) do
+      raise ArgumentError,
+            "#{inspect(projection)}.#{name}/2 declares @compare, which is not supported " <>
+              "by this engine yet: it runs one target and compares none"
+    end
+
     :ok
+  end
+
+  defp compares(projection) do
+    if Code.ensure_loaded?(projection) and function_exported?(projection, :__compares__, 0),
+      do: projection.__compares__(),
+      else: []
   end
 
   defp supported?(%{type: :synchronous, trigger: %{type: :every_step}}), do: true

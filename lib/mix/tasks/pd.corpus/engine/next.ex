@@ -19,9 +19,15 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   such a site raises `PropertyDamage.Next.DependentStreamDataError`. The
   engine answers it as a run that found nothing, with the site on `kept`.
 
-  The shrink executes its final plan last, so with an adapter that starts
-  one system per execution the most recently started system instance is
-  the one that ran the final plan, which is what `bug_fired?` reads.
+  `bug_fired?` is read from the final plan's own run. A shrink executes
+  candidates after the failure, and an adapter may start systems that run
+  no plan, so the most recently started system instance need not be the one
+  that ran the final plan. After a failure the engine therefore replays the
+  final journal once with a fresh fire log and reads whether the bug fired
+  there. That replay is the harness's, not the engine's: it counts neither
+  in `shrink_runs`, which is the failure's, nor in `fires`, which counts
+  the run's executions across the whole seed. A run that finds nothing has
+  no final plan, so its `bug_fired?` is false.
   """
 
   @behaviour PropertyDamage.Corpus.Engine
@@ -38,15 +44,16 @@ defmodule PropertyDamage.Corpus.Engine.Next do
     {:ok, log} = FireLog.start_link()
 
     try do
-      entry |> execute(seed, plan_cap, log) |> result(log)
+      opts = opts(entry, seed, plan_cap, log)
+      opts |> Next.run() |> result(log, opts)
     rescue
-      error in DependentStreamDataError -> result({:ok, %{kept: [error.site]}}, log)
+      error in DependentStreamDataError -> result({:ok, %{kept: [error.site]}}, log, [])
     after
       FireLog.stop(log)
     end
   end
 
-  defp execute(entry, seed, plan_cap, log) do
+  defp opts(entry, seed, plan_cap, log) do
     [
       model: entry.model,
       adapter: entry.adapter,
@@ -56,31 +63,48 @@ defmodule PropertyDamage.Corpus.Engine.Next do
       max_plans: plan_cap
     ]
     |> Keyword.merge(entry.run_opts)
-    |> Next.run()
   end
 
-  defp result({:ok, %{kept: kept}}, log) do
-    %{
-      found?: false,
-      plans_until_found: nil,
-      shrink_runs: 0,
-      shrunk: nil,
-      bug_fired?: FireLog.fired_in_last_instance?(log),
-      fires: FireLog.total(log),
-      kept: kept
-    }
-  end
-
-  defp result({:error, %Failure{} = failure}, log) do
+  defp result({:error, %Failure{} = failure}, log, opts) do
     %{
       found?: true,
       plans_until_found: failure.plan_number,
       shrink_runs: failure.shrink_runs,
       shrunk: plain_plan(failure.plan),
-      bug_fired?: FireLog.fired_in_last_instance?(log),
+      bug_fired?: fired_on_replay?(failure, opts),
       fires: FireLog.total(log),
       kept: failure.kept
     }
+  end
+
+  defp result({:ok, %{kept: kept}}, log, _opts) do
+    %{
+      found?: false,
+      plans_until_found: nil,
+      shrink_runs: 0,
+      shrunk: nil,
+      bug_fired?: false,
+      fires: FireLog.total(log),
+      kept: kept
+    }
+  end
+
+  # Replays the final journal of `failure` with the run's options and a
+  # fresh fire log; true when the bug fired in that replay.
+  defp fired_on_replay?(failure, opts) do
+    {:ok, log} = FireLog.start_link()
+
+    try do
+      replay_opts =
+        opts
+        |> Keyword.take([:model, :adapter, :config, :engine, :dependent_stream_data])
+        |> Keyword.update!(:config, &Map.put(&1, :fire_log, log))
+
+      Next.replay(failure.journal, replay_opts)
+      FireLog.total(log) > 0
+    after
+      FireLog.stop(log)
+    end
   end
 
   defp plain_plan(%Plan{steps: steps}),

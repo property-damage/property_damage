@@ -92,8 +92,9 @@ defmodule PropertyDamage.Next do
   `:seed` and the plan's number alone, so the same options build the same
   plans. Each plan gets its own execution: the adapter's `setup/2`, one
   `execute/3` per step, then `teardown/1` if the adapter defines it. After
-  each step the model's check projections fold the events the adapter
-  returned, and their checks run.
+  each step the model's check projections and its command-sequence
+  projection fold the events the adapter returned, and their checks run; a
+  projection named in both roles folds and checks once.
 
   Returns `{:ok, %{plans: n, kept: sites}}` when every plan passed, or
   `{:error, %PropertyDamage.Next.Failure{}}` for the first plan that
@@ -130,8 +131,9 @@ defmodule PropertyDamage.Next do
     * `:dependent_stream_data` - `:warn` (default) or `:raise`, as for
       `plan/3`
 
-  Raises `ArgumentError` when the model's check projections declare a check
-  form this engine does not run yet; it runs `@check every: N` and
+  Raises `ArgumentError` when the model's check projections or its
+  command-sequence projection declare a check form this engine does not run
+  yet, `@compare` included; it runs `@check every: N` and
   `@check every: CommandModule`.
   """
   @spec run(keyword()) ::
