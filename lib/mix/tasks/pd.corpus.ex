@@ -49,9 +49,15 @@ defmodule Mix.Tasks.Pd.Corpus do
   The printed table has no timings and no process identifiers: equal seeds
   give equal tables.
 
-  The task exits non-zero when a bug-on run finds nothing on some seed, when a
-  run fails without the seeded bug firing, or when a run with the bug off
-  fails or fires the bug.
+  Without `--baseline`, the task exits non-zero when a bug-on run finds
+  nothing on some seed, when a run fails without the seeded bug firing, or when
+  a run with the bug off fails or fires the bug.
+
+  With `--baseline`, a seed that finds nothing is a measured result, not an
+  error. The task exits non-zero only when a run is not clean (the previous
+  two cases that involve a failure), when a seed row of an entry that ran
+  differs from the saved table, or when an entry that ran is not in the saved
+  table. The reason is printed on stderr. `--save` still writes the table.
   """
 
   use Mix.Task
@@ -130,7 +136,23 @@ defmodule Mix.Tasks.Pd.Corpus do
     if baseline, do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
-    if Table.sound?(results) and saved?, do: :ok, else: :error
+    if verdict(results, baseline) and saved?, do: :ok, else: :error
+  end
+
+  # With a baseline, the run passes when it is clean and equal to the saved
+  # table; seeds that find nothing are then measured, not errors. Without one,
+  # the run must also find the bug on every seed.
+  defp verdict(results, nil), do: Table.sound?(results)
+
+  defp verdict(results, baseline) do
+    case Table.judge_against(baseline.results, results) do
+      :ok ->
+        true
+
+      {:error, reasons} ->
+        Enum.each(reasons, &Mix.shell().error("baseline check failed: " <> &1))
+        false
+    end
   end
 
   defp print_diff(baseline, results, cap) do

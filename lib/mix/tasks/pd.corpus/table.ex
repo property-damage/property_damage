@@ -69,6 +69,53 @@ defmodule PropertyDamage.Corpus.Table do
     end)
   end
 
+  @doc """
+  Judges a run against a saved table. Returns `:ok`, or `{:error, reasons}` with
+  one message per problem.
+
+  The run passes when every result is clean (nothing fails with the bug off,
+  and no failure lacks the seeded bug firing; a seed that finds nothing is not
+  a problem here), no seed row of a run entry differs from the saved table,
+  and every entry that ran is in the saved table. Skipped results are not
+  compared.
+  """
+  @spec judge_against([result()], [result()]) :: :ok | {:error, [String.t()]}
+  def judge_against(baseline, results) do
+    base = Map.new(baseline, &{&1.entry, &1})
+    run = Enum.reject(results, &Map.has_key?(&1, :skipped))
+    known = Enum.filter(run, &match?(%{rows: _}, base[&1.entry]))
+    known = Enum.reject(known, &Map.has_key?(base[&1.entry], :skipped))
+
+    changed =
+      Enum.sum(
+        for %{entry: name, rows: rows} <- known do
+          before = base[name].rows
+          seeds_changed(before, rows) + abs(length(before) - length(rows))
+        end
+      )
+
+    reasons =
+      Enum.reject(
+        [
+          if(Enum.all?(run, &clean_result?/1), do: nil, else: "clean violation"),
+          if(changed == 0, do: nil, else: "#{changed} seeds changed"),
+          if(length(known) == length(run),
+            do: nil,
+            else: "entry missing from the baseline: " <> missing_names(run, known)
+          )
+        ],
+        &is_nil/1
+      )
+
+    if reasons == [], do: :ok, else: {:error, reasons}
+  end
+
+  defp clean_result?(%{rows: rows}), do: Enum.all?(rows, &(&1.clean? and not &1.unexplained?))
+
+  defp missing_names(run, known) do
+    run |> Enum.map(& &1.entry) |> Kernel.--(Enum.map(known, & &1.entry)) |> Enum.join(", ")
+  end
+
   @doc "Renders one summary line per entry, plus a line for each kind of problem."
   @spec render([result()]) :: String.t()
   def render(results) do

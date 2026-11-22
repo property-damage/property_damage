@@ -58,6 +58,9 @@ defmodule Mix.Tasks.Pd.CorpusTest do
   end
 
   describe "the seeded bugs" do
+    # offset_refund is not in this list: it finds the bug on 19 of its 20 seeds
+    # within the plan cap, and the one miss is a measured result, not a tuned
+    # one. The offset_refund test below holds it to at least 19.
     for name <- ["lost_full_refund", "double_credit", "rejected_set", "fifth_refund", "long_note"] do
       test "#{name}: found, with the bug fired, on every seed with the bug on; never with it off",
            %{entries: entries} do
@@ -270,8 +273,99 @@ defmodule Mix.Tasks.Pd.CorpusTest do
 
       :ok = Baseline.save(path, edited)
 
-      changed = capture_io(fn -> CorpusTask.exec(args ++ ["--baseline", path]) end)
+      changed =
+        capture_io(fn ->
+          capture_io(:stderr, fn -> CorpusTask.exec(args ++ ["--baseline", path]) end)
+        end)
+
       assert changed =~ "1/20"
+    end
+
+    @tag :tmp_dir
+    test "a run equal to the baseline passes even when a seed finds nothing", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "table.exs")
+      args = ["--only", "lost_full_refund", "--cap", "1"]
+
+      # Without a baseline the strict rule applies: one plan is too few.
+      capture_io(fn -> assert CorpusTask.exec(args ++ ["--save", path]) == :error end)
+      assert {:ok, %{results: [%{rows: rows}]}} = Baseline.load(path)
+      assert Enum.any?(rows, &(not &1.found?))
+
+      capture_io(fn -> assert CorpusTask.exec(args ++ ["--baseline", path]) == :ok end)
+    end
+
+    @tag :tmp_dir
+    test "a changed seed row fails the run and names the count on stderr", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "table.exs")
+      args = ["--only", "rejected_set", "--cap", "50"]
+      capture_io(fn -> assert CorpusTask.exec(args ++ ["--save", path]) == :ok end)
+
+      {:ok, saved} = Baseline.load(path)
+      [%{rows: [first | rest]} = result] = saved.results
+      altered = [%{result | rows: [%{first | shrink_runs: first.shrink_runs + 1} | rest]}]
+      :ok = Baseline.save(path, %{saved | results: altered})
+
+      stderr =
+        capture_io(:stderr, fn ->
+          capture_io(fn -> assert CorpusTask.exec(args ++ ["--baseline", path]) == :error end)
+        end)
+
+      assert stderr =~ "1 seeds changed"
+    end
+
+    @tag :tmp_dir
+    test "an entry missing from the baseline fails the run", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "table.exs")
+      capture_io(fn -> CorpusTask.exec(["--only", "rejected_set", "--save", path]) == :ok end)
+
+      stderr =
+        capture_io(:stderr, fn ->
+          capture_io(fn ->
+            args = ["--only", "double_credit", "--baseline", path]
+            assert CorpusTask.exec(args) == :error
+          end)
+        end)
+
+      assert stderr =~ "entry missing from the baseline: double_credit"
+    end
+
+    @tag :tmp_dir
+    test "a clean violation fails the run even when the table is unchanged", %{
+      tmp_dir: tmp
+    } do
+      dir = TmpPath.unique("pd_corpus_wrong")
+      File.mkdir_p!(Path.join(dir, "support"))
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(dir, "wrong.exs"), """
+      %PropertyDamage.Corpus.Entry{
+        name: "wrong",
+        engine: PropertyDamage.Corpus.Engine.Run,
+        system: Corpus.Scheme,
+        bug: :lost_full_refund,
+        model: Mix.Tasks.Pd.CorpusTest.WrongModel,
+        adapter: Corpus.Scheme.Adapter,
+        minimum: nil,
+        max_commands: 8,
+        seeds: [1]
+      }
+      """)
+
+      path = Path.join(tmp, "table.exs")
+      args = ["--dir", dir, "--only", "wrong"]
+
+      capture_io(:stderr, fn ->
+        capture_io(fn -> CorpusTask.exec(args ++ ["--save", path]) end)
+      end)
+
+      assert File.exists?(path)
+
+      stderr =
+        capture_io(:stderr, fn ->
+          capture_io(fn -> assert CorpusTask.exec(args ++ ["--baseline", path]) == :error end)
+        end)
+
+      assert stderr =~ "clean violation"
     end
 
     test "an unreadable baseline is an error" do
@@ -370,21 +464,100 @@ defmodule Mix.Tasks.Pd.CorpusTest do
     end
   end
 
+  describe "the regression entries" do
+    # The seed sets and counts are measured results of the engine under the
+    # entry's own plan cap, not targets: some seeds draw no failing plan.
+    for {name, found, total} <- [{"ledger", 21, 24}, {"store", 13, 24}] do
+      test "#{name}: finds on #{found} of #{total} seeds, never fails with the bug off",
+           %{entries: entries} do
+        entry = Map.fetch!(entries, unquote(name))
+        assert length(entry.seeds) == unquote(total)
+        assert entry.minimum == nil
+
+        rows = Measure.entry(entry, @plan_cap)
+
+        assert Enum.count(rows, & &1.found?) == unquote(found)
+        assert Enum.all?(rows, & &1.clean?)
+        refute Enum.any?(rows, & &1.unexplained?)
+
+        for %{found?: true, seed: seed} <- rows do
+          assert Engine.Run.run(entry, seed, entry.plan_cap).bug_fired?
+        end
+      end
+    end
+
+    test "the seeded bug is the only difference: each system is correct with the bug off" do
+      log = start_log()
+      {:ok, ledger} = Corpus.Ledger.start(bug: nil, fire_log: log)
+      assert Corpus.Ledger.deposit(ledger, 30) == 30
+      assert Corpus.Ledger.withdraw(ledger, 15) == 15
+
+      {:ok, buggy} = Corpus.Ledger.start(bug: :double_debit_from_12, fire_log: log)
+      assert Corpus.Ledger.deposit(buggy, 30) == 30
+      assert Corpus.Ledger.withdraw(buggy, 11) == 19
+      assert Corpus.Ledger.withdraw(buggy, 12) == -5
+      assert FireLog.total(log) == 1
+
+      {:ok, store} = Corpus.Store.start(bug: nil, fire_log: log)
+      Corpus.Store.put(store, :k0, 1)
+      Corpus.Store.delete(store, :k0)
+      assert Corpus.Store.get(store, :k0) == nil
+      assert FireLog.total(log) == 1
+
+      {:ok, noop} = Corpus.Store.start(bug: :noop_delete, fire_log: log)
+      Corpus.Store.put(noop, :k0, 1)
+      Corpus.Store.delete(noop, :k0)
+      assert Corpus.Store.get(noop, :k0) == 1
+      assert FireLog.total(log) == 2
+    end
+  end
+
+  describe "offset_refund" do
+    test "finds on at least 19 of 20 seeds within the plan cap", %{entries: entries} do
+      rows = Measure.entry(entries["offset_refund"], @plan_cap)
+
+      assert length(rows) == 20
+      assert Enum.count(rows, & &1.found?) >= 19
+      assert Enum.all?(rows, & &1.clean?)
+    end
+  end
+
+  describe "skipped entries" do
+    @skipped ~w(racing_refunds unset_field_in_clause unset_assign_acknowledged
+                layer_matches_no_spec command_never_eligible)
+
+    test "each prints as a skipped row and is selectable with --only" do
+      for name <- @skipped do
+        output =
+          capture_io(fn -> assert CorpusTask.exec(["--only", name]) == :ok end)
+
+        assert output =~ ~r/#{name}\s+skipped: \S/, name
+      end
+    end
+
+    test "each carries a reason and nothing else", %{entries: entries} do
+      for name <- @skipped do
+        assert %Entry{skip: reason, engine: nil, model: nil} = Map.fetch!(entries, name)
+        assert is_binary(reason) and reason != ""
+      end
+    end
+  end
+
   describe "entries" do
     test "carry the fields the harness needs", %{entries: entries} do
-      assert Map.keys(entries) |> Enum.sort() == [
-               "double_credit",
-               "fifth_refund",
-               "long_note",
-               "lost_full_refund",
-               "offset_refund",
-               "rejected_set"
-             ]
+      assert Map.keys(entries) |> Enum.sort() ==
+               Enum.sort(~w(double_credit fifth_refund long_note lost_full_refund offset_refund
+                    rejected_set ledger store) ++ @skipped)
 
-      for {_name, %Entry{} = entry} <- entries do
-        assert entry.seeds == @seeds
+      for {_name, %Entry{skip: nil} = entry} <- entries do
         assert entry.engine == Engine.Run
         assert is_atom(entry.bug) and entry.bug != nil
+        if entry.name in ["ledger", "store"], do: assert(entry.minimum == nil)
+      end
+
+      for name <- ~w(double_credit fifth_refund long_note lost_full_refund offset_refund
+                     rejected_set) do
+        assert entries[name].seeds == @seeds
       end
     end
   end
