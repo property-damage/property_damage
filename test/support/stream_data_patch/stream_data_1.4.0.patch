@@ -1,0 +1,27 @@
+diff --git a/lib/stream_data.ex b/lib/stream_data.ex
+index 4182d11..63e4b4f 100644
+--- a/lib/stream_data.ex
++++ b/lib/stream_data.ex
+@@ -2620,6 +2620,10 @@ defmodule StreamData do
+     split_seed: 1, order: 2, uniform_in_range: 3, lazy_tree: 2, lazy_tree_constant: 1
+   }
+ 
++  # A caller-supplied :rand state whose algorithm map carries :split splits
++  # itself. Every other state splits exactly as before.
++  defp split_seed({%{split: split}, _} = seed), do: split.(seed)
++
+   defp split_seed(seed) do
+     {int, seed} = :rand.uniform_s(1_000_000_000, seed)
+     new_seed = :rand.seed_s(@rand_algorithm, {int, 0, 0})
+@@ -2629,6 +2633,11 @@ defmodule StreamData do
+   defp order(left, right) when left > right, do: {right, left}
+   defp order(left, right), do: {left, right}
+ 
++  # A caller-supplied :rand state whose algorithm map carries :uniform_range is
++  # handed both bounds. Every other state draws exactly as before.
++  defp uniform_in_range(left, right, {%{uniform_range: uniform_range}, _} = seed),
++    do: uniform_range.(left, right, seed)
++
+   defp uniform_in_range(left, right, seed) do
+     {random_int, next_seed} = :rand.uniform_s(right - left + 1, seed)
+     {random_int - 1 + left, next_seed}
