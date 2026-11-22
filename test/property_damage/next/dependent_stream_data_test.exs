@@ -192,7 +192,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
     test "each site is on the kept list of the plan, the run, the failure and the replay" do
       capture_log(fn ->
         assert kept(Next.plan(BothModel, 2, max_steps: 12)) ==
-                 Enum.sort([@field_site, @assign_site])
+                 Enum.sort([@field_site, %{@assign_site | spec: 2}])
 
         assert kept(Next.plan(F.PlainFromModel, 2, max_steps: 3)) == [@field_site]
 
