@@ -13,7 +13,11 @@ defmodule PropertyDamage.Next.Engine do
   |---|---|
   | `integer/1` description | `{:integer, value, range}` |
   | `member_of/1` or `boolean/0` description | `{:member, value, index}`, index from 0 |
-  | any other generator | `{:stream_data, value}` |
+  | any other generator | `{:stream_data, value, path}`, path a list of child indices |
+
+  A StreamData entry's path locates the value in the shrink tree that the
+  generator, drawn from the key's seed, gives: `[]` for a fresh draw. See
+  `PropertyDamage.Next.Steering`.
 
   An engine treats the key as an opaque term: it may look the key up in the
   journal and derive a seed from it, nothing else.

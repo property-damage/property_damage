@@ -16,7 +16,16 @@ defmodule PropertyDamage.Next.Journal do
   never guesses which spec a stored pick meant.
 
   `to_binary/1` and `from_binary/2` save and load a journal. The binary
-  carries a format version, and loading refuses any other version.
+  carries a format version, and loading refuses any other version. It
+  holds the four fields above and nothing about where it was recorded: no
+  PD version, no model version, no module digest. A replay on a model whose
+  spec list changed is refused through the fingerprint; a changed generator
+  is not detected, and the engine fits or redraws the values stored for it.
+
+  Format version 2 records a StreamData value with its path in the
+  generator's shrink tree, `{:stream_data, value, path}`, and may hold an
+  empty pick `{:empty}` for a slot that yields no step. Version 1 recorded
+  a StreamData value without its path, and is refused.
 
   A journal can be loaded in a VM other than the one that saved it, such as
   a later `mix test` or `mix run`. The binary names atoms: PD's own module
@@ -43,9 +52,9 @@ defmodule PropertyDamage.Next.Journal do
         }
 
   @format :property_damage_next_journal
-  @version 1
+  @version 2
   @own_modules [Gen, Dependent, Placeholder, Range]
-  @entry_atoms [:pick, :command, :assigns, :integer, :member, :stream_data]
+  @entry_atoms [:pick, :command, :assigns, :integer, :member, :stream_data, :empty]
 
   @doc "Saves `journal` as a binary that `from_binary/1` loads."
   @spec to_binary(t()) :: binary()
