@@ -159,7 +159,7 @@ defmodule PropertyDamage.Next.GenerationTest do
         assert flag == probe.flag
         assert Enum.at([false, true], flag_index) == flag
 
-        assert entries[{key, :command, :label}] == {:stream_data, probe.label}
+        assert entries[{key, :command, :label}] == {:stream_data, probe.label, []}
         assert is_binary(probe.label)
       end
     end
@@ -335,12 +335,22 @@ defmodule PropertyDamage.Next.GenerationTest do
                inspect(F.CycleFrom)
     end
 
-    test "PD's own engine raises when the function returns a StreamData generator" do
-      assert message(fn -> Next.plan(F.PlainFromModel, 1, max_steps: 2) end) =~
+    test "PD's own engine raises when the function returns a StreamData generator, in raise mode" do
+      raise_mode = [max_steps: 2, dependent_stream_data: :raise]
+
+      assert message(fn -> Next.plan(F.PlainFromModel, 1, raise_mode) end) =~
                inspect(F.PlainFrom)
 
-      assert message(fn -> Next.plan(F.DelegatedFromModel, 1, max_steps: 2) end) =~
+      assert message(fn -> Next.plan(F.DelegatedFromModel, 1, raise_mode) end) =~
                inspect(F.DelegatedFrom)
+    end
+
+    test "PD's own engine draws a StreamData generator the function returns, by default" do
+      ExUnit.CaptureLog.capture_log(fn ->
+        for model <- [F.PlainFromModel, F.DelegatedFromModel] do
+          assert [_, _] = Next.plan(model, 1, max_steps: 2).steps
+        end
+      end)
     end
   end
 

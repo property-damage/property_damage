@@ -153,7 +153,8 @@ defmodule PropertyDamage.Next.RunTest do
             plan = Next.plan(Model, seed, max_steps: 20),
             first_refund = first_key(plan, Refund),
             first_refund != nil do
-          assert {:error, %Failure{} = failure} = run(seed: seed, config: %{fault: :skip_credit})
+          assert {:error, %Failure{} = failure} =
+                   run(seed: seed, config: %{fault: :skip_credit}, shrink: false)
 
           assert failure.plan_number == 1
           assert Terms.steps_of(failure.plan) == plan.steps

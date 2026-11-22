@@ -37,7 +37,7 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
     assert entry.engine == Engine.Next
   end
 
-  test "finds the bug with the bug firing, without shrinking", %{entry: entry} do
+  test "finds the bug with the bug firing, and shrinks it", %{entry: entry} do
     for seed <- @seeds do
       result = Engine.Next.run(entry, seed, @plan_cap)
 
@@ -45,7 +45,7 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
       assert result.bug_fired?, "seed #{seed}: failed without the seeded bug firing"
       assert result.fires > 0
       assert result.plans_until_found in 1..@plan_cap
-      assert result.shrink_runs == 0
+      assert result.shrink_runs > 0
 
       assert [_ | _] = result.shrunk
       assert length(result.shrunk) <= entry.max_commands
@@ -60,7 +60,8 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
     end
   end
 
-  test "reports the failing plan, unshrunk, and the plan it failed on", %{entry: entry} do
+  test "reports the shrunk failing plan, its shrink runs and the plan it failed on",
+       %{entry: entry} do
     for seed <- @seeds do
       result = Engine.Next.run(entry, seed, @plan_cap)
 
@@ -82,6 +83,7 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
 
       assert {:error, %Next.Failure{} = failure} = direct
       assert result.plans_until_found == failure.plan_number
+      assert result.shrink_runs == Map.fetch!(failure, :shrink_runs)
       assert result.shrunk == plain(failure.plan)
     end
   end
