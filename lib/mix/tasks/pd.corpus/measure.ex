@@ -2,7 +2,8 @@ defmodule PropertyDamage.Corpus.Measure do
   @moduledoc """
   Runs one entry over its seeds and records the raw numbers per seed.
 
-  Each seed is run twice with the same plan cap: once with the entry's bug on
+  Each seed is run twice with the same plan cap (the entry's own `plan_cap`
+  when it sets one, otherwise the one given): once with the entry's bug on
   and once with it off. A per-seed row holds:
 
     * `:seed`
@@ -12,7 +13,7 @@ defmodule PropertyDamage.Corpus.Measure do
     * `:plans_until_found`, `:shrink_runs` - the engine's counts, `nil` and
       `0` when `:found?` is false.
     * `:reached_minimum?` - the shrunk plan equals the entry's `minimum` under
-      the entry's `compare` rule.
+      the entry's `compare` rule. Always false for an entry without a minimum.
     * `:clean?` - the bug-off run passed and the bug never fired.
   """
 
@@ -28,10 +29,14 @@ defmodule PropertyDamage.Corpus.Measure do
           clean?: boolean()
         }
 
-  @doc "Measures `entry` on each of its seeds, generating at most `plan_cap` plans per run."
+  @doc """
+  Measures `entry` on each of its seeds, generating at most `plan_cap` plans per
+  run, or the entry's own `plan_cap` when it has one.
+  """
   @spec entry(Entry.t(), pos_integer()) :: [row()]
   def entry(%Entry{} = entry, plan_cap) do
-    Enum.map(entry.seeds, &seed(entry, &1, plan_cap))
+    cap = entry.plan_cap || plan_cap
+    Enum.map(entry.seeds, &seed(entry, &1, cap))
   end
 
   @doc "Measures `entry` on one seed."
@@ -55,6 +60,7 @@ defmodule PropertyDamage.Corpus.Measure do
   @doc "Whether `shrunk` equals the entry's smallest failing plan under its `compare` rule."
   @spec matches_minimum?(Entry.t(), [map()] | nil) :: boolean()
   def matches_minimum?(_entry, nil), do: false
+  def matches_minimum?(%Entry{minimum: nil}, _shrunk), do: false
 
   def matches_minimum?(%Entry{minimum: minimum, compare: compare}, shrunk) do
     normalize(shrunk, compare) == normalize(minimum, compare)

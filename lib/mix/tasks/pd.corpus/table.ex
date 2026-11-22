@@ -10,13 +10,24 @@ defmodule PropertyDamage.Corpus.Table do
     * `:shrink_runs` - mean shrink runs, over the same seeds.
     * `:reached_minimum` - seeds whose shrunk plan equals the entry's minimum.
 
+  A result may carry `skipped: reason` (an entry that was not run; it has no
+  rows, is shown as `skipped: <reason>` and is ignored when judging soundness)
+  or `regression: true` (an entry without a hand-written minimum; its
+  reached-minimum cell shows `-` and it is sound without finding the bug, as
+  long as it is clean and has no unexplained failure).
+
   The rendered text holds no timings and no process identifiers, so equal
   rows render to equal text.
   """
 
   alias PropertyDamage.Corpus.Measure
 
-  @type result :: %{entry: String.t(), rows: [Measure.row()]}
+  @type result :: %{
+          required(:entry) => String.t(),
+          required(:rows) => [Measure.row()],
+          optional(:skipped) => String.t(),
+          optional(:regression) => true
+        }
 
   @type summary :: %{
           seeds: non_neg_integer(),
@@ -46,28 +57,86 @@ defmodule PropertyDamage.Corpus.Table do
     }
   end
 
-  @doc "Whether every row is a sound measurement: found, explained, and clean with the bug off."
+  @doc """
+  Whether every row is a sound measurement: found, explained, and clean with the
+  bug off. A regression result need not find the bug. A skipped result has no rows.
+  """
   @spec sound?([result()]) :: boolean()
   def sound?(results) do
-    Enum.all?(results, fn %{rows: rows} ->
-      Enum.all?(rows, &(&1.found? and &1.clean?))
+    Enum.all?(results, fn
+      %{regression: true, rows: rows} -> Enum.all?(rows, &(&1.clean? and not &1.unexplained?))
+      %{rows: rows} -> Enum.all?(rows, &(&1.found? and &1.clean?))
     end)
+  end
+
+  @doc """
+  Judges a run against a saved table. Returns `:ok`, or `{:error, reasons}` with
+  one message per problem.
+
+  The run passes when every result is clean (nothing fails with the bug off,
+  and no failure lacks the seeded bug firing; a seed that finds nothing is not
+  a problem here), no seed row of a run entry differs from the saved table,
+  and every entry that ran is in the saved table. Skipped results are not
+  compared.
+  """
+  @spec judge_against([result()], [result()]) :: :ok | {:error, [String.t()]}
+  def judge_against(baseline, results) do
+    base = Map.new(baseline, &{&1.entry, &1})
+    run = Enum.reject(results, &Map.has_key?(&1, :skipped))
+    known = Enum.filter(run, &match?(%{rows: _}, base[&1.entry]))
+    known = Enum.reject(known, &Map.has_key?(base[&1.entry], :skipped))
+
+    changed =
+      Enum.sum(
+        for %{entry: name, rows: rows} <- known do
+          before = base[name].rows
+          seeds_changed(before, rows) + abs(length(before) - length(rows))
+        end
+      )
+
+    reasons =
+      Enum.reject(
+        [
+          if(Enum.all?(run, &clean_result?/1), do: nil, else: "clean violation"),
+          if(changed == 0, do: nil, else: "#{changed} seeds changed"),
+          if(length(known) == length(run),
+            do: nil,
+            else: "entry missing from the baseline: " <> missing_names(run, known)
+          )
+        ],
+        &is_nil/1
+      )
+
+    if reasons == [], do: :ok, else: {:error, reasons}
+  end
+
+  defp clean_result?(%{rows: rows}), do: Enum.all?(rows, &(&1.clean? and not &1.unexplained?))
+
+  defp missing_names(run, known) do
+    run |> Enum.map(& &1.entry) |> Kernel.--(Enum.map(known, & &1.entry)) |> Enum.join(", ")
   end
 
   @doc "Renders one summary line per entry, plus a line for each kind of problem."
   @spec render([result()]) :: String.t()
   def render(results) do
-    summaries = Enum.map(results, &{&1.entry, summarize(&1.rows)})
+    run = Enum.reject(results, &Map.has_key?(&1, :skipped))
+    summaries = Enum.map(run, &{&1.entry, summarize(&1.rows)})
 
     lines =
-      Enum.map(summaries, fn {name, s} ->
-        [
-          name,
-          "#{s.found}/#{s.seeds}",
-          plans(s.found_after),
-          number(s.shrink_runs),
-          "#{s.reached_minimum}/#{s.seeds}"
-        ]
+      Enum.map(results, fn
+        %{entry: name, skipped: reason} ->
+          [name, "skipped: #{reason}", "", "", ""]
+
+        %{entry: name, rows: rows} = result ->
+          s = summarize(rows)
+
+          [
+            name,
+            "#{s.found}/#{s.seeds}",
+            plans(s.found_after),
+            number(s.shrink_runs),
+            reached(result, s)
+          ]
       end)
 
     [align([@headers | lines]) | problems(summaries)] |> Enum.join("\n")
@@ -79,18 +148,15 @@ defmodule PropertyDamage.Corpus.Table do
   """
   @spec render_diff([result()], [result()]) :: String.t()
   def render_diff(baseline, current) do
-    base = Map.new(baseline, &{&1.entry, &1.rows})
+    base = Map.new(baseline, &{&1.entry, &1})
+    comparable = Enum.filter(current, &comparable?(&1, base))
 
     lines =
-      Enum.flat_map(current, fn %{entry: name, rows: rows} ->
-        case Map.fetch(base, name) do
-          {:ok, before} -> [diff_line(name, before, rows)]
-          :error -> []
-        end
+      Enum.map(comparable, fn %{entry: name, rows: rows} = result ->
+        diff_line(name, base[name].rows, rows, result)
       end)
 
-    missing = Enum.reject(current, &Map.has_key?(base, &1.entry))
-    notes = Enum.map(missing, &"#{&1.entry}: not in the baseline")
+    notes = Enum.flat_map(current, &diff_note(&1, base))
 
     [
       align([
@@ -102,7 +168,28 @@ defmodule PropertyDamage.Corpus.Table do
     |> Enum.join("\n")
   end
 
-  defp diff_line(name, before, now) do
+  # A skipped entry has no rows to compare, on either side.
+  defp comparable?(result, base) do
+    case Map.fetch(base, result.entry) do
+      {:ok, before} -> not Map.has_key?(before, :skipped) and not Map.has_key?(result, :skipped)
+      :error -> false
+    end
+  end
+
+  defp diff_note(%{entry: name, skipped: reason}, _base), do: ["#{name}: skipped: #{reason}"]
+
+  defp diff_note(%{entry: name}, base) do
+    case Map.fetch(base, name) do
+      {:ok, %{skipped: _}} -> ["#{name}: skipped in the baseline"]
+      {:ok, _} -> []
+      :error -> ["#{name}: not in the baseline"]
+    end
+  end
+
+  defp reached(%{regression: true}, _summary), do: "-"
+  defp reached(_result, s), do: "#{s.reached_minimum}/#{s.seeds}"
+
+  defp diff_line(name, before, now, result) do
     {b, a} = {summarize(before), summarize(now)}
 
     [
@@ -110,7 +197,10 @@ defmodule PropertyDamage.Corpus.Table do
       change(b.found, a.found, &Integer.to_string/1),
       change(b.found_after, a.found_after, &plans/1),
       change(b.shrink_runs, a.shrink_runs, &number/1),
-      change(b.reached_minimum, a.reached_minimum, &Integer.to_string/1),
+      if(result[:regression],
+        do: "-",
+        else: change(b.reached_minimum, a.reached_minimum, &Integer.to_string/1)
+      ),
       "#{seeds_changed(before, now)}/#{length(now)}"
     ]
   end
