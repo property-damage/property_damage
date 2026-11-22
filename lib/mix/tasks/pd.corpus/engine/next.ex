@@ -42,6 +42,12 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   @impl true
   def run(%Entry{} = entry, seed, plan_cap) do
     {:ok, log} = FireLog.start_link()
+    level = Logger.get_process_level(self())
+    # The run warns once for each kept site, with a timestamp. The result
+    # carries the kept list and the task prints it, so this process logs
+    # errors only while it runs; the printed table then does not depend on
+    # when it ran.
+    Logger.put_process_level(self(), :error)
 
     try do
       opts = opts(entry, seed, plan_cap, log)
@@ -49,9 +55,13 @@ defmodule PropertyDamage.Corpus.Engine.Next do
     rescue
       error in DependentStreamDataError -> result({:ok, %{kept: [error.site]}}, log, [])
     after
+      restore_level(level)
       FireLog.stop(log)
     end
   end
+
+  defp restore_level(nil), do: Logger.delete_process_level(self())
+  defp restore_level(level), do: Logger.put_process_level(self(), level)
 
   defp opts(entry, seed, plan_cap, log) do
     [

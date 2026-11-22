@@ -6,7 +6,8 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
   # it raises instead. An engine that can fit such a value does neither.
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureLog, only: [capture_log: 1]
+  import PropertyDamage.Next.Test.OwnLog, only: [with_own_log: 1]
 
   alias PropertyDamage.Next
   alias PropertyDamage.Next.{Failure, Journal, Model, StepSpec}
@@ -110,7 +111,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
   describe "warn mode, the default" do
     test "a from/2 field that returns a StreamData generator warns once per call, naming the site" do
       for model <- [F.PlainFromModel, F.DelegatedFromModel], call <- 1..2 do
-        {plan, log} = with_log(fn -> Next.plan(model, call, max_steps: 6) end)
+        {plan, log} = with_own_log(fn -> Next.plan(model, call, max_steps: 6) end)
         [module] = Enum.map(model.steps(), & &1.command)
 
         assert length(plan.steps) == 6
@@ -131,7 +132,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
     end
 
     test "a dependent assign that returns a StreamData generator warns once per call" do
-      {plan, log} = with_log(fn -> Next.plan(AssignModel, 1, max_steps: 6) end)
+      {plan, log} = with_own_log(fn -> Next.plan(AssignModel, 1, max_steps: 6) end)
 
       assert warnings(log) == 1
       assert log =~ inspect(Base)
@@ -141,12 +142,12 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
     end
 
     test "two sites in one plan warn once each" do
-      {_plan, log} = with_log(fn -> Next.plan(BothModel, 2, max_steps: 12) end)
+      {_plan, log} = with_own_log(fn -> Next.plan(BothModel, 2, max_steps: 12) end)
       assert warnings(log) == 2
     end
 
     test "a run of several plans warns once per site" do
-      {result, log} = with_log(fn -> model_run(BothModel, max_steps: 12) end)
+      {result, log} = with_own_log(fn -> model_run(BothModel, max_steps: 12) end)
 
       assert {:ok, %{plans: 3}} = result
       assert warnings(log) == 2
@@ -161,7 +162,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
       {failure, log} =
         Enum.find_value(1..60, fn seed ->
           {result, log} =
-            with_log(fn ->
+            with_own_log(fn ->
               Next.run(
                 model: F.PlainFromModel,
                 adapter: Shrink.Adapter,
@@ -183,7 +184,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
     end
 
     test "a description returned by a dependent field or assign does not warn" do
-      {plan, log} = with_log(fn -> Next.plan(DescriptionModel, 1, max_steps: 10) end)
+      {plan, log} = with_own_log(fn -> Next.plan(DescriptionModel, 1, max_steps: 10) end)
 
       assert warnings(log) == 0
       assert kept(plan) == []
@@ -249,7 +250,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
         model_run(F.PlainFromModel, dependent_stream_data: :raise)
       end
 
-      {plan, _log} = with_log(fn -> Next.plan(F.PlainFromModel, 1, max_steps: 3) end)
+      {plan, _log} = with_own_log(fn -> Next.plan(F.PlainFromModel, 1, max_steps: 3) end)
 
       assert_raise Surface.dependent_error(), fn ->
         Next.replay(plan.journal,
@@ -269,7 +270,7 @@ defmodule PropertyDamage.Next.DependentStreamDataTest do
   describe "an engine that can fit the value" do
     test "gives neither a warning, a raise, nor a kept site" do
       {plan, log} =
-        with_log(fn -> Next.plan(BothModel, 2, max_steps: 12, engine: FittingEngine) end)
+        with_own_log(fn -> Next.plan(BothModel, 2, max_steps: 12, engine: FittingEngine) end)
 
       assert warnings(log) == 0
       assert kept(plan) == []

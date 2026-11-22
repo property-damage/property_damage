@@ -5,7 +5,7 @@ defmodule PropertyDamage.Next.JournalV2Test do
   # changed spec list and says nothing about a changed generator.
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
+  import PropertyDamage.Next.Test.OwnLog, only: [with_own_log: 1]
 
   alias PropertyDamage.Next
   alias PropertyDamage.Next.{Journal, ModelChangedError}
@@ -47,7 +47,7 @@ defmodule PropertyDamage.Next.JournalV2Test do
       journal = Next.plan(Model, seed, max_steps: 10).journal
 
       {result, log} =
-        with_log(fn ->
+        with_own_log(fn ->
           Next.replay(journal,
             model: WiderShareModel,
             adapter: Adapter,
