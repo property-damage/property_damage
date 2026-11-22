@@ -6,7 +6,8 @@ defmodule PropertyDamage.Next do
   by where generation made it. `plan/3` builds a plan from a seed, or
   rebuilds it from a journal, without executing anything. `run/1` builds
   and executes plans until one fails or the plan budget is spent, and
-  `replay/2` rebuilds the plan of a saved journal and executes it once.
+  `replay/2` rebuilds the plan of a saved journal, or of its saved binary,
+  and executes it once.
   """
 
   alias PropertyDamage.Next.Engine.Native
@@ -111,6 +112,12 @@ defmodule PropertyDamage.Next do
   @doc """
   Rebuilds the plan of `journal` and executes it once.
 
+  `journal` is a `%PropertyDamage.Next.Journal{}` or a binary saved by
+  `PropertyDamage.Next.Journal.to_binary/1`. A binary is loaded with
+  `PropertyDamage.Next.Journal.from_binary/2` given the `:model` option, so
+  a journal saved in another VM replays without loading the model's modules
+  first.
+
   The plan is built as `plan/3` rebuilds it, so a journal saved from a
   failure gives back the failing plan. A journal recorded on a different
   spec list raises `PropertyDamage.Next.ModelChangedError` before the
@@ -122,7 +129,12 @@ defmodule PropertyDamage.Next do
   given, it must equal the journal's number of slots, or `ArgumentError`
   is raised.
   """
-  @spec replay(Journal.t(), keyword()) :: {:ok, %{plans: 1}} | {:error, Failure.t()}
+  @spec replay(Journal.t() | binary(), keyword()) :: {:ok, %{plans: 1}} | {:error, Failure.t()}
+  def replay(binary, opts) when is_binary(binary) do
+    model = opts |> Keyword.validate!(@replay_opts) |> module!(:model)
+    binary |> Journal.from_binary(model: model) |> replay(opts)
+  end
+
   def replay(%Journal{} = journal, opts) do
     validated = Keyword.validate!(opts, @replay_opts)
     model = module!(validated, :model)
