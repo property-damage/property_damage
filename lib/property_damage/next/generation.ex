@@ -53,11 +53,12 @@ defmodule PropertyDamage.Next.Generation do
       withdrawn: []
     }
 
-    acc = Enum.reduce(1..Keyword.fetch!(opts, :max_steps)//1, acc, &slot/2)
+    max_steps = Keyword.fetch!(opts, :max_steps)
+    acc = Enum.reduce(1..max_steps//1, acc, &slot/2)
 
     %Plan{
       steps: Enum.reverse(acc.steps),
-      journal: %{journal | entries: acc.entries},
+      journal: %{journal | entries: acc.entries, max_steps: max_steps},
       withdrawn: Enum.reverse(acc.withdrawn)
     }
   end

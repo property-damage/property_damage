@@ -2,8 +2,9 @@ defmodule PropertyDamage.Next.Journal do
   @moduledoc """
   The test case: every draw of a plan, keyed by where generation made it.
 
-  A journal holds the seed the plan was built from, one entry per key, and
-  a fingerprint of the model's spec list. PD rebuilds the plan by running
+  A journal holds the seed the plan was built from, the number of slots
+  the plan had, one entry per key, and a fingerprint of the model's spec
+  list. PD rebuilds the plan by running
   generation again against the entries: a key with an entry that still fits
   gives back its value, and a key with no entry draws afresh from the seed.
 
@@ -21,10 +22,11 @@ defmodule PropertyDamage.Next.Journal do
   alias PropertyDamage.Next.StepSpec
 
   @enforce_keys [:seed]
-  defstruct seed: nil, entries: %{}, fingerprint: nil
+  defstruct seed: nil, max_steps: nil, entries: %{}, fingerprint: nil
 
   @type t :: %__MODULE__{
           seed: integer(),
+          max_steps: non_neg_integer() | nil,
           entries: %{term() => tuple()},
           fingerprint: binary() | nil
         }
@@ -34,10 +36,9 @@ defmodule PropertyDamage.Next.Journal do
 
   @doc "Saves `journal` as a binary that `from_binary/1` loads."
   @spec to_binary(t()) :: binary()
-  def to_binary(%__MODULE__{seed: seed, entries: entries, fingerprint: fingerprint}) do
-    :erlang.term_to_binary(
-      {@format, @version, %{seed: seed, entries: entries, fingerprint: fingerprint}}
-    )
+  def to_binary(%__MODULE__{} = journal) do
+    content = Map.take(journal, [:seed, :max_steps, :entries, :fingerprint])
+    :erlang.term_to_binary({@format, @version, content})
   end
 
   @doc """
@@ -86,10 +87,15 @@ defmodule PropertyDamage.Next.Journal do
     ArgumentError -> not_a_journal!()
   end
 
-  defp journal!({@format, @version, %{seed: seed, entries: entries, fingerprint: fingerprint}})
+  defp journal!(
+         {@format, @version,
+          %{seed: seed, max_steps: max_steps, entries: entries, fingerprint: fingerprint}}
+       )
        when is_integer(seed) and is_map(entries) and
-              (is_binary(fingerprint) or is_nil(fingerprint)),
-       do: %__MODULE__{seed: seed, entries: entries, fingerprint: fingerprint}
+              ((is_integer(max_steps) and max_steps >= 0) or is_nil(max_steps)) and
+              (is_binary(fingerprint) or is_nil(fingerprint)) do
+    %__MODULE__{seed: seed, max_steps: max_steps, entries: entries, fingerprint: fingerprint}
+  end
 
   defp journal!({@format, version, _content}) do
     raise ArgumentError,

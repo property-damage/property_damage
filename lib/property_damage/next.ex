@@ -35,17 +35,21 @@ defmodule PropertyDamage.Next do
   withdraws its slot. A journal recorded on a different spec list raises
   `PropertyDamage.Next.ModelChangedError`.
 
+  A journal records the number of slots its plan had, and a plan rebuilt
+  from it has that many slots.
+
   Options:
 
-    * `:max_steps` - the number of slots (default 20)
+    * `:max_steps` - the number of slots (default 20). Given with a
+      journal, it must equal the journal's number of slots, or
+      `ArgumentError` is raised
     * `:engine` - the module that draws each value (default
       `PropertyDamage.Next.Engine.Native`)
   """
   @spec plan(module(), integer() | Journal.t(), keyword()) :: Plan.t()
   def plan(model, seed_or_journal, opts \\ []) when is_atom(model) do
-    opts = Keyword.validate!(opts, @plan_opts)
-    max_steps!(opts[:max_steps])
-    build(model, Model.specs!(model), seed_or_journal, opts)
+    plan_opts = opts |> Keyword.validate!(@plan_opts) |> slots!(seed_or_journal, opts)
+    build(model, Model.specs!(model), seed_or_journal, plan_opts)
   end
 
   @doc """
@@ -114,20 +118,23 @@ defmodule PropertyDamage.Next do
   `{:error, %PropertyDamage.Next.Failure{}}` with `plan_number` 1.
 
   Options are those of `run/1` without `:seed` and `:max_plans`. The
-  journal does not record the number of slots: pass the `:max_steps` the
-  journal was recorded with.
+  journal records the number of slots, so `:max_steps` is not needed; if
+  given, it must equal the journal's number of slots, or `ArgumentError`
+  is raised.
   """
   @spec replay(Journal.t(), keyword()) :: {:ok, %{plans: 1}} | {:error, Failure.t()}
   def replay(%Journal{} = journal, opts) do
-    opts = Keyword.validate!(opts, @replay_opts)
-    model = module!(opts, :model)
-    adapter = module!(opts, :adapter)
-    max_steps!(opts[:max_steps])
-    plan_opts = Keyword.take(opts, Keyword.keys(@plan_opts))
+    validated = Keyword.validate!(opts, @replay_opts)
+    model = module!(validated, :model)
+    adapter = module!(validated, :adapter)
+
+    plan_opts =
+      validated |> Keyword.take(Keyword.keys(@plan_opts)) |> slots!(journal, opts)
+
     plan = build(model, Model.specs!(model), journal, plan_opts)
     projections = Checks.load!(model)
 
-    case Execution.run(plan, adapter, opts[:config], projections) do
+    case Execution.run(plan, adapter, validated[:config], projections) do
       :ok -> {:ok, %{plans: 1}}
       {:error, step, reason} -> {:error, failure(plan, 1, step, reason)}
     end
@@ -183,6 +190,31 @@ defmodule PropertyDamage.Next do
 
   defp seed!(other),
     do: raise(ArgumentError, "the :seed option is an integer, got: #{inspect(other)}")
+
+  # The plan options with the number of slots settled: a journal's own when
+  # it records one, else the :max_steps option. A :max_steps option the
+  # caller gave must then match the journal's.
+  defp slots!(plan_opts, %Journal{max_steps: recorded}, given) when is_integer(recorded) do
+    case Keyword.fetch(given, :max_steps) do
+      {:ok, ^recorded} ->
+        :ok
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "the journal was recorded with max_steps #{recorded}, " <>
+                "but the :max_steps option is #{inspect(other)}"
+
+      :error ->
+        :ok
+    end
+
+    Keyword.put(plan_opts, :max_steps, recorded)
+  end
+
+  defp slots!(plan_opts, _seed_or_journal, _given) do
+    max_steps!(plan_opts[:max_steps])
+    plan_opts
+  end
 
   defp max_steps!(n) when is_integer(n) and n >= 0, do: n
 
