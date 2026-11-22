@@ -8,15 +8,22 @@ defmodule PropertyDamage.Next.Engine.Native do
   `PropertyDamage.Next.Steering.walk/3` reaches on the empty path from the
   key's seed, recorded as `{:stream_data, value, []}`.
 
-  On a key whose entry still fits the generator it returns the stored value
-  and entry unchanged. A StreamData entry `{:stream_data, value, path}`
+  On a key whose entry is of the generator's kind it fits the stored value
+  to the current domain, and the entry it returns records that domain:
+
+    * an integer is kept if it lies in the current range, else clamped to
+      the nearer bound; the entry records the current range;
+    * a member is kept if the current list still holds it, else the member
+      at the stored index is taken, else the last member if the list got
+      shorter; the entry records the index in the current list.
+
+  A StreamData entry `{:stream_data, value, path}`
   under a generator that is not a PD description is walked: the stored
   path is followed on the current generator from the key's seed, cut at
   its longest prefix that exists there, and the value reached is returned
   with the path that reached it. The stored value is not read, so a
-  changed generator gives a value it can draw. An entry that no longer
-  fits, or that is of another kind, is replaced by a fresh draw from the
-  key's seed.
+  changed generator gives a value it can draw. An entry of another kind is
+  replaced by a fresh draw from the key's seed.
 
   A `from/2` function that returns a StreamData generator, plain or
   delegated, is refused: this engine cannot fit such a value when the field
@@ -48,12 +55,23 @@ defmodule PropertyDamage.Next.Engine.Native do
     end
   end
 
-  defp kept({:integer, value, _range} = entry, %Gen{kind: :integer, domain: range}, _seed)
-       when is_integer(value),
-       do: if(value in range, do: {:ok, value, entry}, else: :error)
+  defp kept({:integer, value, _range}, %Gen{kind: :integer, domain: range}, _seed)
+       when is_integer(value) do
+    fitted = value |> max(range.first) |> min(range.last)
+    {:ok, fitted, {:integer, fitted, range}}
+  end
 
-  defp kept({:member, value, _index} = entry, %Gen{kind: :member, domain: list}, _seed),
-    do: if(Enum.member?(list, value), do: {:ok, value, entry}, else: :error)
+  defp kept({:member, value, index}, %Gen{kind: :member, domain: list}, _seed)
+       when is_integer(index) and index >= 0 do
+    index =
+      case Enum.find_index(list, &(&1 === value)) do
+        nil -> min(index, length(list) - 1)
+        current -> current
+      end
+
+    member = Enum.at(list, index)
+    {:ok, member, {:member, member, index}}
+  end
 
   defp kept({:stream_data, _value, _path}, %Gen{kind: kind}, _seed) when kind != :delegated,
     do: :error

@@ -8,12 +8,12 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   and at most `plan_cap` plans. The result is read from the failure:
 
     * `plans_until_found` is the number of the plan that failed.
-    * `shrink_runs` is 0: this engine does not shrink yet.
-    * `shrunk` is the failing plan as it was found, normalized to plain maps.
+    * `shrink_runs` is the number of plans the shrink executed.
+    * `shrunk` is the final plan of the shrink, normalized to plain maps.
 
-  The run stops at the failing plan and starts no system after it, so the
-  most recently started system instance is the one that ran the failing
-  plan, which is what `bug_fired?` reads.
+  The shrink executes its final plan last, so with an adapter that starts
+  one system per execution the most recently started system instance is
+  the one that ran the final plan, which is what `bug_fired?` reads.
   """
 
   @behaviour PropertyDamage.Corpus.Engine
@@ -62,7 +62,7 @@ defmodule PropertyDamage.Corpus.Engine.Next do
     %{
       found?: true,
       plans_until_found: failure.plan_number,
-      shrink_runs: 0,
+      shrink_runs: failure.shrink_runs,
       shrunk: plain_plan(failure.plan),
       bug_fired?: FireLog.fired_in_last_instance?(log),
       fires: FireLog.total(log)

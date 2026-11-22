@@ -7,7 +7,9 @@ defmodule PropertyDamage.Next.Generation do
   # state and picks one: the stored pick if the journal has one and that
   # spec is still offered, a weighted draw from the key's seed if the
   # journal has none. A stored pick no longer offered withdraws the slot:
-  # no step, and generation goes on. The picked spec's command fields and
+  # no step, and generation goes on; the slot's entries stay in the rebuilt
+  # journal. An empty pick, `{:empty}`, yields no step and draws nothing
+  # for its slot; it is written back and withdraws nothing. The picked spec's command fields and
   # assigns are drawn through the engine, each under its own key; then the
   # simulator predicts the command's events and the command-sequence
   # projection folds them into the state the next slot reads.
@@ -37,7 +39,14 @@ defmodule PropertyDamage.Next.Generation do
 
   @doc "Builds the plan of `specs` from `journal`."
   @spec build(module(), [StepSpec.t()], Journal.t(), keyword()) :: Plan.t()
-  def build(model, specs, %Journal{} = journal, opts) do
+  def build(model, specs, journal, opts), do: model |> trace(specs, journal, opts) |> elem(0)
+
+  @doc """
+  Builds the plan of `specs` from `journal`, and lists the keys of its
+  field and assign draws in the order they were drawn.
+  """
+  @spec trace(module(), [StepSpec.t()], Journal.t(), keyword()) :: {Plan.t(), [term()]}
+  def trace(model, specs, %Journal{} = journal, opts) do
     projection = model.command_sequence_projection()
 
     acc = %{
@@ -50,17 +59,20 @@ defmodule PropertyDamage.Next.Generation do
       state: projection.init(),
       entries: %{},
       steps: [],
-      withdrawn: []
+      withdrawn: [],
+      drawn: []
     }
 
     max_steps = Keyword.fetch!(opts, :max_steps)
     acc = Enum.reduce(1..max_steps//1, acc, &slot/2)
 
-    %Plan{
+    plan = %Plan{
       steps: Enum.reverse(acc.steps),
       journal: %{journal | entries: acc.entries, max_steps: max_steps},
       withdrawn: Enum.reverse(acc.withdrawn)
     }
+
+    {plan, Enum.reverse(acc.drawn)}
   end
 
   # --- The pick
@@ -71,17 +83,36 @@ defmodule PropertyDamage.Next.Generation do
     offered = Enum.filter(acc.specs, &offered?(&1, acc.state))
 
     case Map.fetch(acc.journal.entries, pick_key) do
+      {:ok, {:empty} = entry} ->
+        put_entry(acc, pick_key, entry)
+
       {:ok, {:pick, id, module} = entry} ->
         acc = put_entry(acc, pick_key, entry)
 
         case Enum.find(offered, &(&1.id == id and &1.command == module)) do
-          nil -> %{acc | withdrawn: [%{key: key, command: module} | acc.withdrawn]}
+          nil -> withdraw(acc, key, module)
           spec -> step(spec, key, acc)
         end
 
       _none ->
         fresh_pick(offered, key, pick_key, acc)
     end
+  end
+
+  # A withdrawn slot keeps its field and assign entries, copied from the
+  # journal it was rebuilt from, so a later edit that offers its command
+  # again brings the command back with the values it had.
+  defp withdraw(acc, key, module) do
+    kept =
+      Map.filter(acc.journal.entries, fn {entry_key, _entry} ->
+        is_tuple(entry_key) and elem(entry_key, 0) == key
+      end)
+
+    %{
+      acc
+      | entries: Map.merge(acc.entries, kept),
+        withdrawn: [%{key: key, command: module} | acc.withdrawn]
+    }
   end
 
   defp fresh_pick([], _key, _pick_key, acc), do: acc
@@ -289,7 +320,7 @@ defmodule PropertyDamage.Next.Generation do
 
   defp draw(acc, key, generator) do
     {value, entry} = acc.engine.draw(acc.journal, key, generator, acc.journal.seed)
-    {value, put_entry(acc, key, entry)}
+    {value, %{put_entry(acc, key, entry) | drawn: [key | acc.drawn]}}
   end
 
   defp put_entry(acc, key, entry), do: %{acc | entries: Map.put(acc.entries, key, entry)}
