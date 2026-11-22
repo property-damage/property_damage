@@ -18,6 +18,9 @@ defmodule PropertyDamage.Corpus.Engine do
       reproduced the failure.
     * `:fires` - how many times the seeded bug's path ran across the whole
       seed, shrink runs included.
+    * `:kept` - the sites where the engine drew a value it cannot fit when
+      the value it depends on changes, each a map; `[]` for an engine that
+      has none (see `PropertyDamage.Next.Engine`).
 
   An entry whose `bug` is `nil` runs with the bug off; the engine runs it the
   same way, with the same `plan_cap`.
@@ -31,7 +34,8 @@ defmodule PropertyDamage.Corpus.Engine do
           shrink_runs: non_neg_integer(),
           shrunk: [map()] | nil,
           bug_fired?: boolean(),
-          fires: non_neg_integer()
+          fires: non_neg_integer(),
+          kept: [map()]
         }
 
   @doc "The engine's name, as written into saved tables."

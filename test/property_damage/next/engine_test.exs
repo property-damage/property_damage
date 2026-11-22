@@ -65,14 +65,14 @@ defmodule PropertyDamage.Next.EngineTest do
       end
     end
 
-    test "a plain or delegated StreamData generator stores the value" do
+    test "a plain or delegated StreamData generator stores the value and the empty path" do
       for k <- 1..20 do
         {value, entry} = Native.draw(journal(), {:k, k}, StreamData.integer(1..5), 3)
-        assert entry == {:stream_data, value}
+        assert entry == {:stream_data, value, []}
         assert value in 1..5
 
         {list, entry} = Native.draw(journal(), {:k, k}, Gen.list_of(Gen.integer(1..3)), 3)
-        assert entry == {:stream_data, list}
+        assert entry == {:stream_data, list, []}
         assert Enum.all?(list, &(&1 in 1..3))
       end
     end
@@ -111,9 +111,9 @@ defmodule PropertyDamage.Next.EngineTest do
   end
 
   describe "a key with an entry" do
-    test "a stored integer that fits the range is returned with its entry unchanged" do
+    test "a stored integer that fits the range is returned, its entry recording the current range" do
       stored = journal(%{k: {:integer, 4, 1..9}})
-      assert Native.draw(stored, :k, Gen.integer(1..5), 1) == {4, {:integer, 4, 1..9}}
+      assert Native.draw(stored, :k, Gen.integer(1..5), 1) == {4, {:integer, 4, 1..5}}
     end
 
     test "a stored member still in the list is kept" do
@@ -122,8 +122,9 @@ defmodule PropertyDamage.Next.EngineTest do
     end
 
     test "a stored StreamData value is returned" do
-      stored = journal(%{k: {:stream_data, 3}})
-      assert Native.draw(stored, :k, StreamData.integer(1..5), 1) == {3, {:stream_data, 3}}
+      {value, entry} = Native.draw(journal(), :k, StreamData.integer(1..5), 1)
+      stored = journal(%{k: entry})
+      assert Native.draw(stored, :k, StreamData.integer(1..5), 1) == {value, entry}
     end
 
     test "a stored value outside the new domain gives a value inside it" do

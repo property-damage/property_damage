@@ -1,6 +1,6 @@
 # DR-068: Generators Describe Their Draws, and an Engine Behaviour Draws Them
 
-**Status:** Accepted
+**Status:** Accepted. Amended (2026-11-22, see "Amendment" at the end): `Engine.Native` draws a dependent StreamData generator instead of refusing it, warns once per site per call and lists the site as kept; `dependent_stream_data: :raise` raises `DependentStreamDataError`; an engine answers whether it can fit such a value through an optional exported `fits_dependent?/1`. Amended by DR-069: a StreamData entry is `{:stream_data, value, path}`; integer and member entries record the domain generation offers now, and a stored value is fitted to it (keep, else clamp; keep the member, else the stored index, else the last); a fresh StreamData value is the root of its shrink tree.
 **Date:** 2026-11-22
 
 ## Context
@@ -71,7 +71,13 @@ no new key shape.
    |---|---|
    | `integer/1` description | `{:integer, value, range}` |
    | `member_of/1` or `boolean/0` description | `{:member, value, index}`, index from 0 |
-   | delegated value or `%StreamData{}` | `{:stream_data, value}` |
+   | delegated value or `%StreamData{}` | `{:stream_data, value, path}`, path a list of child indices |
+
+   *Amended by DR-069: a StreamData entry was `{:stream_data, value}`. It
+   now also records the value's path in the generator's shrink tree, `[]`
+   for a fresh draw. An integer entry records the range generation offers
+   now, and a member entry the index in the list generation offers now,
+   not the domain of the first draw.*
 
    `run/1`, `plan/3` and `replay/2` of `PropertyDamage.Next` take the engine
    as the `:engine` option, with `Engine.Native` as the default.
@@ -91,6 +97,10 @@ no new key shape.
    draws. `Engine.Native` cannot fit it, so it raises `ArgumentError`, naming
    the command module and the field and pointing at the three description
    functions.
+   *Amended (2026-11-22): `Engine.Native` no longer raises here. It draws
+   the wrapped generator, generation warns once per site and lists the
+   site as kept, and `dependent_stream_data: :raise` restores a raise. The
+   wrapper also covers a dependent assign. See "Amendment" below.*
 8. **What `Engine.Native` does with an entry.** On a key with no entry it
    draws from the key's seed: an integer uniformly over the range, a member
    uniformly by index, and a StreamData value from the generator seeded with
@@ -100,6 +110,16 @@ no new key shape.
    replaced by a fresh draw from the key's seed. A rule that fits a stored
    value into a moved domain belongs to the shrinker and is not part of this
    record.
+   *Amended by DR-069: an integer or member entry of the generator's kind
+   is now fitted on every rebuild, not redrawn. An integer is kept if it
+   lies in the current range, else clamped to the nearer bound. A member
+   is kept if the current list holds it, else the member at the stored
+   index is taken, else the last member. A StreamData entry is walked: its
+   stored path is followed on the current generator from the key's seed
+   and cut at its longest prefix that exists there. A fresh StreamData
+   value is the root of the generator's shrink tree from the key's seed,
+   reached through `StreamData.check_all/3` as DR-069 describes, so a
+   walk of the empty path gives back the fresh value.*
 
 ## Alternatives
 
@@ -136,8 +156,72 @@ no new key shape.
   plain StreamData generator, `constant/1` included. A constant that depends
   on another field is written `integer(x..x)` or `member_of([x])`. An
   engine that can fit such values accepts the same model unchanged.
+  *Amended (2026-11-22): `Engine.Native` draws such a value and
+  generation warns about the site, unless `dependent_stream_data: :raise`
+  is given.*
 - A value drawn through StreamData is stored as a bare value. PD can keep it
   or draw it afresh, but it cannot fit it into a moved domain.
 - A generator returned by an `assign_from_command/3` function reaches the
   engine unwrapped. That function receives the whole drawn command, not a
   named field, so the wrapper of decision 7 does not apply to it.
+  *Amended (2026-11-22): a dependent assign's generator is now wrapped
+  too, with the spec and the assign key as its site.*
+- *Amended by DR-069: a value drawn through StreamData is stored with its
+  path. PD still cannot fit it into a moved domain, but after a change it
+  follows its stored path on the new generator, and the shrinker lowers it
+  by extending the path.*
+
+## Amendment (2026-11-22)
+
+A `from/2` function or a dependent assign that returns a StreamData
+generator is now accepted with a warning by default, instead of refused.
+
+1. **The wrapper covers both dependent sites.** Generation wraps such a
+   generator in `Engine.Dependent{generator:, site:}`. The site is
+   `%{site: :field, command: module, key: field, spec: nil}` for a
+   `from/2` field and `%{site: :assign, command: module, key: assign,
+   spec: id}` for a dependent assign
+   (`StepSpec.assign_from_command/3`). A PD description and a mint marker
+   still pass unwrapped.
+2. **`Engine.Native` draws it.** It unwraps the generator and draws it as
+   any other StreamData generator, with its path (DR-069). After the
+   field it depends on changes, the value follows its stored path on the
+   new generator. `Engine.Native` cannot fit that value to the new domain.
+3. **Generation warns once per site and keeps the site.** Under the
+   default `dependent_stream_data: :warn`, the value is drawn. The first
+   draw at each site in one call of `run/1`, `plan/3` or `replay/2` logs
+   one warning. The warning names the site and PD's three descriptions,
+   `integer/1`, `member_of/1` and `boolean/0`. The site goes on the kept
+   list: `kept` of the plan, of the failure, and of the result of `run/1`
+   and `replay/2`. `mix pd.corpus` prints each entry's kept sites after
+   its table. The warned set spans the whole call, so a site first met
+   during a shrink is warned about once and kept.
+4. **Raise mode.** With `dependent_stream_data: :raise`, generation raises
+   `PropertyDamage.Next.DependentStreamDataError` at the first draw at
+   such a site. The exception carries the site, and its message names the
+   command module, the field or assign, and the three descriptions. The
+   shrinker lets the exception through, so raise mode stops a shrink as
+   it stops a run.
+5. **The engine decides whether its value fits.** Before the warning or
+   the raise, generation asks the engine. An engine module may export
+   `fits_dependent?/1`; generation loads the module and checks whether it
+   exports the function. An engine without it answers `false`. An engine
+   answering `true` for the bare generator gets the wrapped generator with
+   no warning, no raise and no kept site. `Engine.Native` does not export
+   the function. The behaviour keeps its one callback, `draw/4`.
+
+Why: refusing every dependent StreamData generator turned away models
+that run correctly and only shrink less well. A dependent value drawn by
+path still replays exactly, because its path and its key's seed fix it.
+What PD loses is fitting: when the source shrinks, the value may move
+away from the one that made the failure, and the shrink may stop early.
+A warning and the kept list name that loss at each site without blocking
+the run, and the raise mode keeps the strict behavior for a team that
+wants it.
+
+The answer belongs to the engine because only the engine knows whether it
+can fit the value. An engine that records domains for StreamData values
+would accept the same model with no warning. Making `fits_dependent?/1` a
+second callback was rejected: every engine would have to define it,
+although most engines answer `false`. An optional exported function lets an engine opt in and
+costs the others nothing.

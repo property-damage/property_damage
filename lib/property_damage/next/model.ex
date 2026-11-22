@@ -6,8 +6,9 @@ defmodule PropertyDamage.Next.Model do
   `PropertyDamage.Next.StepSpec.normalize/1` and changed by layers. It
   names the simulator that predicts each command's events (a module
   implementing `PropertyDamage.Model.Simulator`), the projection that folds
-  the predicted events into the state generation reads, and the
-  projections whose checks run during execution (none by default).
+  the predicted events into the state generation reads, whose checks run
+  during execution, and further projections whose checks run (none by
+  default).
 
       defmodule PaymentsModel do
         use PropertyDamage.Next.Model
@@ -27,10 +28,17 @@ defmodule PropertyDamage.Next.Model do
   @doc "The module that predicts the events of a command from the predicted state."
   @callback simulator() :: module()
 
-  @doc "The projection that folds predicted events into the state generation reads."
+  @doc """
+  The projection that folds predicted events into the state generation
+  reads. During execution it also folds the real events, and its checks run
+  as those of a check projection do.
+  """
   @callback command_sequence_projection() :: module()
 
-  @doc "The projections whose checks run during execution."
+  @doc """
+  Further projections whose checks run during execution. Naming the
+  command-sequence projection here too runs its checks once, not twice.
+  """
   @callback check_projections() :: [module()]
 
   @optional_callbacks check_projections: 0

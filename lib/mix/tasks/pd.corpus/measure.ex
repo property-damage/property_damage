@@ -15,6 +15,8 @@ defmodule PropertyDamage.Corpus.Measure do
     * `:reached_minimum?` - the shrunk plan equals the entry's `minimum` under
       the entry's `compare` rule. Always false for an entry without a minimum.
     * `:clean?` - the bug-off run passed and the bug never fired.
+    * `:kept` - the sites both runs put on the engine's kept list, sorted
+      and without repeats; `[]` for an engine that answers none.
   """
 
   alias PropertyDamage.Corpus.Entry
@@ -26,7 +28,8 @@ defmodule PropertyDamage.Corpus.Measure do
           plans_until_found: pos_integer() | nil,
           shrink_runs: non_neg_integer(),
           reached_minimum?: boolean(),
-          clean?: boolean()
+          clean?: boolean(),
+          kept: [map()]
         }
 
   @doc """
@@ -53,7 +56,8 @@ defmodule PropertyDamage.Corpus.Measure do
       plans_until_found: if(hit?, do: on.plans_until_found),
       shrink_runs: if(hit?, do: on.shrink_runs, else: 0),
       reached_minimum?: hit? and matches_minimum?(entry, on.shrunk),
-      clean?: not off.found? and off.fires == 0
+      clean?: not off.found? and off.fires == 0,
+      kept: (Map.get(on, :kept, []) ++ Map.get(off, :kept, [])) |> Enum.uniq() |> Enum.sort()
     }
   end
 

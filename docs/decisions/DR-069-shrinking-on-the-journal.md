@@ -1,0 +1,268 @@
+# DR-069: The Shrinker Edits the Journal, and Generation Rebuilds Each Candidate
+
+**Status:** Accepted
+**Date:** 2026-11-22
+
+## Context
+
+The new engine under `PropertyDamage.Next` keeps the test case as a journal:
+one entry per draw, keyed by where generation made the draw (DR-068). PD
+rebuilds a plan by running generation again against the journal. A key with
+an entry gives back the stored value, fitted to the domain generation offers
+now; a key without one draws afresh from the key's seed.
+
+A failing plan is rarely the smallest plan that fails. Take a run whose
+twentieth plan fails at step 14 after a payment of 812 and three refunds.
+The smallest plan that shows the same defect may be one payment of 2 and
+one refund of 1. A shrinker searches for that smaller plan by trying
+candidates and keeping each one that still fails the same way.
+
+Today's engine shrinks the command list itself. A candidate built that way
+can be a plan the model would never generate: a refund whose payment was
+removed, or an amount that a `from/2` function would not offer. Each such
+candidate either fails for a new reason or passes for a reason unrelated to
+the defect, and both waste a run against the system under test.
+
+StreamData shrinks a value through a tree. A generator drawn from one seed
+at one size gives one value, the root, whose children are smaller values.
+StreamData exposes this tree only through `StreamData.check_all/3`, which
+offers a failing value's children to the property in order. The modules
+that build the tree directly are private.
+
+## Decision
+
+1. **The shrinker edits only the journal.** A candidate is an edited
+   journal. Generation rebuilds its plan, fitting every stored value to the
+   domain it has now (decision 4), and the plan is executed. So every
+   candidate is a plan the model can build: `when:` predicates, `from/2`
+   functions and the simulator all run again.
+
+2. **The moves.** The shrinker runs these passes, repeated until a round
+   adopts nothing or the run budget is spent:
+
+   1. Once, first: it writes the empty pick `{:empty}` at every slot after
+      the failing step.
+   2. It removes steps in blocks. The block size starts at half the number
+      of steps and halves down to one step; at size one the pass repeats
+      until it removes nothing. A step is removed by writing `{:empty}` at
+      its pick key, `{{lane, slot}, :pick}`. Generation reads `{:empty}` as
+      a slot that yields no step and draws nothing, and writes it back.
+   3. It lowers each drawn value, later slots first and, within a slot, in
+      the reverse of the draw order. Generation draws a `from/2` field
+      after the fields it names, so a dependent value is lowered before its
+      sources. The list of keys is read again after every adoption, since a
+      rebuild can add or drop keys.
+      - An integer tries its range's lower bound first, then bisects
+        between the highest value known to pass and the lowest known to
+        fail, until the two are adjacent.
+      - A member tries each lower index of its list, from 0.
+      - A StreamData value extends its path (decision 6). The shrinker tries
+        the children of the node at the path in order and descends into
+        the first child that fails the same way.
+
+3. **Adoption.** A candidate is adopted when it fails the same way as the
+   current best plan: the same kind of reason at the same step or an
+   earlier one. The kind is the name of the failed check, the adapter's
+   error reason (its tag when it is a tagged tuple), or the module of the
+   raised exception. A candidate whose rebuilt plan has the same steps as
+   the current best is not executed. A candidate whose rebuild raises is
+   dropped and not executed, except for `DependentStreamDataError`, which
+   stops the shrink as it stops a run (DR-068, amendment).
+
+4. **Fitting on rebuild.** `Engine.Native` fits a stored value of the
+   generator's kind to the domain generation offers now, and the entry it
+   records holds that current domain:
+   - An integer is kept if it lies in the current range, else clamped to
+     the nearer bound. The entry records the current range.
+   - A member is kept if the current list holds it, else the member at the
+     stored index is taken, else the last member if the list got shorter.
+     The entry records the index in the current list.
+   - A StreamData value follows its stored path on the current generator
+     (decision 6).
+
+   A kept value can lose its place on a bound. Take a payment of 500, a
+   refund of 200, then a second refund of 300 drawn from `1..300`, the
+   whole balance. A candidate removes the first refund. The second
+   refund's range becomes `1..500`, and 300 still fits, so it is kept; but
+   it no longer refunds the whole balance, and the defect may no longer
+   show. When the candidate that kept such a value is not adopted, the
+   shrinker tries once more with each such value at its new bound, here
+   500. A value sat on a bound when it equalled the stored range's first
+   or last integer and that bound differs in the current range. The
+   shrinker tries this once per candidate, right after it.
+
+   To lower a member, the shrinker writes, at the member's key, a value
+   that no list holds together with the wanted index. The engine then
+   takes the member at the stored index, so the shrinker reaches index `i`
+   without knowing the list.
+
+5. **Withdrawn slots and the final journal.** An edit can leave a stored
+   pick no longer offered: the payment a refund needs is gone, so the
+   refund's `when:` fails. Generation then withdraws that slot: no step,
+   and generation goes on. During the search a withdrawn slot keeps its
+   pick and its field entries in the rebuilt journal, so a later edit that
+   offers the command again brings it back with the values it had.
+
+   The final journal drops what the search kept. Each withdrawn slot's
+   pick becomes `{:empty}` and its other entries go. The final journal
+   therefore holds exactly its plan's draws, and it replays to the
+   identical plan. The empty pick is needed because every plan keeps its
+   full number of slots and the journal has no length: a slot with no pick
+   entry would draw a fresh pick on replay. The shrinker executes the plan
+   that the final journal rebuilds once more, and that execution is the
+   failure `run/1` returns.
+
+6. **A StreamData value is stored as its path, reached by steering.**
+   `Engine.Native` records a StreamData value as `{:stream_data, value,
+   path}`. The path is a list of child indices from the root of the shrink
+   tree that the generator, drawn from the key's seed at a fixed size,
+   gives: `[]` is the root, `[2, 0]` the first child of the root's third
+   child. A fresh draw is the root, with path `[]`.
+
+   `PropertyDamage.Next.Steering` reaches the node at a path through the
+   public `StreamData.check_all/3` alone. It runs one check with
+   `max_runs: 1` and fails the root. `check_all/3` then offers the root's
+   children in order. Steering passes each child until the one at the next
+   index of the path, which it fails, so `check_all/3` descends into that
+   child's children. When the walk reaches the node the path names,
+   steering throws out of the property callback, so `check_all/3` builds
+   no more values. A path that names a child a node does not have is cut
+   at its longest prefix that exists, and the walk ends at the deepest
+   node it reached. On a changed generator, the stored path is walked on
+   the new tree and cut the same way, so the value reached belongs to the
+   current generator.
+
+   The shrinker uses that cut to find a node's last child. It asks for the
+   child at index `i`; if the rebuilt journal records a shorter path, the
+   node has no child `i`, and the search at that node ends without an
+   execution.
+
+7. **How steering counts a node's children.** `Steering.child_count/3`
+   fails the nodes along the path and then passes every child of the node
+   it counts. On the StreamData version in `mix.lock`, `check_all/3` offers a
+   failing node's children in order, descends into the first that fails,
+   and never returns to that child's later siblings. So the count is the
+   number of values offered after failing the node, every one of them
+   passed.
+
+8. **Two canaries guard the steering.** StreamData documents neither
+   behavior that steering relies on, so a test calls `check_all/3`
+   directly, with no PD code, for each:
+   - The visiting-order canary pins the order on the StreamData version in `mix.lock`:
+     children offered in order, descent into the first that fails, no
+     return to later siblings. It also proves that two runs along one path
+     give one value. A StreamData release that changes the order fails
+     this test before any shrink goes wrong.
+   - The throw pin proves that `check_all/3` lets a throw from the property
+     callback pass through to its caller, and pins how many values the
+     generator builds before the throw. A release that catches throws, or
+     builds children eagerly, fails this test.
+
+9. **Saved format version 2.** The StreamData entry shape changes the saved
+   journal, so the format version moves to 2. Version 2 may also hold the
+   empty pick. The loader refuses version 1, and any other version, with a
+   message that names the version found and the version it loads. The
+   journal records no origin: no PD version, no model version, no module
+   digest. `replay/2` refuses a journal whose spec list fingerprint no
+   longer matches the model, and says nothing about a changed generator;
+   the engine fits or walks the values stored for it.
+
+10. **Checks of the command-sequence projection run.** An execution runs
+    the `@check` functions of the model's check projections and of its
+    command-sequence projection. A projection listed in both roles folds
+    its state once and runs its checks once per trigger. Loading a model
+    whose projections declare `@compare`, or a check form this engine does
+    not run, raises `ArgumentError`, so no check is skipped without a word.
+
+11. **Mint markers are stamped once, at generation.** Generation stamps
+    each `mint_per_run/1` marker at its first draw with the step and the
+    location of its key. A stamped marker keeps its stamp. A marker the
+    model reads back from its predicted state therefore names the step
+    that drew it: two steps that hold one marker send one value in an
+    execution, and two separate `mint_per_run/1` calls give two values.
+    The value stays fresh per execution. A member draw over stamped
+    markers stores the stamped marker in the journal, and such a journal
+    saves, loads in a fresh VM and replays.
+
+12. **`shrink_runs` counts executed candidates.** Every execution after
+    the plan that first failed counts as a shrink run, the final
+    execution of the shrunk plan included. Candidates that are not
+    executed, because their rebuild raised or equals the current plan, do
+    not count. `max_shrink_runs` bounds the count, the final execution
+    included. The same run gives the same final plan and the same count.
+
+13. **The corpus engine reads the fired bug from a replay.** A shrink
+    executes many candidates after the failure, so the last system the
+    adapter started need not be the one that ran the final plan. The
+    corpus engine for `PropertyDamage.Next` therefore replays the final
+    journal once with a fresh fire log and reads whether the bug fired
+    there. That replay counts neither in `shrink_runs` nor in the seed's
+    fire count.
+
+## Alternatives
+
+- **Shrinking the command list, as today's engine does.** Rejected: a
+  candidate can be a plan the model would never build, so a run can fail
+  or pass for a reason unrelated to the defect. Rebuilding by generation
+  keeps every candidate valid, and the journal stays the one form of the
+  test case.
+- **Reading StreamData's shrink tree through its private modules.**
+  Rejected: a private module can change in any release without notice.
+  Steering uses only the public `check_all/3`, and the two canaries turn
+  the undocumented behavior it relies on into a test failure.
+- **Storing a StreamData value bare and shrinking it from the key's seed.**
+  Rejected: a bare value cannot be placed in the tree of a changed
+  generator, and every shrink step would have to rebuild the tree from the
+  root without a way to name the step it reached. A path names a node on
+  any generator, and replays it.
+- **Counting a node's children from the values offered by two different
+  walks.** An earlier StreamData release returned to a node's later
+  siblings after descending into a child, so such a count held there.
+  Rejected: on the release in `mix.lock`, `check_all/3` never returns, so the
+  count must be the values offered after failing the node.
+- **Removing a step by deleting its pick entry.** Rejected: every plan
+  keeps its full number of slots, so a slot with no pick entry draws a
+  fresh pick on replay. The empty pick names a removed step explicitly.
+- **Dropping a withdrawn slot's entries as soon as it is withdrawn.**
+  Rejected: a later edit that offers the command again would draw it
+  afresh, so the search could not bring back a step with its values.
+- **Recording the PD version or a module digest in the journal.**
+  Rejected: a version check refuses journals that still replay correctly.
+  The spec list fingerprint refuses the change that makes a stored pick
+  ambiguous, and the engine fits or walks a changed generator's values.
+- **Executing every candidate, including one whose plan equals the
+  current best.** Rejected: such a run cannot change the best plan and
+  only spends the budget.
+
+## Consequences
+
+- Every shrunk failure carries a journal that replays to its plan with
+  `replay/2`, in another VM too.
+- A candidate never names a value the model cannot draw, and a dependent
+  integer or member is fitted when its source shrinks.
+- A dependent value drawn through StreamData follows its stored path when
+  its source shrinks, and is not fitted. The shrink may then stop at a
+  larger plan; the kept list names each such site (DR-068, amendment).
+- Journals saved in format version 1 cannot be loaded. Capture the
+  failure again.
+- `run/1` gains `shrink:` (default `true`), `max_shrink_runs:` (default
+  1000) and `dependent_stream_data:`. A failure describes the final plan;
+  `original` holds the plan that first failed, and `shrink_runs` counts
+  the executed candidates.
+
+## Known costs and limits
+
+- The corpus engine spends one extra execution per failing seed on the
+  replay of decision 13, outside `shrink_runs`.
+- A candidate whose rebuild raises is dropped without a word. A defect in
+  model code that shows only on such a value stays silent during the
+  shrink.
+- The early stop of a walk depends on `check_all/3` not catching throws.
+  The throw pin fails first if a release changes that.
+- A walk costs, in values the generator builds, the root plus `i + 1`
+  children for each index `i` of the path. A long string or list value
+  can cost many generator calls per shrink.
+- The shrinker lowers one key at a time. A failure that needs two values
+  to move together can stop at a local minimum.
+- The value the shrinker writes to ask for a member by index must appear
+  in no model's list.

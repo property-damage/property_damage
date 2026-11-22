@@ -49,7 +49,8 @@ defmodule PropertyDamage.Corpus.Engine.Run do
       shrink_runs: 0,
       shrunk: nil,
       bug_fired?: FireLog.fired_in_last_instance?(log),
-      fires: FireLog.total(log)
+      fires: FireLog.total(log),
+      kept: []
     }
   end
 
@@ -60,7 +61,8 @@ defmodule PropertyDamage.Corpus.Engine.Run do
       shrink_runs: report.shrink_iterations,
       shrunk: report |> FailureReport.shrunk_sequence() |> plain_plan(),
       bug_fired?: FireLog.fired_in_last_instance?(log),
-      fires: FireLog.total(log)
+      fires: FireLog.total(log),
+      kept: []
     }
   end
 
