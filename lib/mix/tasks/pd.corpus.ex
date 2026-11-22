@@ -23,6 +23,13 @@ defmodule Mix.Tasks.Pd.Corpus do
   `skipped: reason` and a saved table records `%{entry: name, rows: [], skipped:
   reason}`. See `PropertyDamage.Corpus.Entry`.
 
+  A guardrail entry sets `expect` instead of a minimum: its model commits one
+  mistake that PD must catch, by raising an error or by a line of the run
+  report. It counts a seed as found when that happens, runs its `control`
+  pair when the bug is off, and shows `-` in the reached-minimum cell. The
+  task prints the line found under `guardrail lines:`, and exits non-zero if
+  a seed does not find it. See `PropertyDamage.Corpus.Entry`.
+
   After the table, the task lists each entry's kept sites: the places where
   the engine drew a value it cannot fit when the value it depends on
   changes (see `PropertyDamage.Next.Engine`). An entry with none is not
@@ -120,6 +127,9 @@ defmodule Mix.Tasks.Pd.Corpus do
   defp result(%{skip: reason} = entry, _cap) when is_binary(reason),
     do: %{entry: entry.name, rows: [], skipped: reason}
 
+  defp result(%{expect: expect} = entry, cap) when not is_nil(expect),
+    do: entry |> measured(cap) |> Map.merge(%{regression: true, guardrail: true})
+
   defp result(%{minimum: nil} = entry, cap),
     do: entry |> measured(cap) |> Map.put(:regression, true)
 
@@ -129,7 +139,14 @@ defmodule Mix.Tasks.Pd.Corpus do
   defp measured(entry, cap) do
     rows = Measure.entry(entry, cap)
     kept = rows |> Enum.flat_map(&Map.get(&1, :kept, [])) |> Enum.uniq() |> Enum.sort()
-    %{entry: entry.name, rows: Enum.map(rows, &Map.delete(&1, :kept)), kept: kept}
+    line = Enum.find_value(rows, &Map.get(&1, :line))
+
+    %{
+      entry: entry.name,
+      rows: Enum.map(rows, &Map.drop(&1, [:kept, :line])),
+      kept: kept,
+      line: line
+    }
   end
 
   defp load_baseline(nil), do: {:ok, nil}
@@ -146,7 +163,8 @@ defmodule Mix.Tasks.Pd.Corpus do
 
     Mix.shell().info(Table.render(results))
     print_kept(results)
-    results = Enum.map(results, &Map.delete(&1, :kept))
+    print_lines(results)
+    results = Enum.map(results, &Map.drop(&1, [:kept, :line]))
     if baseline, do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
@@ -176,6 +194,13 @@ defmodule Mix.Tasks.Pd.Corpus do
           do: "  #{name}: #{describe_site(site)}"
 
     if lines != [], do: Mix.shell().info(Enum.join(["\nkept sites:" | lines], "\n"))
+  end
+
+  defp print_lines(results) do
+    lines =
+      for %{entry: name, line: line} when is_binary(line) <- results, do: "  #{name}: #{line}"
+
+    if lines != [], do: Mix.shell().info(Enum.join(["\nguardrail lines:" | lines], "\n"))
   end
 
   defp describe_site(%{site: :assign, command: module, key: key, spec: id}),

@@ -21,6 +21,9 @@ defmodule PropertyDamage.Corpus.Engine do
     * `:kept` - the sites where the engine drew a value it cannot fit when
       the value it depends on changes, each a map; `[]` for an engine that
       has none (see `PropertyDamage.Next.Engine`).
+    * `:line` - optional. For a guardrail entry (see
+      `PropertyDamage.Corpus.Entry`), the exception message or the report
+      line that was found.
 
   An entry whose `bug` is `nil` runs with the bug off; the engine runs it the
   same way, with the same `plan_cap`.
@@ -29,13 +32,14 @@ defmodule PropertyDamage.Corpus.Engine do
   alias PropertyDamage.Corpus.Entry
 
   @type result :: %{
-          found?: boolean(),
-          plans_until_found: pos_integer() | nil,
-          shrink_runs: non_neg_integer(),
-          shrunk: [map()] | nil,
-          bug_fired?: boolean(),
-          fires: non_neg_integer(),
-          kept: [map()]
+          required(:found?) => boolean(),
+          required(:plans_until_found) => pos_integer() | nil,
+          required(:shrink_runs) => non_neg_integer(),
+          required(:shrunk) => [map()] | nil,
+          required(:bug_fired?) => boolean(),
+          required(:fires) => non_neg_integer(),
+          required(:kept) => [map()],
+          optional(:line) => String.t() | nil
         }
 
   @doc "The engine's name, as written into saved tables."

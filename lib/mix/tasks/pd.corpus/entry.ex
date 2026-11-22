@@ -34,6 +34,17 @@ defmodule PropertyDamage.Corpus.Entry do
       `PropertyDamage.Corpus.Engine.Next` passes it to
       `PropertyDamage.Next.run/1`; `PropertyDamage.Corpus.Engine.Run`
       ignores it. Default `[]`.
+    * `expect` - makes the entry a guardrail entry: a model that commits one
+      mistake PD must catch. `{:raises, Module}` expects the run to raise an
+      exception of that module; `{:report, text}` expects a line of
+      `PropertyDamage.Next.Report.format/1` that contains `text`. A seed
+      counts as found when that happens, and the exception message or the
+      report line is printed under the table. The entry needs no `minimum`.
+      Only `PropertyDamage.Corpus.Engine.Next` reads it. Default `nil`.
+    * `control` - for a guardrail entry, a keyword list with `:model` and
+      `:adapter`, the corrected pair the bug-off run uses. The `bug` switch
+      then reads as: on, the mistake is present; off, the corrected pair runs
+      and must pass. Default `nil`.
     * `skip` - a reason string. A skipped entry is never run: the table shows
       `skipped: <reason>` for it and the saved table records the reason. It
       needs no other field than `name`.
@@ -54,6 +65,8 @@ defmodule PropertyDamage.Corpus.Entry do
           max_commands: pos_integer(),
           plan_cap: pos_integer() | nil,
           run_opts: keyword(),
+          expect: {:raises, module()} | {:report, String.t()} | nil,
+          control: [model: module(), adapter: module()] | nil,
           skip: String.t() | nil
         }
 
@@ -68,6 +81,8 @@ defmodule PropertyDamage.Corpus.Entry do
     :minimum,
     :plan_cap,
     :skip,
+    :expect,
+    :control,
     compare: :ignore_ids,
     seeds: Enum.to_list(1..20),
     max_commands: 20,
