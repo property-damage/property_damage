@@ -11,7 +11,7 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
   @seeds [1, 2]
 
   setup_all do
-    {:ok, [%Entry{name: "lost_full_refund"} = entry]} = Loader.load(@corpus)
+    {:ok, [%Entry{name: "lost_full_refund"} = entry]} = Loader.load(@corpus, ["lost_full_refund"])
     {:ok, entry: entry}
   end
 
