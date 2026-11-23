@@ -39,6 +39,14 @@ defmodule PropertyDamage.Next.Journal do
   schedule entries, one integer under `{{1, slot}, :schedule, point}` for
   each point of each lane-1 step.
 
+  A journal of a model that states paths (see `PropertyDamage.Next.Model`)
+  also holds, for each step whose command module it lists, the pick of the
+  step's path under `{step, :path}`, a member entry whose value is the
+  path's index, and, when the picked path draws values of its own, each
+  under `{step, :path, name}`. Format version 3 carries these entries; a
+  journal of a model without paths holds none, so its bytes are those it
+  had before paths existed.
+
   A journal can be loaded in a VM other than the one that saved it, such as
   a later `mix test` or `mix run`. The binary names atoms: PD's own module
   and field names, and the model's command modules, event modules and field
@@ -85,7 +93,8 @@ defmodule PropertyDamage.Next.Journal do
     :lanes,
     :count,
     :steps,
-    :yields
+    :yields,
+    :path
   ]
 
   @doc "Saves `journal` as a binary that `from_binary/1` loads."

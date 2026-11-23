@@ -10,8 +10,13 @@ defmodule PropertyDamage.Next.Checks do
   # events executed so far (a command counts one, and so does each of its
   # events, as in today's engine), and `every: Module`, after each command or
   # event of that module. Loading a model whose projections declare any other
-  # check form, or a `@compare` boundary observation, raises, so no check is
-  # skipped without a word.
+  # check form raises, so no check is skipped without a word.
+  #
+  # A `@compare` observation compares the two executions of a model that
+  # states paths, after each step, so it loads only as `@compare every: 1`
+  # and only on a model that exports `expansions/0`. Any other `@compare`
+  # form raises on every model, and so does `every: 1` on a model without
+  # paths, which has one execution and nothing to compare it with.
   #
   # After a step, every projection first folds all of the step's events; then
   # the checks the command triggers run, then those each event triggers, in
@@ -21,13 +26,19 @@ defmodule PropertyDamage.Next.Checks do
 
   alias PropertyDamage.Model.Projection.Checks, as: ProjectionChecks
 
-  @type t :: %{projections: [module()], states: map(), counters: map()}
+  @type t :: %{
+          projections: [module()],
+          states: map(),
+          counters: map(),
+          compares: [{module(), atom(), (term(), term() -> term())}]
+        }
 
   @doc """
   The projections whose checks run: the check projections of `model`, then
   its command-sequence projection unless it is one of them. Raises
   `ArgumentError` unless every check they declare has a schedule this engine
-  runs and none declares `@compare`.
+  runs, and every `@compare` they declare is `every: 1` on a model that
+  exports `expansions/0`.
   """
   @spec load!(module()) :: [module()]
   def load!(model) do
@@ -40,19 +51,55 @@ defmodule PropertyDamage.Next.Checks do
     end
 
     projections = Enum.uniq(projections ++ [model.command_sequence_projection()])
-    Enum.each(projections, &supported!/1)
+    paths? = Code.ensure_loaded?(model) and function_exported?(model, :expansions, 0)
+    Enum.each(projections, &supported!(&1, model, paths?))
     projections
   end
 
-  @doc "The state of a fresh execution: every projection at `init/0`."
+  @doc """
+  The state of a fresh execution: every projection at `init/0`, and the
+  `@compare` observations of the projections, in projection order then
+  declaration order, each with its relation.
+  """
   @spec init([module()]) :: t()
   def init(projections) do
     %{
       projections: projections,
       states: Map.new(projections, &{&1, &1.init()}),
-      counters: %{step: 0, command: 0, event: 0}
+      counters: %{step: 0, command: 0, event: 0},
+      compares: observations(projections)
     }
   end
+
+  defp observations(projections) do
+    for projection <- projections, %{name: name} <- compares(projection) do
+      {projection, name, projection.__compare_using__(name)}
+    end
+  end
+
+  @doc """
+  Evaluates every `@compare` observation on the reference's state and on
+  the variant's, each given its execution's concrete command of the step,
+  and judges the variant's value against the reference's by the
+  observation's relation: `==` without `using:`, else the relation's
+  verdict, where only `true` agrees. Returns `:ok`, or the first
+  observation that disagrees as `{:diverged, name, step_key, reference_value,
+  variant_value}`. An observation or a relation that raises raises out of
+  this function.
+  """
+  @spec compare(t(), t(), struct(), struct(), term()) :: :ok | {:error, tuple()}
+  def compare(reference, variant, reference_root, variant_root, step_key) do
+    Enum.find_value(reference.compares, :ok, fn {projection, name, relation} ->
+      reference_value = observe(reference, projection, name, reference_root)
+      variant_value = observe(variant, projection, name, variant_root)
+
+      if relation.(reference_value, variant_value) != true,
+        do: {:error, {:diverged, name, step_key, reference_value, variant_value}}
+    end)
+  end
+
+  defp observe(checks, projection, name, root),
+    do: apply(projection, name, [Map.fetch!(checks.states, projection), root])
 
   @doc """
   Folds one step's real events into every projection and runs the checks
@@ -104,7 +151,7 @@ defmodule PropertyDamage.Next.Checks do
 
   # --- The schedules this engine runs
 
-  defp supported!(projection) do
+  defp supported!(projection, model, paths?) do
     for check <- ProjectionChecks.list(projection), not supported?(check) do
       raise ArgumentError,
             "#{inspect(projection)}.#{check.function_name}/2 declares #{describe(check)}, " <>
@@ -112,10 +159,24 @@ defmodule PropertyDamage.Next.Checks do
               "@check every: CommandModule only"
     end
 
-    for %{name: name} <- compares(projection) do
-      raise ArgumentError,
-            "#{inspect(projection)}.#{name}/2 declares @compare, which is not supported " <>
-              "by this engine yet: it runs one target and compares none"
+    for %{name: name, schedule: schedule} <- compares(projection) do
+      cond do
+        schedule != %{roots: :all, end: false} ->
+          raise ArgumentError,
+                "#{inspect(projection)}.#{name}/2 declares @compare with the schedule " <>
+                  "#{inspect(schedule)}, which is not supported by this engine yet: it " <>
+                  "compares the two executions of a model that states paths after every " <>
+                  "step only, as @compare every: 1"
+
+        not paths? ->
+          raise ArgumentError,
+                "#{inspect(projection)}.#{name}/2 declares @compare every: 1, but " <>
+                  "#{inspect(model)} does not export expansions/0: a model without paths " <>
+                  "runs each plan once, so there is nothing to compare"
+
+        true ->
+          :ok
+      end
     end
 
     :ok

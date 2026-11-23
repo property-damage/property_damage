@@ -8,6 +8,42 @@ defmodule PropertyDamage.Next do
   and executes plans until one fails or the plan budget is spent, and
   `replay/2` rebuilds the plan of a saved journal, or of its saved binary,
   and executes it once.
+
+  ## Two paths of one command
+
+  A model may state, in `expansions/0`, other ways to run some of its
+  commands: for each listed command module, a function of the command as
+  drawn and the predicted state that returns the command's paths, the
+  command alone first (see `PropertyDamage.Next.Model`). Every step of a
+  listed module then draws the pick of its path into the journal, under
+  `{step, :path}`, and each value the picked path draws under
+  `{step, :path, name}`; the step holds the path as `{index, commands}`.
+
+  Such a model runs each plan twice, against two setups of the one adapter:
+  the reference runs every step as drawn, and the variant runs, for each
+  step, the commands of its path. After each step every
+  `@compare every: 1` observation of the model's projections is evaluated
+  on both executions, and the first that disagrees fails the plan with
+  `{:diverged, name, step_key, reference_value, variant_value}`. Lowering a
+  pick moves a step toward its plain path, so a divergence shrinks to the
+  steps whose paths it needs. A model without `expansions/0` runs each plan
+  once, and its journals are those it had before paths existed.
+
+      alias PropertyDamage.Next.Gen
+
+      def expansions, do: [{Refund, &refund_paths/2}]
+
+      # A refund of 2 or more as itself, or as two refunds whose first part
+      # PD draws.
+      def refund_paths(%Refund{amount: amount} = refund, _state) when amount >= 2 do
+        [
+          [refund],
+          {%{first: Gen.integer(1..(amount - 1))},
+           fn %{first: first} -> [%{refund | amount: first}, %{refund | amount: amount - first}] end}
+        ]
+      end
+
+      def refund_paths(refund, _state), do: [[refund]]
   """
 
   require Logger
@@ -104,11 +140,18 @@ defmodule PropertyDamage.Next do
       lets the whole schedule be drawn before anything runs
 
   `:lane_steps` or `:yields` given without `lanes: 2` raises
-  `ArgumentError`. A journal records its lanes: one lane when it holds no
+  `ArgumentError`, and so does `lanes: 2` for a model that exports
+  `expansions/0`: paths run on one lane. A journal records its lanes: one lane when it holds no
   lanes, as every journal saved before lanes existed does. A plan rebuilt
   from it has the lanes it recorded, and each of `:lanes`, `:lane_steps`
   and `:yields` the caller gives must equal the journal's, or
   `ArgumentError` is raised.
+
+  For a model that exports `expansions/0`, the statement is checked first
+  (`ArgumentError` naming the model unless it lists `{module, fun/2}` pairs,
+  each module a command module of the specs, once), and each step of a
+  listed module gets its path; a paths function whose first path is not the
+  command alone raises `ArgumentError` naming the command module.
     * `:engine` - the module that draws each value (default
       `PropertyDamage.Next.Engine.Native`)
     * `:dependent_stream_data` - `:warn` (default) or `:raise`: what to do
@@ -127,7 +170,9 @@ defmodule PropertyDamage.Next do
       |> lanes!(seed_or_journal, opts)
 
     mode!(plan_opts[:dependent_stream_data])
-    plan = build(model, Model.specs!(model), seed_or_journal, plan_opts)
+    specs = Model.specs!(model)
+    paths!(model, specs, plan_opts)
+    plan = build(model, specs, seed_or_journal, plan_opts)
     warn(plan.kept, [])
     plan
   end
@@ -143,6 +188,23 @@ defmodule PropertyDamage.Next do
   each step the model's check projections and its command-sequence
   projection fold the events the adapter returned, and their checks run; a
   projection named in both roles folds and checks once.
+
+  A model that exports `expansions/0` gets two executions per plan, each
+  with its own `setup/2`, its own minted values and its own `teardown/1`:
+  the reference, set up first, and the variant. They run in lockstep: the
+  reference runs a step's command, then the variant runs each command of
+  the step's path, each its own `execute/3` with the step's assigns, folded
+  and checked as a step is. Then the `@compare every: 1` observations are
+  evaluated on each execution's state, in projection order then
+  declaration order, each given the step's command as drawn, made concrete
+  in that execution. A value agrees when it equals the reference's, or,
+  for an observation with `using:`, when the relation answers `true`; the
+  first that disagrees fails the plan at that step with
+  `{:diverged, name, step_key, reference_value, variant_value}`. An
+  observation that raises fails it with `{:raise, exception}`, and a
+  `{:pending, _}` value is compared as any value, without waiting. A
+  failure of either execution fails the plan at that step with its own
+  reason, and a failing setup of either with step `nil`.
 
   With `lanes: 2`, the prefix steps run first, each to completion, and
   then the two lanes' steps run interleaved as the plan's schedule says. A
@@ -160,7 +222,10 @@ defmodule PropertyDamage.Next do
   StreamData generator it cannot fit (see `PropertyDamage.Next.Engine`; a
   warning names each site once per run), the specs each layer changed, the
   specs the search never drew, and, per target, how many steps set each
-  assign and how often the adapter acknowledged it.
+  assign and how often the adapter acknowledged it. For a model with
+  paths, `plans` counts plans, not executions, and the assign counts cover
+  every `execute/3` call of both executions, so a step whose path has two
+  commands counts once for the reference and twice for the variant.
   `PropertyDamage.Next.Report.format/1` renders it as text.
 
   A run whose plans all passed still fails in two cases, each a
@@ -182,8 +247,11 @@ defmodule PropertyDamage.Next do
   member toward the first of its list; a StreamData value down its shrink
   tree), and lets generation withdraw a step whose pick is no longer
   offered. A candidate is kept when it fails the same way: the same failed
-  check, the same adapter error (its tag, for a tagged tuple) or the same
-  exception module, at the same step or an earlier one. The same run gives
+  check, the same adapter error (its tag, for a tagged tuple), the same
+  exception module or a divergence of the same observation, at the same
+  step or an earlier one. A path pick is a member entry whose first member
+  is the plain path, so lowering it moves a step toward its command as
+  drawn. The same run gives
   the same final plan and the same number of shrink runs.
 
   Options:
@@ -222,8 +290,11 @@ defmodule PropertyDamage.Next do
 
   Raises `ArgumentError` when the model's check projections or its
   command-sequence projection declare a check form this engine does not run
-  yet, `@compare` included; it runs `@check every: N` and
-  `@check every: CommandModule`.
+  yet; it runs `@check every: N` and `@check every: CommandModule`, and
+  `@compare every: 1` on a model that exports `expansions/0`. Every other
+  `@compare` form raises, and so does `@compare every: 1` on a model
+  without `expansions/0`. Two lanes with `expansions/0` raise, as for
+  `plan/3`.
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, Failure.t()}
   def run(opts) do
@@ -239,6 +310,7 @@ defmodule PropertyDamage.Next do
     mode!(opts[:dependent_stream_data])
     never_drawn!(opts[:never_drawn])
     specs = Model.specs!(model)
+    paths = paths!(model, specs, plan_opts)
     ignored = ignored!(opts[:ignored_assigns], specs)
     projections = Checks.load!(model)
     table = AssignCounts.new()
@@ -248,7 +320,8 @@ defmodule PropertyDamage.Next do
         search(model, specs, seed, max_plans, plan_opts, table, fn plan, counts ->
           Execution.run(plan, adapter, opts[:config], projections,
             ignored: ignored,
-            counts: counts
+            counts: counts,
+            paths: paths
           )
         end)
 
@@ -264,7 +337,11 @@ defmodule PropertyDamage.Next do
         ignored: ignored,
         adapter: adapter,
         counts: counts,
-        execute: &Execution.run(&1, adapter, opts[:config], projections, ignored: ignored)
+        execute:
+          &Execution.run(&1, adapter, opts[:config], projections,
+            ignored: ignored,
+            paths: paths
+          )
       }
 
       finish(searched, ctx)
@@ -447,7 +524,10 @@ defmodule PropertyDamage.Next do
   `:lane_steps` and `:yields` are not needed either; each one given must
   equal what the journal recorded, or `ArgumentError` is raised. The
   replay runs the journal's schedule, so a deterministic adapter replays a
-  two-lane plan in the same interleaving.
+  two-lane plan in the same interleaving. For a model that exports
+  `expansions/0`, the journal's path entries rebuild each step's path, and
+  the replay runs the reference and the variant as `run/1` does, so a saved
+  divergence replays to the same divergence.
   """
   @spec replay(Journal.t() | binary(), keyword()) ::
           {:ok, %{plans: 1, kept: [map()]}} | {:error, Failure.t()}
@@ -469,12 +549,14 @@ defmodule PropertyDamage.Next do
 
     mode!(plan_opts[:dependent_stream_data])
     specs = Model.specs!(model)
+    paths = paths!(model, specs, plan_opts)
     ignored = ignored!(validated[:ignored_assigns], specs)
     plan = build(model, specs, journal, plan_opts)
     kept = warn(plan.kept, [])
     projections = Checks.load!(model)
+    execution_opts = [ignored: ignored, paths: paths]
 
-    case Execution.run(plan, adapter, validated[:config], projections, ignored: ignored) do
+    case Execution.run(plan, adapter, validated[:config], projections, execution_opts) do
       :ok ->
         {:ok, %{plans: 1, kept: kept}}
 
@@ -482,6 +564,21 @@ defmodule PropertyDamage.Next do
         found = %{plan: plan, step: step, reason: reason}
         {:error, %{failure(found, 1, found, 0, 0) | kept: kept}}
     end
+  end
+
+  # Whether `model` states paths, its expansions/0 checked. Paths run on one
+  # lane: how a variant path would interleave with another lane is not
+  # defined, so two lanes with paths raise.
+  defp paths!(model, specs, plan_opts) do
+    paths? = Model.expansions!(model, specs) != nil
+
+    if paths? and plan_opts[:lanes] == 2 do
+      raise ArgumentError,
+            "#{inspect(model)} exports expansions/0, and paths run on one lane: " <>
+              "the :lanes option or the journal gives 2 lanes"
+    end
+
+    paths?
   end
 
   # The `:ignored_assigns` option: a list of keys, each set by some spec.
