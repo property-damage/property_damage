@@ -195,9 +195,15 @@ defmodule PropertyDamage.Corpus.Engine.Next do
 
   # A step becomes its command's map plus the step's truthy assigns, so a
   # fault a layer set (such as a lost response) is part of the plan.
-  defp plain_step(%Step{command: command, assigns: assigns}) do
+  # A step in a lane also says which one, so a plan shows the steps that overlap.
+  defp plain_step(%Step{key: step_key, command: command, assigns: assigns}) do
     truthy = for {key, value} <- assigns, value, into: %{}, do: {key, plain_value(value)}
-    Map.merge(plain_command(command), truthy)
+    plain = Map.merge(plain_command(command), truthy)
+
+    case step_key do
+      {lane, _slot} when lane > 0 -> Map.put(plain, :lane, lane)
+      _prefix -> plain
+    end
   end
 
   # A command becomes a map of its fields plus its name; a field the system
