@@ -305,7 +305,8 @@ same amount.
 
 5. **Engines.** The pass reads only the integer entries of `Engine.Native`.
    The source entries of `Engine.StreamDataSource` (DR-071) are not paired,
-   so that engine's shrinks do not change.
+   so that engine's shrinks do not change. The next amendment extends the
+   pass to them.
 
 6. **Measured effect.** On the next corpus, both engines, plan cap 200,
    rows for `Engine.Native`; every `Engine.StreamDataSource` row is
@@ -334,3 +335,77 @@ same amount.
 - Bisection assumes that a smaller amount keeps the failure when a larger
   one does. Where that does not hold, the pass can stop above the
   smallest amount that fails.
+
+## Amendment (2026-11-23): pairs on the second engine
+
+The fourth pass also pairs the recorded positions of `Engine.StreamDataSource`
+source entries (DR-071).
+
+1. **Why.** On that engine every value is a source entry
+   `{:source, value, positions}`, an integer field included, so a pass that
+   reads only `{:integer, value, range}` entries never fires there. A refund
+   one below its payment stops at a local minimum on that engine for the
+   reason the previous amendment gives.
+
+2. **The unit.** The pass lowers values. A value is an integer entry above
+   its range's first value, or one recorded position of a source entry
+   whose value is above its recorded lower bound. A position is the
+   smallest integer the engine lets the shrinker edit, and the one the
+   single-lowering move of DR-071 already lowers, so the pair is that move
+   applied to two values at once. Two positions of one entry also form a
+   pair, so a relation inside one nested value, such as two linked amounts
+   in a `fixed_map`, can fall together; both edits go to that entry in turn.
+
+3. **Order and count.** The values are listed in draw order: keys in the
+   order they were drawn, and within a source entry its positions in the
+   order `positions/1` returns them. Pairs are tried in the order of the
+   previous amendment. On `Engine.Native` the list holds only integer
+   entries, so its candidates are the ones the previous amendment tries.
+   The list holds only values still above their lower bound after a round
+   of single lowering kept nothing, and a list's length is bounded by the
+   draw size, so the count of pairs is bounded. No cap is applied beyond
+   `max_shrink_runs`: a cap by position, by key or by count would miss a
+   relation in some shape of value.
+
+4. **No new path.** A candidate is the current journal with one or two
+   source entries replaced by `put_position/3` results. Each position is
+   read again before each candidate, and a value outside its current
+   bounds is not tried. Generation rebuilds the plan and fits each
+   position, and the candidate goes through the adoption rule, the
+   same-plan skip and the run budget. The journal format, the entry layout
+   and the engine do not change.
+
+5. **When it runs.** Unchanged: after a round in which block removal and
+   single lowering adopted nothing; the first pair adopted restarts the
+   rounds.
+
+6. **Measured effect.** On the next corpus, both engines, plan cap 200,
+   rows for `Engine.StreamDataSource`; every `Engine.Native` row is
+   unchanged:
+
+   | entry | reached minimum | mean shrink runs |
+   |---|---|---|
+   | `offset_refund` | 5/20 to 19/20 | 29.0 to 31.9 |
+   | `racing_refunds` | 19/20 to 20/20 | 58.2 to 62.5 |
+   | `nested_price` | 0/20 to 0/20 | 21.7 to 23.3 |
+   | `ledger` (no smallest plan) | - | 35.6 to 40.1 |
+   | `long_note` | 20/20 to 20/20 | 103.5 to 165.8 |
+   | `lost_full_refund` | 20/20 to 20/20 | 43.4 to 54.4 |
+   | `fifth_refund` | 19/20 to 19/20 | 33.1 to 40.4 |
+   | `double_credit` | 20/20 to 20/20 | 12.8 to 13.6 |
+
+   `nested_price` stays at 0/20 because its smallest plan fails with a
+   different reason from the first failure (DR-071), which the adoption
+   rule refuses whatever edit produces it.
+
+**Known costs and limits.**
+
+- A string records, for each character, a choice position whose value
+  does not reach the string. Lowering such a position alone rebuilds the
+  same plan, which costs no run, so the position stays above its lower
+  bound. Paired with a value that matters, such as the string's length, it
+  gives candidates that are executed and refused. `long_note`, whose
+  failing note holds 41 characters, has the largest rise; this cost was
+  seen on a one-string fixture and is not separated from the others in
+  the corpus numbers.
+- The limits of the previous amendment hold on this engine too.

@@ -23,11 +23,13 @@ defmodule PropertyDamage.Next.Shrinker do
   #      StreamData value extends its path in the shrink tree, trying the
   #      node's children in order and descending into the first that fails;
   #   4. only after a round in which passes 2 and 3 adopted nothing: lower
-  #      pairs of integer entries by the same amount, for a failure that
-  #      needs two values to fall together, which no single edit can keep.
-  #      A pair tries the largest amount both can fall first, then bisects
-  #      for the largest amount that still fails the same way. The first
-  #      pair adopted starts the rounds again from pass 2.
+  #      pairs of values by the same amount, for a failure that needs two
+  #      values to fall together, which no single edit can keep. A value is
+  #      an integer entry or one recorded position of a source entry, above
+  #      its lower bound; two positions of one source entry also form a
+  #      pair. A pair tries the largest amount both can fall first, then
+  #      bisects for the largest amount that still fails the same way. The
+  #      first pair adopted starts the rounds again from pass 2.
   #
   # Slots are withdrawn by generation, not by the shrinker: an edit that
   # leaves a stored pick no longer offered withdraws that slot, which keeps
@@ -269,15 +271,15 @@ defmodule PropertyDamage.Next.Shrinker do
   defp edited_position(state, key, position, value),
     do: edited(state, key, StreamDataSource.put_position(entries(state)[key], position, value))
 
-  # Lowers pairs of integer entries by the same amount, for a failure that
-  # needs two values to fall together. The pairs come from the integer
-  # entries above their range's first value, in draw order, and are tried
-  # in the order (first, second), (first, third), ..., (second, third), and
-  # so on. The first pair kept ends the pass, so the next round reads the
-  # pairs again from the rebuilt journal.
+  # Lowers pairs of values by the same amount, for a failure that needs two
+  # values to fall together. The pairs come from the lowerable values in
+  # draw order (see `lowerable_values/1`), and are tried in the order
+  # (first, second), (first, third), ..., (second, third), and so on. The
+  # first pair kept ends the pass, so the next round reads the pairs again
+  # from the rebuilt journal.
   defp lower_pairs(state) do
-    keys = Enum.filter(state.best.drawn, &(lowerable(state, &1) != nil))
-    pairs = for [a | rest] <- tails(keys), b <- rest, do: {a, b}
+    values = lowerable_values(state)
+    pairs = for [a | rest] <- tails(values), b <- rest, do: {a, b}
 
     Enum.reduce_while(pairs, {false, state}, fn pair, {false, state} ->
       case lower_pair(state, pair) do
@@ -319,33 +321,79 @@ defmodule PropertyDamage.Next.Shrinker do
     end
   end
 
-  # The candidate with both values `amount` below `values`. Both entries are
-  # read again first, since a kept candidate can drop a key or move a range;
-  # a value outside its current range is not tried.
+  # The candidate with both values `amount` below `values`. Both values are
+  # read again first, since a kept candidate can drop a key or a position,
+  # or move a range; a value outside its current range is not tried.
   defp lowered_by(state, {a, b}, {va, vb}, amount) do
-    held = entries(state)
+    journal = state.best.plan.journal
 
-    with {:integer, _value, range_a} <- held[a],
-         {:integer, _value, range_b} <- held[b],
-         true <- (va - amount) in range_a and (vb - amount) in range_b do
-      journal = state.best.plan.journal
-
-      entries =
-        held
-        |> Map.put(a, {:integer, va - amount, range_a})
-        |> Map.put(b, {:integer, vb - amount, range_b})
-
+    with %{} = entries <- put_value(journal.entries, a, va - amount),
+         %{} = entries <- put_value(entries, b, vb - amount) do
       attempt(%{journal | entries: entries}, state)
     else
-      _changed -> {false, state}
+      nil -> {false, state}
     end
   end
 
-  # An integer entry above its range's first value, as `{value, first}`.
-  defp lowerable(state, key) do
+  # The values a pair can lower, in draw order: each integer entry above its
+  # range's first value, as `{:entry, key}`, and each recorded position of a
+  # source entry above its lower bound, as `{:position, key, position}`, in
+  # the entry's draw order. Two positions of one entry can form a pair, for
+  # a relation inside one nested value.
+  defp lowerable_values(state) do
+    Enum.flat_map(state.best.drawn, fn key ->
+      case entries(state)[key] do
+        {:integer, value, range} when value > range.first ->
+          [{:entry, key}]
+
+        {@source, _value, _positions} = entry ->
+          for {position, {value, lo, _hi}} <- StreamDataSource.positions(entry),
+              value > lo,
+              do: {:position, key, position}
+
+        _other ->
+          []
+      end
+    end)
+  end
+
+  # A lowerable value as `{value, lower bound}`, or nil once it is gone or
+  # sits on its lower bound.
+  defp lowerable(state, {:entry, key}) do
     case entries(state)[key] do
       {:integer, value, range} when value > range.first -> {value, range.first}
       _other -> nil
+    end
+  end
+
+  defp lowerable(state, {:position, key, position}) do
+    case position_at(state, key, position) do
+      {value, lo, _hi} when value > lo -> {value, lo}
+      _other -> nil
+    end
+  end
+
+  # `entries` with the lowerable value set to `new`, or nil when the value
+  # is gone or `new` falls outside its current range. A position keeps its
+  # recorded bounds.
+  defp put_value(entries, {:entry, key}, new) do
+    case entries[key] do
+      {:integer, _value, range} ->
+        if new in range, do: Map.put(entries, key, {:integer, new, range})
+
+      _other ->
+        nil
+    end
+  end
+
+  defp put_value(entries, {:position, key, position}, new) do
+    with {@source, _value, _positions} = entry <- entries[key],
+         {^position, {_stored, lo, hi}} <-
+           List.keyfind(StreamDataSource.positions(entry), position, 0),
+         true <- new in lo..hi//1 do
+      Map.put(entries, key, StreamDataSource.put_position(entry, position, new))
+    else
+      _gone_or_outside -> nil
     end
   end
 
