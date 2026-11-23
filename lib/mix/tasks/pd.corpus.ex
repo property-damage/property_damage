@@ -23,6 +23,13 @@ defmodule Mix.Tasks.Pd.Corpus do
   `skipped: reason` and a saved table records `%{entry: name, rows: [], skipped:
   reason}`. See `PropertyDamage.Corpus.Entry`.
 
+  A guardrail entry sets `expect` instead of a minimum: its model commits one
+  mistake that PD must catch, by raising an error or by a line of the run
+  report. It counts a seed as found when that happens, runs its `control`
+  pair when the bug is off, and shows `-` in the reached-minimum cell. The
+  task prints the line found under `guardrail lines:`, and exits non-zero if
+  a seed does not find it. See `PropertyDamage.Corpus.Entry`.
+
   After the table, the task lists each entry's kept sites: the places where
   the engine drew a value it cannot fit when the value it depends on
   changes (see `PropertyDamage.Next.Engine`). An entry with none is not
@@ -37,6 +44,7 @@ defmodule Mix.Tasks.Pd.Corpus do
       mix pd.corpus --only lost_full_refund --cap 100
       mix pd.corpus --save tmp/table.exs
       mix pd.corpus --baseline tmp/table.exs
+      MIX_ENV=test mix pd.corpus --dir corpus/next --both-engines
 
   ## Options
 
@@ -50,6 +58,23 @@ defmodule Mix.Tasks.Pd.Corpus do
                         engine, the plan cap and the raw per-seed numbers.
       --baseline PATH   After the table, print the change against the table
                         saved at PATH.
+      --both-engines    Also run every entry of `PropertyDamage.Corpus.Engine.Next`
+                        on `PropertyDamage.Corpus.Engine.NextSource`, the
+                        StreamData source engine. See "Two engines" below.
+
+  ## Two engines
+
+  With `--both-engines`, an entry of `PropertyDamage.Corpus.Engine.Next` gets
+  two rows: one on that engine and one on
+  `PropertyDamage.Corpus.Engine.NextSource`. The table gains an engine column,
+  every result carries the name of the engine it ran on (a saved table
+  records it, and `--baseline` matches a row by its entry and engine), and
+  the kept sites print per engine, with `none` for an engine that kept none.
+  Entries of other engines keep one row.
+
+  The source engine needs the patched StreamData that only the test
+  environment loads, so run these rows with `MIX_ENV=test`. Anywhere else the
+  task prints why and exits non-zero before running any entry.
 
   The printed table has no timings and no process identifiers: equal seeds
   give equal tables.
@@ -67,7 +92,7 @@ defmodule Mix.Tasks.Pd.Corpus do
 
   use Mix.Task
 
-  alias PropertyDamage.Corpus.{Baseline, Loader, Measure, Table}
+  alias PropertyDamage.Corpus.{Baseline, Engine, Loader, Measure, Table}
 
   @shortdoc "Measure finding and shrinking of seeded bugs"
 
@@ -89,7 +114,8 @@ defmodule Mix.Tasks.Pd.Corpus do
           only: [:string, :keep],
           cap: :integer,
           save: :string,
-          baseline: :string
+          baseline: :string,
+          both_engines: :boolean
         ]
       )
 
@@ -105,11 +131,15 @@ defmodule Mix.Tasks.Pd.Corpus do
   defp measure(opts) do
     cap = Keyword.get(opts, :cap, @default_cap)
     dir = Keyword.get(opts, :dir, "corpus")
+    both? = Keyword.get(opts, :both_engines, false)
 
-    with {:ok, baseline} <- load_baseline(opts[:baseline]),
+    with :ok <- check_engines(both?),
+         {:ok, baseline} <- load_baseline(opts[:baseline]),
          {:ok, entries} <- Loader.load(dir, Keyword.get_values(opts, :only)) do
+      entries = if both?, do: Enum.flat_map(entries, &on_both_engines/1), else: entries
       results = Enum.map(entries, &result(&1, cap))
-      report(results, entries, cap, baseline, opts[:save])
+      results = if both?, do: Enum.zip_with(entries, results, &put_engine/2), else: results
+      report(results, entries, cap, baseline, opts[:save], both?)
     else
       {:error, message} ->
         Mix.shell().error(message)
@@ -117,8 +147,23 @@ defmodule Mix.Tasks.Pd.Corpus do
     end
   end
 
+  defp check_engines(false), do: :ok
+  defp check_engines(true), do: Engine.NextSource.check_stream_data()
+
+  defp on_both_engines(%{engine: Engine.Next} = entry),
+    do: [entry, %{entry | engine: Engine.NextSource}]
+
+  defp on_both_engines(entry), do: [entry]
+
+  # A skipped entry names no engine; every other result records its engine.
+  defp put_engine(%{skip: reason}, result) when is_binary(reason), do: result
+  defp put_engine(entry, result), do: Map.put(result, :engine, entry.engine.name())
+
   defp result(%{skip: reason} = entry, _cap) when is_binary(reason),
     do: %{entry: entry.name, rows: [], skipped: reason}
+
+  defp result(%{expect: expect} = entry, cap) when not is_nil(expect),
+    do: entry |> measured(cap) |> Map.merge(%{regression: true, guardrail: true})
 
   defp result(%{minimum: nil} = entry, cap),
     do: entry |> measured(cap) |> Map.put(:regression, true)
@@ -129,13 +174,20 @@ defmodule Mix.Tasks.Pd.Corpus do
   defp measured(entry, cap) do
     rows = Measure.entry(entry, cap)
     kept = rows |> Enum.flat_map(&Map.get(&1, :kept, [])) |> Enum.uniq() |> Enum.sort()
-    %{entry: entry.name, rows: Enum.map(rows, &Map.delete(&1, :kept)), kept: kept}
+    line = Enum.find_value(rows, &Map.get(&1, :line))
+
+    %{
+      entry: entry.name,
+      rows: Enum.map(rows, &Map.drop(&1, [:kept, :line])),
+      kept: kept,
+      line: line
+    }
   end
 
   defp load_baseline(nil), do: {:ok, nil}
   defp load_baseline(path), do: Baseline.load(path)
 
-  defp report(results, entries, cap, baseline, save_path) do
+  defp report(results, entries, cap, baseline, save_path, both?) do
     run = Enum.reject(entries, &is_binary(&1.skip))
     engines = run |> Enum.map(& &1.engine.name()) |> Enum.uniq()
     seeds = run |> Enum.flat_map(& &1.seeds) |> Enum.uniq() |> Enum.sort()
@@ -145,8 +197,9 @@ defmodule Mix.Tasks.Pd.Corpus do
     )
 
     Mix.shell().info(Table.render(results))
-    print_kept(results)
-    results = Enum.map(results, &Map.delete(&1, :kept))
+    print_kept(results, both?)
+    print_lines(results)
+    results = Enum.map(results, &Map.drop(&1, [:kept, :line]))
     if baseline, do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
@@ -169,7 +222,7 @@ defmodule Mix.Tasks.Pd.Corpus do
     end
   end
 
-  defp print_kept(results) do
+  defp print_kept(results, false) do
     lines =
       for %{entry: name, kept: [_ | _] = kept} <- results,
           site <- kept,
@@ -177,6 +230,36 @@ defmodule Mix.Tasks.Pd.Corpus do
 
     if lines != [], do: Mix.shell().info(Enum.join(["\nkept sites:" | lines], "\n"))
   end
+
+  # One section per engine, in the order the engines ran; an engine that kept
+  # no site says `none`.
+  defp print_kept(results, true) do
+    engines = results |> Enum.flat_map(&List.wrap(Map.get(&1, :engine))) |> Enum.uniq()
+
+    sections =
+      for engine <- engines do
+        lines =
+          for %{engine: ^engine, entry: name, kept: kept} <- results,
+              site <- kept,
+              do: "  #{name}: #{describe_site(site)}"
+
+        header = "kept sites (#{engine}):"
+        if lines == [], do: header <> " none", else: Enum.join([header | lines], "\n")
+      end
+
+    Mix.shell().info(Enum.join(["" | sections], "\n"))
+  end
+
+  defp print_lines(results) do
+    lines =
+      for %{entry: name, line: line} = result when is_binary(line) <- results,
+          do: "  #{name}#{engine_suffix(result)}: #{line}"
+
+    if lines != [], do: Mix.shell().info(Enum.join(["\nguardrail lines:" | lines], "\n"))
+  end
+
+  defp engine_suffix(%{engine: engine}) when is_binary(engine), do: " (#{engine})"
+  defp engine_suffix(_result), do: ""
 
   defp describe_site(%{site: :assign, command: module, key: key, spec: id}),
     do: "#{inspect(module)}, assign #{inspect(key)} of spec #{id}"

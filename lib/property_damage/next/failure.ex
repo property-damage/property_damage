@@ -16,6 +16,16 @@ defmodule PropertyDamage.Next.Failure do
   of the plan that failed first; without a shrink they equal the final
   ones.
 
+  A run can also fail with no plan failing. After the search,
+  `reason` is `{:unacknowledged_assigns, rows}` when an assign some step set
+  was acknowledged by no port, or `{:never_drawn, rows}` when the run asked
+  for `never_drawn: :fail` and a spec was never drawn (the rows are those of
+  `PropertyDamage.Next.Report`). Then `plan`, `journal`, `step`, `seed`,
+  `plan_number` and `original` are `nil`, because no plan is to blame.
+
+  `report` is the `PropertyDamage.Next.Report` of the run, with the counts
+  of its search plans; it is `nil` for a failure `replay/2` returns.
+
   `kept` lists every site where PD's engine drew a dependent StreamData
   generator it cannot fit, across every plan the call built, shrink
   candidates included (see `PropertyDamage.Next.Plan`).
@@ -29,19 +39,25 @@ defmodule PropertyDamage.Next.Failure do
     :step,
     :reason,
     :original,
+    :report,
     withdrawn: [],
     shrink_runs: 0,
     kept: []
   ]
 
   @type reason ::
-          {:check, atom(), String.t()} | {:adapter_error, term()} | {:raise, Exception.t()}
+          {:check, atom(), String.t()}
+          | {:adapter_error, term()}
+          | {:raise, Exception.t()}
+          | {:unacknowledged_assigns, [PropertyDamage.Next.Report.assign_row()]}
+          | {:never_drawn, [PropertyDamage.Next.Report.never_drawn()]}
 
   @type t :: %__MODULE__{
-          plan_number: pos_integer(),
-          seed: integer(),
-          plan: PropertyDamage.Next.Plan.t(),
-          journal: PropertyDamage.Next.Journal.t(),
+          plan_number: pos_integer() | nil,
+          seed: integer() | nil,
+          plan: PropertyDamage.Next.Plan.t() | nil,
+          journal: PropertyDamage.Next.Journal.t() | nil,
+          report: PropertyDamage.Next.Report.t() | nil,
           withdrawn: [map()],
           step: term(),
           reason: reason(),

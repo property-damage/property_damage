@@ -73,7 +73,8 @@ defmodule PropertyDamage.Next.Generation do
       withdrawn: [],
       drawn: [],
       mode: Keyword.get(opts, :dependent_stream_data, :warn),
-      kept: []
+      kept: [],
+      eligible: MapSet.new()
     }
 
     max_steps = Keyword.fetch!(opts, :max_steps)
@@ -83,7 +84,8 @@ defmodule PropertyDamage.Next.Generation do
       steps: Enum.reverse(acc.steps),
       journal: %{journal | entries: acc.entries, max_steps: max_steps},
       withdrawn: Enum.reverse(acc.withdrawn),
-      kept: Enum.reverse(acc.kept)
+      kept: Enum.reverse(acc.kept),
+      eligible: acc.eligible |> MapSet.to_list() |> Enum.sort()
     }
 
     {plan, Enum.reverse(acc.drawn)}
@@ -95,6 +97,7 @@ defmodule PropertyDamage.Next.Generation do
     key = {@lane, slot}
     pick_key = {key, :pick}
     offered = Enum.filter(acc.specs, &offered?(&1, acc.state))
+    acc = %{acc | eligible: Enum.reduce(offered, acc.eligible, &MapSet.put(&2, &1.id))}
 
     case Map.fetch(acc.journal.entries, pick_key) do
       {:ok, {:empty} = entry} ->

@@ -17,19 +17,22 @@ defmodule PropertyDamage.Corpus.Measure do
     * `:clean?` - the bug-off run passed and the bug never fired.
     * `:kept` - the sites both runs put on the engine's kept list, sorted
       and without repeats; `[]` for an engine that answers none.
+    * `:line` - only when the bug-on run answered one: the guardrail line it
+      found (see `PropertyDamage.Corpus.Entry`).
   """
 
   alias PropertyDamage.Corpus.Entry
 
   @type row :: %{
-          seed: integer(),
-          found?: boolean(),
-          unexplained?: boolean(),
-          plans_until_found: pos_integer() | nil,
-          shrink_runs: non_neg_integer(),
-          reached_minimum?: boolean(),
-          clean?: boolean(),
-          kept: [map()]
+          required(:seed) => integer(),
+          required(:found?) => boolean(),
+          required(:unexplained?) => boolean(),
+          required(:plans_until_found) => pos_integer() | nil,
+          required(:shrink_runs) => non_neg_integer(),
+          required(:reached_minimum?) => boolean(),
+          required(:clean?) => boolean(),
+          required(:kept) => [map()],
+          optional(:line) => String.t()
         }
 
   @doc """
@@ -49,7 +52,7 @@ defmodule PropertyDamage.Corpus.Measure do
     off = engine.run(%{entry | bug: nil}, seed, plan_cap)
     hit? = on.found? and on.bug_fired?
 
-    %{
+    row = %{
       seed: seed,
       found?: hit?,
       unexplained?: on.found? and not on.bug_fired?,
@@ -59,6 +62,8 @@ defmodule PropertyDamage.Corpus.Measure do
       clean?: not off.found? and off.fires == 0,
       kept: (Map.get(on, :kept, []) ++ Map.get(off, :kept, [])) |> Enum.uniq() |> Enum.sort()
     }
+
+    if on[:line], do: Map.put(row, :line, on.line), else: row
   end
 
   @doc "Whether `shrunk` equals the entry's smallest failing plan under its `compare` rule."

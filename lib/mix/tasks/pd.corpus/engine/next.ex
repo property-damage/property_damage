@@ -34,7 +34,15 @@ defmodule PropertyDamage.Corpus.Engine.Next do
 
   alias PropertyDamage.Corpus.{Entry, FireLog}
   alias PropertyDamage.Next
-  alias PropertyDamage.Next.{DependentStreamDataError, Failure, Placeholder, Plan, Step}
+
+  alias PropertyDamage.Next.{
+    DependentStreamDataError,
+    Failure,
+    Placeholder,
+    Plan,
+    Report,
+    Step
+  }
 
   @impl true
   def name, do: "property_damage_next"
@@ -51,9 +59,25 @@ defmodule PropertyDamage.Corpus.Engine.Next do
 
     try do
       opts = opts(entry, seed, plan_cap, log)
-      opts |> Next.run() |> result(log, opts)
+      outcome = Next.run(opts)
+
+      if entry.expect,
+        do: guardrail_result(entry.expect, outcome, log),
+        else: result(outcome, log, opts)
     rescue
-      error in DependentStreamDataError -> result({:ok, %{kept: [error.site]}}, log, [])
+      error in DependentStreamDataError ->
+        result({:ok, %{kept: [error.site]}}, log, [])
+
+      error ->
+        case entry.expect do
+          {:raises, module} when is_atom(module) ->
+            if is_struct(error, module),
+              do: raised_result(error, log),
+              else: reraise(error, __STACKTRACE__)
+
+          _ ->
+            reraise error, __STACKTRACE__
+        end
     after
       restore_level(level)
       FireLog.stop(log)
@@ -64,15 +88,64 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   defp restore_level(level), do: Logger.put_process_level(self(), level)
 
   defp opts(entry, seed, plan_cap, log) do
+    {model, adapter} = model_and_adapter(entry)
+
     [
-      model: entry.model,
-      adapter: entry.adapter,
+      model: model,
+      adapter: adapter,
       config: %{bug: entry.bug, fire_log: log},
       seed: seed,
       max_steps: entry.max_commands,
       max_plans: plan_cap
     ]
     |> Keyword.merge(entry.run_opts)
+  end
+
+  # With the bug off, an entry that names a `control` runs the control's
+  # model and adapter, a corrected pair of the ones the bug-on run uses.
+  defp model_and_adapter(%Entry{bug: nil, control: control} = entry) when is_list(control),
+    do: {Keyword.get(control, :model, entry.model), Keyword.get(control, :adapter, entry.adapter)}
+
+  defp model_and_adapter(entry), do: {entry.model, entry.adapter}
+
+  # An entry with `expect` is a guardrail entry: the run is judged by the
+  # error it raises or the line its report holds, not by a failing plan.
+  defp raised_result(error, log) do
+    guardrail(true, Exception.message(error), [], log)
+  end
+
+  defp guardrail_result({:report, text}, outcome, log) do
+    case report_of(outcome) do
+      nil ->
+        guardrail(false, nil, [], log)
+
+      %Report{} = report ->
+        line = report |> Report.format() |> String.split("\n") |> Enum.find(&(&1 =~ text))
+        line = line && String.trim(line)
+        guardrail(line != nil, line, report.kept, log)
+    end
+  end
+
+  defp guardrail_result({:raises, _module}, outcome, log),
+    do: guardrail(false, nil, kept_of(outcome), log)
+
+  defp report_of({:ok, %Report{} = report}), do: report
+  defp report_of({:error, %Failure{report: %Report{} = report}}), do: report
+  defp report_of(_outcome), do: nil
+
+  defp kept_of(outcome), do: if(report = report_of(outcome), do: report.kept, else: [])
+
+  defp guardrail(found?, line, kept, log) do
+    %{
+      found?: found?,
+      plans_until_found: nil,
+      shrink_runs: 0,
+      shrunk: nil,
+      bug_fired?: found?,
+      fires: FireLog.total(log),
+      kept: kept,
+      line: line
+    }
   end
 
   defp result({:error, %Failure{} = failure}, log, opts) do
@@ -118,7 +191,14 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   end
 
   defp plain_plan(%Plan{steps: steps}),
-    do: Enum.map(steps, fn %Step{command: command} -> plain_command(command) end)
+    do: Enum.map(steps, &plain_step/1)
+
+  # A step becomes its command's map plus the step's truthy assigns, so a
+  # fault a layer set (such as a lost response) is part of the plan.
+  defp plain_step(%Step{command: command, assigns: assigns}) do
+    truthy = for {key, value} <- assigns, value, into: %{}, do: {key, plain_value(value)}
+    Map.merge(plain_command(command), truthy)
+  end
 
   # A command becomes a map of its fields plus its name; a field the system
   # mints (a placeholder in the plan) becomes `:id`.

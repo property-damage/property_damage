@@ -22,7 +22,17 @@ defmodule PropertyDamage.Next.Execution do
   require Logger
 
   alias PropertyDamage.Mint
-  alias PropertyDamage.Next.{Checks, Placeholder, Plan, Runtime, Step}
+
+  alias PropertyDamage.Next.{
+    AcknowledgedIgnoredAssignError,
+    AcknowledgedUnsetAssignError,
+    AssignCounts,
+    Checks,
+    Placeholder,
+    Plan,
+    Runtime,
+    Step
+  }
 
   @type reason ::
           {:check, atom(), String.t()} | {:adapter_error, term()} | {:raise, Exception.t()}
@@ -30,14 +40,29 @@ defmodule PropertyDamage.Next.Execution do
   @doc """
   Executes `plan`. Returns `:ok`, or `{:error, step_key, reason}` for the
   first failing step; a failing setup has `nil` as its step key.
+
+  Options: `:ignored` lists the assign keys the adapter's target ignores
+  (default `[]`), and `:counts` is an `AssignCounts` table that receives the
+  assigns the steps set and the adapter acknowledges (default `nil`: none
+  counted). The adapter's acknowledgments are checked either way, and the
+  two errors they can raise leave this function as raises.
   """
-  @spec run(Plan.t(), module(), term(), [module()]) :: :ok | {:error, term(), reason()}
-  def run(%Plan{steps: steps}, adapter, config, projections) do
+  @spec run(Plan.t(), module(), term(), [module()], keyword()) ::
+          :ok | {:error, term(), reason()}
+  def run(%Plan{steps: steps}, adapter, config, projections, opts \\ []) do
     checks = Checks.init(projections)
 
     case setup(adapter, config) do
       {:ok, context} ->
-        run = %{adapter: adapter, context: context, nonce: nonce(), events: %{}, checks: checks}
+        run = %{
+          adapter: adapter,
+          context: context,
+          nonce: nonce(),
+          events: %{},
+          checks: checks,
+          ignored: Keyword.get(opts, :ignored, []),
+          counts: Keyword.get(opts, :counts)
+        }
 
         try do
           execute(steps, run)
@@ -99,14 +124,39 @@ defmodule PropertyDamage.Next.Execution do
     command = concrete(command, key, [:command], run)
     assigns = concrete(assigns, key, [:assigns], run)
 
-    with {:ok, events} <- call(run, command, assigns),
+    scope = scope(run, command, assigns)
+
+    with {:ok, events} <- Runtime.with_step(scope, fn -> call(run, command, assigns) end),
          {:ok, checks} <- Checks.step(run.checks, command, events) do
       {:ok, %{run | events: Map.put(run.events, key, events), checks: checks}}
     end
   rescue
-    exception -> {:error, {:raise, exception}}
+    # Misuse of an acknowledgment is not a failure of the system under test.
+    exception in [AcknowledgedUnsetAssignError, AcknowledgedIgnoredAssignError] ->
+      reraise exception, __STACKTRACE__
+
+    exception ->
+      {:error, {:raise, exception}}
   catch
     kind, reason -> {:error, {:raise, caught(kind, reason)}}
+  end
+
+  # The running step as `Runtime.ack/2` sees it, with the step's set
+  # assigns counted: an assign is set when its drawn value is truthy.
+  defp scope(run, command, assigns) do
+    module = command.__struct__
+    set = for {key, value} <- assigns, value, do: key
+
+    if run.counts,
+      do: Enum.each(set, &AssignCounts.record_set(run.counts, run.adapter, module, &1))
+
+    %{
+      target: run.adapter,
+      command: module,
+      set: set,
+      ignored: run.ignored,
+      counts: run.counts
+    }
   end
 
   defp call(%{adapter: adapter, context: context}, command, assigns) do
