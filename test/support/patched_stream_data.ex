@@ -2,9 +2,10 @@ defmodule PropertyDamage.Test.PatchedStreamData do
   @moduledoc false
   # Loads a patched copy of StreamData into the test VM.
   #
-  # The patch in stream_data_patch/ adds two seams to StreamData 1.4.0: a :rand
-  # state whose algorithm map carries :split splits itself, and a state whose
-  # map carries :uniform_range receives both bounds of a range draw. Every
+  # The patch in stream_data_patch/ adds three seams to StreamData 1.4.0: a
+  # :rand state whose algorithm map carries :split splits itself, a state
+  # whose map carries :uniform_range receives both bounds of a range draw,
+  # and tree/2 draws its level sizes through that same range draw. Every
   # other seed behaves exactly as before, so the patched module is a drop-in
   # replacement for the released one.
   #

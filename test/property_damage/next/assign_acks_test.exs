@@ -164,7 +164,7 @@ defmodule PropertyDamage.Next.AssignAcksTest do
 
   describe "Runtime.ack/2" do
     test "returns :ok at a step that set the key" do
-      assert {{:ok, _}, _counts} = Next.run_counted(opts(RetryModel, AckAdapter))
+      assert {:ok, _report} = Next.run(opts(RetryModel, AckAdapter))
     end
 
     test "raises ArgumentError outside a step" do
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Next.AssignAcksTest do
     end
 
     test "works from a process the adapter started with a Task" do
-      assert {{:ok, _}, counts} = Next.run_counted(opts(RetryModel, TaskAckAdapter))
+      assert {:ok, %{assigns: counts}} = Next.run(opts(RetryModel, TaskAckAdapter))
 
       assert %{TaskAckAdapter => [%{key: :retry, acknowledged: @steps_run}]} = counts
     end
@@ -253,8 +253,8 @@ defmodule PropertyDamage.Next.AssignAcksTest do
     end
 
     test "an ignored key the adapter leaves alone is accepted and still counted as set" do
-      assert {{:ok, _}, counts} =
-               Next.run_counted(opts(RetryDelayModel, AckAdapter, ignored_assigns: [:delay]))
+      assert {:ok, %{assigns: counts}} =
+               Next.run(opts(RetryDelayModel, AckAdapter, ignored_assigns: [:delay]))
 
       assert %{AckAdapter => rows} = counts
       assert %{set: @steps_run, acknowledged: 0} = Enum.find(rows, &(&1.key == :delay))
@@ -263,8 +263,8 @@ defmodule PropertyDamage.Next.AssignAcksTest do
 
   describe "counts" do
     test "set counts executed steps with a truthy assign, acknowledged counts the calls" do
-      assert {{:ok, _}, counts} =
-               Next.run_counted(opts(RetryDelayModel, AckAdapter, ignored_assigns: [:delay]))
+      assert {:ok, %{assigns: counts}} =
+               Next.run(opts(RetryDelayModel, AckAdapter, ignored_assigns: [:delay]))
 
       assert counts == %{
                AckAdapter => [
@@ -275,24 +275,25 @@ defmodule PropertyDamage.Next.AssignAcksTest do
     end
 
     test "an assign drawn as false is not counted as set" do
-      assert {{:ok, _}, counts} = Next.run_counted(opts(NeverRetryModel, AckAdapter))
+      assert {:ok, %{assigns: counts}} = Next.run(opts(NeverRetryModel, AckAdapter))
 
-      assert counts == %{}
+      # The report lists the run's target even when no row exists for it.
+      assert counts == %{AckAdapter => []}
     end
 
     test "shrink candidates are not counted" do
-      run = fn shrink -> Next.run_counted(opts(RetryModel, FailingAckAdapter, shrink: shrink)) end
+      run = fn shrink -> Next.run(opts(RetryModel, FailingAckAdapter, shrink: shrink)) end
 
-      assert {{:error, %Failure{shrink_runs: 0}}, searched} = run.(false)
-      assert {{:error, %Failure{shrink_runs: runs}}, shrunk} = run.(true)
+      assert {:error, %Failure{shrink_runs: 0, report: %{assigns: searched}}} = run.(false)
+      assert {:error, %Failure{shrink_runs: runs, report: %{assigns: shrunk}}} = run.(true)
 
       assert runs > 0
       assert shrunk == searched
     end
 
     test "the counts stop at the failing plan, and count its steps up to the failure" do
-      assert {{:error, %Failure{plan_number: 1}}, counts} =
-               Next.run_counted(opts(RetryModel, FailingAckAdapter, shrink: false))
+      assert {:error, %Failure{plan_number: 1, report: %{assigns: counts}}} =
+               Next.run(opts(RetryModel, FailingAckAdapter, shrink: false))
 
       assert %{FailingAckAdapter => [%{set: 2, acknowledged: 2}]} = counts
     end

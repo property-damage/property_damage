@@ -266,3 +266,146 @@ that build the tree directly are private.
   to move together can stop at a local minimum.
 - The value the shrinker writes to ask for a member by index must appear
   in no model's list.
+
+## Amendment (2026-11-23)
+
+The shrinker gains a fourth pass, which lowers two integer entries by the
+same amount.
+
+1. **Why.** Some failures need two values to keep a relation: a refund
+   that must equal a payment, or two amounts whose difference must stay
+   fixed. Lowering either value alone ends the failure, so every single
+   edit of decision 2 is refused and the shrink stops at a local minimum
+   with both values above the smallest plan's (the last limit of "Known
+   costs and limits" above). Lowering both by the same amount keeps such a
+   relation and reaches the smaller plan.
+
+2. **The candidate.** A pair is two `{:integer, value, range}` entries of
+   the current best journal, each above its range's first value. The pair
+   first tries both values lowered by the largest amount both allow,
+   `min(value_a - first_a, value_b - first_b)`. If that candidate is not
+   adopted, the shrinker bisects between zero, which fails, and the
+   smallest amount known not to fail the same way, for the largest amount
+   that still does. Both entries are read again before each candidate,
+   and a value that falls outside its current range is not tried.
+
+3. **When it runs.** Only after a round in which block removal and single
+   lowering adopted nothing. The pairs come from the integer entries in
+   draw order, and are tried as (first, second), (first, third), and so
+   on, then (second, third): the order is fixed by the plan, so one seed
+   gives one shrink. The first pair adopted ends the pass and the rounds
+   start again from block removal, so the pairs are read again from the
+   rebuilt journal, which can add or drop keys. A round in which no pair
+   is adopted ends the search.
+
+4. **No new path.** Each candidate is an edited journal that goes through
+   the adoption rule of decision 3, the same-plan skip, and the run budget
+   of decision 12, and every executed candidate counts as a shrink run.
+   The journal format and the meaning of its entries do not change.
+
+5. **Engines.** The pass reads only the integer entries of `Engine.Native`.
+   The source entries of `Engine.StreamDataSource` (DR-071) are not paired,
+   so that engine's shrinks do not change. The next amendment extends the
+   pass to them.
+
+6. **Measured effect.** On the next corpus, both engines, plan cap 200,
+   rows for `Engine.Native`; every `Engine.StreamDataSource` row is
+   unchanged:
+
+   | entry | reached minimum | mean shrink runs |
+   |---|---|---|
+   | `offset_refund` | 0/20 to 19/20 | 25.8 to 29.8 |
+   | `racing_refunds` | 18/20 to 19/20 | 73.0 to 77.0 |
+   | `ledger` (no smallest plan) | - | 34.2 to 38.5 |
+
+   Every other row is unchanged. A shrink whose journal holds fewer than
+   two integers above their range's first value makes exactly the runs it
+   made before. Where a pair exists but no pair is kept, the pass costs
+   the candidates it tries: two extra runs on a two-step stock fixture.
+
+**Known costs and limits.**
+
+- Before a search ends, it tries each pair of lowerable integers: one
+  candidate for the largest amount, then the bisection's candidates. The
+  number of pairs grows with the square of the number of lowerable
+  integers.
+- The pass lowers by the same amount only. A relation that needs two
+  values to move by different amounts, or three values to move together,
+  can still stop at a local minimum.
+- Bisection assumes that a smaller amount keeps the failure when a larger
+  one does. Where that does not hold, the pass can stop above the
+  smallest amount that fails.
+
+## Amendment (2026-11-23): pairs on the second engine
+
+The fourth pass also pairs the recorded positions of `Engine.StreamDataSource`
+source entries (DR-071).
+
+1. **Why.** On that engine every value is a source entry
+   `{:source, value, positions}`, an integer field included, so a pass that
+   reads only `{:integer, value, range}` entries never fires there. A refund
+   one below its payment stops at a local minimum on that engine for the
+   reason the previous amendment gives.
+
+2. **The unit.** The pass lowers values. A value is an integer entry above
+   its range's first value, or one recorded position of a source entry
+   whose value is above its recorded lower bound. A position is the
+   smallest integer the engine lets the shrinker edit, and the one the
+   single-lowering move of DR-071 already lowers, so the pair is that move
+   applied to two values at once. Two positions of one entry also form a
+   pair, so a relation inside one nested value, such as two linked amounts
+   in a `fixed_map`, can fall together; both edits go to that entry in turn.
+
+3. **Order and count.** The values are listed in draw order: keys in the
+   order they were drawn, and within a source entry its positions in the
+   order `positions/1` returns them. Pairs are tried in the order of the
+   previous amendment. On `Engine.Native` the list holds only integer
+   entries, so its candidates are the ones the previous amendment tries.
+   The list holds only values still above their lower bound after a round
+   of single lowering kept nothing, and a list's length is bounded by the
+   draw size, so the count of pairs is bounded. No cap is applied beyond
+   `max_shrink_runs`: a cap by position, by key or by count would miss a
+   relation in some shape of value.
+
+4. **No new path.** A candidate is the current journal with one or two
+   source entries replaced by `put_position/3` results. Each position is
+   read again before each candidate, and a value outside its current
+   bounds is not tried. Generation rebuilds the plan and fits each
+   position, and the candidate goes through the adoption rule, the
+   same-plan skip and the run budget. The journal format, the entry layout
+   and the engine do not change.
+
+5. **When it runs.** Unchanged: after a round in which block removal and
+   single lowering adopted nothing; the first pair adopted restarts the
+   rounds.
+
+6. **Measured effect.** On the next corpus, both engines, plan cap 200,
+   rows for `Engine.StreamDataSource`; every `Engine.Native` row is
+   unchanged:
+
+   | entry | reached minimum | mean shrink runs |
+   |---|---|---|
+   | `offset_refund` | 5/20 to 19/20 | 29.0 to 31.9 |
+   | `racing_refunds` | 19/20 to 20/20 | 58.2 to 62.5 |
+   | `nested_price` | 0/20 to 0/20 | 21.7 to 23.3 |
+   | `ledger` (no smallest plan) | - | 35.6 to 40.1 |
+   | `long_note` | 20/20 to 20/20 | 103.5 to 165.8 |
+   | `lost_full_refund` | 20/20 to 20/20 | 43.4 to 54.4 |
+   | `fifth_refund` | 19/20 to 19/20 | 33.1 to 40.4 |
+   | `double_credit` | 20/20 to 20/20 | 12.8 to 13.6 |
+
+   `nested_price` stays at 0/20 because its smallest plan fails with a
+   different reason from the first failure (DR-071), which the adoption
+   rule refuses whatever edit produces it.
+
+**Known costs and limits.**
+
+- A string records, for each character, a choice position whose value
+  does not reach the string. Lowering such a position alone rebuilds the
+  same plan, which costs no run, so the position stays above its lower
+  bound. Paired with a value that matters, such as the string's length, it
+  gives candidates that are executed and refused. `long_note`, whose
+  failing note holds 41 characters, has the largest rise; this cost was
+  seen on a one-string fixture and is not separated from the others in
+  the corpus numbers.
+- The limits of the previous amendment hold on this engine too.

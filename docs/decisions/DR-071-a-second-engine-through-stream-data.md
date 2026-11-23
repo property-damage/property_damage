@@ -76,13 +76,18 @@ the corpus shows when both engines run the same entries.
    stays empty for it (DR-068, amendment).
 
 6. **The StreamData change is a patch file applied in the test environment
-   only.** `test/support/stream_data_patch/stream_data_1.4.0.patch` adds two
-   clauses to `deps/stream_data/lib/stream_data.ex` and changes no existing
-   line:
+   only.** `test/support/stream_data_patch/stream_data_1.4.0.patch` opens
+   three seams in `deps/stream_data/lib/stream_data.ex`. It adds two clauses
+   and changes one line:
    - `split_seed/1`: a `:rand` state whose algorithm map carries `:split`
      splits itself.
    - `uniform_in_range/3`: a `:rand` state whose algorithm map carries
      `:uniform_range` receives both bounds of the range draw.
+   - `random_pseudofactors/2`: the level sizes of `tree/2` are drawn with
+     `uniform_in_range(1, trunc(:math.log2(n)), seed)` instead of
+     `:rand.uniform_s(trunc(:math.log2(n)), seed)`. For a state without the
+     handler, `uniform_in_range/3` makes that same `:rand.uniform_s/2` call
+     and returns the same value.
 
    Every other state behaves exactly as before. PD keeps no fork and no git
    dependency of StreamData, and `mix.lock` is unchanged. Dev and prod
@@ -126,7 +131,9 @@ the corpus shows when both engines run the same entries.
    between the lower bound and the stored value. It reads each position
    again before each candidate, because an adoption can drop the position
    or move its bounds. Every candidate goes through the same adoption test
-   as the other moves (DR-069, decision 3).
+   as the other moves (DR-069, decision 3). Once single edits stall, the
+   shrinker also lowers two recorded positions by the same amount (DR-069,
+   amendments of 2026-11-23).
 
    The shrinker reads and edits positions only through the engine's
    functions `tag/0`, `positions/1` and `put_position/3`. Without them, the
@@ -146,31 +153,54 @@ the corpus shows when both engines run the same entries.
 ## Does the patch alone suffice?
 
 **On the StreamData side, yes.** Every `corpus/next` entry runs on the second
-engine with only the two clauses of the patch, and finds its bug on as many
+engine with only the patch, and finds its bug on as many
 seeds as on `Engine.Native` (every seed but one for `offset_refund`, on both
 engines). No other
 change to StreamData was needed: the applied copy differs from the released
-source by exactly those two insertions.
+source by exactly the two clauses and the one changed line of decision 6.
 
 **On the PD side, three more pieces were needed:** the engine itself, the
 one shrinker clause of decision 9, and journal format version 3.
 
-**No different or smaller seam showed up, but the two seams do not cover
-every draw.** In StreamData 1.4.0, every range draw goes through
-`uniform_in_range/3`, and every split goes through `split_seed/1`, with one
-exception. `random_pseudofactors/2` calls `:rand.uniform_s/2` directly to
-choose the level sizes of `tree/2`. `term/0`, `iodata/0` and `chardata/0`
-build on `tree/2`. On this engine, such a draw comes from the key's
-generator, so it is deterministic. The source does not record it, so the
-engine cannot fit it and the shrinker cannot lower it. Such a draw can also
-change on a replay. A fitted position does not advance the key's generator,
-but a fresh draw does. So when a fresh range draw precedes a split on one
-state, as a list's length precedes its elements, the replay hands the
-elements different child generators. A `tree/2` level size drawn inside such
-an element then changes, and the replay builds a different value. For
-example, `list_of(tree(integer(0..9), &list_of/1), length: 2)` replays to a
-different value on each of three seeds probed. No `corpus/next` entry and no
-test draws `tree/2`, `term/0`, `iodata/0` or `chardata/0`.
+**No different or smaller seam showed up, and the three seams cover every
+draw.** In StreamData 1.4.0, every split goes through `split_seed/1`, and
+every range draw goes through `uniform_in_range/3` except one:
+`random_pseudofactors/2` calls `:rand.uniform_s/2` directly to choose the
+level sizes of `tree/2`, on which `term/0`, `iodata/0` and `chardata/0`
+build. The third seam routes that call through `uniform_in_range/3`, so the
+source records each level size like any other range draw: the engine fits
+it and the shrinker lowers it.
+
+Without the third seam, a level size came from the key's generator, so it
+was deterministic but unrecorded, and it could change on a replay. A fitted
+position does not advance the key's generator, but a fresh draw does. So
+when a fresh range draw precedes a split on one state, as a list's length
+precedes its elements, the replay hands the elements different child
+generators, and a level size drawn inside such an element changes.
+
+Measured on seeds 1 to 20, a plan with one step drawn on this engine, then
+rebuilt from its journal
+(`test/property_damage/next/tree_level_size_test.exs`):
+
+| field | replayed differently, two seams | replayed differently, three seams |
+|---|---|---|
+| `list_of(tree(integer(0..9), &list_of/1), length: 2)` | 20/20 | 0/20 |
+| `term()` | 0/20 | 0/20 |
+| `iodata()` | 0/20 | 0/20 |
+| `chardata()` | 0/20 | 0/20 |
+
+A `term/0` value may hold a reference, which `make_ref/0` creates afresh on
+every draw and no journal can replay; the comparison treats references as
+equal. With a failure that needs a tree of at least four nodes, the shrinker
+reached four nodes on 20 of 20 seeds, and the sum of the recorded level
+sizes fell on 11 seeds and stayed equal on 9. A state without the handler
+draws the same values as the released StreamData: a test compares
+`tree/2`, `term/0`, `iodata/0` and `chardata/0` at three sizes on 20 seeds
+each against a VM that loads the released module
+(`test/property_damage/next/stream_data_patch_released_test.exs`). No
+`corpus/next` entry draws `tree/2`, `term/0`, `iodata/0` or `chardata/0`,
+and no row of the corpus table, on either engine, moved with the third
+seam.
 
 **The fit rules differ from `Engine.Native` (DR-069, decision 4).**
 
@@ -189,8 +219,8 @@ fits, never follows a moved lower bound, and fits a member by its index.
 ## Measured results
 
 Both engines ran every `corpus/next` entry with seeds 1 to 20 and a plan cap
-of 200. These numbers were measured on this branch before this record was
-committed. `native` is `property_damage_next`; `source` is
+of 200. These numbers were measured at decision time, on this branch
+before this record was committed, and are not re-measured. `native` is `property_damage_next`; `source` is
 `property_damage_next_source`.
 
 | entry | engine | found | plans until found | mean shrink runs | reached minimum |
@@ -266,11 +296,13 @@ Nothing was tuned to these numbers.
   `PD_SKIP_STREAM_DATA_PATCH=1`, the run lists them as excluded.
 - The test environment depends on the `patch` executable. Without it, the
   tagged tests are excluded locally, and the run stops on CI.
-- A StreamData release that changes either private function breaks the
-  patch. The apply step uses `--fuzz=0`, so it then fails instead of
-  applying a shifted hunk, and the file name names the version it fits.
-- A `tree/2` level size bypasses the source: the engine cannot fit it, the
-  shrinker cannot lower it, and inside a list it can change on a replay.
+- A StreamData release that changes any of the three private functions
+  breaks the patch. The apply step uses `--fuzz=0`, so it then fails
+  instead of applying a shifted hunk, and the file name names the version
+  it fits.
+- A `tree/2` level size is recorded like any other range draw: the engine
+  fits it, the shrinker lowers it, and a journal replays it. A reference
+  that `term/0` draws is the one part of a value no journal can replay.
 - The second engine's fit rules differ from `Engine.Native`'s, as the table
   in "Does the patch alone suffice?" shows. This record states the
   difference; it does not change either rule.

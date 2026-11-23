@@ -226,13 +226,7 @@ defmodule PropertyDamage.Next do
   `@check every: CommandModule`.
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, Failure.t()}
-  def run(opts), do: opts |> run_counted() |> elem(0)
-
-  @doc false
-  # `run/1` and the assign counts of its search, as the report holds them:
-  # `%{target => [%{command:, key:, set:, acknowledged:}]}`.
-  @spec run_counted(keyword()) :: {{:ok, Report.t()} | {:error, Failure.t()}, map()}
-  def run_counted(opts) do
+  def run(opts) do
     opts = Keyword.validate!(opts, @run_opts)
     model = module!(opts, :model)
     adapter = module!(opts, :adapter)
@@ -273,7 +267,7 @@ defmodule PropertyDamage.Next do
         execute: &Execution.run(&1, adapter, opts[:config], projections, ignored: ignored)
       }
 
-      {finish(searched, ctx), counts}
+      finish(searched, ctx)
     after
       AssignCounts.delete(table)
     end
@@ -314,17 +308,17 @@ defmodule PropertyDamage.Next do
     base = report(seen, ctx)
     build = &trace(ctx.model, ctx.specs, &1, ctx.plan_opts)
 
-    {final, runs, warned, found} =
+    {final, runs, dropped, warned, found} =
       if ctx.shrink do
-        {final, runs, warned} =
+        {final, runs, dropped, warned} =
           shrink(found, build, ctx.execute, ctx.max_shrink_runs, seen.warned)
 
-        {final, runs, warned, found}
+        {final, runs, dropped, warned, found}
       else
-        {found, 0, seen.warned, found}
+        {found, 0, 0, seen.warned, found}
       end
 
-    failure = %{failure(final, seen.plans, found, runs) | kept: warned}
+    failure = %{failure(final, seen.plans, found, runs, dropped) | kept: warned}
     report = %{base | kept: warned, withdrawn: failure.withdrawn}
     {:error, %{failure | report: report}}
   end
@@ -383,25 +377,38 @@ defmodule PropertyDamage.Next do
     do: %Failure{reason: reason, report: report, kept: report.kept}
 
   # Shrinks `found`, warning about each kept site of a candidate plan that
-  # no earlier plan of the run named. The shrinker calls `build` once per
-  # candidate, so the sites warned about so far live in the process
-  # dictionary for the length of the shrink.
+  # no earlier plan of the run named, and counting the candidates whose
+  # rebuild raised: the shrinker skips those without a run. It calls `build`
+  # once per candidate, so the sites warned about so far and the raises
+  # counted so far live in the process dictionary for the length of the
+  # shrink.
   defp shrink(found, build, execute, max_shrink_runs, warned) do
     slot = {__MODULE__, :warned, make_ref()}
-    Process.put(slot, warned)
+    Process.put(slot, {warned, 0})
 
     build = fn journal ->
-      {plan, drawn} = build.(journal)
-      Process.put(slot, warn(plan.kept, Process.get(slot)))
+      {plan, drawn} = build_counting(build, journal, slot)
+      {warned, dropped} = Process.get(slot)
+      Process.put(slot, {warn(plan.kept, warned), dropped})
       {plan, drawn}
     end
 
     try do
       {final, runs} = Shrinker.shrink(found, build, execute, max_shrink_runs)
-      {final, runs, Process.get(slot)}
+      {warned, dropped} = Process.get(slot)
+      {final, runs, dropped, warned}
     after
       Process.delete(slot)
     end
+  end
+
+  defp build_counting(build, journal, slot) do
+    build.(journal)
+  rescue
+    exception ->
+      {warned, dropped} = Process.get(slot)
+      Process.put(slot, {warned, dropped + 1})
+      reraise exception, __STACKTRACE__
   end
 
   # Logs one warning for each site of `kept` not in `warned`; returns the
@@ -473,7 +480,7 @@ defmodule PropertyDamage.Next do
 
       {:error, step, reason} ->
         found = %{plan: plan, step: step, reason: reason}
-        {:error, %{failure(found, 1, found, 0) | kept: kept}}
+        {:error, %{failure(found, 1, found, 0, 0) | kept: kept}}
     end
   end
 
@@ -513,8 +520,9 @@ defmodule PropertyDamage.Next do
 
   # The failure of `final`, a plan and the step and reason of its
   # execution, found as plan `number` of the run, whose first failing plan
-  # was `found`.
-  defp failure(final, number, found, runs) do
+  # was `found`. `runs` and `dropped` are the shrink's executions and the
+  # candidates it dropped.
+  defp failure(final, number, found, runs, dropped) do
     %Failure{
       plan_number: number,
       seed: found.plan.journal.seed,
@@ -524,6 +532,7 @@ defmodule PropertyDamage.Next do
       step: final.step,
       reason: final.reason,
       shrink_runs: runs,
+      shrink_dropped: dropped,
       original: %{
         plan: found.plan,
         journal: found.plan.journal,

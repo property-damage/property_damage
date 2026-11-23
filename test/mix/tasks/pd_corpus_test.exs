@@ -304,6 +304,33 @@ defmodule Mix.Tasks.Pd.CorpusTest do
     end
 
     @tag :tmp_dir
+    test "a saved table writes map keys in sorted order, whatever order the atoms were created in",
+         %{tmp_dir: tmp} do
+      # Atom-keyed maps print in atom creation order; these atoms are made in
+      # reverse alphabetical order, and a map over 32 keys prints in hash order.
+      [zed, mid, alpha] = Enum.map(~w(zz_key_zed zz_key_mid zz_key_alpha), &String.to_atom/1)
+
+      many =
+        Map.new(1..40, &{String.to_atom("zz_many_#{String.pad_leading("#{&1}", 2, "0")}"), &1})
+
+      small = %{zed => 1, mid => 2, alpha => 3}
+      table = %{seeds: [1], commit: %{sha: nil, dirty?: false}, engine: [], plan_cap: 1}
+      table = Map.put(table, :results, [%{entry: "x", rows: [small, many]}])
+
+      path = Path.join(tmp, "table.exs")
+      :ok = Baseline.save(path, table)
+      text = File.read!(path)
+
+      assert Regex.scan(~r/zz_key_\w+/, text) |> List.flatten() ==
+               ~w(zz_key_alpha zz_key_mid zz_key_zed)
+
+      many_keys = Regex.scan(~r/zz_many_\d+/, text) |> List.flatten()
+      assert many_keys == Enum.sort(many_keys)
+      assert length(many_keys) == 40
+      assert {:ok, ^table} = Baseline.load(path)
+    end
+
+    @tag :tmp_dir
     test "--baseline prints the change against a saved table", %{tmp_dir: tmp} do
       path = Path.join(tmp, "table.exs")
       args = ["--only", "rejected_set", "--cap", "50"]
@@ -378,6 +405,25 @@ defmodule Mix.Tasks.Pd.CorpusTest do
         end)
 
       assert stderr =~ "entry missing from the baseline: double_credit"
+    end
+
+    @tag :tmp_dir
+    test "an entry in the baseline and not run is named, and the run still passes", %{
+      tmp_dir: tmp
+    } do
+      path = Path.join(tmp, "table.exs")
+
+      capture_io(fn ->
+        CorpusTask.exec(["--only", "rejected_set", "--only", "double_credit", "--save", path])
+      end)
+
+      output =
+        capture_io(fn ->
+          assert CorpusTask.exec(["--only", "rejected_set", "--baseline", path]) == :ok
+        end)
+
+      assert output =~ "double_credit: in the baseline, not run"
+      refute output =~ "rejected_set: in the baseline, not run"
     end
 
     @tag :tmp_dir

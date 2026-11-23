@@ -121,19 +121,19 @@ defmodule Mix.Tasks.Pd.Corpus do
 
     if invalid == [] do
       Mix.Task.run("app.start")
-      measure(opts)
+      measure(opts, args)
     else
       Mix.shell().error("Unknown or malformed option: #{inspect(invalid)}")
       :error
     end
   end
 
-  defp measure(opts) do
+  defp measure(opts, args) do
     cap = Keyword.get(opts, :cap, @default_cap)
     dir = Keyword.get(opts, :dir, "corpus")
     both? = Keyword.get(opts, :both_engines, false)
 
-    with :ok <- check_engines(both?),
+    with :ok <- check_engines(both?, args),
          {:ok, baseline} <- load_baseline(opts[:baseline]),
          {:ok, entries} <- Loader.load(dir, Keyword.get_values(opts, :only)) do
       entries = if both?, do: Enum.flat_map(entries, &on_both_engines/1), else: entries
@@ -147,8 +147,10 @@ defmodule Mix.Tasks.Pd.Corpus do
     end
   end
 
-  defp check_engines(false), do: :ok
-  defp check_engines(true), do: Engine.NextSource.check_stream_data()
+  defp check_engines(false, _args), do: :ok
+
+  defp check_engines(true, args),
+    do: Engine.NextSource.check_stream_data(Engine.NextSource.loader(), args)
 
   defp on_both_engines(%{engine: Engine.Next} = entry),
     do: [entry, %{entry | engine: Engine.NextSource}]
