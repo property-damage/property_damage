@@ -18,6 +18,17 @@ defmodule PropertyDamage.Next.Generation do
   # slots counted from 1. A draw is `{step, :pick}`,
   # `{step, :command, field}` or `{step, :assigns, key}`.
   #
+  # With two lanes, the prefix is lane 0's `max_steps` slots, built as a
+  # one-lane plan is. Lane 1 and lane 2 then have `lane_steps` slots each,
+  # and each lane starts from the predicted state after the prefix: a lane
+  # folds only its own steps' events, so a `when:` in a lane holds when that
+  # lane runs alone after the prefix. Once both lanes are built, and only if
+  # each holds a step, the schedule is drawn: for each lane-1 step in slot
+  # order, one integer per point, `{{1, slot}, :schedule, point}` for points
+  # 1 to `yields + 1`, each naming a lane-2 position from 0 to
+  # `lane_steps * (yields + 1)`. Drawing it last leaves every key of the
+  # prefix and of the lanes drawn as it would be without a schedule.
+  #
   # A generator that a from/2 function or a dependent assign returns, when
   # it is not a PD description, reaches the engine wrapped with its site.
   # Unless the engine says it fits such a value, the site goes on the plan's
@@ -46,7 +57,7 @@ defmodule PropertyDamage.Next.Generation do
 
   alias PropertyDamage.Next.StepSpec.FromCommand
 
-  @lane 0
+  @prefix 0
 
   @doc "Builds the plan of `specs` from `journal`."
   @spec build(module(), [StepSpec.t()], Journal.t(), keyword()) :: Plan.t()
@@ -78,23 +89,67 @@ defmodule PropertyDamage.Next.Generation do
     }
 
     max_steps = Keyword.fetch!(opts, :max_steps)
-    acc = Enum.reduce(1..max_steps//1, acc, &slot/2)
+    acc = Enum.reduce(1..max_steps//1, acc, &slot(@prefix, &1, &2))
+    {acc, schedule, lanes} = lanes(acc, opts)
 
     plan = %Plan{
       steps: Enum.reverse(acc.steps),
-      journal: %{journal | entries: acc.entries, max_steps: max_steps},
+      journal: %{journal | entries: acc.entries, max_steps: max_steps, lanes: lanes},
       withdrawn: Enum.reverse(acc.withdrawn),
       kept: Enum.reverse(acc.kept),
-      eligible: acc.eligible |> MapSet.to_list() |> Enum.sort()
+      eligible: acc.eligible |> MapSet.to_list() |> Enum.sort(),
+      schedule: schedule
     }
 
     {plan, Enum.reverse(acc.drawn)}
   end
 
+  # --- Lanes
+
+  defp lanes(acc, opts) do
+    case Keyword.get(opts, :lanes, 1) do
+      1 ->
+        {acc, %{}, nil}
+
+      2 ->
+        lane_steps = Keyword.fetch!(opts, :lane_steps)
+        yields = Keyword.fetch!(opts, :yields)
+        forked = acc.state
+
+        acc =
+          Enum.reduce([1, 2], acc, fn lane, acc ->
+            Enum.reduce(1..lane_steps//1, %{acc | state: forked}, &slot(lane, &1, &2))
+          end)
+
+        {acc, schedule} = schedule(acc, lane_steps, yields)
+        {acc, schedule, %{count: 2, steps: lane_steps, yields: yields}}
+    end
+  end
+
+  defp schedule(acc, lane_steps, yields) do
+    keys = Enum.map(acc.steps, & &1.key)
+    lane_one = keys |> Enum.filter(&match?({1, _slot}, &1)) |> Enum.sort()
+
+    if lane_one == [] or not Enum.any?(keys, &match?({2, _slot}, &1)) do
+      {acc, %{}}
+    else
+      positions = Gen.integer(0..(lane_steps * (yields + 1)))
+
+      Enum.reduce(lane_one, {acc, %{}}, fn step, {acc, schedule} ->
+        {values, acc} =
+          Enum.map_reduce(1..(yields + 1), acc, fn point, acc ->
+            draw(acc, {step, :schedule, point}, positions)
+          end)
+
+        {acc, Map.put(schedule, step, values)}
+      end)
+    end
+  end
+
   # --- The pick
 
-  defp slot(slot, acc) do
-    key = {@lane, slot}
+  defp slot(lane, slot, acc) do
+    key = {lane, slot}
     pick_key = {key, :pick}
     offered = Enum.filter(acc.specs, &offered?(&1, acc.state))
     acc = %{acc | eligible: Enum.reduce(offered, acc.eligible, &MapSet.put(&2, &1.id))}

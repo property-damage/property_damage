@@ -4,6 +4,17 @@ defmodule PropertyDamage.Next.Execution do
   # one `execute/3` per step in slot order, the checks after each step, and
   # the adapter's teardown.
   #
+  # A step is one or more points. Its first point is its call to
+  # `execute/3`; each `{:yield, continuation}` it answers adds one, the next
+  # point being the call to that continuation, and the step completes at
+  # the point that answers `{:ok, events}`. In a plan with one lane, and in
+  # the prefix of a plan with two, each continuation is called at once.
+  # The two lanes run after the prefix, in one process: at each turn the
+  # plan's schedule picks the lane whose next point runs (see
+  # `PropertyDamage.Next.Plan`). A lane step may yield at most `yields`
+  # times. A step's events fold, and the checks run, when it completes, so
+  # steps of two lanes fold in the order they complete.
+  #
   # Before a step reaches the adapter, its command and assigns are made
   # concrete. A placeholder becomes the value the system minted: the field at
   # the placeholder's path in the real event at its index, among the events
@@ -17,7 +28,8 @@ defmodule PropertyDamage.Next.Execution do
   #
   # The execution stops at the first step that fails: the adapter answers
   # `{:error, reason}`, raises, exits or throws, a check fails, or a value
-  # cannot be made concrete.
+  # cannot be made concrete. A step the other lane left open is dropped
+  # then, and its continuation is never called.
 
   require Logger
 
@@ -49,7 +61,7 @@ defmodule PropertyDamage.Next.Execution do
   """
   @spec run(Plan.t(), module(), term(), [module()], keyword()) ::
           :ok | {:error, term(), reason()}
-  def run(%Plan{steps: steps}, adapter, config, projections, opts \\ []) do
+  def run(%Plan{} = plan, adapter, config, projections, opts \\ []) do
     checks = Checks.init(projections)
 
     case setup(adapter, config) do
@@ -65,7 +77,7 @@ defmodule PropertyDamage.Next.Execution do
         }
 
         try do
-          execute(steps, run)
+          execute(plan, run)
         after
           teardown(adapter, context)
         end
@@ -111,24 +123,127 @@ defmodule PropertyDamage.Next.Execution do
 
   # --- The steps
 
-  defp execute([], _run), do: :ok
+  defp execute(%Plan{steps: steps, schedule: schedule, journal: journal}, run) do
+    {prefix, lane_one, lane_two} = split(steps)
 
-  defp execute([%Step{key: key} = step | rest], run) do
-    case execute_step(step, run) do
-      {:ok, run} -> execute(rest, run)
-      {:error, reason} -> {:error, key, reason}
+    with {:ok, run} <- prefix(prefix, run) do
+      yields = if journal.lanes, do: journal.lanes.yields, else: 0
+      lanes = %{1 => {lane_one, nil}, 2 => {lane_two, nil}}
+      interleave(lanes, run, %{schedule: schedule, yields: yields})
     end
   end
 
-  defp execute_step(%Step{key: key, command: command, assigns: assigns}, run) do
-    command = concrete(command, key, [:command], run)
-    assigns = concrete(assigns, key, [:assigns], run)
+  defp split(steps) do
+    lane = fn n -> Enum.filter(steps, &match?(%Step{key: {^n, _slot}}, &1)) end
+    {lane.(0), lane.(1), lane.(2)}
+  end
 
-    scope = scope(run, command, assigns)
+  # Prefix steps run one after another, each driven to completion.
+  defp prefix([], run), do: {:ok, run}
 
-    with {:ok, events} <- Runtime.with_step(scope, fn -> call(run, command, assigns) end),
-         {:ok, checks} <- Checks.step(run.checks, command, events) do
-      {:ok, %{run | events: Map.put(run.events, key, events), checks: checks}}
+  defp prefix([step | rest], run) do
+    case drive(start(step, run), run) do
+      {:ok, run} -> prefix(rest, run)
+      {:error, key, reason} -> {:error, key, reason}
+    end
+  end
+
+  defp drive({:open, open}, run), do: drive(continue(open, run), run)
+  defp drive({:done, open, events}, run), do: complete(open, events, run)
+  defp drive({:error, key, reason}, _run), do: {:error, key, reason}
+
+  # Each lane is `{steps not yet started, open step or nil}`. Lane 1's next
+  # point runs once lane 2's next point sits at or after the position the
+  # schedule gives that lane-1 point.
+  defp interleave(lanes, run, ctx) do
+    case {next_point(lanes[1]), next_point(lanes[2])} do
+      {nil, nil} -> :ok
+      {nil, _point} -> turn(2, lanes, run, ctx)
+      {_point, nil} -> turn(1, lanes, run, ctx)
+      {one, two} -> turn(if(runs_first?(one, two, ctx), do: 1, else: 2), lanes, run, ctx)
+    end
+  end
+
+  defp next_point({_steps, %{key: {_lane, slot}, point: point}}), do: {slot, point}
+  defp next_point({[%Step{key: {_lane, slot}} | _rest], nil}), do: {slot, 1}
+  defp next_point({[], nil}), do: nil
+
+  defp runs_first?({slot, point}, {lane_two_slot, lane_two_point}, ctx) do
+    position = (lane_two_slot - 1) * (ctx.yields + 1) + (lane_two_point - 1)
+    position >= ctx.schedule |> Map.fetch!({1, slot}) |> Enum.at(point - 1)
+  end
+
+  defp turn(lane, lanes, run, ctx) do
+    answer =
+      case lanes[lane] do
+        {steps, nil} -> start(hd(steps), run)
+        {_steps, open} -> continue(open, run)
+      end
+
+    case answer do
+      {:open, %{key: key, point: point}} when point > ctx.yields + 1 ->
+        {:error, key, {:raise, too_many_yields(run.adapter, ctx.yields)}}
+
+      {:open, open} ->
+        interleave(Map.put(lanes, lane, {rest(lanes[lane]), open}), run, ctx)
+
+      {:done, open, events} ->
+        with {:ok, run} <- complete(open, events, run) do
+          interleave(Map.put(lanes, lane, {rest(lanes[lane]), nil}), run, ctx)
+        end
+
+      {:error, key, reason} ->
+        {:error, key, reason}
+    end
+  end
+
+  # The steps a lane has not started once its next point ran.
+  defp rest({[_started | steps], nil}), do: steps
+  defp rest({steps, _open}), do: steps
+
+  defp too_many_yields(adapter, yields) do
+    %ArgumentError{
+      message:
+        "#{inspect(adapter)}.execute/3 yielded more than #{yields} times in one step " <>
+          "of a lane; raise the :yields option"
+    }
+  end
+
+  # The first point of a step: its command and assigns made concrete, its
+  # scope built, and `execute/3` called within it.
+  defp start(%Step{key: key, command: command, assigns: assigns}, run) do
+    point(key, fn ->
+      command = concrete(command, key, [:command], run)
+      assigns = concrete(assigns, key, [:assigns], run)
+      scope = scope(run, command, assigns)
+      open = %{key: key, command: command, scope: scope, point: 1, continuation: nil}
+      answer = Runtime.with_step(scope, fn -> call(run, command, assigns) end)
+      {open, answer}
+    end)
+  end
+
+  # A later point: the open step's continuation, called within its scope.
+  defp continue(%{key: key, scope: scope, continuation: continuation} = open, run) do
+    point(key, fn ->
+      answer = Runtime.with_step(scope, fn -> answer(run.adapter, continuation.()) end)
+      {open, answer}
+    end)
+  end
+
+  # Runs point `open.point` of a step. Answers `{:open, open}` for a step
+  # that yielded, with `point` now the number of the point to come,
+  # `{:done, open, events}` for a step that completed, or
+  # `{:error, key, reason}`.
+  defp point(key, fun) do
+    case fun.() do
+      {open, {:yield, continuation}} ->
+        {:open, %{open | continuation: continuation, point: open.point + 1}}
+
+      {open, {:ok, events}} ->
+        {:done, open, events}
+
+      {_open, {:error, reason}} ->
+        {:error, key, reason}
     end
   rescue
     # Misuse of an acknowledgment is not a failure of the system under test.
@@ -136,9 +251,22 @@ defmodule PropertyDamage.Next.Execution do
       reraise exception, __STACKTRACE__
 
     exception ->
-      {:error, {:raise, exception}}
+      {:error, key, {:raise, exception}}
   catch
-    kind, reason -> {:error, {:raise, caught(kind, reason)}}
+    kind, reason -> {:error, key, {:raise, caught(kind, reason)}}
+  end
+
+  # A completed step: its events stored for the placeholders that name
+  # them, then folded and checked.
+  defp complete(%{key: key, command: command}, events, run) do
+    case Checks.step(run.checks, command, events) do
+      {:ok, checks} -> {:ok, %{run | events: Map.put(run.events, key, events), checks: checks}}
+      {:error, reason} -> {:error, key, reason}
+    end
+  rescue
+    exception -> {:error, key, {:raise, exception}}
+  catch
+    kind, reason -> {:error, key, {:raise, caught(kind, reason)}}
   end
 
   # The running step as `Runtime.ack/2` sees it, with the step's set
@@ -162,9 +290,28 @@ defmodule PropertyDamage.Next.Execution do
   defp call(%{adapter: adapter, context: context}, command, assigns) do
     case adapter.execute(command, assigns, context) do
       {:ok, events} when is_list(events) -> {:ok, events}
+      {:yield, continuation} when is_function(continuation, 0) -> {:yield, continuation}
       {:error, reason} -> {:error, {:adapter_error, reason}}
-      other -> raise bad_return(adapter, "execute/3", "{:ok, events}", other)
+      other -> raise bad_answer("#{inspect(adapter)}.execute/3", other)
     end
+  end
+
+  # What a continuation answered, read as an answer of `execute/3`.
+  defp answer(adapter, answer) do
+    case answer do
+      {:ok, events} when is_list(events) -> {:ok, events}
+      {:yield, continuation} when is_function(continuation, 0) -> {:yield, continuation}
+      {:error, reason} -> {:error, {:adapter_error, reason}}
+      other -> raise bad_answer("a continuation of #{inspect(adapter)}.execute/3", other)
+    end
+  end
+
+  defp bad_answer(function, got) do
+    %ArgumentError{
+      message:
+        "#{function} must return {:ok, events}, {:yield, continuation} or {:error, reason}, " <>
+          "got: #{inspect(got)}"
+    }
   end
 
   defp bad_return(adapter, function, expected, got) do

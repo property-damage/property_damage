@@ -28,7 +28,13 @@ defmodule PropertyDamage.Next.Runtime do
 
   PD finds the running step from the process that called `execute/3`, or
   from a process that lists it in `$callers`, as a `Task` started there
-  does. The call raises:
+  does. PD makes the step running around every call it makes into the
+  adapter for that step, `execute/3` and each continuation, so while two
+  steps of a plan with lanes are open at once, an acknowledgment counts
+  for the step whose part made it. A process the adapter starts during a
+  part of a step, such as a `Task`, must acknowledge before that part
+  returns or yields: afterwards the running step may be another. The call
+  raises:
 
     * `ArgumentError` outside a step
     * `PropertyDamage.Next.AcknowledgedUnsetAssignError` when the step did

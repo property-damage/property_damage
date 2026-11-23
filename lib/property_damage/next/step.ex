@@ -3,7 +3,9 @@ defmodule PropertyDamage.Next.Step do
   One drawn step of a plan: the command and the assigns for the ports.
 
   `key` is the step's `{lane, slot}`, and `spec_id` the id of the spec it
-  was drawn from. The step is PD's own: the ports receive the command and
+  was drawn from. A step of a plan with one lane, or of the prefix of a
+  plan with two lanes, has key `{0, slot}`; a step in a lane has key
+  `{1, slot}` or `{2, slot}`. The step is PD's own: the ports receive the command and
   the assigns, never the step.
   """
 

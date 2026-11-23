@@ -4,12 +4,15 @@ defmodule PropertyDamage.Next.Shrinker do
   # edited journal; generation rebuilds its plan, fitting every stored value
   # to the domain it has now, and the plan is executed. A candidate is
   # adopted when it fails the same way as the plan it shrinks: the same
-  # kind of reason (see `class/1`) at the same step or an earlier one.
+  # kind of reason (see `class/1`) at the same step or an earlier one. A
+  # candidate whose rebuilt plan has the steps and the schedule of the plan
+  # it shrinks is that same test case, and it is not executed.
   #
   # The passes, repeated until a round adopts nothing or the run budget is
   # spent:
   #
-  #   1. once, first: empty every slot after the failing step;
+  #   1. once, first: empty every slot that runs after the failing step:
+  #      later slots of its lane, and every lane slot after a prefix step;
   #   2. remove steps in blocks, halving the block size down to one step,
   #      by writing the empty pick `{:empty}` at each slot of the block;
   #   3. lower each drawn value, later slots first and, within a slot, in
@@ -81,8 +84,8 @@ defmodule PropertyDamage.Next.Shrinker do
     if removed? or lowered?, do: rounds(state), else: state
   end
 
-  defp cut_after_failure(%{best: %{step: {lane, failing}, plan: plan}} = state) do
-    later = for slot <- (failing + 1)..plan.journal.max_steps//1, do: {lane, slot}
+  defp cut_after_failure(%{best: %{step: {_lane, _slot} = step, plan: plan}} = state) do
+    later = run_after(step, plan.journal)
 
     if Enum.all?(later, &(entries(state)[{&1, :pick}] == {:empty})),
       do: {false, state},
@@ -90,6 +93,23 @@ defmodule PropertyDamage.Next.Shrinker do
   end
 
   defp cut_after_failure(state), do: {false, state}
+
+  # The slots that run after `step`: the later slots of its lane and, after
+  # a prefix step, every lane slot. A lane step's other lane is left alone,
+  # since its later slots may have run before the failure.
+  defp run_after({0, failing}, journal) do
+    prefix = for slot <- (failing + 1)..journal.max_steps//1, do: {0, slot}
+    prefix ++ for lane <- lane_numbers(journal), slot <- lane_slots(journal), do: {lane, slot}
+  end
+
+  defp run_after({lane, failing}, journal),
+    do: for(slot <- lane_slots(journal), slot > failing, do: {lane, slot})
+
+  defp lane_numbers(%{lanes: nil}), do: []
+  defp lane_numbers(_journal), do: [1, 2]
+
+  defp lane_slots(%{lanes: nil}), do: []
+  defp lane_slots(%{lanes: %{steps: steps}}), do: 1..steps//1
 
   defp remove_blocks(state) do
     live = length(state.best.plan.steps)
@@ -293,7 +313,7 @@ defmodule PropertyDamage.Next.Shrinker do
       {:ok, plan, drawn} ->
         cond do
           not wanted?.(plan) -> {:skipped, state}
-          plan.steps == state.best.plan.steps -> {false, state}
+          same_plan?(plan, state.best.plan) -> {false, state}
           true -> judge(state, journal, plan, drawn, true)
         end
 
@@ -334,15 +354,18 @@ defmodule PropertyDamage.Next.Shrinker do
     else
       retried = %{plan.journal | entries: Map.merge(plan.journal.entries, moved)}
 
-      case rebuild(state, retried) do
-        {:ok, again, drawn} when again.steps != state.best.plan.steps ->
-          judge(state, retried, again, drawn, false)
-
-        _same_or_error ->
-          {false, state}
+      with {:ok, again, drawn} <- rebuild(state, retried),
+           false <- same_plan?(again, state.best.plan) do
+        judge(state, retried, again, drawn, false)
+      else
+        _same_or_error -> {false, state}
       end
     end
   end
+
+  # A plan is the test case already held when its steps and its schedule
+  # are those of `best`.
+  defp same_plan?(plan, best), do: plan.steps == best.steps and plan.schedule == best.schedule
 
   defp moved_bound(value, %Range{} = stored, range) do
     cond do
@@ -381,6 +404,10 @@ defmodule PropertyDamage.Next.Shrinker do
 
   defp later?(step, step), do: false
   defp later?({lane, slot}, {lane, best}), do: slot > best
+  # A prefix step runs before every lane step.
+  defp later?({0, _slot}, {_lane, _best}), do: false
+  # Steps of the two lanes compare by slot.
+  defp later?({_lane, slot}, {other, best}) when other != 0, do: slot > best
   defp later?(_step, _best), do: true
 
   # The kind of a failure: the check that failed, the adapter's error

@@ -29,7 +29,14 @@ defmodule PropertyDamage.Next do
     Shrinker
   }
 
-  @plan_opts [max_steps: 20, engine: Native, dependent_stream_data: :warn]
+  @plan_opts [
+    max_steps: 20,
+    engine: Native,
+    dependent_stream_data: :warn,
+    lanes: 1,
+    lane_steps: nil,
+    yields: nil
+  ]
   @run_opts [
     :model,
     :adapter,
@@ -42,7 +49,10 @@ defmodule PropertyDamage.Next do
     engine: Native,
     shrink: true,
     max_shrink_runs: 1000,
-    dependent_stream_data: :warn
+    dependent_stream_data: :warn,
+    lanes: 1,
+    lane_steps: nil,
+    yields: nil
   ]
   @replay_opts [
     :model,
@@ -51,7 +61,10 @@ defmodule PropertyDamage.Next do
     ignored_assigns: [],
     max_steps: 20,
     engine: Native,
-    dependent_stream_data: :warn
+    dependent_stream_data: :warn,
+    lanes: 1,
+    lane_steps: nil,
+    yields: nil
   ]
 
   @doc """
@@ -66,11 +79,36 @@ defmodule PropertyDamage.Next do
   A journal records the number of slots its plan had, and a plan rebuilt
   from it has that many slots.
 
+  A plan may have two lanes. After the `:max_steps` slots of the prefix,
+  lane 1 and lane 2 hold `:lane_steps` slots each, and their steps
+  interleave on a schedule that PD draws into the journal and simulates in
+  one process (see `PropertyDamage.Next.Plan` for `schedule`, and
+  `PropertyDamage.Next.Adapter` for the places a step lets the other lane
+  in). Each lane is generated from the predicted state after the prefix,
+  and folds only its own steps: a `when:` in a lane holds when that lane
+  runs alone after the prefix, so a step can name a value of the prefix or
+  of an earlier step of its own lane, never one of the other lane.
+
   Options:
 
-    * `:max_steps` - the number of slots (default 20). Given with a
-      journal, it must equal the journal's number of slots, or
-      `ArgumentError` is raised
+    * `:max_steps` - the number of slots, or with two lanes the number of
+      prefix slots (default 20). Given with a journal, it must equal the
+      journal's number of slots, or `ArgumentError` is raised
+    * `:lanes` - `1` (default): every step runs one after another; `2`:
+      after the prefix, two lanes run on a simulated schedule
+    * `:lane_steps` - the number of slots in each lane, a non-negative
+      integer (default 3 with `lanes: 2`)
+    * `:yields` - the most times one step in a lane may yield, a
+      non-negative integer (default 1 with `lanes: 2`). PD draws one
+      schedule value for each point a lane-1 step may have, so the bound
+      lets the whole schedule be drawn before anything runs
+
+  `:lane_steps` or `:yields` given without `lanes: 2` raises
+  `ArgumentError`. A journal records its lanes: one lane when it holds no
+  lanes, as every journal saved before lanes existed does. A plan rebuilt
+  from it has the lanes it recorded, and each of `:lanes`, `:lane_steps`
+  and `:yields` the caller gives must equal the journal's, or
+  `ArgumentError` is raised.
     * `:engine` - the module that draws each value (default
       `PropertyDamage.Next.Engine.Native`)
     * `:dependent_stream_data` - `:warn` (default) or `:raise`: what to do
@@ -82,7 +120,12 @@ defmodule PropertyDamage.Next do
   """
   @spec plan(module(), integer() | Journal.t(), keyword()) :: Plan.t()
   def plan(model, seed_or_journal, opts \\ []) when is_atom(model) do
-    plan_opts = opts |> Keyword.validate!(@plan_opts) |> slots!(seed_or_journal, opts)
+    plan_opts =
+      opts
+      |> Keyword.validate!(@plan_opts)
+      |> slots!(seed_or_journal, opts)
+      |> lanes!(seed_or_journal, opts)
+
     mode!(plan_opts[:dependent_stream_data])
     plan = build(model, Model.specs!(model), seed_or_journal, plan_opts)
     warn(plan.kept, [])
@@ -100,6 +143,13 @@ defmodule PropertyDamage.Next do
   each step the model's check projections and its command-sequence
   projection fold the events the adapter returned, and their checks run; a
   projection named in both roles folds and checks once.
+
+  With `lanes: 2`, the prefix steps run first, each to completion, and
+  then the two lanes' steps run interleaved as the plan's schedule says. A
+  lane step's events fold, and the checks run, when the step completes, so
+  steps of the two lanes fold in the order they complete. The checks see
+  the real events only; a model meant for lanes states bounds over the
+  folded state rather than comparing a step with its lane's prediction.
 
   Returns `{:ok, report}` when every plan passed, or
   `{:error, %PropertyDamage.Next.Failure{}}` for the first plan that
@@ -151,7 +201,11 @@ defmodule PropertyDamage.Next do
       `PropertyDamage.Next.Runtime.ack/2`)
     * `:never_drawn` - `:report` (default) lists the specs the search never
       drew in the report; `:fail` also fails a run that passed, as above
-    * `:max_steps` - the number of slots per plan (default 20)
+    * `:max_steps` - the number of slots per plan, or with two lanes the
+      number of prefix slots (default 20)
+    * `:lanes`, `:lane_steps`, `:yields` - as for `plan/3`: `lanes: 2`
+      adds two lanes of `:lane_steps` slots (default 3) after the prefix,
+      whose steps may each yield at most `:yields` times (default 1)
     * `:max_plans` - the most plans to build (default 100)
     * `:engine` - the module that draws each value (default
       `PropertyDamage.Next.Engine.Native`)
@@ -184,6 +238,7 @@ defmodule PropertyDamage.Next do
     adapter = module!(opts, :adapter)
     seed = seed!(opts[:seed])
     max_steps!(opts[:max_steps])
+    plan_opts = opts |> Keyword.take(Keyword.keys(@plan_opts)) |> lanes!(seed, opts)
     max_plans = max_plans!(opts[:max_plans])
     shrink = shrink!(opts[:shrink])
     max_shrink_runs = max_shrink_runs!(opts[:max_shrink_runs])
@@ -192,7 +247,6 @@ defmodule PropertyDamage.Next do
     specs = Model.specs!(model)
     ignored = ignored!(opts[:ignored_assigns], specs)
     projections = Checks.load!(model)
-    plan_opts = Keyword.take(opts, Keyword.keys(@plan_opts))
     table = AssignCounts.new()
 
     try do
@@ -382,7 +436,11 @@ defmodule PropertyDamage.Next do
   Options are those of `run/1` without `:seed` and `:max_plans`. The
   journal records the number of slots, so `:max_steps` is not needed; if
   given, it must equal the journal's number of slots, or `ArgumentError`
-  is raised.
+  is raised. The journal also records its lanes, so `:lanes`,
+  `:lane_steps` and `:yields` are not needed either; each one given must
+  equal what the journal recorded, or `ArgumentError` is raised. The
+  replay runs the journal's schedule, so a deterministic adapter replays a
+  two-lane plan in the same interleaving.
   """
   @spec replay(Journal.t() | binary(), keyword()) ::
           {:ok, %{plans: 1, kept: [map()]}} | {:error, Failure.t()}
@@ -397,7 +455,10 @@ defmodule PropertyDamage.Next do
     adapter = module!(validated, :adapter)
 
     plan_opts =
-      validated |> Keyword.take(Keyword.keys(@plan_opts)) |> slots!(journal, opts)
+      validated
+      |> Keyword.take(Keyword.keys(@plan_opts))
+      |> slots!(journal, opts)
+      |> lanes!(journal, opts)
 
     mode!(plan_opts[:dependent_stream_data])
     specs = Model.specs!(model)
@@ -525,6 +586,77 @@ defmodule PropertyDamage.Next do
     max_steps!(plan_opts[:max_steps])
     plan_opts
   end
+
+  # The plan options with the lanes settled: `:lanes` is 1 or 2, and with
+  # two lanes `:lane_steps` and `:yields` are integers, the defaults filled
+  # in. A journal fixes all three, so a lane option the caller gave must
+  # match what the journal recorded; one lane is what a journal without
+  # lanes recorded.
+  defp lanes!(plan_opts, seed_or_journal, given) do
+    lanes = lane_count!(plan_opts[:lanes])
+    lane_steps = count!(plan_opts[:lane_steps], "lane_steps")
+    yields = count!(plan_opts[:yields], "yields")
+
+    settled =
+      case seed_or_journal do
+        %Journal{lanes: recorded} ->
+          recorded!(recorded, lanes, lane_steps, yields, given)
+
+        _seed ->
+          {lanes, lane_steps, yields}
+      end
+
+    case settled do
+      {1, steps, _count} when steps != nil ->
+        raise ArgumentError, "the :lane_steps option needs lanes: 2"
+
+      {1, nil, count} when count != nil ->
+        raise ArgumentError, "the :yields option needs lanes: 2"
+
+      {1, nil, nil} ->
+        Keyword.merge(plan_opts, lanes: 1, lane_steps: nil, yields: nil)
+
+      {2, steps, count} ->
+        Keyword.merge(plan_opts, lanes: 2, lane_steps: steps || 3, yields: count || 1)
+    end
+  end
+
+  defp recorded!(recorded, lanes, lane_steps, yields, given) do
+    {count, steps, max_yields} =
+      case recorded do
+        nil -> {1, nil, nil}
+        %{count: count, steps: steps, yields: max_yields} -> {count, steps, max_yields}
+      end
+
+    if Keyword.has_key?(given, :lanes), do: same!(:lanes, count, lanes)
+
+    if count == 1 do
+      {1, lane_steps, yields}
+    else
+      if lane_steps != nil, do: same!(:lane_steps, steps, lane_steps)
+      if yields != nil, do: same!(:yields, max_yields, yields)
+      {count, steps, max_yields}
+    end
+  end
+
+  defp same!(_key, recorded, recorded), do: :ok
+
+  defp same!(key, recorded, given) do
+    raise ArgumentError,
+          "the journal was recorded with #{key} #{recorded}, " <>
+            "but the #{inspect(key)} option is #{inspect(given)}"
+  end
+
+  defp lane_count!(lanes) when lanes in [1, 2], do: lanes
+
+  defp lane_count!(other),
+    do: raise(ArgumentError, "the :lanes option is 1 or 2, got: #{inspect(other)}")
+
+  defp count!(nil, _name), do: nil
+  defp count!(n, _name) when is_integer(n) and n >= 0, do: n
+
+  defp count!(other, name),
+    do: raise(ArgumentError, "#{name} is a non-negative integer, got: #{inspect(other)}")
 
   defp max_steps!(n) when is_integer(n) and n >= 0, do: n
 

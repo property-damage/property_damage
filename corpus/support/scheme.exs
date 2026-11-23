@@ -16,6 +16,10 @@ defmodule Corpus.Scheme do
       is accepted, but its credit is never applied.
     * `:long_note`: a refund note longer than 40 characters is silently cut to
       its first 40 (see `refund_noted/5`).
+    * `:racing_refunds`: a refund made in two calls (`begin_refund/3`, then
+      `finish_refund/2`) is checked against the balance in the first call and
+      applied in the second without checking again, so two overlapping refunds
+      can both pass and take the balance below 0.
 
   Each time a buggy path runs, the scheme records it in the fire log.
   """
@@ -74,6 +78,41 @@ defmodule Corpus.Scheme do
       case apply_refund(state, id, amount, false) do
         {{:ok, balance}, state} -> {{:ok, balance, stored_note(state, note)}, state}
         {error, state} -> {error, state}
+      end
+    end)
+  end
+
+  @doc """
+  Starts a refund of `amount` of payment `id` and checks it against the
+  current balance. Returns `{:ok, ticket}` to pass to `finish_refund/2`,
+  `{:error, :unknown_payment}` or `{:error, :exceeds_balance}`.
+  """
+  def begin_refund(scheme, id, amount) do
+    Agent.get(scheme, fn state ->
+      case Map.fetch(state.payments, id) do
+        :error -> {:error, :unknown_payment}
+        {:ok, %{balance: balance}} when amount > balance -> {:error, :exceeds_balance}
+        {:ok, _payment} -> {:ok, {id, amount}}
+      end
+    end)
+  end
+
+  @doc """
+  Applies the refund that `begin_refund/3` checked; returns the payment's
+  balance afterwards. A correct scheme checks again and answers
+  `{:error, :exceeds_balance}` when another refund took the balance in
+  between.
+  """
+  def finish_refund(scheme, {id, amount}) do
+    Agent.get_and_update(scheme, fn state ->
+      payment = state.payments[id]
+
+      if amount > payment.balance and state.bug != :racing_refunds do
+        {{:error, :exceeds_balance}, state}
+      else
+        if amount > payment.balance, do: FireLog.fired(state.log, state.instance)
+        payment = %{payment | balance: payment.balance - amount, refunds: payment.refunds + 1}
+        {{:ok, payment.balance}, put_in(state, [:payments, id], payment)}
       end
     end)
   end
