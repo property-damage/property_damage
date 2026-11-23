@@ -16,7 +16,16 @@ defmodule PropertyDamage.Next.Generation do
   #
   # Keys: the step is `{lane, slot}`, with lane 0 for a one-lane plan and
   # slots counted from 1. A draw is `{step, :pick}`,
-  # `{step, :command, field}` or `{step, :assigns, key}`.
+  # `{step, :command, field}`, `{step, :assigns, key}`, `{step, :path}` or
+  # `{step, :path, name}`.
+  #
+  # For a step whose command module the model lists in expansions/0, the
+  # path is drawn after the command's fields and assigns and before the
+  # prediction: the paths function gets the command as drawn and the state
+  # its generator saw, the pick is a member of the path indexes, and a path
+  # that draws values of its own draws each under its name. A model without
+  # expansions/0 draws no path key, so its journals are those it had before
+  # paths existed.
   #
   # With two lanes, the prefix is lane 0's `max_steps` slots, built as a
   # one-lane plan is. Lane 1 and lane 2 then have `lane_steps` slots each,
@@ -49,6 +58,7 @@ defmodule PropertyDamage.Next.Generation do
     Gen,
     GeneratorCheck,
     Journal,
+    Model,
     Placeholder,
     Plan,
     Step,
@@ -85,7 +95,8 @@ defmodule PropertyDamage.Next.Generation do
       drawn: [],
       mode: Keyword.get(opts, :dependent_stream_data, :warn),
       kept: [],
-      eligible: MapSet.new()
+      eligible: MapSet.new(),
+      expansions: Model.expansions!(model, specs)
     }
 
     max_steps = Keyword.fetch!(opts, :max_steps)
@@ -211,7 +222,8 @@ defmodule PropertyDamage.Next.Generation do
   defp step(%StepSpec{} = spec, key, acc) do
     {command, acc} = draw_command(spec, key, acc)
     {assigns, acc} = draw_assigns(spec, command, key, acc)
-    step = %Step{key: key, spec_id: spec.id, command: command, assigns: assigns}
+    {path, acc} = draw_path(spec.command, command, key, acc)
+    step = %Step{key: key, spec_id: spec.id, command: command, assigns: assigns, path: path}
     %{predict(command, key, acc) | steps: [step | acc.steps]}
   end
 
@@ -385,6 +397,73 @@ defmodule PropertyDamage.Next.Generation do
       {value, acc} = draw(acc, {key, :assigns, name}, dependent(generator, site))
       {Map.put(drawn, name, value), acc}
     end)
+  end
+
+  # --- The path
+
+  # The step's path, for a command module the model lists in expansions/0:
+  # the pick drawn as a member of the path indexes, so that lowering it moves
+  # the step toward its plain path at index 0, then the picked path's own
+  # draws, names ascending. An unlisted module draws nothing and has no path.
+  defp draw_path(module, command, key, acc) do
+    case acc.expansions do
+      %{^module => paths_fun} ->
+        paths = paths!(paths_fun.(command, acc.state), command, module)
+        indexes = Enum.to_list(0..(length(paths) - 1))
+        {index, acc} = draw(acc, {key, :path}, Gen.member_of(indexes))
+        {commands, acc} = path_commands(Enum.at(paths, index), module, key, acc)
+        {{index, commands}, acc}
+
+      _unlisted ->
+        {nil, acc}
+    end
+  end
+
+  defp paths!([first | _] = paths, command, _module) when first == [command], do: paths
+
+  defp paths!(other, command, module) do
+    raise ArgumentError,
+          "the paths function of #{inspect(module)} must return a list of paths whose " <>
+            "first is the command alone, #{inspect([command])}, got: #{inspect(other)}"
+  end
+
+  defp path_commands({generators, builder}, module, key, acc)
+       when is_map(generators) and not is_struct(generators) and is_function(builder, 1) do
+    {values, acc} =
+      generators
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.reduce({%{}, acc}, fn {name, generator}, {values, acc} ->
+        path_generator!(name, generator, module)
+        {value, acc} = draw(acc, {key, :path, name}, generator)
+        {Map.put(values, name, value), acc}
+      end)
+
+    {commands!(builder.(values), module), acc}
+  end
+
+  defp path_commands(commands, module, _key, acc), do: {commands!(commands, module), acc}
+
+  defp path_generator!(name, generator, module) do
+    unless is_atom(name) do
+      raise ArgumentError,
+            "a path of #{inspect(module)} draws under #{inspect(name)}, which is not an atom"
+    end
+
+    unless GeneratorCheck.accepted?(generator) do
+      GeneratorCheck.refuse!(generator, "a path of #{inspect(module)}, draw #{inspect(name)}")
+    end
+  end
+
+  defp commands!([_ | _] = commands, module) do
+    if Enum.all?(commands, &is_struct/1), do: commands, else: path_error!(commands, module)
+  end
+
+  defp commands!(other, module), do: path_error!(other, module)
+
+  defp path_error!(other, module) do
+    raise ArgumentError,
+          "a path of #{inspect(module)} is a non-empty list of command structs, or " <>
+            "{generators, builder} whose builder returns one, got: #{inspect(other)}"
   end
 
   # --- Drawing one value

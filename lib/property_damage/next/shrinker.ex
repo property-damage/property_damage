@@ -598,6 +598,9 @@ defmodule PropertyDamage.Next.Shrinker do
   defp class({:check, name, _message}), do: {:check, name}
   defp class({:adapter_error, reason}), do: {:adapter_error, error_class(reason)}
   defp class({:raise, %module{}}), do: {:raise, module}
+  # A divergence is classed by its observation name: two divergences of one
+  # observation are the same failure whatever values the executions saw.
+  defp class({:diverged, name, _step, _reference, _variant}), do: {:diverged, name}
   defp class(other), do: other
 
   defp error_class(tuple)

@@ -7,7 +7,9 @@ defmodule PropertyDamage.Next.Report do
   the same facts in both cases. A report is a plain struct with these
   fields:
 
-    * `plans` - the number of plans the search executed
+    * `plans` - the number of plans the search executed. A model that
+      states paths runs each plan twice, as the reference and the variant;
+      `plans` still counts each plan once
     * `withdrawn` - the slots withdrawn while building the plans, each as
       `%{key: key, command: module}`. For a failing run it is the failure's
       own list. A plan the search draws from a seed never withdraws a slot,
@@ -27,6 +29,11 @@ defmodule PropertyDamage.Next.Report do
       and each row is `%{command: module, key: atom, set: n, acknowledged: n}`:
       how many executed steps of the search plans set the assign, and how many
       times the adapter acknowledged it. Only keys some step set have a row.
+      For a model that states paths, every call of `execute/3` in both
+      executions counts: the reference's call for a step, and each call the
+      variant makes for the commands of the step's path, each with the
+      step's assigns and counted under that command's module. The plans
+      the shrink executes are not counted
       The map is keyed by target so a run with several targets needs no new
       shape
 

@@ -8,7 +8,9 @@ defmodule PropertyDamage.Next.Model do
   implementing `PropertyDamage.Model.Simulator`), the projection that folds
   the predicted events into the state generation reads, whose checks run
   during execution, and further projections whose checks run (none by
-  default).
+  default). A model may also state, in `c:expansions/0`, other ways to run
+  some of its commands; each plan then runs twice and the two executions
+  are compared after each step.
 
       defmodule PaymentsModel do
         use PropertyDamage.Next.Model
@@ -43,7 +45,31 @@ defmodule PropertyDamage.Next.Model do
   """
   @callback check_projections() :: [module()]
 
-  @optional_callbacks check_projections: 0
+  @doc """
+  The paths of the listed commands: each a command module of the model's
+  specs, once, with a function of two arguments.
+
+  The function receives the step's command as drawn, which may hold
+  placeholders, and the predicted state the command's generator saw. It
+  returns the list of paths, each a way to run that command: the plain
+  path, the command alone as `[command]`, first, then any number of others.
+  A path is a non-empty list of command structs, or `{generators, builder}`:
+  `generators` is a plain map from an atom name to a generator, drawn by PD
+  under the step, and `builder` is a function given the map of drawn values
+  that returns the path's non-empty list of command structs.
+
+  A model that states paths runs each plan twice, against two fresh setups
+  of its adapter: the reference runs every step plain, and the variant runs
+  the path picked for each step, whose pick PD draws. Its `@compare every:
+  1` observations are compared between the two after each step (see
+  `PropertyDamage.Next.run/1`).
+  """
+  @callback expansions() :: [{module(), (struct(), term() -> [path])}]
+
+  @typedoc "One way to run a command: a list of commands, or a draw and a builder."
+  @type path :: [struct()] | {%{atom() => term()}, (map() -> [struct()])}
+
+  @optional_callbacks check_projections: 0, expansions: 0
 
   defmacro __using__(_opts) do
     quote do
@@ -79,4 +105,50 @@ defmodule PropertyDamage.Next.Model do
   end
 
   defp with_id({spec, position}), do: %{spec | id: position}
+
+  @doc """
+  The paths functions of `model` by command module, or `nil` for a model
+  that does not export `c:expansions/0`. Raises `ArgumentError` naming the
+  model unless `expansions/0` returns a list of `{module, fun/2}` pairs,
+  each module the command module of one of `specs` and none listed twice.
+  """
+  @spec expansions!(module(), [StepSpec.t()]) :: %{module() => function()} | nil
+  def expansions!(model, specs) when is_atom(model) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :expansions, 0),
+      do: statement!(model.expansions(), model, specs)
+  end
+
+  defp statement!(statement, model, specs) when is_list(statement) do
+    commands = MapSet.new(specs, & &1.command)
+
+    Enum.reduce(statement, %{}, fn
+      {module, fun} = pair, acc when is_atom(module) and is_function(fun, 2) ->
+        cond do
+          module not in commands ->
+            statement_error!(model, "names #{inspect(module)}, which no spec draws", pair)
+
+          Map.has_key?(acc, module) ->
+            statement_error!(model, "lists #{inspect(module)} twice", pair)
+
+          true ->
+            Map.put(acc, module, fun)
+        end
+
+      other, _acc ->
+        statement_error!(model, "holds an element that is not a {module, fun/2} pair", other)
+    end)
+  end
+
+  defp statement!(other, model, _specs) do
+    raise ArgumentError,
+          "#{inspect(model)}.expansions/0 must return a list of {command module, fun/2} " <>
+            "pairs, got: #{inspect(other)}"
+  end
+
+  defp statement_error!(model, problem, element) do
+    raise ArgumentError,
+          "#{inspect(model)}.expansions/0 #{problem}: #{inspect(element)}. It lists each " <>
+            "command module of the model's specs at most once, with a function of the " <>
+            "command and the predicted state"
+  end
 end

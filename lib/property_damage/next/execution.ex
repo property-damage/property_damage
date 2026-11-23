@@ -30,6 +30,18 @@ defmodule PropertyDamage.Next.Execution do
   # `{:error, reason}`, raises, exits or throws, a check fails, or a value
   # cannot be made concrete. A step the other lane left open is dropped
   # then, and its continuation is never called.
+  #
+  # A model that states paths runs the plan twice, in lockstep, against two
+  # setups of the adapter: the reference, set up first, and the variant.
+  # Each has its own context, its own checks and its own nonce. At each step
+  # the reference runs the step's command; then the variant runs each
+  # command of the step's path in order (the step's command for a step
+  # without a path), each its own call to `execute/3` with the step's
+  # assigns, folded and checked as a step is. The variant's events for the
+  # step are those of its commands in order, so a later placeholder naming
+  # the step resolves against them. Then the `@compare` observations judge
+  # the two executions, each given the step's command made concrete in that
+  # execution. The plans of such a model have one lane.
 
   require Logger
 
@@ -47,7 +59,10 @@ defmodule PropertyDamage.Next.Execution do
   }
 
   @type reason ::
-          {:check, atom(), String.t()} | {:adapter_error, term()} | {:raise, Exception.t()}
+          {:check, atom(), String.t()}
+          | {:adapter_error, term()}
+          | {:raise, Exception.t()}
+          | {:diverged, atom(), term(), term(), term()}
 
   @doc """
   Executes `plan`. Returns `:ok`, or `{:error, step_key, reason}` for the
@@ -57,27 +72,35 @@ defmodule PropertyDamage.Next.Execution do
   (default `[]`), and `:counts` is an `AssignCounts` table that receives the
   assigns the steps set and the adapter acknowledges (default `nil`: none
   counted). The adapter's acknowledgments are checked either way, and the
-  two errors they can raise leave this function as raises.
+  two errors they can raise leave this function as raises. `paths: true`
+  runs the plan twice, the reference and the variant, and compares them
+  after each step (default `false`); a failing setup of either has `nil` as
+  its step key, and every context set up is torn down.
   """
   @spec run(Plan.t(), module(), term(), [module()], keyword()) ::
           :ok | {:error, term(), reason()}
   def run(%Plan{} = plan, adapter, config, projections, opts \\ []) do
     checks = Checks.init(projections)
 
+    with_context(adapter, config, fn context ->
+      run = open(adapter, context, checks, opts)
+
+      if Keyword.get(opts, :paths, false) do
+        with_context(adapter, config, fn variant_context ->
+          lockstep(plan.steps, run, open(adapter, variant_context, checks, opts))
+        end)
+      else
+        execute(plan, run)
+      end
+    end)
+  end
+
+  # Calls `fun` with a context the adapter set up, and tears it down after.
+  defp with_context(adapter, config, fun) do
     case setup(adapter, config) do
       {:ok, context} ->
-        run = %{
-          adapter: adapter,
-          context: context,
-          nonce: nonce(),
-          events: %{},
-          checks: checks,
-          ignored: Keyword.get(opts, :ignored, []),
-          counts: Keyword.get(opts, :counts)
-        }
-
         try do
-          execute(plan, run)
+          fun.(context)
         after
           teardown(adapter, context)
         end
@@ -85,6 +108,20 @@ defmodule PropertyDamage.Next.Execution do
       {:error, reason} ->
         {:error, nil, reason}
     end
+  end
+
+  # One execution: its own context, checks, nonce and the events its steps
+  # returned.
+  defp open(adapter, context, checks, opts) do
+    %{
+      adapter: adapter,
+      context: context,
+      nonce: nonce(),
+      events: %{},
+      checks: checks,
+      ignored: Keyword.get(opts, :ignored, []),
+      counts: Keyword.get(opts, :counts)
+    }
   end
 
   defp nonce, do: 8 |> :crypto.strong_rand_bytes() |> :binary.decode_unsigned()
@@ -146,6 +183,49 @@ defmodule PropertyDamage.Next.Execution do
       {:ok, run} -> prefix(rest, run)
       {:error, key, reason} -> {:error, key, reason}
     end
+  end
+
+  # --- Two executions in lockstep
+
+  defp lockstep([], _reference, _variant), do: :ok
+
+  defp lockstep([step | rest], reference, variant) do
+    with {:ok, reference} <- drive(start(step, reference), reference),
+         {:ok, variant} <- variant_step(step, variant),
+         :ok <- compare(step, reference, variant) do
+      lockstep(rest, reference, variant)
+    end
+  end
+
+  # The variant's commands for `step`, each run as a step of its own under
+  # the step's key and with the step's assigns.
+  defp variant_step(%Step{path: path, command: command} = step, run) do
+    commands =
+      case path do
+        {_index, commands} -> commands
+        nil -> [command]
+      end
+
+    Enum.reduce_while(commands, {:ok, run}, fn command, {:ok, run} ->
+      case drive(start(%{step | command: command}, run), run) do
+        {:ok, run} -> {:cont, {:ok, run}}
+        failure -> {:halt, failure}
+      end
+    end)
+  end
+
+  defp compare(%Step{key: key, command: command}, reference, variant) do
+    reference_root = concrete(command, key, [:command], reference)
+    variant_root = concrete(command, key, [:command], variant)
+
+    case Checks.compare(reference.checks, variant.checks, reference_root, variant_root, key) do
+      :ok -> :ok
+      {:error, reason} -> {:error, key, reason}
+    end
+  rescue
+    exception -> {:error, key, {:raise, exception}}
+  catch
+    kind, reason -> {:error, key, {:raise, caught(kind, reason)}}
   end
 
   defp drive({:open, open}, run), do: drive(continue(open, run), run)
@@ -257,11 +337,16 @@ defmodule PropertyDamage.Next.Execution do
   end
 
   # A completed step: its events stored for the placeholders that name
-  # them, then folded and checked.
+  # them, then folded and checked. A variant's later command of the same
+  # step appends its events to those stored under the step.
   defp complete(%{key: key, command: command}, events, run) do
     case Checks.step(run.checks, command, events) do
-      {:ok, checks} -> {:ok, %{run | events: Map.put(run.events, key, events), checks: checks}}
-      {:error, reason} -> {:error, key, reason}
+      {:ok, checks} ->
+        stored = Map.update(run.events, key, events, &(&1 ++ events))
+        {:ok, %{run | events: stored, checks: checks}}
+
+      {:error, reason} ->
+        {:error, key, reason}
     end
   rescue
     exception -> {:error, key, {:raise, exception}}
