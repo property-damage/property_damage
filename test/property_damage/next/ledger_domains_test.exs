@@ -16,30 +16,52 @@ defmodule PropertyDamage.Next.LedgerDomainsTest do
   alias Corpus.Next.Ledger.{Deposit, Open, Withdraw}
   alias PropertyDamage.Corpus.{Entry, FireLog, Loader}
   alias PropertyDamage.Next
+  alias PropertyDamage.Next.Engine.StreamDataSource
   alias PropertyDamage.Next.{Failure, Gen, Journal, Model, Placeholder, Plan, Step}
+  alias PropertyDamage.Test.PatchedStreamData
 
   @corpus "corpus/next"
+
+  # Each engine with the number of the entry's seeds it finds a failure on.
+  # PD's own engine is the default and takes no `engine:` option; the second
+  # engine needs the patched StreamData, so its tests carry the tag that the
+  # test helper excludes where the patch is not loaded.
+  @engines [
+    {:own, [], 21},
+    {:stream_data_source, [engine: StreamDataSource], 19}
+  ]
 
   setup_all do
     {:ok, [%Entry{name: "ledger"} = entry]} = Loader.load(@corpus, ["ledger"])
 
     failures =
-      for seed <- entry.seeds, {:error, %Failure{} = failure} <- [run(entry, seed)], do: failure
+      for {name, engine_opts, _found} <- @engines,
+          name == :own or PatchedStreamData.active?(),
+          into: %{} do
+        {name,
+         for(
+           seed <- entry.seeds,
+           {:error, %Failure{} = failure} <- [run(entry, seed, engine_opts)],
+           do: failure
+         )}
+      end
 
     {:ok, entry: entry, failures: failures}
   end
 
-  defp run(entry, seed) do
+  defp run(entry, seed, engine_opts) do
     {:ok, log} = FireLog.start_link()
 
     try do
       Next.run(
-        model: entry.model,
-        adapter: entry.adapter,
-        config: %{bug: entry.bug, fire_log: log},
-        seed: seed,
-        max_steps: entry.max_commands,
-        max_plans: entry.plan_cap
+        [
+          model: entry.model,
+          adapter: entry.adapter,
+          config: %{bug: entry.bug, fire_log: log},
+          seed: seed,
+          max_steps: entry.max_commands,
+          max_plans: entry.plan_cap
+        ] ++ engine_opts
       )
     after
       FireLog.stop(log)
@@ -126,68 +148,84 @@ defmodule PropertyDamage.Next.LedgerDomainsTest do
     end)
   end
 
-  test "every value in each final plan is one the model's generators draw",
-       %{entry: entry, failures: failures} do
-    assert length(failures) == 21
+  for {name, engine_opts, found} <- @engines do
+    @engine_name name
+    @engine_opts engine_opts
+    @found found
+    if name != :own, do: @tag(:patched_stream_data)
 
-    for %Failure{plan: plan, seed: seed} <- failures do
-      assert violations(entry.model, plan.steps) == [],
-             "seed #{seed}: final plan [#{describe(plan)}] holds a value outside the model's domains"
+    test "#{name}: every value in each final plan is one the model's generators draw",
+         %{entry: entry, failures: all} do
+      failures = Map.fetch!(all, @engine_name)
+      assert length(failures) == @found
+
+      for %Failure{plan: plan, seed: seed} <- failures do
+        assert violations(entry.model, plan.steps) == [],
+               "seed #{seed}: final plan [#{describe(plan)}] holds a value outside the model's domains"
+      end
     end
-  end
 
-  test "the domain check reports a withdrawal above the balance and a deposit above 20",
-       %{entry: entry, failures: failures} do
-    %Failure{plan: plan} = hd(failures)
-    steps = plan.steps
-    assert violations(entry.model, steps) == []
+    if name != :own, do: @tag(:patched_stream_data)
 
-    wd = Enum.find_index(steps, &match?(%Step{command: %Withdraw{}}, &1))
-    dep = Enum.find_index(steps, &match?(%Step{command: %Deposit{}}, &1))
-    assert wd && dep
+    test "#{name}: the domain check reports a withdrawal above the balance and a deposit above 20",
+         %{entry: entry, failures: all} do
+      %Failure{plan: plan} = all |> Map.fetch!(@engine_name) |> hd()
+      steps = plan.steps
+      assert violations(entry.model, steps) == []
 
-    over_balance = replace_amount(steps, wd, balance_before(entry.model, steps, wd) + 1)
-    wd_key = Enum.at(steps, wd).key
+      wd = Enum.find_index(steps, &match?(%Step{command: %Withdraw{}}, &1))
+      dep = Enum.find_index(steps, &match?(%Step{command: %Deposit{}}, &1))
+      assert wd && dep
 
-    assert {wd_key, :amount, balance_before(entry.model, steps, wd) + 1} in violations(
-             entry.model,
-             over_balance
-           )
+      over_balance = replace_amount(steps, wd, balance_before(entry.model, steps, wd) + 1)
+      wd_key = Enum.at(steps, wd).key
 
-    over_twenty = replace_amount(steps, dep, 21)
-    dep_key = Enum.at(steps, dep).key
-    assert {dep_key, :amount, 21} in violations(entry.model, over_twenty)
+      assert {wd_key, :amount, balance_before(entry.model, steps, wd) + 1} in violations(
+               entry.model,
+               over_balance
+             )
 
-    wrong_account =
-      List.update_at(steps, dep, fn %Step{command: command} = step ->
-        %{step | command: %{command | account_id: "acct-other"}}
-      end)
+      over_twenty = replace_amount(steps, dep, 21)
+      dep_key = Enum.at(steps, dep).key
+      assert {dep_key, :amount, 21} in violations(entry.model, over_twenty)
 
-    assert {dep_key, :account_id, "acct-other"} in violations(entry.model, wrong_account)
-  end
+      wrong_account =
+        List.update_at(steps, dep, fn %Step{command: command} = step ->
+          %{step | command: %{command | account_id: "acct-other"}}
+        end)
 
-  test "every final journal saves, loads and replays to the same plan and the same failure",
-       %{entry: entry, failures: failures} do
-    assert length(failures) == 21
+      assert {dep_key, :account_id, "acct-other"} in violations(entry.model, wrong_account)
+    end
 
-    for %Failure{} = failure <- failures do
-      {:ok, log} = FireLog.start_link()
+    if name != :own, do: @tag(:patched_stream_data)
 
-      try do
-        binary = Journal.to_binary(failure.journal)
+    test "#{name}: every final journal saves, loads and replays to the same plan and the same failure",
+         %{entry: entry, failures: all} do
+      failures = Map.fetch!(all, @engine_name)
+      assert length(failures) == @found
 
-        assert {:error, %Failure{} = replayed} =
-                 Next.replay(binary,
-                   model: entry.model,
-                   adapter: entry.adapter,
-                   config: %{bug: entry.bug, fire_log: log}
-                 )
+      for %Failure{} = failure <- failures do
+        {:ok, log} = FireLog.start_link()
 
-        assert replayed.reason == failure.reason, "seed #{failure.seed}: another failure"
-        assert replayed.step == failure.step, "seed #{failure.seed}: another failing step"
-        assert replayed.plan.steps == failure.plan.steps, "seed #{failure.seed}: another plan"
-      after
-        FireLog.stop(log)
+        try do
+          binary = Journal.to_binary(failure.journal)
+
+          assert {:error, %Failure{} = replayed} =
+                   Next.replay(
+                     binary,
+                     [
+                       model: entry.model,
+                       adapter: entry.adapter,
+                       config: %{bug: entry.bug, fire_log: log}
+                     ] ++ @engine_opts
+                   )
+
+          assert replayed.reason == failure.reason, "seed #{failure.seed}: another failure"
+          assert replayed.step == failure.step, "seed #{failure.seed}: another failing step"
+          assert replayed.plan.steps == failure.plan.steps, "seed #{failure.seed}: another plan"
+        after
+          FireLog.stop(log)
+        end
       end
     end
   end
