@@ -18,8 +18,8 @@ defmodule PropertyDamage.Next.NativeShrinkRunsTest do
     {Shrink.NoteModel, Shrink.Adapter, 1, :note, 2, 1, 21, 1},
     {Till.Model, Till.Adapter, 14, :till, 1, 2, 34, 6},
     {Till.Model, Till.Adapter, 14, :till, 2, 1, 35, 6},
-    {Stock.Model, Shrink.Adapter, 8, :stock, 1, 1, 22, 2},
-    {Stock.Model, Shrink.Adapter, 8, :stock, 2, 1, 24, 2}
+    {Stock.Model, Shrink.Adapter, 8, :stock, 1, 1, 24, 2},
+    {Stock.Model, Shrink.Adapter, 8, :stock, 2, 1, 26, 2}
   ]
 
   defp config(:amount), do: %{fails?: fn c, _ -> c.amount >= 37 end}

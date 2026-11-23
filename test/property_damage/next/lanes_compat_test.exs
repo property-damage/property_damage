@@ -161,8 +161,8 @@ defmodule PropertyDamage.Next.LanesCompatTest do
         {:note, 2, 1, 21, {0, 1}, @note},
         {:till, 1, 2, 34, {0, 14}, @till_1},
         {:till, 2, 1, 35, {0, 13}, @till_2},
-        {:stock, 1, 1, 22, {0, 2}, @stock},
-        {:stock, 2, 1, 24, {0, 2}, @stock}
+        {:stock, 1, 1, 24, {0, 2}, @stock},
+        {:stock, 2, 1, 26, {0, 2}, @stock}
       ],
       StreamDataSource => [
         {:amount, 1, 1, 20, {0, 1}, @amount},
