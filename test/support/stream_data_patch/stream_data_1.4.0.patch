@@ -1,8 +1,19 @@
 diff --git a/lib/stream_data.ex b/lib/stream_data.ex
-index 4182d11..63e4b4f 100644
+index 4182d11..11100da 100644
 --- a/lib/stream_data.ex
 +++ b/lib/stream_data.ex
-@@ -2620,6 +2620,10 @@ defmodule StreamData do
+@@ -1573,7 +1573,9 @@ defmodule StreamData do
+ 
+   defp random_pseudofactors(n, seed) do
+     {seed1, seed2} = split_seed(seed)
+-    {factor, _seed} = :rand.uniform_s(trunc(:math.log2(n)), seed1)
++    # A caller-supplied :rand state whose algorithm map carries :uniform_range
++    # is handed these bounds too. Every other state draws exactly as before.
++    {factor, _seed} = uniform_in_range(1, trunc(:math.log2(n)), seed1)
+ 
+     if factor == 1 do
+       [n]
+@@ -2620,6 +2622,10 @@ defmodule StreamData do
      split_seed: 1, order: 2, uniform_in_range: 3, lazy_tree: 2, lazy_tree_constant: 1
    }
  
@@ -13,7 +24,7 @@ index 4182d11..63e4b4f 100644
    defp split_seed(seed) do
      {int, seed} = :rand.uniform_s(1_000_000_000, seed)
      new_seed = :rand.seed_s(@rand_algorithm, {int, 0, 0})
-@@ -2629,6 +2633,11 @@ defmodule StreamData do
+@@ -2629,6 +2635,11 @@ defmodule StreamData do
    defp order(left, right) when left > right, do: {right, left}
    defp order(left, right), do: {left, right}
  

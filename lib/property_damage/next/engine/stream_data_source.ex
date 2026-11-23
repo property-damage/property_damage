@@ -68,8 +68,9 @@ defmodule PropertyDamage.Next.Engine.StreamDataSource do
 
   The source works only with a StreamData whose `:rand` seams are open: one
   that lets a `:rand` state carrying `:split` split itself and hands a state
-  carrying `:uniform_range` both bounds of every range draw. StreamData
-  1.4.0 as released has neither seam. On it the source is asked only once,
+  carrying `:uniform_range` both bounds of every range draw, the level
+  sizes of `tree/2` included. StreamData 1.4.0 as released has none of
+  these seams. On it the source is asked only once,
   for the integer StreamData seeds its own state from, and the value is
   then drawn without the source, so nothing is recorded or fitted. The
   engine detects that the source was never split and raises
