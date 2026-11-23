@@ -121,6 +121,8 @@ defmodule PropertyDamage.Next.CorpusLanesTest do
       stream_data = StreamData |> :code.which() |> Path.dirname() |> String.to_charlist()
       false = :peer.call(peer, :code, :is_loaded, [StreamData])
       true = :peer.call(peer, :code, :add_patha, [stream_data])
+      # Loading the entry compiles its support files, which needs Elixir running.
+      {:ok, _apps} = :peer.call(peer, :application, :ensure_all_started, [:elixir])
 
       on_exit(fn ->
         try do
