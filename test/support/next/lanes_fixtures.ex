@@ -236,7 +236,7 @@ defmodule PropertyDamage.Next.Test.Lanes.Model do
   use PropertyDamage.Next.Model
 
   alias PropertyDamage.Next.StepSpec
-  alias PropertyDamage.Next.Test.Lanes.{Deposit, Balance, Simulator, Withdraw}
+  alias PropertyDamage.Next.Test.Lanes.{Balance, Deposit, Simulator, Withdraw}
 
   def steps,
     do:
@@ -255,7 +255,7 @@ defmodule PropertyDamage.Next.Test.Lanes.OnceModel do
   use PropertyDamage.Next.Model
 
   alias PropertyDamage.Next.StepSpec
-  alias PropertyDamage.Next.Test.Lanes.{Deposit, Balance, Simulator, Withdraw}
+  alias PropertyDamage.Next.Test.Lanes.{Balance, Deposit, Simulator, Withdraw}
 
   def steps do
     StepSpec.normalize([
