@@ -22,10 +22,11 @@ defmodule PropertyDamage.Next.Journal do
   spec list changed is refused through the fingerprint; a changed generator
   is not detected, and the engine fits or redraws the values stored for it.
 
-  Format version 2 records a StreamData value with its path in the
-  generator's shrink tree, `{:stream_data, value, path}`, and may hold an
-  empty pick `{:empty}` for a slot that yields no step. Version 1 recorded
-  a StreamData value without its path, and is refused. A member entry may
+  Format version 3 records a StreamData value with its path in the
+  generator's shrink tree, `{:stream_data, value, path}`, may hold an
+  empty pick `{:empty}` for a slot that yields no step, and may hold an
+  entry of `PropertyDamage.Next.Engine.StreamDataSource`,
+  `{:source, value, positions}`. Versions 1 and 2 are refused. A member entry may
   hold a mint marker that the model read back from its predicted state,
   with the stamp generation gave it.
 
@@ -55,9 +56,9 @@ defmodule PropertyDamage.Next.Journal do
         }
 
   @format :property_damage_next_journal
-  @version 2
+  @version 3
   @own_modules [Gen, Dependent, Placeholder, Mint, Range]
-  @entry_atoms [:pick, :command, :assigns, :integer, :member, :stream_data, :empty]
+  @entry_atoms [:pick, :command, :assigns, :integer, :member, :stream_data, :empty, :source]
 
   @doc "Saves `journal` as a binary that `from_binary/1` loads."
   @spec to_binary(t()) :: binary()
