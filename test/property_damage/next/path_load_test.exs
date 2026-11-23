@@ -4,7 +4,7 @@ defmodule PropertyDamage.Next.PathLoadTest do
   # every other `@compare` form raises on every model. `expansions/0` is a
   # list of `{command module, fun/2}` pairs over the model's own command
   # modules, each module once, and a paths function returns the command
-  # alone as its first path. Two lanes and paths do not combine.
+  # alone as its first path. Two lanes and paths do not run together.
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Next
@@ -235,11 +235,11 @@ defmodule PropertyDamage.Next.PathLoadTest do
   end
 
   describe "two lanes with paths" do
-    test "raise ArgumentError in plan/3, naming :lanes and expansions/0" do
-      message = argument_error(fn -> Next.plan(SplitModel, 1, max_steps: 2, lanes: 2) end)
+    test "build in plan/3, whose two-lane prefix is the one-lane plan of the same seed" do
+      one = Next.plan(SplitModel, 1, max_steps: 2)
+      two = Next.plan(SplitModel, 1, max_steps: 2, lanes: 2)
 
-      assert message =~ ":lanes"
-      assert message =~ "expansions/0"
+      assert Enum.filter(two.steps, &match?(%{key: {0, _slot}}, &1)) == one.steps
     end
 
     test "raise ArgumentError in run/1" do

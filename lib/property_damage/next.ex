@@ -140,8 +140,9 @@ defmodule PropertyDamage.Next do
       lets the whole schedule be drawn before anything runs
 
   `:lane_steps` or `:yields` given without `lanes: 2` raises
-  `ArgumentError`, and so does `lanes: 2` for a model that exports
-  `expansions/0`: paths run on one lane. A journal records its lanes: one lane when it holds no
+  `ArgumentError`. A model that exports `expansions/0` may build a plan
+  with two lanes, but `run/1` and `replay/2` refuse to execute one: paths
+  run on one lane. A journal records its lanes: one lane when it holds no
   lanes, as every journal saved before lanes existed does. A plan rebuilt
   from it has the lanes it recorded, and each of `:lanes`, `:lane_steps`
   and `:yields` the caller gives must equal the journal's, or
@@ -171,7 +172,7 @@ defmodule PropertyDamage.Next do
 
     mode!(plan_opts[:dependent_stream_data])
     specs = Model.specs!(model)
-    paths!(model, specs, plan_opts)
+    Model.expansions!(model, specs)
     plan = build(model, specs, seed_or_journal, plan_opts)
     warn(plan.kept, [])
     plan
@@ -293,8 +294,8 @@ defmodule PropertyDamage.Next do
   yet; it runs `@check every: N` and `@check every: CommandModule`, and
   `@compare every: 1` on a model that exports `expansions/0`. Every other
   `@compare` form raises, and so does `@compare every: 1` on a model
-  without `expansions/0`. Two lanes with `expansions/0` raise, as for
-  `plan/3`.
+  without `expansions/0`. Two lanes with `expansions/0` raise
+  `ArgumentError`: paths run on one lane.
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, Failure.t()}
   def run(opts) do
@@ -568,7 +569,9 @@ defmodule PropertyDamage.Next do
 
   # Whether `model` states paths, its expansions/0 checked. Paths run on one
   # lane: how a variant path would interleave with another lane is not
-  # defined, so two lanes with paths raise.
+  # defined, so executing two lanes with paths raises. Building such a plan
+  # is allowed, so the prefix of a two-lane plan stays comparable with the
+  # one-lane plan of the same seed for every model.
   defp paths!(model, specs, plan_opts) do
     paths? = Model.expansions!(model, specs) != nil
 
