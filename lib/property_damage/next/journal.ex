@@ -96,7 +96,9 @@ defmodule PropertyDamage.Next.Journal do
     # A one-lane journal leaves the field out, so it saves the four fields
     # it saved before lanes existed.
     content = if journal.lanes, do: Map.put(content, :lanes, journal.lanes), else: content
-    :erlang.term_to_binary({@format, @version, content})
+    # `:deterministic` writes map keys in term order, so equal journals give
+    # equal bytes in every VM, not in the order this VM created the atoms.
+    :erlang.term_to_binary({@format, @version, content}, [:deterministic])
   end
 
   @doc """
