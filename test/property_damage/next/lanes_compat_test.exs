@@ -118,9 +118,10 @@ defmodule PropertyDamage.Next.LanesCompatTest do
   end
 
   describe "the one-lane shrink" do
-    # Captured on the engine before it had lanes: per row, the fixture and
-    # seed, then the plan number, the shrink runs, the failing step and the
-    # final plan's steps as {key, command}.
+    # Captured on the engine before it had lanes, with the shrink runs of the
+    # rows that later shrinker candidates moved measured again: per row, the
+    # fixture and seed, then the plan number, the shrink runs, the failing
+    # step and the final plan's steps as {key, command}.
     @payment_5 %Placeholder{step: {0, 5}, event_index: 0, path: [:payment]}
     @payment_6 %Placeholder{step: {0, 6}, event_index: 0, path: [:payment]}
 
@@ -169,12 +170,12 @@ defmodule PropertyDamage.Next.LanesCompatTest do
         {:amount, 2, 1, 20, {0, 1}, @amount},
         {:split, 1, 3, 15, {0, 1}, @split},
         {:split, 2, 1, 16, {0, 1}, @split},
-        {:note, 1, 1, 14, {0, 1}, @note},
-        {:note, 2, 1, 24, {0, 1}, @note},
+        {:note, 1, 1, 16, {0, 1}, @note},
+        {:note, 2, 1, 26, {0, 1}, @note},
         {:till, 1, 2, 34, {0, 14}, @till_1},
         {:till, 2, 1, 35, {0, 13}, @till_2},
-        {:stock, 1, 1, 29, {0, 2}, @stock},
-        {:stock, 2, 1, 30, {0, 2}, @stock}
+        {:stock, 1, 1, 31, {0, 2}, @stock},
+        {:stock, 2, 1, 32, {0, 2}, @stock}
       ]
     }
 

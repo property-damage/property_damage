@@ -54,7 +54,7 @@ defmodule PropertyDamage.Next.CorpusLanesTest do
 
   for {engine, corpus_engine, misses} <- [
         {Native, Engine.Next, [8]},
-        {StreamDataSource, Engine.NextSource, [17]}
+        {StreamDataSource, Engine.NextSource, []}
       ] do
     @corpus_engine corpus_engine
     @engine engine
@@ -76,13 +76,14 @@ defmodule PropertyDamage.Next.CorpusLanesTest do
       assert seeds_where(rows, &(not &1.reached_minimum?)) == @misses
     end
 
-    # The shrinker misses the smallest plan on the pinned seeds. It lowers
-    # two integer values by the same amount, but it has no candidate that
-    # removes a step of a lane and moves that step's schedule value to a
-    # later step of the same lane, and the miss of PD's own engine on seed 8
-    # needs one. When an engine's pinned list is empty, this tag comes off
-    # for that engine.
-    @tag :known_defect
+    # The second engine reaches the smallest plan on every seed, so this test
+    # runs by default for it. PD's own engine still misses it on seed 8: the
+    # shrinker lowers two integer values by the same amount, but it has no
+    # candidate that removes a step of a lane and moves that step's schedule
+    # value to a later step of the same lane, and seed 8 needs one. An engine
+    # with pinned misses keeps the known_defect tag; the tag comes off for an
+    # engine when its pinned list is empty.
+    if misses != [], do: @tag(:known_defect)
     if engine == StreamDataSource, do: @tag(:patched_stream_data)
 
     test "#{inspect(corpus_engine)} shrinks the race to the smallest plan on every seed",
