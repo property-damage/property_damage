@@ -170,9 +170,10 @@ defmodule PropertyDamage.Next.Engine.StreamDataSource do
   end
 
   # The `:rand` algorithm map of the source. StreamData calls `:split` and
-  # `:uniform_range` when its seams are open; `:uniform_n` serves the other
-  # integer draws `:rand.uniform_s/2` makes. A source never needs `next` or
-  # `uniform`.
+  # `:uniform_range` when its seams are open. With them open, no StreamData
+  # 1.4.0 draw reaches `:uniform_n`; it answers only a `:rand.uniform_s/2`
+  # call made on a source state from outside StreamData. A source never
+  # needs `next` or `uniform`.
   defp handler(slot) do
     %{
       type: __MODULE__,
@@ -235,8 +236,8 @@ defmodule PropertyDamage.Next.Engine.StreamDataSource do
     raise ArgumentError,
           "#{inspect(__MODULE__)} needs a StreamData whose :rand seams are open: a :rand " <>
             "state carrying :split must split itself, and one carrying :uniform_range must " <>
-            "receive both bounds of every range draw. The StreamData loaded here has neither " <>
-            "seam (StreamData 1.4.0 as released lacks them), so the source cannot record " <>
-            "or fit any draw."
+            "receive both bounds of every range draw, the level sizes of tree/2 included. " <>
+            "The StreamData loaded here does not open all three seams (StreamData 1.4.0 as " <>
+            "released opens none of them), so the source cannot record or fit every draw."
   end
 end

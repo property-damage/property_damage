@@ -13,6 +13,8 @@ defmodule PropertyDamage.Next.Model do
       defmodule PaymentsModel do
         use PropertyDamage.Next.Model
 
+        alias PropertyDamage.Next.StepSpec
+
         def steps, do: StepSpec.normalize([{Pay, weight: 2}, {Refund, when: &Refund.possible?/1}])
         def simulator, do: PaymentsSimulator
         def command_sequence_projection, do: Payments
