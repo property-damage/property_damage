@@ -167,6 +167,18 @@ defmodule Mix.Tasks.Pd.CorpusEnginesTest do
     end
   end
 
+  describe "the refusal of the source rows" do
+    test "names the --dir and the arguments that were passed" do
+      dir = corpus_of("rejected_set", [1])
+      args = ["--dir", dir, "--only", "rejected_set", "--both-engines"]
+      loader = Module.concat(__MODULE__, Missing)
+
+      assert {:error, message} = Engine.NextSource.check_stream_data(loader, args)
+      assert message =~ "`MIX_ENV=test mix pd.corpus #{Enum.join(args, " ")}`"
+      refute message =~ "corpus/next"
+    end
+  end
+
   describe "nested_price on the new engine" do
     test "finds the bug with it firing, keeps the price site, and never fails with the bug off",
          %{entries: entries} do

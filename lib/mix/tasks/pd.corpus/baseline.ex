@@ -36,10 +36,16 @@ defmodule PropertyDamage.Corpus.Baseline do
     }
   end
 
-  @doc "Writes `baseline` to `path`."
+  @doc """
+  Writes `baseline` to `path`. Map keys are written in sorted order, so equal
+  tables give equal bytes whatever order the atoms were created in.
+  """
   @spec save(Path.t(), t()) :: :ok | {:error, File.posix()}
   def save(path, baseline) do
-    File.write(path, inspect(baseline, pretty: true, limit: :infinity) <> "\n")
+    File.write(
+      path,
+      inspect(baseline, pretty: true, limit: :infinity, custom_options: [sort_maps: true]) <> "\n"
+    )
   end
 
   @doc "Reads a saved table. Only literal terms are accepted."

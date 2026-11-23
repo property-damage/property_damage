@@ -184,7 +184,7 @@ defmodule PropertyDamage.Corpus.Table do
         head(result, engines?) ++ diff_line(base[key(result)].rows, rows, result)
       end)
 
-    notes = Enum.flat_map(current, &diff_note(&1, base))
+    notes = Enum.flat_map(current, &diff_note(&1, base)) ++ not_run_notes(baseline, current)
 
     headers =
       headers(
@@ -205,6 +205,17 @@ defmodule PropertyDamage.Corpus.Table do
       {:ok, before} -> not Map.has_key?(before, :skipped) and not Map.has_key?(result, :skipped)
       :error -> false
     end
+  end
+
+  # A saved entry with no result in this run, for example under `--only`. It
+  # is named so a shorter run is not read as a complete one; it does not fail
+  # the run.
+  defp not_run_notes(baseline, current) do
+    ran = MapSet.new(current, &key/1)
+
+    for result <- baseline,
+        not MapSet.member?(ran, key(result)),
+        do: "#{label(result)}: in the baseline, not run"
   end
 
   defp diff_note(%{skipped: reason} = result, _base),
