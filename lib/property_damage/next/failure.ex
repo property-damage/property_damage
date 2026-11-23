@@ -12,6 +12,9 @@ defmodule PropertyDamage.Next.Failure do
   After a shrink the final plan is the shrunk one: its journal holds
   exactly its plan's draws and replays to it. `shrink_runs` counts the
   executions after the plan that failed first, 0 when nothing was shrunk.
+  `shrink_dropped` counts the shrink candidates dropped without a run
+  because the model raised while rebuilding their plan; they are not in
+  `shrink_runs`.
   `original` holds the `plan`, `journal`, `step`, `reason` and `withdrawn`
   of the plan that failed first; without a shrink they equal the final
   ones.
@@ -42,6 +45,7 @@ defmodule PropertyDamage.Next.Failure do
     :report,
     withdrawn: [],
     shrink_runs: 0,
+    shrink_dropped: 0,
     kept: []
   ]
 
@@ -62,6 +66,7 @@ defmodule PropertyDamage.Next.Failure do
           step: term(),
           reason: reason(),
           shrink_runs: non_neg_integer(),
+          shrink_dropped: non_neg_integer(),
           kept: [PropertyDamage.Next.Engine.Dependent.site()],
           original: %{
             plan: PropertyDamage.Next.Plan.t(),
