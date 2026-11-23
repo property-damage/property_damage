@@ -16,6 +16,11 @@ defmodule PropertyDamage.Corpus.Table do
   reached-minimum cell shows `-` and it is sound without finding the bug, as
   long as it is clean and has no unexplained failure).
 
+  A result may also carry `engine: name`, the corpus engine it ran on. When
+  one does, the tables print an engine column, and a result is matched
+  against a saved one by its entry and engine together, so one entry can
+  have a row per engine.
+
   The rendered text holds no timings and no process identifiers, so equal
   rows render to equal text.
   """
@@ -26,7 +31,8 @@ defmodule PropertyDamage.Corpus.Table do
           required(:entry) => String.t(),
           required(:rows) => [Measure.row()],
           optional(:skipped) => String.t(),
-          optional(:regression) => true
+          optional(:regression) => true,
+          optional(:engine) => String.t()
         }
 
   @type summary :: %{
@@ -81,15 +87,15 @@ defmodule PropertyDamage.Corpus.Table do
   """
   @spec judge_against([result()], [result()]) :: :ok | {:error, [String.t()]}
   def judge_against(baseline, results) do
-    base = Map.new(baseline, &{&1.entry, &1})
+    base = Map.new(baseline, &{key(&1), &1})
     run = Enum.reject(results, &Map.has_key?(&1, :skipped))
-    known = Enum.filter(run, &match?(%{rows: _}, base[&1.entry]))
-    known = Enum.reject(known, &Map.has_key?(base[&1.entry], :skipped))
+    known = Enum.filter(run, &match?(%{rows: _}, base[key(&1)]))
+    known = Enum.reject(known, &Map.has_key?(base[key(&1)], :skipped))
 
     changed =
       Enum.sum(
-        for %{entry: name, rows: rows} <- known do
-          before = base[name].rows
+        for %{rows: rows} = result <- known do
+          before = base[key(result)].rows
           seeds_changed(before, rows) + abs(length(before) - length(rows))
         end
       )
@@ -113,33 +119,50 @@ defmodule PropertyDamage.Corpus.Table do
   defp clean_result?(%{rows: rows}), do: Enum.all?(rows, &(&1.clean? and not &1.unexplained?))
 
   defp missing_names(run, known) do
-    run |> Enum.map(& &1.entry) |> Kernel.--(Enum.map(known, & &1.entry)) |> Enum.join(", ")
+    run |> Enum.map(&label/1) |> Kernel.--(Enum.map(known, &label/1)) |> Enum.join(", ")
   end
+
+  # A result is identified by its entry and, when it carries one, its engine.
+  defp key(result), do: {result.entry, Map.get(result, :engine)}
+
+  defp label(%{entry: name, engine: engine}), do: "#{name} (#{engine})"
+  defp label(%{entry: name}), do: name
+
+  defp engines?(results), do: Enum.any?(results, &Map.has_key?(&1, :engine))
+
+  # The leading cells of a row: the entry, then the engine when the table
+  # has an engine column.
+  defp head(result, false), do: [result.entry]
+  defp head(result, true), do: [result.entry, Map.get(result, :engine, "")]
+
+  defp headers(headers, false), do: headers
+  defp headers(headers, true), do: List.insert_at(headers, 1, "engine")
 
   @doc "Renders one summary line per entry, plus a line for each kind of problem."
   @spec render([result()]) :: String.t()
   def render(results) do
     run = Enum.reject(results, &Map.has_key?(&1, :skipped))
-    summaries = Enum.map(run, &{&1.entry, summarize(&1.rows)})
+    summaries = Enum.map(run, &{label(&1), summarize(&1.rows)})
+    engines? = engines?(results)
 
     lines =
       Enum.map(results, fn
-        %{entry: name, skipped: reason} ->
-          [name, "skipped: #{reason}", "", "", ""]
+        %{skipped: reason} = result ->
+          head(result, engines?) ++ ["skipped: #{reason}", "", "", ""]
 
-        %{entry: name, rows: rows} = result ->
+        %{rows: rows} = result ->
           s = summarize(rows)
 
-          [
-            name,
-            "#{s.found}/#{s.seeds}",
-            plans(s.found_after),
-            number(s.shrink_runs),
-            reached(result, s)
-          ]
+          head(result, engines?) ++
+            [
+              "#{s.found}/#{s.seeds}",
+              plans(s.found_after),
+              number(s.shrink_runs),
+              reached(result, s)
+            ]
       end)
 
-    [align([@headers | lines]) | problems(summaries)] |> Enum.join("\n")
+    [align([headers(@headers, engines?) | lines]) | problems(summaries)] |> Enum.join("\n")
   end
 
   @doc """
@@ -148,21 +171,25 @@ defmodule PropertyDamage.Corpus.Table do
   """
   @spec render_diff([result()], [result()]) :: String.t()
   def render_diff(baseline, current) do
-    base = Map.new(baseline, &{&1.entry, &1})
+    base = Map.new(baseline, &{key(&1), &1})
     comparable = Enum.filter(current, &comparable?(&1, base))
+    engines? = engines?(current)
 
     lines =
-      Enum.map(comparable, fn %{entry: name, rows: rows} = result ->
-        diff_line(name, base[name].rows, rows, result)
+      Enum.map(comparable, fn %{rows: rows} = result ->
+        head(result, engines?) ++ diff_line(base[key(result)].rows, rows, result)
       end)
 
     notes = Enum.flat_map(current, &diff_note(&1, base))
 
+    headers =
+      headers(
+        ["entry", "found", "found after", "shrink runs", "reached minimum", "seeds changed"],
+        engines?
+      )
+
     [
-      align([
-        ["entry", "found", "found after", "shrink runs", "reached minimum", "seeds changed"]
-        | lines
-      ])
+      align([headers | lines])
       | notes
     ]
     |> Enum.join("\n")
@@ -170,30 +197,30 @@ defmodule PropertyDamage.Corpus.Table do
 
   # A skipped entry has no rows to compare, on either side.
   defp comparable?(result, base) do
-    case Map.fetch(base, result.entry) do
+    case Map.fetch(base, key(result)) do
       {:ok, before} -> not Map.has_key?(before, :skipped) and not Map.has_key?(result, :skipped)
       :error -> false
     end
   end
 
-  defp diff_note(%{entry: name, skipped: reason}, _base), do: ["#{name}: skipped: #{reason}"]
+  defp diff_note(%{skipped: reason} = result, _base),
+    do: ["#{label(result)}: skipped: #{reason}"]
 
-  defp diff_note(%{entry: name}, base) do
-    case Map.fetch(base, name) do
-      {:ok, %{skipped: _}} -> ["#{name}: skipped in the baseline"]
+  defp diff_note(result, base) do
+    case Map.fetch(base, key(result)) do
+      {:ok, %{skipped: _}} -> ["#{label(result)}: skipped in the baseline"]
       {:ok, _} -> []
-      :error -> ["#{name}: not in the baseline"]
+      :error -> ["#{label(result)}: not in the baseline"]
     end
   end
 
   defp reached(%{regression: true}, _summary), do: "-"
   defp reached(_result, s), do: "#{s.reached_minimum}/#{s.seeds}"
 
-  defp diff_line(name, before, now, result) do
+  defp diff_line(before, now, result) do
     {b, a} = {summarize(before), summarize(now)}
 
     [
-      name,
       change(b.found, a.found, &Integer.to_string/1),
       change(b.found_after, a.found_after, &plans/1),
       change(b.shrink_runs, a.shrink_runs, &number/1),
