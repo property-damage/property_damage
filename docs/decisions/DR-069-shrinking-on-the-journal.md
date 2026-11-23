@@ -409,3 +409,53 @@ source entries (DR-071).
   seen on a one-string fixture and is not separated from the others in
   the corpus numbers.
 - The limits of the previous amendment hold on this engine too.
+
+## Amendment (2026-11-23): values that change nothing alone leave the pair list
+
+The pass of pairs leaves out every value whose single lowering, in the
+round just ended, rebuilt only the plan already held, because a pair with
+such a value is in effect a single lowering of the other value and costs
+runs that single lowering has already spent.
+
+1. **Why.** On `Engine.StreamDataSource` a string records, for each
+   character, a position whose value does not reach the string (the first
+   limit of the previous amendment). Every such position stays above its
+   lower bound, so the pair list holds one per character, and each pair of
+   one with the string's length executes candidates that differ from the
+   plan held only in the length. On `long_note` every run of the pass of
+   pairs went to such pairs: 62.3 runs per seed on average, over a list of
+   17.4 values of which 16.4 changed nothing alone.
+
+2. **The rule.** During single lowering the shrinker notes, for each
+   integer entry and each recorded position it lowers, whether every
+   candidate rebuilt the plan already held, or whether one was executed or
+   could not be rebuilt. The pass of pairs reads these notes and leaves out
+   the values of the first kind. It runs only after a round that adopted
+   nothing, so the notes describe the plan it pairs from, and reading them
+   costs no run. A value with no note, or one whose lowering executed a
+   candidate, stays in the list. The rule applies to integer entries of
+   `Engine.Native` and to source positions alike; on the next corpus it
+   leaves values out only on `Engine.StreamDataSource`, and every
+   `Engine.Native` row is unchanged.
+
+3. **Measured effect.** On the next corpus, both engines, plan cap 200,
+   seeds as recorded per entry, run twice with identical tables; rows for
+   `Engine.StreamDataSource` that moved. No row changed its found count or
+   its count of seeds that reach the smallest plan, and no seed changed
+   either flag.
+
+   | entry | mean shrink runs |
+   |---|---|
+   | `long_note` | 165.8 to 103.5 |
+   | `fifth_refund` | 40.4 to 33.1 |
+   | `lost_full_refund` | 54.4 to 49.6 |
+   | `double_credit` | 13.6 to 12.8 |
+
+**Known costs and limits.**
+
+- A value can change nothing alone and still matter in a pair, when the
+  other value's change makes it reach the plan. Such a pair is no longer
+  tried. No entry of the corpus has one.
+- Under a cap of 64 shrink runs, `long_note` spends its whole budget on
+  single lowering of the note, before the payment's amount is lowered and
+  before the pass of pairs starts, so the rule does not change that row.

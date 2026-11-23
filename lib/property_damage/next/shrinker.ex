@@ -27,9 +27,13 @@ defmodule PropertyDamage.Next.Shrinker do
   #      values to fall together, which no single edit can keep. A value is
   #      an integer entry or one recorded position of a source entry, above
   #      its lower bound; two positions of one source entry also form a
-  #      pair. A pair tries the largest amount both can fall first, then
-  #      bisects for the largest amount that still fails the same way. The
-  #      first pair adopted starts the rounds again from pass 2.
+  #      pair. A value whose single lowering in the round just ended rebuilt
+  #      only the plan already held is left out, such as a position of a
+  #      string's character that does not reach the string: a pair with it
+  #      would in effect lower the other value alone. A pair tries
+  #      the largest amount both can fall first, then bisects for the
+  #      largest amount that still fails the same way. The first pair
+  #      adopted starts the rounds again from pass 2.
   #
   # Slots are withdrawn by generation, not by the shrinker: an edit that
   # leaves a stored pick no longer offered withdraws that slot, which keeps
@@ -72,7 +76,15 @@ defmodule PropertyDamage.Next.Shrinker do
   @spec shrink(best(), (Journal.t() -> {Plan.t(), [term()]}), (Plan.t() -> term()), pos_integer()) ::
           {best(), non_neg_integer()}
   def shrink(best, build, execute, max_runs) do
-    state = %{best: best, build: build, execute: execute, runs: 0, limit: max_runs - 1}
+    state = %{
+      best: best,
+      build: build,
+      execute: execute,
+      runs: 0,
+      limit: max_runs - 1,
+      lowering: nil,
+      alone: %{}
+    }
 
     searched =
       try do
@@ -88,7 +100,7 @@ defmodule PropertyDamage.Next.Shrinker do
 
   defp rounds(state) do
     {removed?, state} = remove_blocks(state)
-    {lowered?, state} = lower(state)
+    {lowered?, state} = lower(%{state | alone: %{}})
 
     if removed? or lowered?, do: rounds(state), else: after_stable_round(state)
   end
@@ -181,10 +193,12 @@ defmodule PropertyDamage.Next.Shrinker do
   defp lower_key(state, key) do
     case entries(state)[key] do
       {:integer, value, range} when value > range.first ->
-        case state |> edited(key, {:integer, range.first, range}) |> attempt(state) do
-          {true, state} -> {true, state}
-          {false, state} -> bisect(state, key, range.first, value, false)
-        end
+        alone(state, {:entry, key}, fn state ->
+          case state |> edited(key, {:integer, range.first, range}) |> attempt(state) do
+            {true, state} -> {true, state}
+            {false, state} -> bisect(state, key, range.first, value, false)
+          end
+        end)
 
       {:member, _value, index} when is_integer(index) and index > 0 ->
         first_adopted(state, 0..(index - 1)//1, &edited(&1, key, {:member, @no_member, &2}))
@@ -231,10 +245,12 @@ defmodule PropertyDamage.Next.Shrinker do
   defp lower_position(state, key, position) do
     case position_at(state, key, position) do
       {value, lo, _hi} when value > lo ->
-        case state |> edited_position(key, position, lo) |> attempt(state) do
-          {true, state} -> {true, state}
-          {false, state} -> bisect_position(state, key, position, lo, value, false)
-        end
+        alone(state, {:position, key, position}, fn state ->
+          case state |> edited_position(key, position, lo) |> attempt(state) do
+            {true, state} -> {true, state}
+            {false, state} -> bisect_position(state, key, position, lo, value, false)
+          end
+        end)
 
       _absent_or_lowest ->
         {false, state}
@@ -271,14 +287,37 @@ defmodule PropertyDamage.Next.Shrinker do
   defp edited_position(state, key, position, value),
     do: edited(state, key, StreamDataSource.put_position(entries(state)[key], position, value))
 
+  # Runs the single lowering of one lowerable value (see `lowerable_values/1`)
+  # and notes, under `alone`, whether every candidate it made rebuilt the
+  # plan already held (`:same`) or one was executed or could not be rebuilt
+  # (`:moved`). The pass of pairs reads the notes of the round just ended.
+  defp alone(state, value, lower) do
+    {lowered?, state} = lower.(%{state | lowering: value})
+    {lowered?, %{state | lowering: nil}}
+  end
+
+  defp noted(%{lowering: nil} = state, _seen), do: state
+
+  defp noted(%{lowering: value, alone: alone} = state, seen),
+    do: %{state | alone: Map.update(alone, value, seen, &merge_seen(&1, seen))}
+
+  defp merge_seen(:moved, _seen), do: :moved
+  defp merge_seen(_same, seen), do: seen
+
   # Lowers pairs of values by the same amount, for a failure that needs two
   # values to fall together. The pairs come from the lowerable values in
   # draw order (see `lowerable_values/1`), and are tried in the order
   # (first, second), (first, third), ..., (second, third), and so on. The
   # first pair kept ends the pass, so the next round reads the pairs again
   # from the rebuilt journal.
+  #
+  # A value whose single lowering, in the round just ended, rebuilt only the
+  # plan already held is left out: it changed nothing alone, so a pair with
+  # it would in effect lower the other value alone, the move of pass 3. The
+  # round adopted nothing, so its notes describe the plan held now, and
+  # reading them costs no run.
   defp lower_pairs(state) do
-    values = lowerable_values(state)
+    values = state |> lowerable_values() |> Enum.reject(&(state.alone[&1] == :same))
     pairs = for [a | rest] <- tails(values), b <- rest, do: {a, b}
 
     Enum.reduce_while(pairs, {false, state}, fn pair, {false, state} ->
@@ -457,12 +496,12 @@ defmodule PropertyDamage.Next.Shrinker do
       {:ok, plan, drawn} ->
         cond do
           not wanted?.(plan) -> {:skipped, state}
-          same_plan?(plan, state.best.plan) -> {false, state}
-          true -> judge(state, journal, plan, drawn, true)
+          same_plan?(plan, state.best.plan) -> {false, noted(state, :same)}
+          true -> judge(noted(state, :moved), journal, plan, drawn, true)
         end
 
       :error ->
-        {:skipped, state}
+        {:skipped, noted(state, :moved)}
     end
   end
 
