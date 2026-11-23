@@ -11,7 +11,9 @@ defmodule PropertyDamage.Corpus.Engine.Next do
 
     * `plans_until_found` is the number of the plan that failed.
     * `shrink_runs` is the number of plans the shrink executed.
-    * `shrunk` is the final plan of the shrink, normalized to plain maps.
+    * `shrunk` is the final plan of the shrink, normalized to plain maps. A
+      step that runs a path other than the plain one also has `path:`, the
+      path's commands as plain maps.
     * `kept` is the run's kept list: the sites where a `from/2` function
       or a dependent assign returned a StreamData generator.
 
@@ -196,13 +198,24 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   # A step becomes its command's map plus the step's truthy assigns, so a
   # fault a layer set (such as a lost response) is part of the plan.
   # A step in a lane also says which one, so a plan shows the steps that overlap.
-  defp plain_step(%Step{key: step_key, command: command, assigns: assigns}) do
+  # A step that runs a path other than the plain one lists the path's
+  # commands as plain maps under `:path`.
+  defp plain_step(%Step{key: step_key, command: command, assigns: assigns, path: path}) do
     truthy = for {key, value} <- assigns, value, into: %{}, do: {key, plain_value(value)}
     plain = Map.merge(plain_command(command), truthy)
 
-    case step_key do
-      {lane, _slot} when lane > 0 -> Map.put(plain, :lane, lane)
-      _prefix -> plain
+    plain =
+      case step_key do
+        {lane, _slot} when lane > 0 -> Map.put(plain, :lane, lane)
+        _prefix -> plain
+      end
+
+    case path do
+      {index, commands} when index > 0 ->
+        Map.put(plain, :path, Enum.map(commands, &plain_command/1))
+
+      _plain_path ->
+        plain
     end
   end
 

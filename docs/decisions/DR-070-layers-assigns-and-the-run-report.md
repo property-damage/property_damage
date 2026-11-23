@@ -205,3 +205,21 @@ were withdrawn. Without one place for them, each is a log line or lost.
   only through the report's counts.
 - A run has one target. Counts are keyed by target already, and a run of
   several targets would add keys without changing a row.
+
+## Amendment (2026-11-23): counts and the report under two executions
+
+A model that exports `expansions/0` runs each plan twice (DR-073), so the
+report's counts need a rule for what they count.
+
+1. **Assign counts.** `set` and `acknowledged` count every `execute/3` call
+   of both executions of the search plans. A step whose path holds two
+   commands is two calls in the variant, each with the step's assigns, so
+   its assign is counted twice there and once in the reference. The rule
+   that a key set and never acknowledged fails the run reads these counts.
+
+2. **Plans and withdrawn slots.** `plans` counts plans, not executions.
+   `withdrawn` comes from generation and is counted once, since both
+   executions run the same plan.
+
+3. **Unchanged.** The shrink's candidates stay out of the counts, and a
+   model without `expansions/0` reports exactly what it did before.

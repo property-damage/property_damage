@@ -459,3 +459,31 @@ runs that single lowering has already spent.
 - Under a cap of 64 shrink runs, `long_note` spends its whole budget on
   single lowering of the note, before the payment's amount is lowered and
   before the pass of pairs starts, so the rule does not change that row.
+
+## Amendment (2026-11-23): a divergence is classed by its observation name
+
+The shrinker gains one clause in the class of a failure, for the reason a
+model that states paths can fail with (DR-073).
+
+1. **Why.** A candidate is adopted when its failure has the class of the
+   best failure so far, at the same step or an earlier one. The class of a
+   reason is the reason, except for a check (its name), an adapter error and
+   a raise. A divergence is `{:diverged, name, step_key, reference_value,
+   variant_value}`, and as a whole term it changes with every value the
+   plan carries. Lowering an amount changes both observed values, so no
+   candidate that lowers a value would be adopted and the shrink would stop
+   at the plan first found.
+
+2. **The rule.** `class({:diverged, name, _, _, _})` is `{:diverged, name}`:
+   two divergences on one observation are one kind of failure, whatever
+   values they carry. The step test is unchanged, so a candidate must still
+   diverge at the same step or an earlier one. No other reason takes the
+   clause, so every other shrink is as it was.
+
+3. **Paths need nothing else.** A step's path pick is a member entry that
+   lowers toward index 0, the plain path. The entries of a path sit under the
+   step's key, so removing a step removes them, and a withdrawn slot keeps
+   them until the final journal replaces them.
+
+4. **Model loading.** `@compare` is still refused at load, except
+   `@compare every: 1` on a model that exports `expansions/0`.

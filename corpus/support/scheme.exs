@@ -21,6 +21,10 @@ defmodule Corpus.Scheme do
       applied in the second without checking again, so two overlapping refunds
       can both pass and take the balance below 0.
 
+    * `:split_refund`: a refund of a payment that already had a refund credits
+      one unit less than its amount, so a refund split in two credits one unit
+      less than the same refund made once.
+
   Each time a buggy path runs, the scheme records it in the fire log.
   """
 
@@ -163,6 +167,17 @@ defmodule Corpus.Scheme do
        when amount == payment.amount - 1 do
     FireLog.fired(state.log, state.instance)
     put_in(state, [:payments, id], payment)
+  end
+
+  defp credit(%{bug: :split_refund} = state, id, payment, amount, _key)
+       when payment.refunds > 0 do
+    FireLog.fired(state.log, state.instance)
+
+    put_in(state, [:payments, id], %{
+      payment
+      | balance: payment.balance - (amount - 1),
+        refunds: payment.refunds + 1
+    })
   end
 
   defp credit(state, id, payment, amount, key) do
