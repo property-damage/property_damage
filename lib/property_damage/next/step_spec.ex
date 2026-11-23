@@ -167,8 +167,15 @@ defmodule PropertyDamage.Next.StepSpec do
   @doc """
   Applies a layer, or each layer of a list in order, to every spec.
 
-  A layer is a function from one spec to one spec. A result that is not a
-  `%StepSpec{}` raises, naming the function. A layer that changes no spec
+  A layer is a function from one spec to one spec; `specs` is a list of
+  `%StepSpec{}` and anything else raises. A result that is not a
+  `%StepSpec{}` raises, naming the function.
+
+  A layer may match a spec on its command module, weight, `command_opts` or
+  assigns. It never matches or replaces `when:`: a function has no usable
+  identity to match on, and a replaced predicate would silently change which
+  steps are eligible. A layer that returns a spec with a different `when:`
+  raises, naming the function. A layer that changes no spec
   does not raise; each spec records every layer in its `history`, marked
   `:changed` or `:unchanged`, so a report can count the specs each layer
   changed.
@@ -179,7 +186,18 @@ defmodule PropertyDamage.Next.StepSpec do
 
   def transform(specs, fun) when is_list(specs) and is_function(fun, 1) do
     Enum.each(specs, &spec!(&1, "the input of StepSpec.transform/2"))
-    Enum.map(specs, fn spec -> spec |> fun.() |> spec!(fun) |> note_layer(spec, fun) end)
+
+    Enum.map(specs, fn spec ->
+      spec |> fun.() |> spec!(fun) |> keeps_when!(spec, fun) |> note_layer(spec, fun)
+    end)
+  end
+
+  defp keeps_when!(%__MODULE__{when: kept} = result, %__MODULE__{when: kept}, _fun), do: result
+
+  defp keeps_when!(%__MODULE__{}, %__MODULE__{command: command}, fun) do
+    raise ArgumentError,
+          "the layer #{inspect(fun)} given to StepSpec.transform/2 changed the when: of the " <>
+            "spec for #{inspect(command)}; a layer never changes when:"
   end
 
   defp note_layer(result, original, fun) do

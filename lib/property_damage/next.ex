@@ -15,6 +15,7 @@ defmodule PropertyDamage.Next do
   alias PropertyDamage.Next.Engine.Native
 
   alias PropertyDamage.Next.{
+    AssignCounts,
     Checks,
     DependentStreamDataError,
     Execution,
@@ -24,6 +25,7 @@ defmodule PropertyDamage.Next do
     Model,
     ModelChangedError,
     Plan,
+    Report,
     Shrinker
   }
 
@@ -33,6 +35,8 @@ defmodule PropertyDamage.Next do
     :adapter,
     :seed,
     config: %{},
+    ignored_assigns: [],
+    never_drawn: :report,
     max_steps: 20,
     max_plans: 100,
     engine: Native,
@@ -44,6 +48,7 @@ defmodule PropertyDamage.Next do
     :model,
     :adapter,
     config: %{},
+    ignored_assigns: [],
     max_steps: 20,
     engine: Native,
     dependent_stream_data: :warn
@@ -96,13 +101,29 @@ defmodule PropertyDamage.Next do
   projection fold the events the adapter returned, and their checks run; a
   projection named in both roles folds and checks once.
 
-  Returns `{:ok, %{plans: n, kept: sites}}` when every plan passed, or
+  Returns `{:ok, report}` when every plan passed, or
   `{:error, %PropertyDamage.Next.Failure{}}` for the first plan that
   failed, shrunk unless `shrink: false`; its journal replays the final
-  plan with `replay/2`. `kept` lists every site, in every plan the run
-  built, where PD's engine drew a dependent StreamData generator it cannot
-  fit (see `PropertyDamage.Next.Engine`); a warning names each site once
-  per run.
+  plan with `replay/2`. Both carry a `PropertyDamage.Next.Report`: for a
+  failure, in its `report` field. The report holds the plan count, the
+  withdrawn slots, the `kept` sites where PD's engine drew a dependent
+  StreamData generator it cannot fit (see `PropertyDamage.Next.Engine`; a
+  warning names each site once per run), the specs each layer changed, the
+  specs the search never drew, and, per target, how many steps set each
+  assign and how often the adapter acknowledged it.
+  `PropertyDamage.Next.Report.format/1` renders it as text.
+
+  A run whose plans all passed still fails in two cases, each a
+  `%Failure{}` with `plan`, `journal` and `step` set to `nil`:
+
+    * an assign some step set was acknowledged by no port, and the target
+      does not list it in `:ignored_assigns`. The reason is
+      `{:unacknowledged_assigns, rows}`, the rows being those of the
+      report for each such key. This catches a fault the model draws and
+      the adapter silently ignores. A plan that failed first wins; its
+      report still carries the counts
+    * `never_drawn: :fail` is given and the search never drew some spec.
+      The reason is `{:never_drawn, rows}`
 
   The shrink edits the failing plan's journal and rebuilds each candidate
   plan from the edited journal by generation, so every candidate is a plan
@@ -121,6 +142,15 @@ defmodule PropertyDamage.Next do
     * `:adapter` - the adapter module (required)
     * `:seed` - an integer (required)
     * `:config` - passed to the adapter's `setup/2` (default `%{}`)
+    * `:ignored_assigns` - the assign keys the target's adapter never acts
+      on (default `[]`). `:adapter`, `:config` and `:ignored_assigns`
+      describe the run's one target. A key that no spec of the model sets
+      raises `ArgumentError` before the first plan; an adapter that
+      acknowledges an ignored key raises
+      `PropertyDamage.Next.AcknowledgedIgnoredAssignError` (see
+      `PropertyDamage.Next.Runtime.ack/2`)
+    * `:never_drawn` - `:report` (default) lists the specs the search never
+      drew in the report; `:fail` also fails a run that passed, as above
     * `:max_steps` - the number of slots per plan (default 20)
     * `:max_plans` - the most plans to build (default 100)
     * `:engine` - the module that draws each value (default
@@ -131,14 +161,24 @@ defmodule PropertyDamage.Next do
     * `:dependent_stream_data` - `:warn` (default) or `:raise`, as for
       `plan/3`
 
+  An adapter that acknowledges an assign its step did not set raises
+  `PropertyDamage.Next.AcknowledgedUnsetAssignError` out of this function;
+  like the ignored case, it is misuse of PD and is neither a failure nor
+  shrunk.
+
   Raises `ArgumentError` when the model's check projections or its
   command-sequence projection declare a check form this engine does not run
   yet, `@compare` included; it runs `@check every: N` and
   `@check every: CommandModule`.
   """
-  @spec run(keyword()) ::
-          {:ok, %{plans: pos_integer(), kept: [map()]}} | {:error, Failure.t()}
-  def run(opts) do
+  @spec run(keyword()) :: {:ok, Report.t()} | {:error, Failure.t()}
+  def run(opts), do: opts |> run_counted() |> elem(0)
+
+  @doc false
+  # `run/1` and the assign counts of its search, as the report holds them:
+  # `%{target => [%{command:, key:, set:, acknowledged:}]}`.
+  @spec run_counted(keyword()) :: {{:ok, Report.t()} | {:error, Failure.t()}, map()}
+  def run_counted(opts) do
     opts = Keyword.validate!(opts, @run_opts)
     model = module!(opts, :model)
     adapter = module!(opts, :adapter)
@@ -148,36 +188,145 @@ defmodule PropertyDamage.Next do
     shrink = shrink!(opts[:shrink])
     max_shrink_runs = max_shrink_runs!(opts[:max_shrink_runs])
     mode!(opts[:dependent_stream_data])
+    never_drawn!(opts[:never_drawn])
     specs = Model.specs!(model)
+    ignored = ignored!(opts[:ignored_assigns], specs)
     projections = Checks.load!(model)
     plan_opts = Keyword.take(opts, Keyword.keys(@plan_opts))
-    execute = &Execution.run(&1, adapter, opts[:config], projections)
+    table = AssignCounts.new()
 
-    Enum.reduce_while(1..max_plans, [], fn number, warned ->
-      {plan, drawn} = trace(model, specs, plan_seed(seed, number), plan_opts)
-      warned = warn(plan.kept, warned)
+    try do
+      searched =
+        search(model, specs, seed, max_plans, plan_opts, table, fn plan, counts ->
+          Execution.run(plan, adapter, opts[:config], projections,
+            ignored: ignored,
+            counts: counts
+          )
+        end)
 
-      case execute.(plan) do
-        :ok ->
-          {:cont, warned}
+      counts = AssignCounts.rows(table)
 
-        {:error, step, reason} ->
-          {:halt, {number, %{plan: plan, drawn: drawn, step: step, reason: reason}, warned}}
-      end
-    end)
-    |> case do
-      warned when is_list(warned) ->
-        {:ok, %{plans: max_plans, kept: warned}}
+      ctx = %{
+        model: model,
+        specs: specs,
+        plan_opts: plan_opts,
+        shrink: shrink,
+        max_shrink_runs: max_shrink_runs,
+        never_drawn: opts[:never_drawn],
+        ignored: ignored,
+        adapter: adapter,
+        counts: counts,
+        execute: &Execution.run(&1, adapter, opts[:config], projections, ignored: ignored)
+      }
 
-      {number, found, warned} when shrink ->
-        build = &trace(model, specs, &1, plan_opts)
-        {final, runs, warned} = shrink(found, build, execute, max_shrink_runs, warned)
-        {:error, %{failure(final, number, found, runs) | kept: warned}}
-
-      {number, found, warned} ->
-        {:error, %{failure(found, number, found, 0) | kept: warned}}
+      {finish(searched, ctx), counts}
+    after
+      AssignCounts.delete(table)
     end
   end
+
+  defp search(model, specs, seed, max_plans, plan_opts, table, execute) do
+    seen = %{plans: 0, warned: [], drawn: MapSet.new(), eligible: MapSet.new(), withdrawn: []}
+
+    Enum.reduce_while(1..max_plans, seen, fn number, seen ->
+      {plan, drawn} = trace(model, specs, plan_seed(seed, number), plan_opts)
+      seen = observe(seen, plan, number)
+
+      case execute.(plan, table) do
+        :ok ->
+          {:cont, seen}
+
+        {:error, step, reason} ->
+          {:halt, {%{plan: plan, drawn: drawn, step: step, reason: reason}, seen}}
+      end
+    end)
+  end
+
+  # What the search has seen after plan `number`: the plan count, the kept
+  # sites warned about, the specs drawn or offered at some slot, and the
+  # slots withdrawn.
+  defp observe(seen, plan, number) do
+    %{
+      seen
+      | plans: number,
+        warned: warn(plan.kept, seen.warned),
+        drawn: Enum.reduce(plan.steps, seen.drawn, &MapSet.put(&2, &1.spec_id)),
+        eligible: Enum.reduce(plan.eligible, seen.eligible, &MapSet.put(&2, &1)),
+        withdrawn: seen.withdrawn ++ plan.withdrawn
+    }
+  end
+
+  defp finish({found, seen}, ctx) when is_map(found) do
+    base = report(seen, ctx)
+    build = &trace(ctx.model, ctx.specs, &1, ctx.plan_opts)
+
+    {final, runs, warned, found} =
+      if ctx.shrink do
+        {final, runs, warned} =
+          shrink(found, build, ctx.execute, ctx.max_shrink_runs, seen.warned)
+
+        {final, runs, warned, found}
+      else
+        {found, 0, seen.warned, found}
+      end
+
+    failure = %{failure(final, seen.plans, found, runs) | kept: warned}
+    report = %{base | kept: warned, withdrawn: failure.withdrawn}
+    {:error, %{failure | report: report}}
+  end
+
+  defp finish(seen, ctx) do
+    report = report(seen, ctx)
+    rows = Map.fetch!(report.assigns, ctx.adapter)
+
+    case {unacknowledged(rows, ctx.ignored), report.never_drawn, ctx.never_drawn} do
+      {[_ | _] = unacknowledged, _never_drawn, _mode} ->
+        {:error, no_plan(report, {:unacknowledged_assigns, unacknowledged})}
+
+      {[], [_ | _] = never_drawn, :fail} ->
+        {:error, no_plan(report, {:never_drawn, never_drawn})}
+
+      _passed ->
+        {:ok, report}
+    end
+  end
+
+  # The report of the search, before a shrink changes `kept` and `withdrawn`.
+  defp report(seen, ctx) do
+    never_drawn =
+      for spec <- ctx.specs, spec.id not in seen.drawn do
+        reason = if spec.id in seen.eligible, do: :never_chosen, else: :never_eligible
+        %{spec: spec.id, command: spec.command, reason: reason}
+      end
+
+    %Report{
+      plans: seen.plans,
+      withdrawn: seen.withdrawn,
+      kept: seen.warned,
+      layers: Report.layers(ctx.specs),
+      never_drawn: never_drawn,
+      assigns: Map.put_new(ctx.counts, ctx.adapter, [])
+    }
+  end
+
+  # The rows of each key that some step set and no port acknowledged, on
+  # any command, and that the target does not ignore.
+  defp unacknowledged(rows, ignored) do
+    silent =
+      rows
+      |> Enum.group_by(& &1.key)
+      |> Enum.filter(fn {key, key_rows} ->
+        key not in ignored and Enum.sum(Enum.map(key_rows, & &1.set)) > 0 and
+          Enum.sum(Enum.map(key_rows, & &1.acknowledged)) == 0
+      end)
+      |> Enum.map(&elem(&1, 0))
+
+    Enum.filter(rows, &(&1.key in silent))
+  end
+
+  # A failure of a run whose plans all passed: no plan is to blame.
+  defp no_plan(report, reason),
+    do: %Failure{reason: reason, report: report, kept: report.kept}
 
   # Shrinks `found`, warning about each kept site of a candidate plan that
   # no earlier plan of the run named. The shrinker calls `build` once per
@@ -251,17 +400,39 @@ defmodule PropertyDamage.Next do
       validated |> Keyword.take(Keyword.keys(@plan_opts)) |> slots!(journal, opts)
 
     mode!(plan_opts[:dependent_stream_data])
-    plan = build(model, Model.specs!(model), journal, plan_opts)
+    specs = Model.specs!(model)
+    ignored = ignored!(validated[:ignored_assigns], specs)
+    plan = build(model, specs, journal, plan_opts)
     kept = warn(plan.kept, [])
     projections = Checks.load!(model)
 
-    case Execution.run(plan, adapter, validated[:config], projections) do
+    case Execution.run(plan, adapter, validated[:config], projections, ignored: ignored) do
       :ok ->
         {:ok, %{plans: 1, kept: kept}}
 
       {:error, step, reason} ->
         found = %{plan: plan, step: step, reason: reason}
         {:error, %{failure(found, 1, found, 0) | kept: kept}}
+    end
+  end
+
+  # The `:ignored_assigns` option: a list of keys, each set by some spec.
+  defp ignored!(keys, specs) do
+    unless is_list(keys) and Enum.all?(keys, &is_atom/1) do
+      raise ArgumentError,
+            "the :ignored_assigns option is a list of assign keys, got: #{inspect(keys)}"
+    end
+
+    set = specs |> Enum.flat_map(&Map.keys(&1.assigns)) |> MapSet.new()
+
+    case Enum.reject(keys, &(&1 in set)) do
+      [] ->
+        keys
+
+      unknown ->
+        raise ArgumentError,
+              "the :ignored_assigns option names #{inspect(unknown)}, " <>
+                "but no spec of the model sets #{if match?([_], unknown), do: "that key", else: "those keys"}"
     end
   end
 
@@ -369,6 +540,12 @@ defmodule PropertyDamage.Next do
 
   defp shrink!(other),
     do: raise(ArgumentError, "the :shrink option is a boolean, got: #{inspect(other)}")
+
+  defp never_drawn!(mode) when mode in [:report, :fail], do: mode
+
+  defp never_drawn!(other) do
+    raise ArgumentError, "the :never_drawn option is :report or :fail, got: #{inspect(other)}"
+  end
 
   defp mode!(mode) when mode in [:warn, :raise], do: mode
 

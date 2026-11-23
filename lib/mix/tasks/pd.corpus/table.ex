@@ -14,7 +14,9 @@ defmodule PropertyDamage.Corpus.Table do
   rows, is shown as `skipped: <reason>` and is ignored when judging soundness)
   or `regression: true` (an entry without a hand-written minimum; its
   reached-minimum cell shows `-` and it is sound without finding the bug, as
-  long as it is clean and has no unexplained failure).
+  long as it is clean and has no unexplained failure) or `guardrail: true`
+  (also shown with `-`; it is sound only when every seed found its line and
+  the control run was clean).
 
   A result may also carry `engine: name`, the corpus engine it ran on. When
   one does, the tables print an engine column, and a result is matched
@@ -32,6 +34,7 @@ defmodule PropertyDamage.Corpus.Table do
           required(:rows) => [Measure.row()],
           optional(:skipped) => String.t(),
           optional(:regression) => true,
+          optional(:guardrail) => true,
           optional(:engine) => String.t()
         }
 
@@ -70,6 +73,7 @@ defmodule PropertyDamage.Corpus.Table do
   @spec sound?([result()]) :: boolean()
   def sound?(results) do
     Enum.all?(results, fn
+      %{guardrail: true, rows: rows} -> Enum.all?(rows, &(&1.found? and &1.clean?))
       %{regression: true, rows: rows} -> Enum.all?(rows, &(&1.clean? and not &1.unexplained?))
       %{rows: rows} -> Enum.all?(rows, &(&1.found? and &1.clean?))
     end)
@@ -249,8 +253,14 @@ defmodule PropertyDamage.Corpus.Table do
         do: "#{name}: #{count} seed(s) #{text}"
   end
 
-  defp mean([], _fun), do: nil
-  defp mean(rows, fun), do: Enum.sum(Enum.map(rows, fun)) / length(rows)
+  # A row without the number (a guardrail found by a raise has no plan
+  # number) is left out of the mean.
+  defp mean(rows, fun) do
+    case rows |> Enum.map(fun) |> Enum.reject(&is_nil/1) do
+      [] -> nil
+      values -> Enum.sum(values) / length(values)
+    end
+  end
 
   defp plans(nil), do: "-"
   defp plans(value), do: number(value) <> " plans"
