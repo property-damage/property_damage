@@ -39,6 +39,33 @@ defmodule PropertyDamage.Next.PathExecutionsTest do
     def expansions, do: [{Token, &Expansions.token_paths/2}]
   end
 
+  defmodule PayOnlySimulator do
+    @moduledoc false
+    # Predicts `Pay` and nothing else: a call with any other command raises.
+    @behaviour PropertyDamage.Model.Simulator
+
+    alias PropertyDamage.Next.Test.Paths.Events.Paid
+    alias PropertyDamage.Next.Test.Paths.Pay
+
+    @impl true
+    def simulate(%Pay{amount: amount}, _state), do: [%Paid{amount: amount}]
+  end
+
+  defmodule PathOnlyCommandModel do
+    @moduledoc false
+    # Draws `Pay` alone. Its second path adds `Peek`, a command that no spec
+    # draws and that the simulator has no clause for.
+    use PropertyDamage.Next.Model
+
+    alias PropertyDamage.Next.StepSpec
+    alias PropertyDamage.Next.Test.Paths.{Pay, Peek, Totals}
+
+    def steps, do: StepSpec.normalize([Pay])
+    def simulator, do: PayOnlySimulator
+    def command_sequence_projection, do: Totals
+    def expansions, do: [{Pay, fn pay, _state -> [[pay], [pay, %Peek{}]] end}]
+  end
+
   defp run(model, seed, opts \\ []) do
     [
       model: model,
@@ -173,6 +200,23 @@ defmodule PropertyDamage.Next.PathExecutionsTest do
 
       assert MapSet.size(tokens.(reference)) == 3
       assert MapSet.disjoint?(tokens.(reference), tokens.(variant))
+    end
+  end
+
+  describe "a command that only a path uses" do
+    test "runs in the variant though no spec draws it, and the simulator is never asked to predict it" do
+      assert_raise FunctionClauseError, fn -> PayOnlySimulator.simulate(%Peek{}, %{}) end
+
+      checked =
+        for seed <- 1..10 do
+          assert {:ok, _report} = run(PathOnlyCommandModel, seed)
+          assert [reference, variant] = Recorded.executions()
+
+          refute Enum.any?(calls(reference), &match?({%Peek{}, _}, &1))
+          Enum.any?(calls(variant), &match?({%Peek{}, _}, &1))
+        end
+
+      assert Enum.any?(checked), "no seed picked the path that holds the read"
     end
   end
 
