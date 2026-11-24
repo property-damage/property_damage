@@ -73,7 +73,11 @@ divergence is shrunk and replayed, and what the corpus shows.
    each its own `execute/3` with the step's assigns, each folded into the
    projections and checked as a step is. The variant's events for a step are
    the concatenation of its commands' events, and later placeholders resolve
-   against them. The two executions run in lockstep, one step at a time.
+   against them. A path may hold commands of modules that no spec draws;
+   the adapter runs them, and the simulator is never asked to predict them,
+   because the prediction of a step is made from the step's command as
+   drawn, whichever path is picked. The two executions run in lockstep, one
+   step at a time.
    Each has its own mint nonce, so a value minted per execution differs
    between them as it would between two runs. Both contexts are torn down. A
    failing setup of either execution fails the plan before any step.

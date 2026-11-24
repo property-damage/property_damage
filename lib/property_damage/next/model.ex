@@ -58,6 +58,18 @@ defmodule PropertyDamage.Next.Model do
   under the step, and `builder` is a function given the map of drawn values
   that returns the path's non-empty list of command structs.
 
+  A path may hold commands of modules that no spec draws, such as a read
+  that exists only to split a write in two. Two parts of the model then
+  treat such a command differently:
+
+    * The adapter runs it: the variant passes every command of the picked
+      path to `execute/3`, so the adapter needs a clause for each.
+    * The simulator never sees it. PD predicts each step from the step's
+      command as drawn, whichever path is picked, so the simulator needs
+      clauses only for the commands that specs draw. The paths of a command
+      are meant to leave the system in the state the command alone leaves
+      it in; a path that does not is the difference the comparison reports.
+
   A model that states paths runs each plan twice, against two fresh setups
   of its adapter: the reference runs every step plain, and the variant runs
   the path picked for each step, whose pick PD draws. Its `@compare every:
