@@ -12,14 +12,14 @@ defmodule PropertyDamage.Next.NativeShrinkRunsTest do
   @rows [
     {Shrink.AmountModel, Shrink.Adapter, 1, :amount, 1, 1, 20, 1},
     {Shrink.AmountModel, Shrink.Adapter, 1, :amount, 2, 1, 19, 1},
-    {Shrink.SplitModel, Shrink.Adapter, 1, :split, 1, 11, 16, 1},
-    {Shrink.SplitModel, Shrink.Adapter, 1, :split, 2, 7, 18, 1},
+    {Shrink.SplitModel, Shrink.Adapter, 1, :split, 1, 11, 22, 1},
+    {Shrink.SplitModel, Shrink.Adapter, 1, :split, 2, 7, 22, 1},
     {Shrink.NoteModel, Shrink.Adapter, 1, :note, 1, 2, 16, 1},
     {Shrink.NoteModel, Shrink.Adapter, 1, :note, 2, 1, 21, 1},
-    {Till.Model, Till.Adapter, 14, :till, 1, 2, 34, 6},
-    {Till.Model, Till.Adapter, 14, :till, 2, 1, 35, 6},
-    {Stock.Model, Shrink.Adapter, 8, :stock, 1, 1, 24, 2},
-    {Stock.Model, Shrink.Adapter, 8, :stock, 2, 1, 26, 2}
+    {Till.Model, Till.Adapter, 14, :till, 1, 2, 29, 6},
+    {Till.Model, Till.Adapter, 14, :till, 2, 1, 31, 6},
+    {Stock.Model, Shrink.Adapter, 8, :stock, 1, 1, 22, 2},
+    {Stock.Model, Shrink.Adapter, 8, :stock, 2, 1, 24, 2}
   ]
 
   defp config(:amount), do: %{fails?: fn c, _ -> c.amount >= 37 end}

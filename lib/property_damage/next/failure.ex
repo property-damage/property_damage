@@ -15,6 +15,9 @@ defmodule PropertyDamage.Next.Failure do
   `shrink_dropped` counts the shrink candidates dropped without a run
   because the model raised while rebuilding their plan; they are not in
   `shrink_runs`.
+  `shrink_ended` is `:cap` when the shrink stopped because it reached
+  `max_shrink_runs`, so the plan may shrink further, `:done` when the
+  shrink found no smaller plan to try, and `nil` when nothing was shrunk.
   `original` holds the `plan`, `journal`, `step`, `reason` and `withdrawn`
   of the plan that failed first; without a shrink they equal the final
   ones.
@@ -32,6 +35,8 @@ defmodule PropertyDamage.Next.Failure do
   `kept` lists every site where PD's engine drew a dependent StreamData
   generator it cannot fit, across every plan the call built, shrink
   candidates included (see `PropertyDamage.Next.Plan`).
+
+  `format/1` renders a failure as text.
   """
 
   defstruct [
@@ -43,6 +48,7 @@ defmodule PropertyDamage.Next.Failure do
     :reason,
     :original,
     :report,
+    :shrink_ended,
     withdrawn: [],
     shrink_runs: 0,
     shrink_dropped: 0,
@@ -67,6 +73,7 @@ defmodule PropertyDamage.Next.Failure do
           reason: reason(),
           shrink_runs: non_neg_integer(),
           shrink_dropped: non_neg_integer(),
+          shrink_ended: :cap | :done | nil,
           kept: [PropertyDamage.Next.Engine.Dependent.site()],
           original: %{
             plan: PropertyDamage.Next.Plan.t(),
@@ -76,4 +83,29 @@ defmodule PropertyDamage.Next.Failure do
             withdrawn: [map()]
           }
         }
+
+  @doc """
+  Renders `failure` as text: the same lines for the same failure.
+
+  The first line names the failing step and the reason, then one line per
+  step of the final plan, its key and its command, then the shrink runs.
+  When the run budget ended the shrink, a last line says so and names the
+  option that sets the budget, `max_shrink_runs`. A failure with no plan
+  to blame renders its reason alone.
+  """
+  @spec format(t()) :: String.t()
+  def format(%__MODULE__{plan: nil} = failure), do: "Failed: #{inspect(failure.reason)}\n"
+
+  def format(%__MODULE__{} = failure) do
+    steps = Enum.map(failure.plan.steps, &"  #{inspect(&1.key)} #{inspect(&1.command)}")
+
+    (["Failed at step #{inspect(failure.step)}: #{inspect(failure.reason)}", "Steps"] ++
+       steps ++ ["Shrink runs: #{failure.shrink_runs}"] ++ notice(failure))
+    |> Enum.map_join(&(&1 <> "\n"))
+  end
+
+  defp notice(%__MODULE__{shrink_ended: :cap, shrink_runs: runs}),
+    do: ["Shrinking stopped at #{runs} runs (max_shrink_runs). The plan may shrink further."]
+
+  defp notice(_failure), do: []
 end

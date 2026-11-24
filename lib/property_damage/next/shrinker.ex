@@ -15,20 +15,38 @@ defmodule PropertyDamage.Next.Shrinker do
   #      later slots of its lane, and every lane slot after a prefix step;
   #   2. remove steps in blocks, halving the block size down to one step,
   #      by writing the empty pick `{:empty}` at each slot of the block;
-  #   3. lower each drawn value, later slots first and, within a slot, in
-  #      the reverse of the draw order, so a value drawn from another field
-  #      is lowered before the field it depends on. An integer tries its
-  #      range's lower bound first, then bisects between it and the stored
-  #      value. A member tries each lower index of its list, from 0. A
-  #      StreamData value extends its path in the shrink tree, trying the
-  #      node's children in order and descending into the first that fails;
-  #   4. only after a round in which passes 2 and 3 adopted nothing: lower
+  #   3. lower the drawn values, in three phases:
+  #      a. find the values that must keep their stored value. A value is an
+  #         integer entry above its range's first value, a member above
+  #         index 0, or one recorded position of a source entry above its
+  #         lower bound, in draw order; its minimum is that first value,
+  #         index 0 or that lower bound. The first candidate puts every
+  #         value at its minimum. If it does not fail the same way, a
+  #         bisection over the set of values (QuickXplain) finds a set to
+  #         keep such that the candidate with every other value at its
+  #         minimum fails the same way, and that candidate is adopted.
+  #         Every candidate of this phase is built from the journal held
+  #         when the phase starts. One that rebuilds the plan held fails
+  #         the same way and costs no run;
+  #      b. bisect each kept value between its minimum and its stored
+  #         value, later slots first and, within a slot, in the reverse of
+  #         the draw order, so a value drawn from another field is lowered
+  #         before the field it depends on;
+  #      c. extend the path of each StreamData value in its shrink tree,
+  #         later slots first, trying the node's children in order and
+  #         descending into the first that fails;
+  #   4. only after a round in which passes 2 and 3 adopted nothing: remove
+  #      each step together with the later steps whose command holds a
+  #      placeholder of it, a removal no single block can make when the
+  #      later steps would otherwise pick another step's value; the first
+  #      removal adopted starts the rounds again from pass 2;
+  #   5. only after a round in which passes 2 to 4 adopted nothing: lower
   #      pairs of values by the same amount, for a failure that needs two
   #      values to fall together, which no single edit can keep. A value is
   #      an integer entry or one recorded position of a source entry, above
   #      its lower bound; two positions of one source entry also form a
-  #      pair. A value whose single lowering in the round just ended rebuilt
-  #      only the plan already held is left out, such as a position of a
+  #      pair. A value whose bisection in pass 3b of the round just ended
+  #      rebuilt only the plan already held is left out, such as a position of a
   #      string's character that does not reach the string: a pair with it
   #      would in effect lower the other value alone. A pair tries
   #      the largest amount both can fall first, then bisects for the
@@ -41,7 +59,11 @@ defmodule PropertyDamage.Next.Shrinker do
   #
   # A stored integer that sat on a bound of its stored range and was kept
   # although that bound moved is tried at the new bound once, right after
-  # the candidate that kept it was not adopted.
+  # the candidate that kept it was not adopted. In pass 3a the retried plan
+  # answers for the set of kept values that made the first.
+  #
+  # Within one round a plan is executed at most once: a candidate whose
+  # rebuilt plan the round already executed takes that execution's answer.
   #
   # The final journal drops what the search kept: each withdrawn slot's
   # pick becomes `{:empty}` and its other entries go, so the journal holds
@@ -50,9 +72,11 @@ defmodule PropertyDamage.Next.Shrinker do
   #
   # Every execution after the plan that first failed counts as a shrink
   # run, the last one included, and there are at most `max_runs` of them.
+  # When the budget ends inside pass 3a, the failing candidate of the phase
+  # with the fewest kept values is adopted before the last execution.
 
   alias PropertyDamage.Next.Engine.StreamDataSource
-  alias PropertyDamage.Next.{Journal, Plan}
+  alias PropertyDamage.Next.{Journal, Placeholder, Plan}
 
   # The tag of an entry that records positions of a random source; its
   # positions are read and written only through the engine that writes it.
@@ -71,11 +95,24 @@ defmodule PropertyDamage.Next.Shrinker do
   @doc """
   Shrinks `best`. `build` rebuilds a plan from a journal and lists its draw
   keys in order; `execute` runs a plan and answers `:ok` or
-  `{:error, step, reason}`. Returns `{best, runs}`.
+  `{:error, step, reason}`. Returns `{best, runs}`; `search/4` also says
+  what ended the search.
   """
   @spec shrink(best(), (Journal.t() -> {Plan.t(), [term()]}), (Plan.t() -> term()), pos_integer()) ::
           {best(), non_neg_integer()}
   def shrink(best, build, execute, max_runs) do
+    {final, runs, _ended} = search(best, build, execute, max_runs)
+    {final, runs}
+  end
+
+  @doc """
+  As `shrink/4`, but returns `{best, runs, ended}`, where `ended` is `:cap`
+  when the run budget ended the search and `:done` when the passes ran out
+  of candidates to adopt.
+  """
+  @spec search(best(), (Journal.t() -> {Plan.t(), [term()]}), (Plan.t() -> term()), pos_integer()) ::
+          {best(), non_neg_integer(), :cap | :done}
+  def search(best, build, execute, max_runs) do
     state = %{
       best: best,
       build: build,
@@ -83,36 +120,74 @@ defmodule PropertyDamage.Next.Shrinker do
       runs: 0,
       limit: max_runs - 1,
       lowering: nil,
-      alone: %{}
+      alone: %{},
+      ran: %{},
+      kept_search: nil
     }
 
-    searched =
+    {searched, ended} =
       try do
-        state |> cut_after_failure() |> elem(1) |> rounds()
+        {state |> cut_after_failure() |> elem(1) |> rounds(), :done}
       catch
-        {__MODULE__, :spent, spent} -> spent
+        {__MODULE__, :spent, spent} -> {adopt_fewest_kept(spent), :cap}
       end
 
-    finish(searched)
+    {final, runs} = finish(searched)
+    {final, runs, ended}
   end
 
   # --- Passes
 
   defp rounds(state) do
-    {removed?, state} = remove_blocks(state)
-    {lowered?, state} = lower(%{state | alone: %{}})
+    {removed?, state} = remove_blocks(%{state | ran: %{}})
+    {fixed?, kept, state} = find_kept(%{state | alone: %{}})
+    {narrowed?, state} = narrow(state, kept)
+    {walked?, state} = walk_trees(state)
 
-    if removed? or lowered?, do: rounds(state), else: after_stable_round(state)
+    if removed? or fixed? or narrowed? or walked?,
+      do: rounds(state),
+      else: after_stable_round(state)
   end
 
-  # A round of single edits kept nothing: try pairs, and start the rounds
-  # again if one is kept.
+  # A round of single edits kept nothing: try removing steps with their
+  # dependents, then pairs, and start the rounds again if one is kept.
   defp after_stable_round(state) do
-    case lower_pairs(state) do
+    with {false, state} <- remove_dependents(state),
+         {false, state} <- lower_pairs(state) do
+      state
+    else
       {true, state} -> rounds(state)
-      {false, state} -> state
     end
   end
+
+  # Removes a step together with every later step whose command holds a
+  # placeholder of it. Block removal cannot make this edit when the steps
+  # lie apart: removing the step alone leaves its dependents to pick
+  # another step's value, and removing a dependent alone leaves the step.
+  defp remove_dependents(state) do
+    steps = state.best.plan.steps
+
+    candidates =
+      for {step, index} <- Enum.with_index(steps),
+          dependents =
+            for(
+              later <- Enum.drop(steps, index + 1),
+              holds?(later.command, step.key),
+              do: later.key
+            ),
+          dependents != [],
+          do: [step.key | dependents]
+
+    first_adopted(state, candidates, &emptied/2)
+  end
+
+  # Whether `term` holds a placeholder minted by the step at `key`.
+  defp holds?(%Placeholder{step: step}, key), do: step == key
+  defp holds?(%_{} = struct, key), do: struct |> Map.from_struct() |> holds?(key)
+  defp holds?(map, key) when is_map(map), do: Enum.any?(map, fn {_k, v} -> holds?(v, key) end)
+  defp holds?(list, key) when is_list(list), do: Enum.any?(list, &holds?(&1, key))
+  defp holds?(tuple, key) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> holds?(key)
+  defp holds?(_leaf, _key), do: false
 
   defp cut_after_failure(%{best: %{step: {_lane, _slot} = step, plan: plan}} = state) do
     later = run_after(step, plan.journal)
@@ -177,46 +252,294 @@ defmodule PropertyDamage.Next.Shrinker do
     end
   end
 
-  # Lowers each drawn value once per round. The list of keys is read again
-  # after every adoption, since a rebuild can add or drop keys.
-  defp lower(state, done \\ MapSet.new(), any? \\ false) do
+  # --- Pass 3a: the values that must keep their stored value
+
+  # Answers `{adopted?, kept values, state}`. QuickXplain over the values,
+  # with "set to its minimum" as the removal, finds a set to keep that no
+  # smaller part of keeps the failure; its first test is the candidate with
+  # every value at its minimum. Every candidate is built from the journal
+  # held when the phase starts and judged against the failure held then,
+  # under `kept_search`:
+  #
+  #   * `base` - the best failure when the phase started
+  #   * `values` - the values, in draw order
+  #   * `memo` - the answer for each set of kept values tried
+  #   * `runs` - the answer for each plan executed, by its steps and schedule
+  #   * `fewest` - the failing candidate with the fewest kept values so far
+  #
+  # When no candidate fails the same way, every value is kept, so pass 3b
+  # bisects each of them.
+  defp find_kept(state) do
+    case minimizable(state) do
+      [] ->
+        {false, [], state}
+
+      values ->
+        search = %{base: state.best, values: values, memo: %{}, runs: %{}, fewest: nil}
+        {kept, state} = quick_xplain(%{state | kept_search: search}, [], true, values)
+        {_fails?, state} = fails_kept?(state, kept)
+        %{memo: memo, fewest: fewest} = state.kept_search
+        state = %{state | kept_search: nil}
+
+        case {memo[MapSet.new(kept)], fewest} do
+          {{:failed, failure}, _fewest} -> {true, kept, %{state | best: failure}}
+          {:same, _fewest} -> {false, kept, state}
+          {_refused, nil} -> {false, values, state}
+          {_refused, {smaller, failure}} -> {true, smaller, %{state | best: failure}}
+        end
+    end
+  end
+
+  # When the run budget ends inside pass 3a, its failing candidate with the
+  # fewest kept values is adopted.
+  defp adopt_fewest_kept(%{kept_search: %{fewest: {_kept, failure}}} = state),
+    do: %{state | best: failure, kept_search: nil}
+
+  defp adopt_fewest_kept(state), do: state
+
+  # QuickXplain: `base` is kept in every candidate below this call, and the
+  # answer is the part of `candidates` that must be kept too. `test?` says
+  # whether the candidate keeping `base` alone is still to be tried.
+  defp quick_xplain(state, base, test?, candidates) do
+    {fails?, state} = if test?, do: fails_kept?(state, base), else: {false, state}
+
+    cond do
+      fails? ->
+        {[], state}
+
+      length(candidates) == 1 ->
+        {candidates, state}
+
+      true ->
+        {first, second} = Enum.split(candidates, div(length(candidates), 2))
+        {kept_second, state} = quick_xplain(state, base ++ first, first != [], second)
+        {kept_first, state} = quick_xplain(state, base ++ kept_second, kept_second != [], first)
+        {kept_first ++ kept_second, state}
+    end
+  end
+
+  # Whether the candidate that keeps `kept` and puts every other value at
+  # its minimum fails the same way. A candidate that rebuilds the plan held
+  # does, and costs no run.
+  defp fails_kept?(state, kept) do
+    set = MapSet.new(kept)
+
+    {result, state} =
+      case state.kept_search.memo[set] do
+        nil ->
+          {result, state} = judge_kept(state, set)
+          {result, put_search(state, :memo, set, result)}
+
+        result ->
+          {result, state}
+      end
+
+    {result == :same or match?({:failed, _}, result), state}
+  end
+
+  # Answers `{:failed, failure}`, `:same`, `:passed` (which includes a
+  # failure of another kind or at a later step) or `:refused` (the journal
+  # cannot be rebuilt).
+  defp judge_kept(%{kept_search: search} = state, set) do
+    lowered = Enum.reject(search.values, &MapSet.member?(set, &1))
+    entries = Enum.reduce(lowered, search.base.plan.journal.entries, &at_minimum(&2, &1))
+    journal = %{search.base.plan.journal | entries: entries}
+
+    case rebuild(state, journal) do
+      :error ->
+        {:refused, state}
+
+      {:ok, plan, drawn} ->
+        cond do
+          same_plan?(plan, search.base.plan) ->
+            {:same, state}
+
+          Map.has_key?(search.runs, plan_id(plan)) ->
+            {search.runs[plan_id(plan)], state}
+
+          true ->
+            {result, state} = executed_kept(state, plan, drawn)
+            {result, state} = retry_kept(state, journal, plan, result)
+            state = put_search(state, :runs, plan_id(plan), result)
+            {result, note_fewest(state, set, result)}
+        end
+    end
+  end
+
+  # A candidate of the phase that does not fail the same way, with a kept
+  # integer that sat on a bound of its stored range that moved, is tried
+  # once more with each such integer at its new bound, as `retry/4` does
+  # for a single edit.
+  defp retry_kept(state, journal, plan, :passed) do
+    moved = moved_integers(journal, plan)
+    retried = %{plan.journal | entries: Map.merge(plan.journal.entries, moved)}
+
+    with false <- moved == %{},
+         {:ok, again, drawn} <- rebuild(state, retried),
+         false <- same_plan?(again, state.kept_search.base.plan) do
+      case state.kept_search.runs[plan_id(again)] do
+        nil ->
+          {result, state} = executed_kept(state, again, drawn)
+          {result, put_search(state, :runs, plan_id(again), result)}
+
+        seen ->
+          {seen, state}
+      end
+    else
+      _no_retry -> {:passed, state}
+    end
+  end
+
+  defp retry_kept(state, _journal, _plan, result), do: {result, state}
+
+  defp executed_kept(state, plan, drawn) do
+    {result, state} = executed(state, plan)
+
+    case result do
+      {:error, step, reason} = failed ->
+        if same_way?(failed, state.kept_search.base),
+          do: {{:failed, %{plan: plan, drawn: drawn, step: step, reason: reason}}, state},
+          else: {:passed, state}
+
+      _passed ->
+        {:passed, state}
+    end
+  end
+
+  defp note_fewest(state, set, {:failed, failure}) do
+    kept = Enum.filter(state.kept_search.values, &MapSet.member?(set, &1))
+
+    case state.kept_search.fewest do
+      {held, _failure} when length(held) <= length(kept) -> state
+      _none_or_more -> %{state | kept_search: %{state.kept_search | fewest: {kept, failure}}}
+    end
+  end
+
+  defp note_fewest(state, _set, _result), do: state
+
+  defp put_search(%{kept_search: search} = state, field, key, value),
+    do: %{state | kept_search: Map.update!(search, field, &Map.put(&1, key, value))}
+
+  # The values of pass 3a, in draw order: each integer entry above its
+  # range's first value, each member above index 0, and each recorded
+  # position of a source entry above its lower bound. StreamData values
+  # are left to pass 3c.
+  defp minimizable(state) do
+    Enum.flat_map(state.best.drawn, fn key ->
+      case entries(state)[key] do
+        {:integer, value, range} when value > range.first ->
+          [{:entry, key}]
+
+        {:member, _value, index} when is_integer(index) and index > 0 ->
+          [{:member, key}]
+
+        {@source, _value, _positions} = entry ->
+          for {position, {value, lo, _hi}} <- StreamDataSource.positions(entry),
+              value > lo,
+              do: {:position, key, position}
+
+        _other ->
+          []
+      end
+    end)
+  end
+
+  defp at_minimum(entries, {:entry, key}) do
+    {:integer, _value, range} = entries[key]
+    Map.put(entries, key, {:integer, range.first, range})
+  end
+
+  defp at_minimum(entries, {:member, key}), do: Map.put(entries, key, {:member, @no_member, 0})
+
+  defp at_minimum(entries, {:position, key, position}) do
+    entry = entries[key]
+    {^position, {_value, lo, _hi}} = List.keyfind(StreamDataSource.positions(entry), position, 0)
+    Map.put(entries, key, StreamDataSource.put_position(entry, position, lo))
+  end
+
+  # --- Pass 3b: bisect each kept value
+
+  # Each kept value, later slots first and in the reverse of the draw order,
+  # bisects between its minimum, which pass 3a tried, and its stored value.
+  # Each value is read again first, since an adoption can drop it.
+  defp narrow(state, kept) do
+    kept
+    |> Enum.reverse()
+    |> Enum.reduce({false, state}, fn value, {any?, state} ->
+      {lowered?, state} = narrow_value(state, value)
+      {any? or lowered?, state}
+    end)
+  end
+
+  defp narrow_value(state, {:entry, key} = value) do
+    case entries(state)[key] do
+      {:integer, stored, range} when stored > range.first ->
+        alone(state, value, &bisect(&1, key, range.first, stored, false))
+
+      _other ->
+        {false, state}
+    end
+  end
+
+  defp narrow_value(state, {:member, key}) do
+    case entries(state)[key] do
+      {:member, _value, index} when is_integer(index) and index > 0 ->
+        bisect_member(state, key, 0, index, false)
+
+      _other ->
+        {false, state}
+    end
+  end
+
+  defp narrow_value(state, {:position, key, position} = value) do
+    case position_at(state, key, position) do
+      {stored, lo, _hi} when stored > lo ->
+        alone(state, value, &bisect_position(&1, key, position, lo, stored, false))
+
+      _absent_or_lowest ->
+        {false, state}
+    end
+  end
+
+  defp bisect_member(state, _key, passing, failing, any?) when failing - passing <= 1,
+    do: {any?, state}
+
+  defp bisect_member(state, key, passing, failing, any?) do
+    middle = div(passing + failing, 2)
+
+    case entries(state)[key] do
+      {:member, _value, index} when is_integer(index) ->
+        case state |> edited(key, {:member, @no_member, middle}) |> attempt(state) do
+          {true, state} -> bisect_member(state, key, passing, middle, true)
+          {false, state} -> bisect_member(state, key, middle, failing, any?)
+        end
+
+      _changed ->
+        {any?, state}
+    end
+  end
+
+  # --- Pass 3c: StreamData values
+
+  # Each StreamData value walks its shrink tree, later slots first. The list
+  # of keys is read again after every adoption, since a rebuild can add or
+  # drop keys.
+  defp walk_trees(state, done \\ MapSet.new(), any? \\ false) do
     case state.best.drawn |> Enum.reverse() |> Enum.find(&(not MapSet.member?(done, &1))) do
       nil ->
         {any?, state}
 
       key ->
-        {lowered?, state} = lower_key(state, key)
-        lower(state, MapSet.put(done, key), any? or lowered?)
-    end
-  end
+        {walked?, state} =
+          case entries(state)[key] do
+            {:stream_data, value, path} when is_list(path) ->
+              descend(state, key, value, path, 0, false)
 
-  defp lower_key(state, key) do
-    case entries(state)[key] do
-      {:integer, value, range} when value > range.first ->
-        alone(state, {:entry, key}, fn state ->
-          case state |> edited(key, {:integer, range.first, range}) |> attempt(state) do
-            {true, state} -> {true, state}
-            {false, state} -> bisect(state, key, range.first, value, false)
+            _other ->
+              {false, state}
           end
-        end)
 
-      {:member, _value, index} when is_integer(index) and index > 0 ->
-        first_adopted(state, 0..(index - 1)//1, &edited(&1, key, {:member, @no_member, &2}))
-
-      {:stream_data, value, path} when is_list(path) ->
-        descend(state, key, value, path, 0, false)
-
-      {@source, _value, _positions} = entry ->
-        entry
-        |> StreamDataSource.positions()
-        |> Enum.reverse()
-        |> Enum.reduce({false, state}, fn {position, _drawn}, {any?, state} ->
-          {lowered?, state} = lower_position(state, key, position)
-          {any? or lowered?, state}
-        end)
-
-      _other ->
-        {false, state}
+        walk_trees(state, MapSet.put(done, key), any? or walked?)
     end
   end
 
@@ -235,25 +558,6 @@ defmodule PropertyDamage.Next.Shrinker do
       end
     else
       _changed -> {any?, state}
-    end
-  end
-
-  # Lowers one recorded position of a source entry: its lower bound first,
-  # then bisection between it and the stored value. The position is read
-  # again before each candidate, since an adoption can drop it or move its
-  # bounds.
-  defp lower_position(state, key, position) do
-    case position_at(state, key, position) do
-      {value, lo, _hi} when value > lo ->
-        alone(state, {:position, key, position}, fn state ->
-          case state |> edited_position(key, position, lo) |> attempt(state) do
-            {true, state} -> {true, state}
-            {false, state} -> bisect_position(state, key, position, lo, value, false)
-          end
-        end)
-
-      _absent_or_lowest ->
-        {false, state}
     end
   end
 
@@ -506,9 +810,9 @@ defmodule PropertyDamage.Next.Shrinker do
   end
 
   defp judge(state, journal, plan, drawn, retry?) do
-    state = spend(state)
+    {result, state} = executed(state, plan)
 
-    case state.execute.(plan) do
+    case result do
       {:error, step, reason} = failed ->
         if same_way?(failed, state.best),
           do: {true, %{state | best: %{plan: plan, drawn: drawn, step: step, reason: reason}}},
@@ -524,13 +828,7 @@ defmodule PropertyDamage.Next.Shrinker do
   defp retry(state, _journal, _plan, false), do: {false, state}
 
   defp retry(state, journal, plan, true) do
-    moved =
-      for {key, {:integer, value, range}} <- plan.journal.entries,
-          {:integer, ^value, stored} <- [journal.entries[key]],
-          bound = moved_bound(value, stored, range),
-          bound != nil,
-          into: %{},
-          do: {key, {:integer, bound, range}}
+    moved = moved_integers(journal, plan)
 
     if moved == %{} do
       {false, state}
@@ -545,6 +843,34 @@ defmodule PropertyDamage.Next.Shrinker do
       end
     end
   end
+
+  # Each integer of `plan` that `journal` stored on a bound of its stored
+  # range and that the rebuild kept although that bound moved, at the new
+  # bound.
+  defp moved_integers(journal, plan) do
+    for {key, {:integer, value, range}} <- plan.journal.entries,
+        {:integer, ^value, stored} <- [journal.entries[key]],
+        bound = moved_bound(value, stored, range),
+        bound != nil,
+        into: %{},
+        do: {key, {:integer, bound, range}}
+  end
+
+  # The execution of `plan`: the one the round already made of the same
+  # plan, or a new one, which spends a run.
+  defp executed(state, plan) do
+    case Map.fetch(state.ran, plan_id(plan)) do
+      {:ok, result} ->
+        {result, state}
+
+      :error ->
+        state = spend(state)
+        result = state.execute.(plan)
+        {result, %{state | ran: Map.put(state.ran, plan_id(plan), result)}}
+    end
+  end
+
+  defp plan_id(plan), do: {plan.steps, plan.schedule}
 
   # A plan is the test case already held when its steps and its schedule
   # are those of `best`.

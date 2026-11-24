@@ -64,6 +64,24 @@ defmodule PropertyDamage.Next.Test.Shrink.Split do
     do: %{cut: integer(1..100), rest: from(:cut, fn cut -> integer(1..(101 - cut)) end)}
 end
 
+defmodule PropertyDamage.Next.Test.Shrink.Five do
+  @moduledoc false
+  # Five independent integers, for a failure that needs only some of them.
+  use PropertyDamage.Next.Command
+
+  defstruct [:a, :b, :c, :d, :e]
+
+  def generator(_state, _opts) do
+    %{
+      a: integer(1..100),
+      b: integer(1..100),
+      c: integer(1..100),
+      d: integer(1..100),
+      e: integer(1..100)
+    }
+  end
+end
+
 defmodule PropertyDamage.Next.Test.Shrink.Note do
   @moduledoc false
   # A value drawn by StreamData.
@@ -310,3 +328,4 @@ alias PropertyDamage.Next.Test.Shrink
 F.Models.defmodel(Shrink.AmountModel, [Shrink.Amount])
 F.Models.defmodel(Shrink.SplitModel, [Shrink.Split])
 F.Models.defmodel(Shrink.NoteModel, [Shrink.Note])
+F.Models.defmodel(Shrink.FiveModel, [Shrink.Five])
