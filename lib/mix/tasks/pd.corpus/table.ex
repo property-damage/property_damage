@@ -9,6 +9,10 @@ defmodule PropertyDamage.Corpus.Table do
       seeds that found it (`nil` when none did).
     * `:shrink_runs` - mean shrink runs, over the same seeds.
     * `:reached_minimum` - seeds whose shrunk plan equals the entry's minimum.
+    * `:reached_minimum_at` - per shrink budget of
+      `PropertyDamage.Corpus.Measure.budgets/0`, the seeds whose run under
+      that budget shrank to the minimum; `nil` when the rows record no
+      budgets.
 
   A result may carry `skipped: reason` (an entry that was not run; it has no
   rows, is shown as `skipped: <reason>` and is ignored when judging soundness)
@@ -17,6 +21,9 @@ defmodule PropertyDamage.Corpus.Table do
   long as it is clean and has no unexplained failure) or `guardrail: true`
   (also shown with `-`; it is sound only when every seed found its line and
   the control run was clean).
+
+  When any result's rows record budgets, the table prints one more column
+  per budget, `reached at 16` and so on, with `-` for a result without them.
 
   A result may also carry `engine: name`, the corpus engine it ran on. When
   one does, the tables print an engine column, and a result is matched
@@ -44,6 +51,7 @@ defmodule PropertyDamage.Corpus.Table do
           found_after: float() | nil,
           shrink_runs: float() | nil,
           reached_minimum: non_neg_integer(),
+          reached_minimum_at: %{Measure.budget() => non_neg_integer()} | nil,
           unexplained: non_neg_integer(),
           dirty_off: non_neg_integer()
         }
@@ -61,10 +69,19 @@ defmodule PropertyDamage.Corpus.Table do
       found_after: mean(found, & &1.plans_until_found),
       shrink_runs: mean(found, & &1.shrink_runs),
       reached_minimum: Enum.count(rows, & &1.reached_minimum?),
+      reached_minimum_at: reached_at(rows),
       unexplained: Enum.count(rows, & &1.unexplained?),
       dirty_off: Enum.count(rows, &(not &1.clean?))
     }
   end
+
+  defp reached_at([%{reached_minimum_at: _} | _] = rows) do
+    Map.new(Measure.budgets(), fn budget ->
+      {budget, Enum.count(rows, &Map.fetch!(&1.reached_minimum_at, budget))}
+    end)
+  end
+
+  defp reached_at(_rows), do: nil
 
   @doc """
   Whether every row is a sound measurement: found, explained, and clean with the
@@ -142,17 +159,32 @@ defmodule PropertyDamage.Corpus.Table do
   defp headers(headers, false), do: headers
   defp headers(headers, true), do: List.insert_at(headers, 1, "engine")
 
+  defp budgets?(results),
+    do: Enum.any?(results, &match?(%{rows: [%{reached_minimum_at: _} | _]}, &1))
+
+  defp budget_headers(false), do: []
+  defp budget_headers(true), do: Enum.map(Measure.budgets(), &"reached at #{&1}")
+
+  defp budget_cells(_summary, false), do: []
+
+  defp budget_cells(%{reached_minimum_at: nil}, true),
+    do: Enum.map(Measure.budgets(), fn _ -> "-" end)
+
+  defp budget_cells(%{reached_minimum_at: counts, seeds: seeds}, true),
+    do: Enum.map(Measure.budgets(), &"#{Map.fetch!(counts, &1)}/#{seeds}")
+
   @doc "Renders one summary line per entry, plus a line for each kind of problem."
   @spec render([result()]) :: String.t()
   def render(results) do
     run = Enum.reject(results, &Map.has_key?(&1, :skipped))
     summaries = Enum.map(run, &{label(&1), summarize(&1.rows)})
     engines? = engines?(results)
+    budgets? = budgets?(results)
 
     lines =
       Enum.map(results, fn
         %{skipped: reason} = result ->
-          head(result, engines?) ++ ["skipped: #{reason}", "", "", ""]
+          head(result, engines?) ++ ["skipped: #{reason}", "", "", ""] ++ blank(budgets?)
 
         %{rows: rows} = result ->
           s = summarize(rows)
@@ -163,10 +195,11 @@ defmodule PropertyDamage.Corpus.Table do
               plans(s.found_after),
               number(s.shrink_runs),
               reached(result, s)
-            ]
+            ] ++ budget_cells(s, budgets?)
       end)
 
-    [align([headers(@headers, engines?) | lines]) | problems(summaries)] |> Enum.join("\n")
+    headers = headers(@headers, engines?) ++ budget_headers(budgets?)
+    [align([headers | lines]) | problems(summaries)] |> Enum.join("\n")
   end
 
   @doc """
@@ -228,6 +261,8 @@ defmodule PropertyDamage.Corpus.Table do
       :error -> ["#{label(result)}: not in the baseline"]
     end
   end
+
+  defp blank(budgets?), do: Enum.map(budget_headers(budgets?), fn _ -> "" end)
 
   defp reached(%{regression: true}, _summary), do: "-"
   defp reached(_result, s), do: "#{s.reached_minimum}/#{s.seeds}"

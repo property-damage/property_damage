@@ -55,7 +55,15 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   def name, do: "property_damage_next"
 
   @impl true
-  def run(%Entry{} = entry, seed, plan_cap) do
+  def run(%Entry{} = entry, seed, plan_cap), do: run(entry, seed, plan_cap, :harness)
+
+  @doc """
+  Runs `entry` like `run/3`, with the shrink executing at most `budget`
+  plans. With `:default` the run passes no `max_shrink_runs`, so
+  `PropertyDamage.Next.run/1` applies its own default.
+  """
+  @impl true
+  def run(%Entry{} = entry, seed, plan_cap, budget) do
     {:ok, log} = FireLog.start_link()
     level = Logger.get_process_level(self())
     # The run warns once for each kept site, with a timestamp. The result
@@ -65,7 +73,7 @@ defmodule PropertyDamage.Corpus.Engine.Next do
     Logger.put_process_level(self(), :error)
 
     try do
-      opts = opts(entry, seed, plan_cap, log)
+      opts = opts(entry, seed, plan_cap, log, budget)
       outcome = Next.run(opts)
 
       if entry.expect,
@@ -94,7 +102,7 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   defp restore_level(nil), do: Logger.delete_process_level(self())
   defp restore_level(level), do: Logger.put_process_level(self(), level)
 
-  defp opts(entry, seed, plan_cap, log) do
+  defp opts(entry, seed, plan_cap, log, budget) do
     {model, adapter} = model_and_adapter(entry)
 
     [
@@ -103,11 +111,19 @@ defmodule PropertyDamage.Corpus.Engine.Next do
       config: %{bug: entry.bug, fire_log: log},
       seed: seed,
       max_steps: entry.max_commands,
-      max_plans: plan_cap,
-      max_shrink_runs: @max_shrink_runs
+      max_plans: plan_cap
     ]
     |> Keyword.merge(entry.run_opts)
+    |> shrink_budget(budget)
   end
+
+  # The harness's budget yields to one the entry's `run_opts` sets; a budget
+  # the caller names replaces both.
+  defp shrink_budget(opts, :harness),
+    do: Keyword.put_new(opts, :max_shrink_runs, @max_shrink_runs)
+
+  defp shrink_budget(opts, :default), do: Keyword.delete(opts, :max_shrink_runs)
+  defp shrink_budget(opts, runs), do: Keyword.put(opts, :max_shrink_runs, runs)
 
   # With the bug off, an entry that names a `control` runs the control's
   # model and adapter, a corrected pair of the ones the bug-on run uses.

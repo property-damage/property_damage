@@ -38,12 +38,28 @@ defmodule Mix.Tasks.Pd.Corpus do
   A `found` column counts the seeds that found the bug within the plan cap.
   A seed that does not find it is counted there, never left out.
 
+  ## Shrink budget columns
+
+  The columns above use the harness's own shrink budget, large enough that
+  the budget rarely ends a shrink. A smaller budget can leave the shrunk
+  plan short of the minimum, so for an entry with a minimum whose engine has
+  a shrink budget (the engines of `PropertyDamage.Next`), the table gains
+  one column per budget: `reached at 16`, `reached at 32` and `reached at
+  default`. Each counts the seeds whose shrunk plan equals the entry's
+  minimum when the shrink may execute at most that many plans; `default` is
+  the budget `PropertyDamage.Next.run/1` applies when the run names none.
+  Every budget is a bug-on run of its own on the same seed and plan cap,
+  so a cell says exactly what a run with that `max_shrink_runs` gives. Other
+  entries show `-`. A saved table records the flags per seed under
+  `:reached_minimum_at`. See `PropertyDamage.Corpus.Measure`.
+
   ## Usage
 
       mix pd.corpus
       mix pd.corpus --only lost_full_refund --cap 100
       mix pd.corpus --save tmp/table.exs
       mix pd.corpus --baseline tmp/table.exs
+      MIX_ENV=test mix pd.corpus --dir corpus/next --both-engines --gate corpus/next/baseline_next.exs
       MIX_ENV=test mix pd.corpus --dir corpus/next --both-engines
 
   ## Options
@@ -58,6 +74,9 @@ defmodule Mix.Tasks.Pd.Corpus do
                         engine, the plan cap and the raw per-seed numbers.
       --baseline PATH   After the table, print the change against the table
                         saved at PATH.
+      --gate PATH       After the table, judge the run against the table saved
+                        at PATH and fail only on a regression. See "The gate"
+                        below. Not combined with `--baseline`.
       --both-engines    Also run every entry of `PropertyDamage.Corpus.Engine.Next`
                         on `PropertyDamage.Corpus.Engine.NextSource`, the
                         StreamData source engine. See "Two engines" below.
@@ -88,11 +107,46 @@ defmodule Mix.Tasks.Pd.Corpus do
   two cases that involve a failure), when a seed row of an entry that ran
   differs from the saved table, or when an entry that ran is not in the saved
   table. The reason is printed on stderr. `--save` still writes the table.
+
+  ## The gate
+
+  `--baseline` fails on any change, so it suits a table that must not move.
+  `--gate` fails only when a change is for the worse, so CI can hold the
+  corpus to a saved table without failing a change that improves it. The
+  saved table `corpus/next/baseline_next.exs` holds `corpus/next` on both
+  engines, and CI runs:
+
+      MIX_ENV=test mix pd.corpus --dir corpus/next --both-engines --gate corpus/next/baseline_next.exs
+
+  The run fails, naming the entry, engine and seed with the old and the new
+  value on stderr, when against the saved table:
+
+    * a seed's shrink runs rise;
+    * a seed no longer reaches the entry's smallest plan, under the
+      harness's budget or under one of the shrink budget columns;
+    * a seed no longer finds the bug;
+    * a run is not clean (a failure without the seeded bug firing, or a
+      failure or a fire with the bug off);
+    * the entries, engines, seeds or plan cap differ from the table.
+
+  A seed that finds nothing is a measured result, as with `--baseline`. A
+  change for the better (fewer shrink runs, a seed that now finds the bug or
+  reaches a smallest plan) and a change in plans until found are listed and
+  do not fail; the task then says the table is out of date and prints the
+  command that saves it again. A table saved before the shrink budget
+  columns existed is refused with the same advice. See
+  `PropertyDamage.Corpus.Gate`.
+
+  When a change raises shrink runs or loses a smallest plan on purpose, save
+  the table again in the same change and say in the change why the numbers
+  moved:
+
+      MIX_ENV=test mix pd.corpus --dir corpus/next --both-engines --save corpus/next/baseline_next.exs
   """
 
   use Mix.Task
 
-  alias PropertyDamage.Corpus.{Baseline, Engine, Loader, Measure, Table}
+  alias PropertyDamage.Corpus.{Baseline, Engine, Gate, Loader, Measure, Table}
 
   @shortdoc "Measure finding and shrinking of seeded bugs"
 
@@ -115,6 +169,7 @@ defmodule Mix.Tasks.Pd.Corpus do
           cap: :integer,
           save: :string,
           baseline: :string,
+          gate: :string,
           both_engines: :boolean
         ]
       )
@@ -133,18 +188,26 @@ defmodule Mix.Tasks.Pd.Corpus do
     dir = Keyword.get(opts, :dir, "corpus")
     both? = Keyword.get(opts, :both_engines, false)
 
-    with :ok <- check_engines(both?, args),
-         {:ok, baseline} <- load_baseline(opts[:baseline]),
+    with :ok <- one_comparison(opts),
+         :ok <- check_engines(both?, args),
+         {:ok, baseline} <- load_baseline(opts[:baseline] || opts[:gate]),
          {:ok, entries} <- Loader.load(dir, Keyword.get_values(opts, :only)) do
       entries = if both?, do: Enum.flat_map(entries, &on_both_engines/1), else: entries
       results = Enum.map(entries, &result(&1, cap))
       results = if both?, do: Enum.zip_with(entries, results, &put_engine/2), else: results
-      report(results, entries, cap, baseline, opts[:save], both?)
+      compare = if opts[:gate], do: {:gate, baseline, args}, else: baseline
+      report(results, entries, cap, compare, opts[:save], both?)
     else
       {:error, message} ->
         Mix.shell().error(message)
         :error
     end
+  end
+
+  defp one_comparison(opts) do
+    if opts[:baseline] && opts[:gate],
+      do: {:error, "--baseline and --gate each compare against a saved table; pass one of them"},
+      else: :ok
   end
 
   defp check_engines(false, _args), do: :ok
@@ -202,18 +265,30 @@ defmodule Mix.Tasks.Pd.Corpus do
     print_kept(results, both?)
     print_lines(results)
     results = Enum.map(results, &Map.drop(&1, [:kept, :line]))
-    if baseline, do: print_diff(baseline, results, cap)
+    if is_map(baseline), do: print_diff(baseline, results, cap)
     saved? = is_nil(save_path) or save(save_path, Baseline.build(results, engines, cap, seeds))
 
-    if verdict(results, baseline) and saved?, do: :ok, else: :error
+    if verdict(results, baseline, cap) and saved?, do: :ok, else: :error
   end
 
   # With a baseline, the run passes when it is clean and equal to the saved
   # table; seeds that find nothing are then measured, not errors. Without one,
   # the run must also find the bug on every seed.
-  defp verdict(results, nil), do: Table.sound?(results)
+  defp verdict(results, nil, _cap), do: Table.sound?(results)
 
-  defp verdict(results, baseline) do
+  defp verdict(results, {:gate, table, args}, cap) do
+    case Gate.judge(table, results, cap) do
+      {:ok, %{regressions: regressions, changes: changes}} ->
+        print_gate(regressions, changes, args)
+        regressions == []
+
+      {:error, message} ->
+        Mix.shell().error("gate: " <> message)
+        false
+    end
+  end
+
+  defp verdict(results, baseline, _cap) do
     case Table.judge_against(baseline.results, results) do
       :ok ->
         true
@@ -223,6 +298,35 @@ defmodule Mix.Tasks.Pd.Corpus do
         false
     end
   end
+
+  defp print_gate(regressions, changes, args) do
+    Enum.each(regressions, &Mix.shell().error("gate: regression: " <> &1))
+
+    if changes != [] do
+      env = if "--both-engines" in args, do: "MIX_ENV=test ", else: ""
+      save = args |> gate_to_save() |> Enum.join(" ")
+
+      Mix.shell().info(
+        Enum.join(
+          ["\nchanges against the saved table that do not fail the gate:"] ++
+            Enum.map(changes, &("  " <> &1)) ++
+            ["The saved table is out of date. Save it again with `#{env}mix pd.corpus #{save}`."],
+          "\n"
+        )
+      )
+    end
+
+    verdict =
+      if regressions == [], do: "passed", else: "failed: #{length(regressions)} regression(s)"
+
+    Mix.shell().info("\ngate #{verdict}")
+  end
+
+  # The arguments of this run with `--gate PATH` turned into `--save PATH`.
+  defp gate_to_save(["--gate", path | rest]), do: ["--save", path | gate_to_save(rest)]
+  defp gate_to_save(["--gate=" <> path | rest]), do: ["--save", path | gate_to_save(rest)]
+  defp gate_to_save([arg | rest]), do: [arg | gate_to_save(rest)]
+  defp gate_to_save([]), do: []
 
   defp print_kept(results, false) do
     lines =
