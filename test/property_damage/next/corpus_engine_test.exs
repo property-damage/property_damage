@@ -75,7 +75,8 @@ defmodule PropertyDamage.Next.CorpusEngineTest do
             config: %{bug: entry.bug, fire_log: log},
             seed: seed,
             max_steps: entry.max_commands,
-            max_plans: @plan_cap
+            max_plans: @plan_cap,
+            max_shrink_runs: 1_000
           )
         after
           FireLog.stop(log)
