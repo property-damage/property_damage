@@ -47,4 +47,22 @@ defmodule PropertyDamage.Corpus.Engine do
 
   @doc "Runs `entry` on `seed`, generating at most `plan_cap` plans."
   @callback run(Entry.t(), seed :: integer(), plan_cap :: pos_integer()) :: result()
+
+  @doc """
+  Runs `entry` on `seed` as `c:run/3` does, except that the shrink executes
+  at most `budget` plans, or as many as the testing library allows by
+  default when `budget` is `:default`.
+
+  The harness measures the smallest-plan columns under each shrink budget
+  through this callback. An engine without a shrink budget leaves it out,
+  and its rows then have no such columns.
+  """
+  @callback run(
+              Entry.t(),
+              seed :: integer(),
+              plan_cap :: pos_integer(),
+              budget :: pos_integer() | :default
+            ) :: result()
+
+  @optional_callbacks run: 4
 end

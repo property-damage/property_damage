@@ -30,9 +30,17 @@ defmodule PropertyDamage.Corpus.Engine.NextSource do
 
   @impl true
   def run(%Entry{} = entry, seed, plan_cap) do
-    run_opts = Keyword.put(entry.run_opts, :engine, StreamDataSource)
-    Engine.Next.run(%{entry | run_opts: run_opts}, seed, plan_cap)
+    Engine.Next.run(on_source(entry), seed, plan_cap)
   end
+
+  @doc "Runs `entry` like `run/3`, with the shrink budget of `Engine.Next.run/4`."
+  @impl true
+  def run(%Entry{} = entry, seed, plan_cap, budget) do
+    Engine.Next.run(on_source(entry), seed, plan_cap, budget)
+  end
+
+  defp on_source(entry),
+    do: %{entry | run_opts: Keyword.put(entry.run_opts, :engine, StreamDataSource)}
 
   @doc "The module that loads the patched StreamData, the default of `check_stream_data/2`."
   @spec loader() :: module()
