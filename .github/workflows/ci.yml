@@ -155,6 +155,41 @@ jobs:
           path: test/browser/playwright-report/
           retention-days: 7
 
+  # Holds the corpus of the PropertyDamage.Next engines to its saved table:
+  # the job fails when a seed's shrink runs rise, a seed stops finding its
+  # bug, or a seed stops reaching the smallest plan, under the harness's
+  # budget or a small shrink budget. A change that raises the numbers on
+  # purpose saves the table again (see `mix help pd.corpus`).
+  corpus:
+    name: Corpus shrink gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          # The verified toolchain pair (.tool-versions / lint entry above).
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: mix-1.20-27-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-1.20-27-
+
+      - run: mix deps.get
+
+      # The source engine's rows need the patched StreamData, which only the
+      # test environment loads.
+      - name: Gate the corpus against its saved table
+        env:
+          MIX_ENV: test
+        run: mix pd.corpus --dir corpus/next --both-engines --gate corpus/next/baseline_next.exs
+
   package:
     name: Hex package contents
     runs-on: ubuntu-24.04
