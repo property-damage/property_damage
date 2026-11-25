@@ -487,3 +487,90 @@ model that states paths can fail with (DR-073).
 
 4. **Model loading.** `@compare` is still refused at load, except
    `@compare every: 1` on a model that exports `expansions/0`.
+
+## Amendment (2026-11-24): values fall all at once, then by bisection; a default of 100 shrink runs
+
+The single-lowering pass becomes three phases, a new move removes a step
+with its dependents, and `max_shrink_runs` defaults to 100 with a field and
+a printed line that say when the budget ended the search.
+
+1. **Why.** Single lowering spends at least one run per value, later slots
+   first, before it learns which values the failure needs. Under a small
+   budget it often stops with most values still at their stored value. A
+   failure usually needs few of its values, and one candidate that puts
+   every value at its minimum tells the shrinker so in one run.
+
+2. **The phases of pass 3.** After block removal, each round:
+   1. One candidate puts every value at its minimum. A value is an integer
+      entry above its range's first value (minimum: that first value), a
+      member above index 0 (minimum: index 0), or one recorded position of
+      an `Engine.StreamDataSource` source entry above its lower bound
+      (minimum: that bound). If the candidate does not fail the same way,
+      a bisection over the set of values (QuickXplain) finds a set to keep
+      such that the candidate with every other value at its minimum fails
+      the same way, and that candidate is adopted. Every candidate of the
+      phase is built from the journal held when the phase starts. One that
+      rebuilds the plan held counts as failing and costs no run. A
+      candidate that does not fail the same way gets the moved-bound retry
+      of decision 4, and the retried plan answers for its set.
+   2. Each kept value bisects between its minimum and its stored value,
+      later slots first and, within a slot, in the reverse of the draw
+      order.
+   3. Each StreamData value walks its shrink tree as before.
+
+   When no candidate of the first phase fails the same way, every value is
+   kept, so the second phase bisects all of them.
+
+3. **Removing a step with its dependents.** After a round that adopted
+   nothing, and before the pass of pairs, the shrinker tries removing each
+   step together with every later step whose command holds a placeholder
+   of it. Block removal cannot make this edit when the steps lie apart:
+   removing the step alone can leave a dependent to pick another step's
+   value, and removing a dependent alone leaves the step. The first removal
+   adopted starts the rounds again. The pass of pairs reads the notes of
+   the second phase.
+
+4. **No repeated execution in a round.** Within one round a plan, by its
+   steps and schedule, is executed at most once; a later candidate that
+   rebuilds it takes the earlier answer. Execution is deterministic, and a
+   candidate that did not fail the same way cannot start to, since the
+   best failure only moves to the same step or an earlier one.
+
+5. **The budget.** Every execution still counts against `max_shrink_runs`.
+   When the budget ends inside the first phase, its failing candidate with
+   the fewest kept values is adopted before the final execution.
+
+6. **Default and notice.** `max_shrink_runs` defaults to 100, down from
+   1000. The failure's `shrink_ended` is `:cap` when the budget ended the
+   search, `:done` when no candidate was left, and `nil` when nothing was
+   shrunk. `PropertyDamage.Next.Failure.format/1` then prints "Shrinking
+   stopped at N runs (max_shrink_runs). The plan may shrink further." The
+   corpus engine passes its own budget of 1000, so its tables do not move
+   with the default.
+
+7. **Measured effect.** On the next corpus, both engines, seeds 1 to 20,
+   plan cap 200, run twice with identical rows. Smallest plans reached on
+   the seven entries that have one, of 140 per engine:
+
+   | shrink budget | native, before | native, after | second engine, before | second engine, after |
+   |---|---|---|---|---|
+   | 16 | 46 | 88 | 55 | 85 |
+   | 32 | 86 | 106 | 93 | 113 |
+   | 64 | 93 | 113 | 96 | 118 |
+   | 100 | 93 | 113 | 112 | 119 |
+   | 1000 | 113 | 113 | 118 | 119 |
+
+   No entry changed its found count. Mean shrink runs at a budget of 1000
+   fell on every entry but one; `long_note` on the second engine fell from
+   103.5 to 28.9, and `double_credit` on the second engine rose from 12.8
+   to 13.3.
+
+**Known costs and limits.**
+
+- Against the order it replaces, one seed loses the smallest plan at a
+  budget of 16, while 79 gain it; at larger budgets no seed loses it. No
+  entry row falls.
+- QuickXplain finds a set that no smaller part of keeps the failure, not
+  the smallest such set.
+- The dependents move removes direct dependents only; a dependent of a
+  dependent stays unless block removal takes it.

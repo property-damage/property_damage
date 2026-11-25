@@ -156,26 +156,26 @@ defmodule PropertyDamage.Next.LanesCompatTest do
       Native => [
         {:amount, 1, 1, 20, {0, 1}, @amount},
         {:amount, 2, 1, 19, {0, 1}, @amount},
-        {:split, 1, 11, 16, {0, 1}, @split},
-        {:split, 2, 7, 18, {0, 1}, @split},
+        {:split, 1, 11, 22, {0, 1}, @split},
+        {:split, 2, 7, 22, {0, 1}, @split},
         {:note, 1, 2, 16, {0, 1}, @note},
         {:note, 2, 1, 21, {0, 1}, @note},
-        {:till, 1, 2, 34, {0, 14}, @till_1},
-        {:till, 2, 1, 35, {0, 13}, @till_2},
-        {:stock, 1, 1, 24, {0, 2}, @stock},
-        {:stock, 2, 1, 26, {0, 2}, @stock}
+        {:till, 1, 2, 29, {0, 14}, @till_1},
+        {:till, 2, 1, 31, {0, 13}, @till_2},
+        {:stock, 1, 1, 22, {0, 2}, @stock},
+        {:stock, 2, 1, 24, {0, 2}, @stock}
       ],
       StreamDataSource => [
         {:amount, 1, 1, 20, {0, 1}, @amount},
         {:amount, 2, 1, 20, {0, 1}, @amount},
-        {:split, 1, 3, 15, {0, 1}, @split},
-        {:split, 2, 1, 16, {0, 1}, @split},
-        {:note, 1, 1, 14, {0, 1}, @note},
-        {:note, 2, 1, 24, {0, 1}, @note},
-        {:till, 1, 2, 34, {0, 14}, @till_1},
-        {:till, 2, 1, 35, {0, 13}, @till_2},
-        {:stock, 1, 1, 31, {0, 2}, @stock},
-        {:stock, 2, 1, 32, {0, 2}, @stock}
+        {:split, 1, 3, 21, {0, 1}, @split},
+        {:split, 2, 1, 21, {0, 1}, @split},
+        {:note, 1, 1, 10, {0, 1}, @note},
+        {:note, 2, 1, 13, {0, 1}, @note},
+        {:till, 1, 2, 29, {0, 14}, @till_1},
+        {:till, 2, 1, 31, {0, 13}, @till_2},
+        {:stock, 1, 1, 30, {0, 2}, @stock},
+        {:stock, 2, 1, 29, {0, 2}, @stock}
       ]
     }
 

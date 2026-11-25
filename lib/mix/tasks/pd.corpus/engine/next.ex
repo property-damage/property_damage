@@ -5,8 +5,9 @@ defmodule PropertyDamage.Corpus.Engine.Next do
   Each seed gets a fresh `PropertyDamage.Corpus.FireLog`. The entry's adapter
   receives it in its config as `:fire_log`, together with the entry's `:bug`
   switch. The run draws plans of at most the entry's `max_commands` steps,
-  and at most `plan_cap` plans, with the entry's `run_opts` as further
-  options of `PropertyDamage.Next.run/1`. The result is read from the
+  and at most `plan_cap` plans, shrinks with at most 1000 shrink runs, and
+  takes the entry's `run_opts` as further options of
+  `PropertyDamage.Next.run/1`. The result is read from the
   failure:
 
     * `plans_until_found` is the number of the plan that failed.
@@ -45,6 +46,10 @@ defmodule PropertyDamage.Corpus.Engine.Next do
     Report,
     Step
   }
+
+  # The harness's own shrink budget, so a change to the default of
+  # `PropertyDamage.Next.run/1` does not move the corpus tables.
+  @max_shrink_runs 1_000
 
   @impl true
   def name, do: "property_damage_next"
@@ -98,7 +103,8 @@ defmodule PropertyDamage.Corpus.Engine.Next do
       config: %{bug: entry.bug, fire_log: log},
       seed: seed,
       max_steps: entry.max_commands,
-      max_plans: plan_cap
+      max_plans: plan_cap,
+      max_shrink_runs: @max_shrink_runs
     ]
     |> Keyword.merge(entry.run_opts)
   end

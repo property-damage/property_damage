@@ -84,7 +84,7 @@ defmodule PropertyDamage.Next do
     max_plans: 100,
     engine: Native,
     shrink: true,
-    max_shrink_runs: 1000,
+    max_shrink_runs: 100,
     dependent_stream_data: :warn,
     lanes: 1,
     lane_steps: nil,
@@ -280,7 +280,10 @@ defmodule PropertyDamage.Next do
       `PropertyDamage.Next.Engine.Native`)
     * `:shrink` - whether to shrink the failing plan (default `true`)
     * `:max_shrink_runs` - the most plans executed while shrinking, the
-      final execution of the shrunk plan included (default 1000)
+      final execution of the shrunk plan included (default 100). When the
+      budget ends the search, the failure's `shrink_ended` is `:cap` and
+      `PropertyDamage.Next.Failure.format/1` says the plan may shrink
+      further
     * `:dependent_stream_data` - `:warn` (default) or `:raise`, as for
       `plan/3`
 
@@ -386,17 +389,19 @@ defmodule PropertyDamage.Next do
     base = report(seen, ctx)
     build = &trace(ctx.model, ctx.specs, &1, ctx.plan_opts)
 
-    {final, runs, dropped, warned, found} =
+    {final, runs, ended, dropped, warned} =
       if ctx.shrink do
-        {final, runs, dropped, warned} =
-          shrink(found, build, ctx.execute, ctx.max_shrink_runs, seen.warned)
-
-        {final, runs, dropped, warned, found}
+        shrink(found, build, ctx.execute, ctx.max_shrink_runs, seen.warned)
       else
-        {found, 0, 0, seen.warned, found}
+        {found, 0, nil, 0, seen.warned}
       end
 
-    failure = %{failure(final, seen.plans, found, runs, dropped) | kept: warned}
+    failure = %{
+      failure(final, seen.plans, found, runs, dropped)
+      | kept: warned,
+        shrink_ended: ended
+    }
+
     report = %{base | kept: warned, withdrawn: failure.withdrawn}
     {:error, %{failure | report: report}}
   end
@@ -472,9 +477,9 @@ defmodule PropertyDamage.Next do
     end
 
     try do
-      {final, runs} = Shrinker.shrink(found, build, execute, max_shrink_runs)
+      {final, runs, ended} = Shrinker.search(found, build, execute, max_shrink_runs)
       {warned, dropped} = Process.get(slot)
-      {final, runs, dropped, warned}
+      {final, runs, ended, dropped, warned}
     after
       Process.delete(slot)
     end
